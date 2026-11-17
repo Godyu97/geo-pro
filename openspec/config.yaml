@@ -1,0 +1,42 @@
+schema: spec-driven
+skillsScope: project
+
+context: |
+  GeoPro（geo-pro）是面向中国大陆品牌经营者的 AI GEO 监测与优化平台。
+  - 当前工程基线：仅完成 Phase 0 工程初始化（公开官网 /、邮箱密码认证 /login、受保护空工作台 /dashboard、Better Auth 4 张 PostgreSQL 表及全量 DDL 导出）；产品 M0–M2 均尚未实施，未经明确授权不得推进业务功能或宣称业务验收通过。
+  - 权威产品与工程约束：产品需求与业务口径以 docs/README.md 索引的 Intent / PRD / SPEC / 指标合同与 docs/product-map.json 为准，不得修改既有产品文档来迁就代码，也不得从 docs/archive/ 或旧原型恢复已删除需求；工程治理以 AGENTS.md 与 .agents/governance/ 为准。
+  - 技术栈与边界：Node.js >=24 <25、pnpm（唯一锁文件 pnpm-lock.yaml）、Next.js App Router、React 19、TypeScript（strict: true）、Tailwind CSS v4、shadcn/ui、Zod、Drizzle ORM、Better Auth。保持模块化单体：src/app/ 保持薄层，业务放 src/features/<domain>/，基础设施放 src/lib/；默认 Server Components，最小化 "use client"；不提前引入全局状态管理（Redux/Zustand）、微服务、独立队列或 Worker。
+  - 安全与数据真实性：服务端密钥、环境变量读取、DB 连接与 Auth 实例必须保留 import "server-only"，严禁通过 NEXT_PUBLIC_* 或客户端输出泄露凭据/连接串；所有外部输入使用 Zod 校验；私有页面、API 与 Server Actions 必须独立校验 auth.api.getSession 与用户/品牌归属权；严禁伪造监测记录、趋势、排名、客户评价或提升比例。
+  - 数据访问与缓存目标（待按授权用例实施）：遵循 docs/architecture/data-access.md 与 docs/architecture/database-deployment.md。DAO 须适配 SQLite3 与 PostgreSQL（方言隔离在 src/lib/db/，禁止用 drizzle-kit push 替代迁移）；cache 集中于 src/lib/cache/ 适配 memory 与 Redis（默认 Redis），且不可承载唯一证据/预算/幂等/审批状态；避免 N+1 与大量串行 SQL，优先批量操作并审查索引；Schema/migration 变更同步维护全量 DDL（pnpm db:ddl 与 pnpm db:ddl:check）。
+  - 质量门禁现状：当前已配置 pnpm lint、pnpm typecheck、pnpm build、pnpm db:ddl:check、pnpm verify:auth 与 python docs/tools/validate_docs.py；尚未配置 Vitest/Jest/Playwright 等单元或 E2E 测试框架。
+  - 语言约定：代码标识符、文件名与 OpenSpec 结构化关键字（如 ## Purpose、### Requirement:、#### Scenario:、SHALL/MUST、WHEN/THEN）遵守既有约定，需求与设计说明使用简体中文，面向中国大陆用户的 UI 文案使用简体中文。
+
+rules:
+  proposal:
+    - "明确标注本次变更所属阶段或范围（Phase 0 基础设施 / M0 / M1 / M2），如涉及产品需求须引用 docs/product-map.json 或 docs/ 中的需求/任务 ID，并写清 Out-of-Scope。"
+    - "不得将未授权的 M0–M2 产品任务纳入范围，不得从 docs/archive/ 或旧原型恢复已删除需求。"
+    - "评估是否涉及认证、数据库 Schema、DAO 双后端、缓存合同或新增依赖；纯重构、工具链或文档类变更应确认是否需要通过 .openspec.yaml 设置 skip_specs: true。"
+  specs:
+    - "严格遵循 spec-driven 规范格式：新能力首节包含 ## Purpose（不少于 50 字符），使用 ## ADDED/MODIFIED/REMOVED/RENAMED Requirements、### Requirement: <name>（SHALL/MUST，描述不超过 500 字符）与 #### Scenario: <name>（含 WHEN/GIVEN 与 THEN）。"
+    - "业务语义与指标口径必须对齐 docs/04-产品功能规格-SPEC.md 与 docs/07-指标与证据合同.md，明确区分「修改已完成」「公开核验通过」「复测完成」「观察改善」等独立状态。"
+    - "必须覆盖认证与资源归属边界（未登录拒绝、越权隔离）以及缺失配置、外部服务或缓存不可用时的受控降级与错误反馈。"
+  design:
+    - "目录与运行边界须遵守 src/app/ 薄层、src/features/<domain>/ 领域组织、src/lib/ server-only 隔离与默认 Server Components 原则，不提前引入全局状态库、独立队列或微服务。"
+    - "涉及数据库或 DAO 的变更须说明：SQLite3 与 PostgreSQL 方言隔离及类型/外键/事务差异、精简表结构与索引审查依据、批量 SQL 与防 N+1 策略，以及迁移与全量 DDL（pnpm db:ddl / pnpm db:ddl:check）维护方案。"
+    - "涉及缓存的变更须说明：src/lib/cache/ 下 memory 与 Redis（默认）一致合同、包含用户/品牌/版本/scope 的 key 设计、写后失效时机及 Redis 不可用时的受控降级策略。"
+    - "涉及依赖引入或安全边界的变更须论证必要性与替代方案，遵守 pnpm-workspace.yaml 构建脚本最小授权，并明确 Zod 校验与服务端鉴权落点。"
+  tasks:
+    - "严格使用 `- [ ] X.Y <任务与验证方式>` 复选框格式，按依赖顺序分阶段拆解为可单次会话完成的最小改动。"
+    - "每个任务必须附带可执行的验证方式（如 pnpm lint、pnpm typecheck、pnpm build、pnpm db:ddl:check、pnpm verify:auth 或可观察行为），不得将测试与文档检查全部推迟到最后一组。"
+    - "涉及数据库 Schema/migration 的任务必须包含 drizzle-kit generate、SQL 审核、pnpm db:ddl、pnpm db:ddl:check 与目标库 pnpm db:migrate 验证；涉及 docs/ 产品文档的任务包含 python docs/tools/validate_docs.py。"
+    - "当前项目未配置 Vitest/Jest/Playwright 等自动化测试框架；如任务确实需要测试框架，须单独论证并经授权，未配置前不得假设存在默认测试脚本。"
+
+operations:
+  apply:
+    guidance:
+      - "保持最小必要改动与局部作用域，遵守 TypeScript strict: true 与 eslint.config.mjs 规则；保护已有未提交改动，不修改无关代码或既有产品文档。"
+      - "按 .agents/governance/quality-gates.md 执行实际可运行的检查（至少 pnpm lint、pnpm typecheck、pnpm build；Schema 变更含 pnpm db:ddl:check），严格区分检查通过、检查失败、未配置与环境受阻，严禁虚报或破坏性凑过检查。"
+  archive:
+    guidance:
+      - "归档前确认适用门禁结果与未验证/受阻边界已如实记录，不将构建成功或文档校验通过等同于产品 M0/M1/M2 业务验收。"
+      - "若变更更新了技术栈、目录结构、可用命令或已落地工程能力，同步更新 .agents/references/project-context.md 与对应 docs/tasks/ 记录。"

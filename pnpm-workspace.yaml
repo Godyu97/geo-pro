@@ -1,0 +1,11 @@
+allowBuilds:
+  esbuild: true
+  sharp: false
+  unrs-resolver: false
+
+# GHSA-g3hv-75wg-m249: keep the affected glob matcher on its patched release.
+# Node 24 is supported; the minimatch() API used by the tooling is unchanged.
+overrides:
+  "minimatch@>=7.0.0 <11.0.1": 11.0.1
+  # GHSA-67mh-4wv8-2f99: stable Drizzle tooling still pulls esbuild 0.18.
+  "@esbuild-kit/core-utils>esbuild": 0.25.12
