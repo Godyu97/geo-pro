@@ -6,7 +6,7 @@
 
 - **包名与版本**：`geo-pro` v`0.1.0`（`"private": true`，`"type": "module"`，见 [package.json](../../package.json)）
 - **定位**：GeoPro（AI GEO），面向中国大陆品牌经营者的品牌可见度监测与优化平台。
-- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)；T-M0-01 的 [B01 双语言基础子项](../../docs/tasks/B01-i18n.md) 已实现；产品 M0–M2 尚无完整里程碑交付。
+- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)；T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)基础子项已实现；产品 M0–M2 尚无完整里程碑交付。
 
 ## 2. 技术栈与实际版本
 
@@ -36,17 +36,17 @@
   - `api/health/route.ts`：固定存活状态 JSON（`{ status: "ok", service: "geo-pro" }`）
 - `src/components/`：
   - `ui/`：已安装的 shadcn/ui 基础组件（button、card、input、badge、table、tabs、dialog、sidebar、skeleton、separator、dropdown-menu、form、label、sheet、tooltip）
-  - `layout/`：`app-sidebar.tsx`、`auth-form.tsx`、`brand-mark.tsx`、`module-links.ts`、`sign-out-button.tsx`
+  - `layout/`：`app-sidebar.tsx`、`auth-form.tsx`、`brand-mark.tsx`、`module-links.ts`、`sign-out-button.tsx`、`session-monitor.tsx`；会话失效/身份切换时整页恢复，服务暂不可用提供重试。
   - `charts/README.md`：仅边界说明，无图表实现
 - `src/features/`：包含 6 个仅含 `README.md` 的业务占位域：`brands/`、`monitoring/`、`prompts/`、`citations/`、`competitors/`、`optimization/`。
 - `src/lib/`：`i18n/`（locale、消息、Server Action、Provider、Intl），`auth/`（`client.ts`、`env.ts`、`options.ts`、`server.ts`、`session.ts`、`validation.ts`）、`db/`（`index.ts`、`auth-schema.ts`），以及仅含 `README.md` 的 `ai/`、`cache/`。
 - `src/hooks/use-mobile.ts`、`src/types/README.md`
 - `drizzle/`：`0000_nervous_mole_man.sql` 及快照/日志（4 张 Better Auth 基础表）。
 - `drizzle/ddl/postgresql.sql`：由当前 Schema 导出的全量应用建表快照，不含迁移历史和客户数据；`scripts/export-ddl.mjs` 提供导出与只读一致性检查。
-- `scripts/verify-auth.mjs`：本地 HTTP + PostgreSQL 端到端认证验证脚本（自动清理临时账号）。
+- `scripts/verify-auth.mjs`：本地 HTTP + PostgreSQL 端到端认证验证脚本（含伪造/过期/撤销会话读写拒绝及账号隔离，自动清理临时账号）。
 - `docs/`：产品文档包（v3.0）、工程初始化任务书与 Phase 0 架构/任务记录。
 - `.agents/`：包含本轮接入的 `governance/`、`workflows/`、`references/`，以及仓库原有的 `skills/openspec-*`（保留不自动启用）。
-- `openspec/`：仓库初始保留目录，当前不自动纳入开发范围。
+- `openspec/`：B02 使用 `account-session` 能力规格及对应变更归档；仅按当前任务授权加载相关规格。
 
 ## 4. 可用命令与检查现状
 

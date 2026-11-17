@@ -26,7 +26,8 @@
     "loginTitle": "登录",
     "dashboardTitle": "工作台",
     "notFoundMetadata": "页面未找到",
-    "genericError": "暂时无法显示此内容，请稍后重试。"
+    "genericError": "暂时无法显示此内容，请稍后重试。",
+    "sessionCheckFailed": "暂时无法检查登录状态，请检查网络并重试后继续。"
   },
   "marketing": {
     "nav": "主导航",
@@ -95,7 +96,9 @@
     "accountExists": "暂时无法创建账号。如已有账号，请切换到登录。",
     "tooManyRequests": "操作过于频繁，请稍后再试。",
     "unavailable": "认证服务暂不可用，请稍后重试。",
-    "networkError": "暂时无法连接认证服务，请检查网络后重试。"
+    "networkError": "暂时无法连接认证服务，请检查网络后重试。",
+    "sessionRequired": "请登录后继续。若会话已失效，重新登录将返回原页面；操作仍需再次确认。",
+    "retry": "重试账号服务"
   },
   "dashboard": {
     "subtitle": "品牌可见度工作台",

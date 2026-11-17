@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ArrowLeft, Fingerprint } from "lucide-react";
 
 import { AuthForm } from "@/components/layout/auth-form";
@@ -7,7 +8,7 @@ import { BrandMark } from "@/components/layout/brand-mark";
 import { Card, CardContent } from "@/components/ui/card";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
-import { isAuthConfigured } from "@/lib/auth/env";
+import { getSessionState } from "@/lib/auth/session";
 import { safeReturnTo } from "@/lib/auth/return-to";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -19,9 +20,12 @@ export const dynamic = "force-dynamic";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ mode?: string; returnTo?: string }>;
+  searchParams: Promise<{ mode?: string; returnTo?: string; reason?: string }>;
 }) {
-  const { mode, returnTo } = await searchParams;
+  const { mode, returnTo, reason } = await searchParams;
+  const target = safeReturnTo(returnTo);
+  const state = await getSessionState();
+  if (state.status === "authenticated") redirect(target);
   const locale = await getLocale();
   const t = await getTranslator("auth");
   const common = await getTranslator("common");
@@ -67,11 +71,17 @@ export default async function LoginPage({
             <p className="mb-7 text-sm leading-6 text-muted-foreground">
               {t("description")}
             </p>
+            {state.status === "anonymous" && reason === "session-required" && (
+              <p role="status" className="mb-5 rounded-lg border bg-muted p-3 text-sm leading-6 text-muted-foreground">
+                {t("sessionRequired")}
+              </p>
+            )}
             <AuthForm
               initialMode={mode === "signup" ? "signup" : "login"}
-              configured={isAuthConfigured()}
+              configured={state.status !== "not-configured"}
+              unavailable={state.status === "unavailable"}
               messages={getMessages(locale).auth}
-              returnTo={safeReturnTo(returnTo)}
+              returnTo={target}
             />
             <p className="mt-6 text-center text-xs leading-6 text-muted-foreground">
               {t("emailNotice")}

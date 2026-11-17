@@ -44,6 +44,18 @@ await writeFile(dashboard, (await readFile(dashboard, "utf8")).replace(
   '  const { user } = await requireSession();\n  const requestHeaders = await (await import("next/headers")).headers();\n  if (requestHeaders.get("x-geo-path")?.includes("probeError=true")) throw new Error("Private dashboard test failure");',
 ));
 
+const session = path.join(fixture, "src/lib/auth/session.ts");
+await writeFile(session, (await readFile(session, "utf8"))
+  .replace('  if (!isAuthConfigured()) {',
+    '  if ((await headers()).get("cookie")?.includes("geo-auth-unconfigured=1") || !isAuthConfigured()) {')
+  .replace('  try {',
+    '  try {\n    if ((await headers()).get("cookie")?.includes("geo-auth-unavailable=1")) throw new Error("Private auth test failure");'));
+const authRoute = path.join(fixture, "src/app/api/auth/[...all]/route.ts");
+await writeFile(authRoute, (await readFile(authRoute, "utf8")).replace(
+  '  try {',
+  '  try {\n    if (request.cookies.get("geo-auth-unavailable")?.value === "1") throw new Error("Private auth test failure");',
+));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

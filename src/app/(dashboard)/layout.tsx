@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { SignOutButton } from "@/components/layout/sign-out-button";
+import { SessionMonitor } from "@/components/layout/session-monitor";
 import {
   SidebarInset,
   SidebarProvider,
@@ -35,6 +36,7 @@ export default async function DashboardLayout({
       <SidebarProvider>
         <AppSidebar messages={messages.dashboard} modules={messages.modules} />
         <SidebarInset className="min-w-0 bg-background">
+          <SessionMonitor userId={user.id} />
           <header className="flex min-h-18 flex-wrap items-center justify-between gap-3 border-b bg-card px-4 py-3 sm:px-8">
             <div className="flex min-w-0 flex-wrap items-center gap-3">
               <SidebarTrigger aria-label={t("toggleSidebar")} />

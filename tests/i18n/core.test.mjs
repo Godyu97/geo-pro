@@ -5,7 +5,7 @@ import { checkMessages, validateCatalogs } from "../../scripts/check-i18n.mjs";
 import { resolveLocale } from "../../src/lib/i18n/locale.ts";
 import { createTranslator } from "../../src/lib/i18n/translate.ts";
 import { formatCount, formatDateTime, formatMoney, formatNumber, formatPercent } from "../../src/lib/i18n/format.ts";
-import { safeReturnTo } from "../../src/lib/auth/return-to.ts";
+import { loginPath, safeReturnTo } from "../../src/lib/auth/return-to.ts";
 import { signUpSchema } from "../../src/lib/auth/validation.ts";
 
 test("saved preferences take priority; invalid and unsupported locales safely fall back", () => {
@@ -68,8 +68,13 @@ test("validation emits stable codes and keeps mixed Unicode names intact", async
 });
 
 test("login return targets preserve local filters and reject external or malformed paths", () => {
-  for (const value of [null, [], "https://evil.invalid", "//evil.invalid", "/login", "/dashboard/../login", "/dashboard\\evil", "/dashboard\n"]) {
+  for (const value of [null, [], "https://evil.invalid", "//evil.invalid", "/login", "/dashboard/../login", "/dashboard\\evil", "/dashboard\n", "/dashboard\x7f", "/dashboard/%2e%2e/login", "/dashboard%2f%2fevil.invalid", "/dashboard?x=" + "a".repeat(2048)]) {
     assert.equal(safeReturnTo(value), "/dashboard");
   }
   assert.equal(safeReturnTo("/dashboard?filter=品牌#monitoring"), "/dashboard?filter=%E5%93%81%E7%89%8C#monitoring");
+  const login = new URL(loginPath("/dashboard?filter=品牌&reason=external#monitoring", "session-required"), "https://local.invalid");
+  assert.equal(login.pathname, "/login");
+  assert.equal(login.searchParams.get("reason"), "session-required");
+  assert.equal(login.searchParams.get("returnTo"), "/dashboard?filter=%E5%93%81%E7%89%8C&reason=external#monitoring");
+  assert.equal(new URL(loginPath("//evil.invalid", "unavailable"), login).searchParams.get("returnTo"), "/dashboard");
 });

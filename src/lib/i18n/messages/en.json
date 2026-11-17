@@ -26,7 +26,8 @@
     "loginTitle": "Sign in",
     "dashboardTitle": "Workspace",
     "notFoundMetadata": "Page not found",
-    "genericError": "This content is temporarily unavailable. Please try again."
+    "genericError": "This content is temporarily unavailable. Please try again.",
+    "sessionCheckFailed": "Could not check your session. Check your connection and retry before continuing."
   },
   "marketing": {
     "nav": "Main navigation",
@@ -95,7 +96,9 @@
     "accountExists": "Unable to create an account. If you already have one, switch to sign in.",
     "tooManyRequests": "Too many requests. Please try again later.",
     "unavailable": "Authentication is temporarily unavailable. Please try again later.",
-    "networkError": "Could not connect to authentication services. Check your connection and try again."
+    "networkError": "Could not connect to authentication services. Check your connection and try again.",
+    "sessionRequired": "Sign in to continue. If your session ended, signing in returns you to your page. Actions require your confirmation again.",
+    "retry": "Retry account services"
   },
   "dashboard": {
     "subtitle": "Brand visibility workspace",

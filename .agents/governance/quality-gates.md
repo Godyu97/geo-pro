@@ -9,7 +9,7 @@
 | 基础静态门禁 | ESLint 检查 | `pnpm lint` | 实际执行 `eslint`；所有代码改动必须执行 |
 | 基础静态门禁 | TypeScript 类型检查 | `pnpm typecheck` | 实际执行 `tsc --noEmit`；所有 TS/TSX 改动必须执行 |
 | 构建门禁 | Next.js 生产构建 | `pnpm build` | 实际执行 `next build`；不依赖数据库或 AI Key |
-| 专项认证门禁 | 本地认证与 DB 端到端校验 | `pnpm verify:auth` | 当前仅 HTTP + PostgreSQL；涉及认证、会话、DB Schema 变更时运行（需本地应用运行且开发库已迁移），不覆盖 SQLite |
+| 专项认证门禁 | 本地认证与 DB 端到端校验 | `pnpm verify:auth` | 当前仅 HTTP + PostgreSQL；包含伪造/过期/撤销会话读写拒绝及账号隔离；涉及认证、会话、DB Schema 变更时运行（需本地应用运行且开发库已迁移），不覆盖 SQLite |
 | 数据库迁移核验 | Auth Schema 与迁移检查 | `pnpm db:auth-schema` / `pnpm db:generate` / `pnpm db:migrate` | 当前仅配置 PostgreSQL；涉及表结构或认证选项变更时按需生成、审核 SQL 再迁移，SQLite 须另补适用入口 |
 | 全量 DDL 一致性 | 防止建表快照过期 | `pnpm db:ddl:check` | 当前仅 PostgreSQL；Schema/migration、DDL 或导出脚本变更时执行；过期先运行 `pnpm db:ddl` 并审核；结构变化还须验证隔离空库部署 |
 | 文档包核验 | 产品文档一致性检查 | `python docs/tools/validate_docs.py` | 仅当核对或变更 `docs/` 产品文档时运行（仅检查链接、映射与样例，不代表业务验收） |

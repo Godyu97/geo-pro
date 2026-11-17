@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth/client";
+import { safeReturnTo } from "@/lib/auth/return-to";
 import {
   isValidationKey,
   signInFormSchema,
@@ -56,11 +57,13 @@ function AuthFormMessage({ messages }: { messages: Messages["auth"] }) {
 export function AuthForm({
   initialMode,
   configured,
+  unavailable = false,
   messages,
   returnTo,
 }: {
   initialMode: AuthMode;
   configured: boolean;
+  unavailable?: boolean;
   messages: Messages["auth"];
   returnTo: string;
 }) {
@@ -74,8 +77,10 @@ export function AuthForm({
     defaultValues: { name: "", email: "", password: "" },
   });
   const pending = form.formState.isSubmitting;
+  const disabled = pending || !configured || unavailable;
 
   async function onSubmit(values: AuthFormValues) {
+    if (disabled) return;
     setError(null);
 
     try {
@@ -100,8 +105,11 @@ export function AuthForm({
         return;
       }
 
-      router.replace(returnTo);
-      router.refresh();
+      // Replace the document to clear credentials and private router caches.
+      // A fragment inherited by an HTTP login redirect is only a page location.
+      const target = new URL(safeReturnTo(returnTo), window.location.origin);
+      if (!target.hash) target.hash = window.location.hash;
+      window.location.replace(safeReturnTo(`${target.pathname}${target.search}${target.hash}`));
     } catch {
       setError("networkError");
     }
@@ -127,12 +135,15 @@ export function AuthForm({
         </TabsTrigger>
       </TabsList>
       <TabsContent value={mode}>
-        {!configured && (
+        {(!configured || unavailable) && (
           <p
             role="status"
             className="mb-5 rounded-lg border bg-muted p-3 text-sm leading-6 text-muted-foreground"
           >
-            {t("notConfigured")}
+            {t(unavailable ? "unavailable" : "notConfigured")}
+            <Button type="button" variant="outline" className="mt-3 flex" onClick={() => router.refresh()}>
+              {t("retry")}
+            </Button>
           </p>
         )}
         <Form {...form}>
@@ -160,7 +171,7 @@ export function AuthForm({
                         placeholder={t("namePlaceholder")}
                         autoComplete="name"
                         maxLength={160}
-                        disabled={pending || !configured}
+                        disabled={disabled}
                         className="h-11 bg-white"
                       />
                     </FormControl>
@@ -185,7 +196,7 @@ export function AuthForm({
                       placeholder={t("emailPlaceholder")}
                       autoComplete="email"
                       maxLength={254}
-                      disabled={pending || !configured}
+                      disabled={disabled}
                       className="h-11 bg-white"
                     />
                   </FormControl>
@@ -211,7 +222,7 @@ export function AuthForm({
                         mode === "signup" ? "new-password" : "current-password"
                       }
                       maxLength={128}
-                      disabled={pending || !configured}
+                      disabled={disabled}
                       className="h-11 bg-white"
                     />
                   </FormControl>
@@ -235,7 +246,7 @@ export function AuthForm({
             <Button
               type="submit"
               className="h-11 w-full"
-              disabled={pending || !configured}
+              disabled={disabled}
             >
               {pending ? (
                 <>

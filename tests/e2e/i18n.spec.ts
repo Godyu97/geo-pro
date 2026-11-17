@@ -1,6 +1,7 @@
 import { test as base, expect, type Page, type BrowserContext } from "@playwright/test";
 import { randomBytes } from "node:crypto";
 import postgres from "postgres";
+import { registerTestAccount } from "./auth-helpers";
 
 const baseURL = "http://localhost:3100";
 const name = `品牌🚀 Évidence ${"LongBrandName".repeat(4)}`;
@@ -56,9 +57,7 @@ async function disposableAccount(context: BrowserContext) {
   const databaseURL = localDatabaseURL();
   const email = `b01-${randomBytes(10).toString("hex")}@example.invalid`;
   const password = randomBytes(24).toString("base64url");
-  const response = await context.request.post("/api/auth/sign-up/email", {
-    headers: { Origin: baseURL }, data: { name, email, password },
-  });
+  const response = await registerTestAccount(context, { name, email, password });
   expect(response.status(), "Disposable local account registration").toBe(200);
   const userId: string = (await response.json()).user.id;
   return async () => {
@@ -215,7 +214,7 @@ for (const locale of ["zh-CN", "en"] as const) {
     const password = randomBytes(24).toString("base64url");
     const sql = postgres(localDatabaseURL(), { max: 1 });
     try {
-      await page.goto("/dashboard?filter=保留");
+      await page.goto("/dashboard?filter=保留#monitoring");
       await expect(page).toHaveURL(/\/login\?returnTo=/);
       await page.getByRole("tab", { name: locale === "en" ? "Create account" : "创建账号", exact: true }).click();
       await page.getByLabel(locale === "en" ? "Name" : "称呼", { exact: true }).fill("品牌🚀 Account É");
@@ -224,9 +223,9 @@ for (const locale of ["zh-CN", "en"] as const) {
       const submitted = page.waitForResponse(response => response.url().includes("/api/auth/sign-up/email"));
       await page.getByRole("button", { name: locale === "en" ? "Create account and open workspace" : "创建账号并进入工作台" }).click();
       const response = await submitted;
-      const responseBody = await response.json();
-      expect(response.status(), `Sign-up returned ${responseBody.code ?? "unknown"}`).toBe(200);
+      expect(response.status(), "UI sign-up should succeed before replacing the document").toBe(200);
       await expect(page).toHaveURL(/\/dashboard\?filter=/);
+      expect(new URL(page.url()).hash).toBe("#monitoring");
       await expect(page.locator("html")).toHaveAttribute("lang", locale);
       await page.getByRole("button", { name: locale === "en" ? "Sign out" : "退出登录", exact: true }).click();
       await expect(page).toHaveURL(/\/login$/);
