@@ -10,7 +10,7 @@
 
 [工程架构总览](architecture/overview.md) 记录现状与实施边界；[数据访问与缓存工程约束](architecture/data-access.md) 记录已确认的 SQLite3 / pg DAO、memory / Redis（默认）、批量 SQL 和精简表结构/索引要求。它们属于本仓库工程接入层，不改变产品对象、指标或阶段验收，也不代表这些适配已经完成。复制产品合同到其他项目时，工程接入决定须按该项目重新核对。
 
-[数据库部署说明](architecture/database-deployment.md) 规定全量 DDL 随 Schema/migration 及时更新，提供离线生成、防漂移检查与数据库快速部署流程；当前全量 DDL 仅覆盖已经实现的 PostgreSQL 结构。
+[数据库部署说明](architecture/database-deployment.md) 规定双方言全量 DDL 的生成、防漂移和部署流程；[B08 维护授权](tasks/B08-maintenance-access.md) 已实现认证/维护 DAO 的 SQLite3/PostgreSQL 基础，其余业务 DAO 与全部缓存仍待按任务实施，完整 M0 保持未完成。
 
 首期界面支持 `zh-CN` / `en`，默认 `zh-CN`；[公共多语言合同 ui-i18n-v1](04-产品功能规格-SPEC.md#interface-locales) 是 M0 起所有界面任务的共同输入，[Web 多语言规范](architecture/i18n.md) 与 [双语言兼容矩阵](08-验收场景与样例.md#i18n-checks) 定义设计和验收。它独立于采样语言、币种与统计时区，不增加 26 项功能的计数；现有官网、账号与工作台壳层已接入，后续业务页面随各任务交付。
 

@@ -7,7 +7,7 @@ export function safeReturnTo(value: unknown): string {
     return "/dashboard";
   }
   const target = new URL(result.data, "https://local.invalid");
-  return target.origin === "https://local.invalid" && target.pathname === "/dashboard"
+  return target.origin === "https://local.invalid" && ["/dashboard", "/dashboard/maintenance"].includes(target.pathname)
     ? `${target.pathname}${target.search}${target.hash}`
     : "/dashboard";
 }

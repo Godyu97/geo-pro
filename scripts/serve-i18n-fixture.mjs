@@ -56,6 +56,17 @@ await writeFile(authRoute, (await readFile(authRoute, "utf8")).replace(
   '  try {\n    if (request.cookies.get("geo-auth-unavailable")?.value === "1") throw new Error("Private auth test failure");',
 ));
 
+const maintenanceService = path.join(fixture, "src/features/maintenance/service.ts");
+await writeFile(maintenanceService, (await readFile(maintenanceService, "utf8")).replace(
+  '    connection = getConnection();',
+  '    connection = getConnection();\n    if ((await (await import("next/headers")).headers()).get("cookie")?.includes("geo-maintenance-unavailable=1")) return maintenanceUnavailable(undefined);',
+));
+const maintenancePage = path.join(fixture, "src/features/maintenance/access-page.tsx");
+await writeFile(maintenancePage, (await readFile(maintenancePage, "utf8")).replace(
+  '  await requireSession();',
+  '  await requireSession();\n  if ((await (await import("next/headers")).headers()).get("cookie")?.includes("geo-maintenance-slow=1")) await new Promise(resolve => setTimeout(resolve, 1500));',
+));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

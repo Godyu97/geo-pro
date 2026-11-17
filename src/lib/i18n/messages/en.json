@@ -27,7 +27,8 @@
     "dashboardTitle": "Workspace",
     "notFoundMetadata": "Page not found",
     "genericError": "This content is temporarily unavailable. Please try again.",
-    "sessionCheckFailed": "Could not check your session. Check your connection and retry before continuing."
+    "sessionCheckFailed": "Could not check your session. Check your connection and retry before continuing.",
+    "maintenance": "Maintenance access"
   },
   "marketing": {
     "nav": "Main navigation",
@@ -153,5 +154,31 @@
     "optimizationTitle": "Optimization suggestions",
     "optimizationDescription": "Turn observations supported by evidence into verifiable content actions.",
     "optimizationEmpty": "No optimization suggestions"
+  },
+  "maintenance": {
+    "title": "Platform maintenance access",
+    "description": "Review the separate maintenance permissions for this account. Each new operation checks access again; revocation takes effect immediately.",
+    "statusTitle": "Current access status",
+    "permissionsTitle": "Separate maintenance permissions",
+    "authorized": "Some maintenance permissions are granted",
+    "authorizedDescription": "Operations are limited to the permissions granted. Your current access is listed below.",
+    "denied": "This account lacks the required maintenance permission",
+    "contactDescription": "Contact the project owner if maintenance access is needed. They must verify a separate maintenance account on the controlled server.",
+    "unavailable": "Maintenance access cannot be verified right now",
+    "retryDescription": "Refresh and try again later. Maintenance operations are unavailable while access cannot be confirmed.",
+    "sessionRequired": "Sign in to review maintenance access",
+    "signInDescription": "Sign in again, then return to this page.",
+    "invalidInput": "Invalid maintenance access request",
+    "trace": "Reference: {id}",
+    "granted": "Granted",
+    "notGranted": "Not granted",
+    "capabilities.manage": "Channel capability maintenance",
+    "quotas.manage": "Pilot quota operations",
+    "support.read": "Support metadata access",
+    "operationsPending": "This page verifies access. The corresponding business operations are not open yet.",
+    "privacyBoundary": "Maintenance access does not grant access to customer text, attachments, private reports, content approval or publishing on their behalf. Access changes and key operations retain minimal audit records.",
+    "refresh": "Refresh access status",
+    "back": "Back to workspace",
+    "loading": "Checking maintenance access…"
   }
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowUpRight, LayoutDashboard, CircleHelp } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { ArrowUpRight, LayoutDashboard, CircleHelp, ShieldCheck } from "lucide-react";
 
 import { BrandMark } from "@/components/layout/brand-mark";
 import { getModuleLinks } from "@/components/layout/module-links";
@@ -28,6 +29,7 @@ export function AppSidebar({ messages, modules }: { messages: Messages["dashboar
   const t = createTranslator(locale, messages);
   const moduleLinks = getModuleLinks(modules);
   const { setOpenMobile } = useSidebar();
+  const pathname = usePathname();
 
   return (
     <Sidebar>
@@ -41,13 +43,22 @@ export function AppSidebar({ messages, modules }: { messages: Messages["dashboar
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive className="h-auto min-h-10 py-2">
+                  <SidebarMenuButton asChild isActive={pathname === "/dashboard"} className="h-auto min-h-10 py-2">
                     <Link
                       href="/dashboard"
+                      aria-current={pathname === "/dashboard" ? "page" : undefined}
                       onClick={() => setOpenMobile(false)}
                     >
                       <LayoutDashboard aria-hidden="true" />
                       <span>{common("overview")}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/dashboard/maintenance"} className="h-auto min-h-10 py-2">
+                    <Link href="/dashboard/maintenance" aria-current={pathname === "/dashboard/maintenance" ? "page" : undefined} onClick={() => setOpenMobile(false)}>
+                      <ShieldCheck aria-hidden="true" />
+                      <span className="whitespace-normal">{common("maintenance")}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -62,7 +73,7 @@ export function AppSidebar({ messages, modules }: { messages: Messages["dashboar
                   <SidebarMenuItem key={id}>
                     <SidebarMenuButton asChild className="h-auto min-h-10 py-2">
                       <a
-                        href={`#${id}`}
+                        href={pathname === "/dashboard" ? `#${id}` : `/dashboard#${id}`}
                         onClick={() => setOpenMobile(false)}
                       >
                         <Icon aria-hidden="true" />

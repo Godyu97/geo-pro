@@ -6,14 +6,14 @@ import { betterAuth } from "better-auth";
 import { getAuthEnvironment } from "@/lib/auth/env";
 import { authOptions } from "@/lib/auth/options";
 import { getDatabase } from "@/lib/db";
-import * as schema from "@/lib/db/auth-schema";
 
 function createAuth() {
   const environment = getAuthEnvironment();
+  const { database, provider, schema } = getDatabase();
 
   return betterAuth({
     ...authOptions,
-    database: drizzleAdapter(getDatabase(), { provider: "pg", schema }),
+    database: drizzleAdapter(database, { provider, schema }),
     baseURL: environment.BETTER_AUTH_URL,
     secret: environment.BETTER_AUTH_SECRET,
     trustedOrigins: [new URL(environment.BETTER_AUTH_URL).origin],

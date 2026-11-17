@@ -3,13 +3,13 @@ skillsScope: project
 
 context: |
   GeoPro（geo-pro）是面向中国大陆品牌经营者的 AI GEO 监测与优化平台。
-  - 当前工程基线：仅完成 Phase 0 工程初始化（公开官网 /、邮箱密码认证 /login、受保护空工作台 /dashboard、Better Auth 4 张 PostgreSQL 表及全量 DDL 导出）；产品 M0–M2 均尚未实施，未经明确授权不得推进业务功能或宣称业务验收通过。
+  - 当前工程基线：Phase 0、B01 双语言、B02 认证恢复、B03 可信官网、B08 最小维护授权已实现；认证/维护数据支持 PostgreSQL 与 SQLite3。产品 M0–M2 无完整里程碑交付，未经授权不得推进其他业务或宣称阶段验收通过。
   - 权威产品与工程约束：产品需求与业务口径以 docs/README.md 索引的 Intent / PRD / SPEC / 指标合同与 docs/product-map.json 为准，不得修改既有产品文档来迁就代码，也不得从 docs/archive/ 或旧原型恢复已删除需求；工程治理以 AGENTS.md 与 .agents/governance/ 为准。
   - 技术栈与边界：Node.js >=24 <25、pnpm（唯一锁文件 pnpm-lock.yaml）、Next.js App Router、React 19、TypeScript（strict: true）、Tailwind CSS v4、shadcn/ui、Zod、Drizzle ORM、Better Auth。保持模块化单体：src/app/ 保持薄层，业务放 src/features/<domain>/，基础设施放 src/lib/；默认 Server Components，最小化 "use client"；不提前引入全局状态管理（Redux/Zustand）、微服务、独立队列或 Worker。
   - 安全与数据真实性：服务端密钥、环境变量读取、DB 连接与 Auth 实例必须保留 import "server-only"，严禁通过 NEXT_PUBLIC_* 或客户端输出泄露凭据/连接串；所有外部输入使用 Zod 校验；私有页面、API 与 Server Actions 必须独立校验 auth.api.getSession 与用户/品牌归属权；严禁伪造监测记录、趋势、排名、客户评价或提升比例。
-  - 数据访问与缓存目标（待按授权用例实施）：遵循 docs/architecture/data-access.md 与 docs/architecture/database-deployment.md。DAO 须适配 SQLite3 与 PostgreSQL（方言隔离在 src/lib/db/，禁止用 drizzle-kit push 替代迁移）；cache 集中于 src/lib/cache/ 适配 memory 与 Redis（默认 Redis），且不可承载唯一证据/预算/幂等/审批状态；避免 N+1 与大量串行 SQL，优先批量操作并审查索引；Schema/migration 变更同步维护全量 DDL（pnpm db:ddl 与 pnpm db:ddl:check）。
-  - 质量门禁现状：当前已配置 pnpm lint、pnpm typecheck、pnpm build、pnpm db:ddl:check、pnpm verify:auth 与 python docs/tools/validate_docs.py；尚未配置 Vitest/Jest/Playwright 等单元或 E2E 测试框架。
-  - 语言约定：代码标识符、文件名与 OpenSpec 结构化关键字（如 ## Purpose、### Requirement:、#### Scenario:、SHALL/MUST、WHEN/THEN）遵守既有约定，需求与设计说明使用简体中文，面向中国大陆用户的 UI 文案使用简体中文。
+  - 数据访问与缓存：遵循 docs/architecture/data-access.md 与 docs/architecture/database-deployment.md。认证与维护 DAO 已适配 SQLite3/PostgreSQL，其他领域继续按用例接入；方言隔离在 src/lib/db/，禁止用 push 替代迁移。cache 仍未实现，目标为 memory/Redis（默认 Redis），不可承载唯一业务状态。避免 N+1，优先批量 SQL，审查表/索引；Schema/migration 同步更新双方言 DDL。
+  - 质量门禁：已配置 lint/typecheck/build、双库 DDL、verify:auth、check:i18n/test:i18n、Playwright test:e2e、维护 DAO test:maintenance、双库 HTTP/CLI verify:maintenance 和文档验证；其他业务及 Redis 专项按任务补齐，无 Vitest/Jest。
+  - 语言约定：代码标识符、文件名与 OpenSpec 结构化关键字遵守既有约定；需求与设计说明用简体中文，已开放 UI 同步提供 zh-CN/en，默认 zh-CN，独立于业务语言。
 
 rules:
   proposal:
@@ -29,7 +29,7 @@ rules:
     - "严格使用 `- [ ] X.Y <任务与验证方式>` 复选框格式，按依赖顺序分阶段拆解为可单次会话完成的最小改动。"
     - "每个任务必须附带可执行的验证方式（如 pnpm lint、pnpm typecheck、pnpm build、pnpm db:ddl:check、pnpm verify:auth 或可观察行为），不得将测试与文档检查全部推迟到最后一组。"
     - "涉及数据库 Schema/migration 的任务必须包含 drizzle-kit generate、SQL 审核、pnpm db:ddl、pnpm db:ddl:check 与目标库 pnpm db:migrate 验证；涉及 docs/ 产品文档的任务包含 python docs/tools/validate_docs.py。"
-    - "当前项目未配置 Vitest/Jest/Playwright 等自动化测试框架；如任务确实需要测试框架，须单独论证并经授权，未配置前不得假设存在默认测试脚本。"
+    - "优先复用现有 Node 原生测试、Playwright 和专项脚本；若新增测试基础设施须论证必要性，不假设未配置的脚本存在。"
 
 operations:
   apply:

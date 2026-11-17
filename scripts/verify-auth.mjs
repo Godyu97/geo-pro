@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 import nextEnv from "@next/env";
-import postgres from "postgres";
+import { parseDatabaseConfig } from "../src/lib/db/config.ts";
+import { openConnection } from "../src/lib/db/connection.ts";
+import { MaintenanceDao } from "../src/features/maintenance/dao.ts";
 
 nextEnv.loadEnvConfig(process.cwd());
 
@@ -11,14 +13,15 @@ assert.ok(
   ["localhost", "127.0.0.1", "[::1]"].includes(baseURL.hostname),
   "认证验证脚本仅连接本地开发应用",
 );
-assert.ok(process.env.DATABASE_URL, "请配置开发 DATABASE_URL");
-assert.ok(URL.canParse(process.env.DATABASE_URL), "请配置有效的本地开发数据库地址");
-assert.ok(
-  ["localhost", "127.0.0.1", "[::1]"].includes(new URL(process.env.DATABASE_URL).hostname),
-  "认证验证脚本仅修改本地开发数据库中的临时账号",
-);
-
-const sql = postgres(process.env.DATABASE_URL, { max: 1, connect_timeout: 5 });
+const config = parseDatabaseConfig(process.env);
+assert.ok(config.success, "请明确配置开发数据库");
+if (config.data.DATABASE_PROVIDER === "postgresql") {
+  assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(new URL(config.data.DATABASE_URL).hostname), "认证验证脚本仅修改本地开发数据库中的临时账号");
+}
+const connection = openConnection(config.data);
+const dao = new MaintenanceDao(connection);
+// All existing verification queries remain parameterized on both dialects.
+const sql = (parts, ...values) => dao.query(parts.join("?"), values.map((value) => value instanceof Date ? connection.kind === "sqlite" ? value.getTime() : value.toISOString() : value));
 const email = `phase0-${randomBytes(10).toString("hex")}@example.invalid`;
 const password = randomBytes(24).toString("base64url");
 let createdUserId;
@@ -129,7 +132,7 @@ try {
     "控制台应呈现真实空状态",
   );
   console.log(
-    "PASS: 服务端输入校验、PostgreSQL 注册持久化、密码哈希、会话和控制台空状态",
+    `PASS: 服务端输入校验、${connection.kind} 注册持久化、密码哈希、会话和控制台空状态`,
   );
 
   const forbiddenOrigin = await request("/api/auth/sign-out", {
@@ -227,5 +230,5 @@ try {
     await sql`delete from "user" where id = ${otherUserId} and email = ${otherEmail}`;
     console.log("CLEANUP: 已清理隔离验证账号及其会话");
   }
-  await sql.end();
+  await connection.close();
 }

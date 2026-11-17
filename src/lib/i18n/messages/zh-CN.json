@@ -27,7 +27,8 @@
     "dashboardTitle": "工作台",
     "notFoundMetadata": "页面未找到",
     "genericError": "暂时无法显示此内容，请稍后重试。",
-    "sessionCheckFailed": "暂时无法检查登录状态，请检查网络并重试后继续。"
+    "sessionCheckFailed": "暂时无法检查登录状态，请检查网络并重试后继续。",
+    "maintenance": "平台维护权限"
   },
   "marketing": {
     "nav": "主导航",
@@ -153,5 +154,31 @@
     "optimizationTitle": "优化建议",
     "optimizationDescription": "把有依据的观察，转化为可核验的内容动作。",
     "optimizationEmpty": "暂无优化建议"
+  },
+  "maintenance": {
+    "title": "平台维护权限",
+    "description": "查看当前账号的独立维护授权。每次新操作都会重新核验权限；撤销后立即停止放行。",
+    "statusTitle": "当前授权状态",
+    "permissionsTitle": "独立维护权限",
+    "authorized": "已获得部分维护权限",
+    "authorizedDescription": "仅可在已授予的范围内操作。下方列出本账号的当前权限。",
+    "denied": "当前账号没有所需的维护权限",
+    "contactDescription": "如需维护权限，请联系项目负责人，由其在受控服务器核对独立维护账号后处理。",
+    "unavailable": "暂时无法核验维护权限",
+    "retryDescription": "请稍后刷新重试。当前无法确认授权，维护操作暂不可用。",
+    "sessionRequired": "请登录后查看维护权限",
+    "signInDescription": "请重新登录，再返回当前页面。",
+    "invalidInput": "维护权限请求无效",
+    "trace": "追踪编号：{id}",
+    "granted": "已授予",
+    "notGranted": "未授予",
+    "capabilities.manage": "通道能力维护",
+    "quotas.manage": "试点额度操作",
+    "support.read": "支持元信息查看",
+    "operationsPending": "本页提供授权核验。对应业务操作尚未开放。",
+    "privacyBoundary": "维护授权不提供客户正文、附件、私人报告、内容批准或代发布权限。授权及关键操作会记录最小审计信息。",
+    "refresh": "刷新权限状态",
+    "back": "返回工作台",
+    "loading": "正在核验维护权限…"
   }
 }

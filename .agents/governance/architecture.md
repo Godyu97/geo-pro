@@ -29,9 +29,9 @@
 ## 演进与克制原则
 
 - **不提前引入全局状态管理**：当前无跨页面复杂客户端共享状态需求，不引入 Redux、Zustand 等状态库。
-- **数据访问与缓存**：DAO 支持 SQLite3 / pg、cache 支持 memory / Redis（默认）是已确认工程要求，遵循 [数据访问与缓存工程约束](../../docs/architecture/data-access.md)。当前仅 PostgreSQL 认证基线；按已授权用例落地最小适配，不提前建设通用框架。
+- **数据访问与缓存**：DAO 支持 SQLite3 / pg、cache 支持 memory / Redis（默认）是已确认工程要求，遵循 [数据访问与缓存工程约束](../../docs/architecture/data-access.md)。B08 已接入认证及维护授权双库；其他用例按授权落地，不提前建设通用框架，尚无缓存实现。
 - **不提前拆分微服务或任务基础设施**：仅当真实业务出现耗时任务、失败重试与状态恢复需求时，再优先以持久化任务记录分离触发与执行，不提前引入独立队列、后台 Worker 或微服务。Redis 缓存选型不构成引入 Redis 队列或锁的授权。
 - **优先使用 Next.js 原生能力**：路由分组、服务端渲染、Metadata、Route Handlers 与 Server Actions。
-- **数据库 Schema 演进**：Better Auth 认证表始终走官方生成链；当前 `pnpm db:auth-schema`、`pnpm db:generate` 与 `pnpm db:migrate` 仅配置 PostgreSQL，SQLite 实施时须补齐对应生成与迁移链。表结构保持精简并按访问路径审查索引，先审核 SQL 再迁移，不用 `push` 替代迁移。
+- **数据库 Schema 演进**：Better Auth 认证表始终走官方生成链；`pnpm db:auth-schema`、`pnpm db:generate` 生成双方言，`pnpm db:migrate` 按显式后端配置执行，见 [数据库部署](../../docs/architecture/database-deployment.md)。表结构保持精简并按访问路径审查索引，先审核 SQL 再迁移，不用 `push` 替代迁移。
 - **全量 DDL 维护**：Schema/migration 变更必须同步执行 `pnpm db:ddl` 与 `pnpm db:ddl:check`，维护全部应用表、约束与索引；空库部署和迁移历史边界遵循 [数据库部署说明](../../docs/architecture/database-deployment.md)。
 - **随规模渐进建立边界**：当某业务领域代码增长时，再在对应 `src/features/<domain>/` 内部细分 `components/`、`server/`、`schemas/` 等结构。

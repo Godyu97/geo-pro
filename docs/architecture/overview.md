@@ -4,7 +4,7 @@
 
 GeoPro 面向中国大陆品牌经营者，将 AI 中的品牌观察连接到真实证据和可核验动作。产品定义以 [Intent](../00-PRODUCT-INTENT.md)、[PRD](../02-产品需求文档-PRD.md)、[公共 SPEC](../04-产品功能规格-SPEC.md) 和 [指标合同](../07-指标与证据合同.md) 为准。
 
-当前完成 [工程初始化任务书](../CODEX_INIT.md) 的 Phase 0，以及 [B01 双语言基础子项](../tasks/B01-i18n.md)：官网、账号认证、受保护的空工作台、迁移与工程文档。**尚未完成产品 M0**，T-M0-01 也仅交付公共双语言子项。
+当前完成 [Phase 0](../CODEX_INIT.md)、T-M0-01 的 B01 双语言/B02 认证恢复/B03 可信官网，以及 [B08 维护授权基础](../tasks/B08-maintenance-access.md)。**尚未完成产品 M0 或完整 T-M0-01**；品牌、监测等仍按各任务授权与依赖推进。
 
 ## 需求分层
 
@@ -12,14 +12,14 @@ GeoPro 面向中国大陆品牌经营者，将 AI 中的品牌观察连接到真
 | --- | --- | --- |
 | 产品方向与公共合同 | Intent / PRD / 公共 SPEC / 指标合同；真实回答 → 证据 → 内容动作 → 公开核验 → 同口径复测 | 已定义，不能用页面、构建或演示代替业务验收 |
 | 首期界面语言 | [Web 多语言](i18n.md)：zh-CN / en，默认 zh-CN；界面语言与业务 scope 独立 | 当前官网/账号/工作台壳层已接入；JSON 消息、请求 locale、Cookie 偏好与专项检查可用 |
-| M0 | [12 项任务](../tasks/M0.md)：单品牌自助、事实/问题、双轨采样、证据诊断、内容交付、人工发布核验和探索复测 | 尚无完整任务交付；T-M0-01 的 B01 子项已实现，其余按授权和依赖推进 |
+| M0 | [12 项任务](../tasks/M0.md)：单品牌自助、事实/问题、双轨采样、证据诊断、内容交付、人工发布核验和探索复测 | 尚无完整任务交付；B01–03 和 B08 基础子项已实现，其余按授权/依赖推进 |
 | M1 / M2 | [M1 的 8 项任务](../tasks/M1.md)：持续经营与团队；[M2 的 6 项任务](../tasks/M2.md)：代理交付、授权连接与受控助理 | 全部待实施，先满足前级门禁和场景条件 |
-| 数据工程要求 | [数据访问与缓存](data-access.md)：SQLite3 / pg DAO；memory / Redis（默认）；批量 SQL；精简表结构与索引 | 要求已确认；当前只有 PostgreSQL 认证基线，无业务 DAO 或缓存实现 |
-| 数据库部署材料 | [全量 DDL 与部署](database-deployment.md)：随 Schema/migration 更新完整表、约束和索引 | PostgreSQL 已配置导出与检查入口；SQLite 随适配补齐 |
+| 数据工程要求 | [数据访问与缓存](data-access.md)：SQLite3 / pg DAO；memory / Redis（默认）；批量 SQL；精简表结构与索引 | 认证/维护授权已适配双库；其他业务 DAO 和缓存未实现 |
+| 数据库部署材料 | [全量 DDL 与部署](database-deployment.md)：随 Schema/migration 更新完整表、约束和索引 | PostgreSQL / SQLite 均有独立迁移、全量 DDL 与检查 |
 
 产品对象是业务语义，不直接决定表数量。工程要求、当前事实与实际验收分别记录；详细需求追溯仍由 [追溯矩阵](../06-需求追溯矩阵.md) 和 `product-map.json` 维护。
 
-旧技术架构文件已在 v3.0 停用。当前产品合同不指定技术栈，本轮按初始化任务书选择技术；保留原文档与已有 OpenSpec 文件，不启用 OpenSpec 工作流。任务书要求六个模块占位，而 PRD 要求避免大量无效菜单，因此导航仅定位当前页面中明确标注“尚未开放”的六张卡片，不增加虚假业务路由。竞品入口不意味着后续对比算法提前进入 M0。
+旧技术架构文件已在 v3.0 停用；当前沿用初始化技术栈，B02/B03/B08 按授权使用 OpenSpec。六个未开放业务模块仍只定位明确标注的占位卡片；新增维护权限页是可运行的授权核验，不提前开放后续维护业务。
 
 ## 运行架构与边界
 
@@ -28,10 +28,10 @@ GeoPro 面向中国大陆品牌经营者，将 AI 中的品牌观察连接到真
 | 目录 | 职责 |
 | --- | --- |
 | `src/app/` | 路由、布局、页面组合和 Route Handlers |
-| `src/features/` | 品牌、监测、问题、引用、竞品和优化领域；当前仅目录边界说明 |
+| `src/features/` | `marketing` 官网、`maintenance` 授权/审计；六个原业务域仍为占位 |
 | `src/components/ui/` | 从官方 registry 安装的基础 UI；移动端 Hook 适配当前 React lint 规则 |
 | `src/components/layout/` | 品牌标识、导航元数据、侧栏、认证表单和退出按钮 |
-| `src/lib/db/` | PostgreSQL 连接和 CLI 生成的认证 Schema，仅服务端使用 |
+| `src/lib/db/` | 双后端连接、官方生成认证表及维护表 Schema/迁移，仅服务端使用 |
 | `src/lib/auth/` | Better Auth 服务端工厂、环境校验、客户端、会话门禁和表单校验 |
 | `src/lib/ai/`、`src/lib/cache/` | 扩展说明，无 Provider、缓存系统或队列实现 |
 | `drizzle/` | 纳入版本控制的 SQL migration、快照和迁移日志 |
@@ -40,25 +40,26 @@ GeoPro 面向中国大陆品牌经营者，将 AI 中的品牌观察连接到真
 
 ## Server / Client 原则
 
-页面和工作台布局默认使用 Server Components。只有表单、退出按钮、响应式侧栏等交互使用 Client Components。服务端完成身份校验，只将展示需要的用户名称渲染到页面，不序列化完整会话令牌。公开主页不初始化认证；登录页只检查环境配置是否齐全，不连接数据库。`next.config.ts` 关闭自动生成 Agent 规则，保留仓库维护的 `AGENTS.md` 作为规则来源。
+页面和工作台布局默认使用 Server Components；表单、退出、侧栏等交互最小化客户端边界。公开入口按真实会话分流，维护页面/API 分别鉴权；完整会话令牌不进入展示数据。`next.config.ts` 保留仓库自有 `AGENTS.md`，关闭自动生成规则。
 
 数据库和认证实例在首次需要时建立；开发模式复用 PostgreSQL 连接池，避免热更新重复连接。`.env.local` 可缺失，AI Key 可留空，首页、登录页与生产构建仍可运行。缺少认证配置时，登录页显示不可用状态、禁用提交；认证 API 返回固定 503 响应，工作台跳转登录。数据库故障不代表已认证，客户端显示可重试错误。
 
 ## 认证与 API 权限
 
 - `GET /api/health`：公开存活检查，仅返回 `status` 和 `service`，不代表数据库就绪，不返回配置与依赖详情。
-- `/api/auth/[...all]`：官方 `toNextJsHandler` 委托 Better Auth；启用邮箱/密码注册与登录，使用 `@better-auth/drizzle-adapter`、`provider: pg`，保留框架的来源校验、会话与默认保护。
+- `/api/auth/[...all]`：官方 `toNextJsHandler` 和 Drizzle Adapter；按显式数据库选择 pg/sqlite provider，保留来源校验、会话与默认保护。
 - `/dashboard`：布局与页面都通过 `requireSession()` 调用服务端 `getSession`。无有效会话跳转 `/login`；不会因 Cookie 存在、伪造或过期而放行。
 - 退出通过 Better Auth 撤销数据库会话；旧 Cookie 无法继续进入控制台。未实现邮件验证、找回密码、社交登录、短信或复杂角色权限。
 - 后续每个敏感 API/Server Action 必须独立校验会话与资源归属，不能只依赖布局门禁。输入用 Zod 验证，错误输出不带内部异常、数据库 URL 或密钥。
+- `/dashboard/maintenance`、`/api/maintenance/access`：当前会话 + 三项独立持久授权；只显示本人权限，不扩大客户资料范围。受控 CLI、事务审计和故障行为见 [维护说明](maintenance-access.md)。
 
 ## Schema 与迁移
 
 `auth.schema.config.ts` 加载 Next 环境文件，复用 `src/lib/auth/options.ts`，供官方 Auth CLI 在无数据库连接、无循环导入时生成 Schema。运行时才组合完整 Drizzle Adapter。四张认证表和关系均来自 CLI，不手工推测认证字段。
 
-`drizzle.config.ts` 通过 `@next/env` 加载根目录 `.env.local`。`db:generate` 无需数据库或 URL；`db:migrate` 要求明确配置的数据库。迁移先生成、审核，再应用到目标环境，不能用 `push` 绕过记录。
+`drizzle.config.ts` 与 `drizzle.sqlite.config.ts` 分别维护双方言。`db:generate` 离线生成两者；`db:migrate` 只迁移显式后端。SQLite 使用 Node 24 原生驱动与 Drizzle journal/parser 的原子迁移，外键启用；迁移先审核，不用 `push` 绕过记录。
 
-每次 Schema/migration 变更同步运行 `pnpm db:ddl` 与 `pnpm db:ddl:check`，维护 `drizzle/ddl/postgresql.sql` 全量快照。项目数据库快速部署继续通过 `pnpm db:migrate` 建立迁移历史；直接导入全量 SQL 的空库限制与后续升级边界见 [数据库部署说明](database-deployment.md)。
+每次 Schema/migration 变更同步运行 `pnpm db:ddl` 与 `pnpm db:ddl:check`，维护 `drizzle/ddl/postgresql.sql` 和 `sqlite.sql`。快速部署通过 `pnpm db:migrate` 建立历史；全量导入的空库限制及升级边界见 [数据库部署说明](database-deployment.md)。
 
 可选 `compose.yaml` 只提供本机 PostgreSQL，绑定 `127.0.0.1:55432`；显式 Compose 项目名 `geo-pro-phase0` 隔离已有容器，避免占用本机原有 5432 服务。Docker 不是构建前提，可替换成其他开发 PostgreSQL。
 
@@ -70,7 +71,7 @@ GeoPro 面向中国大陆品牌经营者，将 AI 中的品牌观察连接到真
 
 Phase 0 尚未实现任何品牌 CRUD、真实 GEO 采样、AI 调用、网页抓取、引用解析、指标计算、内容生产、竞品算法、报告、发布、支付、多租户计费、CI/CD 或外部渠道验证。
 
-验证证据和剩余事项见 [Phase 0 任务记录](../tasks/phase-0.md)。
+历史基线见 [Phase 0](../tasks/phase-0.md)；当前维护与双库证据见 [B08 记录](../tasks/B08-maintenance-access.md)，两者不代表 M0 业务闭环完成。
 
 ## 官方实现依据
 

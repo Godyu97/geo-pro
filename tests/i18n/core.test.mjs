@@ -68,10 +68,11 @@ test("validation emits stable codes and keeps mixed Unicode names intact", async
 });
 
 test("login return targets preserve local filters and reject external or malformed paths", () => {
-  for (const value of [null, [], "https://evil.invalid", "//evil.invalid", "/login", "/dashboard/../login", "/dashboard\\evil", "/dashboard\n", "/dashboard\x7f", "/dashboard/%2e%2e/login", "/dashboard%2f%2fevil.invalid", "/dashboard?x=" + "a".repeat(2048)]) {
+  for (const value of [null, [], "https://evil.invalid", "//evil.invalid", "/login", "/dashboard/unknown", "/dashboard/maintenance/unknown", "/dashboard/../login", "/dashboard\\evil", "/dashboard\n", "/dashboard\x7f", "/dashboard/%2e%2e/login", "/dashboard%2f%2fevil.invalid", "/dashboard?x=" + "a".repeat(2048)]) {
     assert.equal(safeReturnTo(value), "/dashboard");
   }
   assert.equal(safeReturnTo("/dashboard?filter=品牌#monitoring"), "/dashboard?filter=%E5%93%81%E7%89%8C#monitoring");
+  assert.equal(safeReturnTo("/dashboard/maintenance?filter=权限#current"), "/dashboard/maintenance?filter=%E6%9D%83%E9%99%90#current");
   const login = new URL(loginPath("/dashboard?filter=品牌&reason=external#monitoring", "session-required"), "https://local.invalid");
   assert.equal(login.pathname, "/login");
   assert.equal(login.searchParams.get("reason"), "session-required");
