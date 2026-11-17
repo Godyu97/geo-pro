@@ -15,37 +15,59 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  useFormField,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth/client";
 import {
+  isValidationKey,
   signInFormSchema,
   signUpSchema,
   type AuthFormValues,
 } from "@/lib/auth/validation";
 
+import type { Messages } from "@/lib/i18n/server";
+import { createTranslator } from "@/lib/i18n/translate";
+import { useLocale } from "@/lib/i18n/client";
+
 type AuthMode = "login" | "signup";
 
-const errorMessages: Record<string, string> = {
-  INVALID_EMAIL_OR_PASSWORD: "邮箱或密码不正确，请检查后重试。",
-  USER_ALREADY_EXISTS: "暂时无法创建账号。如已有账号，请切换到登录。",
-  USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL:
-    "暂时无法创建账号。如已有账号，请切换到登录。",
-  PASSWORD_TOO_SHORT: "密码至少需要 8 个字符。",
-  PASSWORD_TOO_LONG: "密码最多 128 个字符。",
-  TOO_MANY_REQUESTS: "操作过于频繁，请稍后再试。",
+const errorKeys: Record<string, keyof Messages["auth"]> = {
+  INVALID_EMAIL_OR_PASSWORD: "invalidCredentials",
+  USER_ALREADY_EXISTS: "accountExists",
+  USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "accountExists",
+  PASSWORD_TOO_SHORT: "passwordMin",
+  PASSWORD_TOO_LONG: "passwordMax",
+  TOO_MANY_REQUESTS: "tooManyRequests",
 };
+
+function AuthFormMessage({ messages }: { messages: Messages["auth"] }) {
+  const { error } = useFormField();
+  const { locale } = useLocale();
+  const t = createTranslator(locale, messages);
+  return (
+    <FormMessage>
+      {error ? t(isValidationKey(error.message) ? error.message : "unavailable") : null}
+    </FormMessage>
+  );
+}
 
 export function AuthForm({
   initialMode,
   configured,
+  messages,
+  returnTo,
 }: {
   initialMode: AuthMode;
   configured: boolean;
+  messages: Messages["auth"];
+  returnTo: string;
 }) {
+  const { locale } = useLocale();
+  const t = createTranslator(locale, messages);
   const [mode, setMode] = useState<AuthMode>(initialMode);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<keyof Messages["auth"] | null>(null);
   const router = useRouter();
   const form = useForm<AuthFormValues>({
     resolver: zodResolver(mode === "signup" ? signUpSchema : signInFormSchema),
@@ -71,16 +93,17 @@ export function AuthForm({
 
       if (result.error) {
         setError(
-          errorMessages[result.error.code ?? ""] ??
-            "认证服务暂不可用，请稍后重试。",
+          result.error.status === 429
+            ? "tooManyRequests"
+            : errorKeys[result.error.code ?? ""] ?? "unavailable",
         );
         return;
       }
 
-      router.replace("/dashboard");
+      router.replace(returnTo);
       router.refresh();
     } catch {
-      setError("暂时无法连接认证服务，请检查网络后重试。");
+      setError("networkError");
     }
   }
 
@@ -95,12 +118,12 @@ export function AuthForm({
         }
       }}
     >
-      <TabsList className="mb-5 h-10 w-full" aria-label="账号操作">
+      <TabsList className="mb-5 h-10 w-full" aria-label={t("operations")}>
         <TabsTrigger value="login" disabled={pending}>
-          登录
+          {t("login")}
         </TabsTrigger>
         <TabsTrigger value="signup" disabled={pending}>
-          创建账号
+          {t("signup")}
         </TabsTrigger>
       </TabsList>
       <TabsContent value={mode}>
@@ -109,12 +132,17 @@ export function AuthForm({
             role="status"
             className="mb-5 rounded-lg border bg-muted p-3 text-sm leading-6 text-muted-foreground"
           >
-            账号服务尚未配置，请联系维护者完成配置后再试。
+            {t("notConfigured")}
           </p>
         )}
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(onSubmit)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && event.nativeEvent.isComposing) {
+                event.preventDefault();
+              }
+            }}
             noValidate
             className="space-y-5"
             aria-busy={pending}
@@ -125,21 +153,21 @@ export function AuthForm({
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>称呼</FormLabel>
+                    <FormLabel>{t("name")}</FormLabel>
                     <FormControl>
                       <Input
                         {...field}
-                        placeholder="你的称呼"
+                        placeholder={t("namePlaceholder")}
                         autoComplete="name"
-                        maxLength={80}
+                        maxLength={160}
                         disabled={pending || !configured}
                         className="h-11 bg-white"
                       />
                     </FormControl>
                     <FormDescription className="sr-only">
-                      用于工作台中的欢迎称呼
+                      {t("nameDescription")}
                     </FormDescription>
-                    <FormMessage />
+                    <AuthFormMessage messages={messages} />
                   </FormItem>
                 )}
               />
@@ -149,12 +177,12 @@ export function AuthForm({
               name="email"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>邮箱</FormLabel>
+                  <FormLabel>{t("email")}</FormLabel>
                   <FormControl>
                     <Input
                       {...field}
                       type="email"
-                      placeholder="name@example.com"
+                      placeholder={t("emailPlaceholder")}
                       autoComplete="email"
                       maxLength={254}
                       disabled={pending || !configured}
@@ -162,9 +190,9 @@ export function AuthForm({
                     />
                   </FormControl>
                   <FormDescription className="sr-only">
-                    使用此邮箱登录账号
+                    {t("emailDescription")}
                   </FormDescription>
-                  <FormMessage />
+                  <AuthFormMessage messages={messages} />
                 </FormItem>
               )}
             />
@@ -173,12 +201,12 @@ export function AuthForm({
               name="password"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>密码</FormLabel>
+                  <FormLabel>{t("password")}</FormLabel>
                   <FormControl>
                     <Input
                       {...field}
                       type="password"
-                      placeholder="请输入密码"
+                      placeholder={t("passwordPlaceholder")}
                       autoComplete={
                         mode === "signup" ? "new-password" : "current-password"
                       }
@@ -189,10 +217,10 @@ export function AuthForm({
                   </FormControl>
                   <FormDescription>
                     {mode === "signup"
-                      ? "使用 8–128 个字符，不要与其他网站共用密码。"
-                      : "请输入创建账号时设置的密码。"}
+                      ? t("signupPasswordHint")
+                      : t("loginPasswordHint")}
                   </FormDescription>
-                  <FormMessage />
+                  <AuthFormMessage messages={messages} />
                 </FormItem>
               )}
             />
@@ -201,7 +229,7 @@ export function AuthForm({
                 role="alert"
                 className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm leading-6 text-destructive"
               >
-                {error}
+                {t(error)}
               </p>
             )}
             <Button
@@ -212,13 +240,13 @@ export function AuthForm({
               {pending ? (
                 <>
                   <LoaderCircle className="animate-spin" aria-hidden="true" />
-                  正在{mode === "signup" ? "创建账号" : "登录"}…
+                  {t(mode === "signup" ? "creating" : "signingIn")}
                 </>
               ) : (
                 <>
                   {mode === "signup"
-                    ? "创建账号并进入工作台"
-                    : "登录并进入工作台"}
+                    ? t("signupSubmit")
+                    : t("loginSubmit")}
                   <ArrowRight aria-hidden="true" />
                 </>
               )}

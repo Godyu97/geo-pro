@@ -6,8 +6,10 @@ import { LoaderCircle, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth/client";
+import { useLocale } from "@/lib/i18n/client";
 
 export function SignOutButton() {
+  const { t } = useLocale();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(false);
   const router = useRouter();
@@ -35,7 +37,7 @@ export function SignOutButton() {
     <div className="flex flex-wrap items-center justify-end gap-2">
       {error && (
         <span role="alert" className="text-xs text-destructive">
-          退出失败，请重试
+          {t("signOutFailed")}
         </span>
       )}
       <Button variant="ghost" onClick={signOut} disabled={pending}>
@@ -44,7 +46,7 @@ export function SignOutButton() {
         ) : (
           <LogOut aria-hidden="true" />
         )}
-        <span>退出登录</span>
+        <span>{t("signOut")}</span>
       </Button>
     </div>
   );

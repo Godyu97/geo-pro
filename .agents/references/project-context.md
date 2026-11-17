@@ -6,7 +6,7 @@
 
 - **包名与版本**：`geo-pro` v`0.1.0`（`"private": true`，`"type": "module"`，见 [package.json](../../package.json)）
 - **定位**：GeoPro（AI GEO），面向中国大陆品牌经营者的品牌可见度监测与优化平台。
-- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)；产品 M0–M2 业务功能（见 [docs/tasks/M0.md](../../docs/tasks/M0.md) 等）**均尚未实施**。
+- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)；T-M0-01 的 [B01 双语言基础子项](../../docs/tasks/B01-i18n.md) 已实现；产品 M0–M2 尚无完整里程碑交付。
 
 ## 2. 技术栈与实际版本
 
@@ -28,8 +28,8 @@
 ## 3. 实际源码与目录结构
 
 - `src/app/`：
-  - `layout.tsx`、`globals.css`
-  - `(marketing)/page.tsx`：公开中文浅色官网首页（`/`）
+  - `layout.tsx`、`globals.css`、`error.tsx`、`global-error.tsx`、`not-found.tsx`；`src/proxy.ts` 处理请求路径和禁用公共缓存
+  - `(marketing)/page.tsx`：公开中英文浅色官网首页（`/`）
   - `(auth)/login/page.tsx`：邮箱/密码注册与登录页（`/login`）
   - `(dashboard)/layout.tsx`、`(dashboard)/dashboard/page.tsx`、`error.tsx`、`loading.tsx`：受服务端会话保护的空工作台（`/dashboard`）
   - `api/auth/[...all]/route.ts`：Better Auth Next.js Handler（缺失配置时返回 503）
@@ -39,7 +39,7 @@
   - `layout/`：`app-sidebar.tsx`、`auth-form.tsx`、`brand-mark.tsx`、`module-links.ts`、`sign-out-button.tsx`
   - `charts/README.md`：仅边界说明，无图表实现
 - `src/features/`：包含 6 个仅含 `README.md` 的业务占位域：`brands/`、`monitoring/`、`prompts/`、`citations/`、`competitors/`、`optimization/`。
-- `src/lib/`：`auth/`（`client.ts`、`env.ts`、`options.ts`、`server.ts`、`session.ts`、`validation.ts`）、`db/`（`index.ts`、`auth-schema.ts`），以及仅含 `README.md` 的 `ai/`、`cache/`。
+- `src/lib/`：`i18n/`（locale、消息、Server Action、Provider、Intl），`auth/`（`client.ts`、`env.ts`、`options.ts`、`server.ts`、`session.ts`、`validation.ts`）、`db/`（`index.ts`、`auth-schema.ts`），以及仅含 `README.md` 的 `ai/`、`cache/`。
 - `src/hooks/use-mobile.ts`、`src/types/README.md`
 - `drizzle/`：`0000_nervous_mole_man.sql` 及快照/日志（4 张 Better Auth 基础表）。
 - `drizzle/ddl/postgresql.sql`：由当前 Schema 导出的全量应用建表快照，不含迁移历史和客户数据；`scripts/export-ddl.mjs` 提供导出与只读一致性检查。
@@ -65,7 +65,7 @@
 | `pnpm verify:auth` | `node scripts/verify-auth.mjs` | 本地认证闭环校验（需应用在 `BETTER_AUTH_URL` 运行且开发库已迁移） |
 | `python docs/tools/validate_docs.py` | 标准库 Python 脚本 | 校验 `docs/` 产品文档链接、映射与指标样例 |
 
-- **测试框架现状**：当前 `package.json` **未配置**单元测试或 E2E 测试框架（如 Vitest、Jest、Playwright）。
+- **测试现状**：`pnpm check:i18n` 检查消息；`pnpm test:i18n` 运行 Node.js 原生基础测试；`pnpm test:e2e` 使用 `@playwright/test@1.65.1` 和本机 Chrome，在 `.cache/i18n-app` 的生产构建副本核验语言/页面边界，测试账号精确清理。业务 DAO、SQLite、Redis 等专项测试仍未配置。
 
 ## 5. 已确认工程要求与适配差距
 
@@ -73,7 +73,7 @@
 
 **当前事实**：数据库连接、Auth Adapter、Schema 生成和迁移均为 PostgreSQL，认证验证脚本也直接使用 PostgreSQL；没有业务 DAO、SQLite 适配或缓存实现。现有 Redis 暂缓规则属于 Phase 0 实施边界，不再表示后续缓存后端选型未定。
 
-**多语言要求与差距**：首期界面支持 `zh-CN` / `en`，默认 `zh-CN`，详见 [Web 多语言规范](../../docs/architecture/i18n.md)。当前 [根布局](../../src/app/layout.tsx) 固定 `lang="zh-CN"` 和中文 Metadata，[认证表单](../../src/components/layout/auth-form.tsx) 与 [校验消息](../../src/lib/auth/validation.ts) 为中文；无消息目录、英文界面、语言切换/持久化及专用 i18n 验证命令。需求已确认，运行时适配未实施。
+**多语言现状**：当前官网、账号和工作台壳层已提供 `zh-CN` / `en`，请求解析、Cookie 偏好、Metadata、消息/参数检查与浏览器 E2E 已接入。详见 [Web 多语言规范](../../docs/architecture/i18n.md) 和 [B01 记录](../../docs/tasks/B01-i18n.md)。未来业务页面、图表、导出与真实采样 scope 的语言隔离仍需随业务任务验收。
 
 ## 6. 尚未确定的重要技术决策
 
@@ -82,6 +82,6 @@
 1. **业务数据模型设计**：品牌、事实版本、问题集、监测样本与证据对象的具体 Drizzle 表结构。
 2. **AI Provider 适配方案**：`src/lib/ai/` 的多模型调用接口、重试、限流与成本记录方式。
 3. **异步采样与任务恢复机制**：当出现长耗时采样的持久化任务表设计与后续是否拆分独立 Worker。
-4. **自动化测试选型**：后续业务单测与端到端测试工具链（如 Vitest / Playwright）的引入时机与范围。
+4. **业务自动化测试**：已采用 Node.js 原生基础测试与 Playwright；业务用例、DAO 与渠道测试的覆盖方式随对应任务补齐。
 5. **适配实现细节**：SQLite 驱动、双方言 Schema/迁移配置、DAO 的具体用例接口，以及 Redis 客户端、后端选择配置、各用例 TTL 与失效范围。后端支持集合和 Redis 默认值已确定，不重新作为开放选型。
-6. **i18n 实现细节**：消息工具/目录、locale URL 策略、偏好承载方式、消息一致性检查入口；支持集合与默认值已确认，选型须满足服务端/客户端、鉴权路径及缓存隔离要求。
+6. **后续 i18n 扩展**：B01 已确定 JSON/Intl、原路径与 Cookie 偏好；新增业务领域按当前消息、SSR、格式化与测试边界扩展，不重新选择默认语言或改写业务 scope。

@@ -2,13 +2,13 @@
 
 GeoPro（AI GEO）是面向中国大陆品牌经营者的 GEO 品牌可见度监测与优化平台。产品方向是“真实回答 → 可追溯证据 → 内容动作 → 同口径复测”，不承诺固定排名。
 
-当前仅完成 **Phase 0 工程初始化**：中文官网、邮箱/密码账号、受服务端会话保护的空工作台、PostgreSQL 认证表与迁移。六个业务模块仅有导航和真实空状态，尚未完成产品 M0。
+当前完成 **Phase 0 工程初始化与 B01 双语言基础**：中英文官网、邮箱/密码账号、受服务端会话保护的空工作台、PostgreSQL 认证表与迁移。六个业务模块仅有导航和真实空状态，尚未完成产品 M0。
 
 后续工程要求已确认：DAO 支持 SQLite3 / PostgreSQL，cache 支持 memory / Redis（默认），查询优先批量 SQL，表结构保持精简并审查索引。当前尚无双数据库 DAO 或缓存实现，现有启动与迁移命令仍针对 PostgreSQL；详见 [数据访问与缓存工程约束](docs/architecture/data-access.md)。
 
 当前 [PostgreSQL 全量 DDL](drizzle/ddl/postgresql.sql) 由 Schema 生成并随迁移维护；更新、检查和空库部署方式见 [数据库部署说明](docs/architecture/database-deployment.md)。
 
-产品首期界面要求支持 `zh-CN` / `en`，默认 `zh-CN`；[Web 多语言规范](docs/architecture/i18n.md) 定义文案、语言切换、SSR、格式化及布局兼容。当前运行时仍为中文基线，英文与语言切换待实施。
+产品首期界面要求支持 `zh-CN` / `en`，默认 `zh-CN`；[Web 多语言规范](docs/architecture/i18n.md) 定义文案、语言切换、SSR、格式化及布局兼容。现有页面已接入双语言，显式选择通过 Cookie 保存一年；未保存时按受支持的浏览器语言选择，否则回退中文。URL 保持原路径。实施边界与证据见 [B01 交付记录](docs/tasks/B01-i18n.md)。
 
 ## 环境准备
 
@@ -54,12 +54,18 @@ pnpm dev
 pnpm lint
 pnpm typecheck
 pnpm build
+pnpm check:i18n
+pnpm test:i18n
+# 需本机 Chrome、可用的本地开发 PostgreSQL；使用独立 3100 端口。
+pnpm test:e2e
 pnpm db:ddl:check
 # 需先启动本地应用并迁移开发数据库。
 pnpm verify:auth
 # 生产构建完成后可启动生产服务。
 pnpm start
 ```
+
+多语言 E2E 在 `.cache/i18n-app` 构建独立源码副本，使用临时账号并精确清理，只在副本增加加载/故障探针；截图输出到忽略的 `test-results/`。默认使用本机 Chrome；也可先运行 `pnpm exec playwright install chromium`，再用 `PLAYWRIGHT_CHANNEL=chromium pnpm test:e2e`。不需要修改 `.env.local` 的应用来源。
 
 认证验证脚本通过真实 HTTP 与 PostgreSQL 检查公开路由、未登录及伪造 Cookie、输入校验、注册、密码哈希、登录、来源校验、退出与会话撤销。仅连接本地应用，创建独立验证账号并在结束后精确清理该账号；不生成业务记录。
 

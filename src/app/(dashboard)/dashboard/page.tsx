@@ -1,32 +1,35 @@
 import { ArrowDown, FolderOpen, Leaf, ShieldCheck } from "lucide-react";
 
-import { moduleLinks } from "@/components/layout/module-links";
+import { getModuleLinks } from "@/components/layout/module-links";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
 
 export default async function DashboardPage() {
   // Each protected page checks the session, including RSC navigation requests.
   const { user } = await requireSession();
+  const locale = await getLocale();
+  const t = await getTranslator("dashboard");
+  const moduleLinks = getModuleLinks(getMessages(locale).modules);
 
   return (
     <div className="space-y-9">
       <section className="rounded-2xl border bg-secondary/55 p-6 sm:p-8">
         <Badge variant="outline" className="mb-5 gap-1.5 bg-white/60">
           <ShieldCheck className="size-3.5" aria-hidden="true" />
-          账号已连接
+          {t("connected")}
         </Badge>
-        <h1 className="text-2xl leading-relaxed font-semibold tracking-tight sm:text-3xl">
-          你好，<span className="break-words">{user.name}</span>
+        <h1 className="break-words text-2xl leading-relaxed font-semibold tracking-tight sm:text-3xl">
+          {t("greeting", { name: user.name })}
         </h1>
         <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
-          欢迎来到品牌可见度工作台。这里将连接品牌资料、回答证据与内容动作，帮助你理解
-          AI 中的品牌表现。
+          {t("welcome")}
         </p>
         <Button asChild variant="outline" className="mt-6 bg-white/70">
           <a href="#modules">
-            查看模块状态
+            {t("moduleStatus")}
             <ArrowDown aria-hidden="true" />
           </a>
         </Button>
@@ -42,20 +45,20 @@ export default async function DashboardPage() {
           />
         </span>
         <h2 id="evidence-title" className="font-medium">
-          等待第一份真实证据
+          {t("waitingEvidence")}
         </h2>
         <p className="mx-auto mt-2 max-w-lg text-sm leading-7 text-muted-foreground">
-          当前暂无监测数据。业务模块开放后，你可以从品牌资料和客户问题开始，逐步建立自己的观察记录。
+          {t("emptyDescription")}
         </p>
       </section>
       <section id="modules" aria-labelledby="modules-title">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <h2 id="modules-title" className="text-lg font-semibold">
-            工作台模块
+            {t("workspaceModules")}
           </h2>
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Leaf className="size-3.5 text-primary" aria-hidden="true" />
-            逐步建设，持续完善
+            {t("improving")}
           </span>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -70,7 +73,7 @@ export default async function DashboardPage() {
                     variant="outline"
                     className="font-normal text-muted-foreground"
                   >
-                    尚未开放
+                    {t("unavailable")}
                   </Badge>
                 </div>
                 <h3 className="font-medium">{title}</h3>

@@ -1,21 +1,25 @@
 import { z } from "zod";
 
+// Stable codes keep validation rules independent of the interface language.
+export const validationKeys = [
+  "emailMax", "emailInvalid", "passwordMin", "passwordMax", "nameRequired", "nameMax",
+] as const;
+export type ValidationKey = (typeof validationKeys)[number];
+
+export function isValidationKey(value: unknown): value is ValidationKey {
+  return validationKeys.some((key) => key === value);
+}
+
 export const loginSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .max(254, "邮箱地址过长")
-    .pipe(z.email("请输入有效的邮箱地址")),
-  password: z
-    .string()
-    .min(8, "密码至少需要 8 个字符")
-    .max(128, "密码最多 128 个字符"),
+  email: z.string().trim().max(254, "emailMax").pipe(z.email("emailInvalid")),
+  password: z.string().min(8, "passwordMin").max(128, "passwordMax"),
 });
 
 export const signUpSchema = loginSchema.extend({
-  name: z.string().trim().min(1, "请输入称呼").max(80, "称呼最多 80 个字符"),
+  name: z.string().trim().min(1, "nameRequired").refine(
+    (value) => Array.from(value).length <= 80, "nameMax",
+  ),
 });
 
 export const signInFormSchema = loginSchema.extend({ name: z.string() });
-
 export type AuthFormValues = z.infer<typeof signUpSchema>;

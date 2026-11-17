@@ -1,0 +1,14 @@
+{
+  "zh-CN": {
+    "title": "暂时无法加载 GeoPro",
+    "description": "请重新加载页面，或稍后返回首页重试。",
+    "reload": "重新加载",
+    "home": "返回首页"
+  },
+  "en": {
+    "title": "Unable to load GeoPro",
+    "description": "Reload this page, or return home and try again later.",
+    "reload": "Reload",
+    "home": "Back to home"
+  }
+}

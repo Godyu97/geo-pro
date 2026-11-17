@@ -1,10 +1,10 @@
 # GeoPro Agent 统一开发约定
 
-GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、PostgreSQL / Drizzle ORM 与 Better Auth 的 AI GEO 监测与优化平台。**当前工程基线仅完成 `docs/CODEX_INIT.md` 的 Phase 0；产品 M0–M2（`docs/tasks/M0.md` 等）均尚未实施。**
+GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、PostgreSQL / Drizzle ORM 与 Better Auth 的 AI GEO 监测与优化平台。**已完成 `docs/CODEX_INIT.md` 的 Phase 0 及 T-M0-01 的 B01 双语言基础子项；产品 M0–M2 里程碑仍未完成，其他业务任务按授权与依赖推进。**
 
 已确认的工程目标：DAO 适配 SQLite3 与 PostgreSQL；cache 适配 memory 与 Redis（默认）；避免 N+1 与大量串行 SQL，优先批量操作；表结构精简并按查询路径审查索引；全量 DDL 随 Schema/migration 及时更新。**数据适配目标尚未实现**，详见 [数据访问与缓存工程约束](docs/architecture/data-access.md)；全量 DDL 维护与部署见 [数据库部署说明](docs/architecture/database-deployment.md)。
 
-产品首期界面支持 `zh-CN` / `en`，默认 `zh-CN`；Web 开发从文案、校验、路由、SSR、格式化、布局与缓存设计双语言兼容。界面 locale 独立于业务采样语言、币种和统计时区。当前仍是中文基线，规范与验收见 [Web 多语言设计](docs/architecture/i18n.md)。
+产品首期界面支持 `zh-CN` / `en`，默认 `zh-CN`；Web 开发从文案、校验、路由、SSR、格式化、布局与缓存设计双语言兼容。界面 locale 独立于业务采样语言、币种和统计时区。现有官网、账号与工作台壳层已接入双语言；后续业务页面继续按任务补齐。规范与验收见 [Web 多语言设计](docs/architecture/i18n.md)。
 
 ## 强制约束（不可违背）
 

@@ -1,24 +1,29 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { LocaleProvider } from "@/lib/i18n/client";
+import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: {
-    default: "GeoPro · GEO 品牌可见度监测与优化平台",
-    template: "%s · GeoPro",
-  },
-  description:
-    "面向中国大陆品牌经营者，以真实回答和可核验证据，连接品牌可见度观察与内容优化。",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator("common");
+  return {
+    title: { default: t("siteTitle"), template: "%s · GeoPro" },
+    description: t("siteDescription"),
+  };
+}
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const locale = await getLocale();
+  const messages = getMessages(locale).common;
   return (
-    <html lang="zh-CN" className="h-full antialiased">
+    <html lang={locale} className="h-full antialiased">
       <body className="min-h-full">
-        <a href="#main-content" className="skip-link">
-          跳转到主要内容
-        </a>
-        {children}
+        <LocaleProvider locale={locale} messages={messages}>
+          <a href="#main-content" className="skip-link">
+            {messages.skip}
+          </a>
+          {children}
+        </LocaleProvider>
       </body>
     </html>
   );

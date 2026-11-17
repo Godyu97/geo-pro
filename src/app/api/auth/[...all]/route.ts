@@ -2,22 +2,29 @@ import { toNextJsHandler } from "better-auth/next-js";
 
 import { isAuthConfigured } from "@/lib/auth/env";
 import { getAuth } from "@/lib/auth/server";
+import { localeCookie, resolveLocale } from "@/lib/i18n/locale";
+import { getMessages } from "@/lib/i18n/server";
+import type { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 
-function unavailable() {
+function unavailable(request: NextRequest) {
+  const locale = resolveLocale(
+    request.cookies.get(localeCookie)?.value,
+    request.headers.get("accept-language"),
+  );
   return Response.json(
     {
       code: "AUTH_UNAVAILABLE",
-      message: "认证服务暂不可用，请稍后重试或联系维护者。",
+      message: getMessages(locale).auth.unavailable,
     },
     { status: 503, headers: { "Cache-Control": "no-store" } },
   );
 }
 
-async function handle(request: Request) {
+async function handle(request: NextRequest) {
   if (!isAuthConfigured()) {
-    return unavailable();
+    return unavailable(request);
   }
 
   try {
@@ -27,7 +34,7 @@ async function handle(request: Request) {
       : handlers.POST(request));
   } catch {
     // Do not send driver errors, connection strings or stack traces to clients.
-    return unavailable();
+    return unavailable(request);
   }
 }
 

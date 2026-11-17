@@ -10,12 +10,14 @@ import {
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { LanguageSwitcher } from "@/components/layout/language-switcher";
+import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
 
-export const metadata: Metadata = {
-  title: "工作台",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator("common");
+  return { title: t("dashboardTitle"), robots: { index: false, follow: false } };
+}
 export const dynamic = "force-dynamic";
 
 export default async function DashboardLayout({
@@ -24,22 +26,26 @@ export default async function DashboardLayout({
   children: ReactNode;
 }) {
   const { user } = await requireSession();
+  const locale = await getLocale();
+  const messages = getMessages(locale);
+  const t = await getTranslator("common");
 
   return (
     <TooltipProvider>
       <SidebarProvider>
-        <AppSidebar />
+        <AppSidebar messages={messages.dashboard} modules={messages.modules} />
         <SidebarInset className="min-w-0 bg-background">
-          <header className="flex min-h-18 items-center justify-between gap-3 border-b bg-card px-4 sm:px-8">
-            <div className="flex min-w-0 items-center gap-3">
-              <SidebarTrigger aria-label="切换侧边导航" />
+          <header className="flex min-h-18 flex-wrap items-center justify-between gap-3 border-b bg-card px-4 py-3 sm:px-8">
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <SidebarTrigger aria-label={t("toggleSidebar")} />
               <Separator orientation="vertical" className="h-5!" />
-              <span className="truncate text-sm font-medium">工作台总览</span>
+              <span className="truncate text-sm font-medium">{t("overview")}</span>
             </div>
-            <div className="flex min-w-0 items-center gap-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
               <span className="hidden max-w-36 truncate text-xs text-muted-foreground sm:inline">
                 {user.name}
               </span>
+              <LanguageSwitcher />
               <SignOutButton />
             </div>
           </header>
