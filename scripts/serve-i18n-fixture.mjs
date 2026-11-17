@@ -67,6 +67,12 @@ await writeFile(maintenancePage, (await readFile(maintenancePage, "utf8")).repla
   '  await requireSession();\n  if ((await (await import("next/headers")).headers()).get("cookie")?.includes("geo-maintenance-slow=1")) await new Promise(resolve => setTimeout(resolve, 1500));',
 ));
 
+const settingsPage = path.join(fixture, "src/features/account/settings-page.tsx");
+await writeFile(settingsPage, (await readFile(settingsPage, "utf8")).replace(
+  '  const { user } = await requireSession();',
+  '  const { user } = await requireSession();\n  if ((await (await import("next/headers")).headers()).get("cookie")?.includes("geo-settings-slow=1")) await new Promise(resolve => setTimeout(resolve, 1500));',
+));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

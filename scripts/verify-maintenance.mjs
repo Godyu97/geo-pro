@@ -94,8 +94,27 @@ async function verify(kind) {
     const read = await request(`/api/auth/get-session?userId=${customer.id}`, { cookie: maintainer.cookie });
     assert.equal((await read.json()).user.id, maintainer.id);
     const write = await request("/api/auth/update-user", { method: "POST", cookie: maintainer.cookie, body: { userId: customer.id, id: customer.id, role: "superuser", name: "Updated own maintainer" } });
-    assert.equal(write.status, 200);
+    assert.equal(write.status, 400);
+    assert.equal((await write.json()).code, "INVALID_PROFILE_INPUT");
+    assert.equal((await dao.query('SELECT name FROM "user" WHERE id = ?', [maintainer.id]))[0].name, "Synthetic separate maintainer 🚀");
     assert.equal((await dao.query('SELECT name FROM "user" WHERE id = ?', [customer.id]))[0].name, "PRIVATE_CUSTOMER_TEXT_SENTINEL");
+    phase = `${kind}: failed profile write does not commit or report success`;
+    // Only this isolated database gets the temporary constraint.
+    await dao.query('CREATE UNIQUE INDEX geo_b15_profile_failure ON "user" (name)');
+    try {
+      const failedUpdate = await request("/api/auth/update-user", {
+        method: "POST", cookie: maintainer.cookie, body: { name: "PRIVATE_CUSTOMER_TEXT_SENTINEL" },
+      });
+      assert.equal(failedUpdate.status, 503, "A database write failure must not return success");
+      assert.equal((await failedUpdate.json()).code, "AUTH_UNAVAILABLE");
+      assert.ok(output.includes("auth-api-unavailable"), "Authentication outage must produce a safe server trace");
+      const unchanged = await (await request("/api/auth/get-session", { cookie: maintainer.cookie })).json();
+      assert.equal(unchanged.user.name, "Synthetic separate maintainer 🚀");
+    } finally {
+      await dao.query("DROP INDEX geo_b15_profile_failure");
+    }
+    console.log(`PASS: ${kind} 资料写入发生真实数据库约束错误时拒绝提交并隐藏数据库细节`);
+
     const target = "/dashboard/maintenance?source=verification#current";
     const redirect = await request(`/login?returnTo=${encodeURIComponent(target)}`, { cookie: maintainer.cookie });
     assert.equal(new URL(redirect.headers.get("location"), baseURL).href, new URL(target, baseURL).href);

@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
-import { SignOutButton } from "@/components/layout/sign-out-button";
 import { SessionMonitor } from "@/components/layout/session-monitor";
+import { WorkspaceAccountControls } from "@/components/layout/workspace-account-controls";
 import {
   SidebarInset,
   SidebarProvider,
@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
 
@@ -47,8 +46,7 @@ export default async function DashboardLayout({
               <span className="hidden max-w-36 truncate text-xs text-muted-foreground sm:inline">
                 {user.name}
               </span>
-              <LanguageSwitcher />
-              <SignOutButton />
+              <WorkspaceAccountControls />
             </div>
           </header>
           <main

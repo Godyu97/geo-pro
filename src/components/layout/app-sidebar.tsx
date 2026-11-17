@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowUpRight, LayoutDashboard, CircleHelp, ShieldCheck } from "lucide-react";
+import { ArrowUpRight, LayoutDashboard, CircleHelp, Settings, ShieldCheck } from "lucide-react";
 
 import { BrandMark } from "@/components/layout/brand-mark";
 import { getModuleLinks } from "@/components/layout/module-links";
@@ -59,6 +59,18 @@ export function AppSidebar({ messages, modules }: { messages: Messages["dashboar
                     <Link href="/dashboard/maintenance" aria-current={pathname === "/dashboard/maintenance" ? "page" : undefined} onClick={() => setOpenMobile(false)}>
                       <ShieldCheck aria-hidden="true" />
                       <span className="whitespace-normal">{common("maintenance")}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/dashboard/settings"} className="h-auto min-h-10 py-2">
+                    <Link
+                      href="/dashboard/settings"
+                      aria-current={pathname === "/dashboard/settings" ? "page" : undefined}
+                      onClick={() => setOpenMobile(false)}
+                    >
+                      <Settings aria-hidden="true" />
+                      <span className="whitespace-normal">{common("accountSettings")}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

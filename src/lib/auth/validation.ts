@@ -15,11 +15,11 @@ export const loginSchema = z.object({
   password: z.string().min(8, "passwordMin").max(128, "passwordMax"),
 });
 
-export const signUpSchema = loginSchema.extend({
-  name: z.string().trim().min(1, "nameRequired").refine(
-    (value) => Array.from(value).length <= 80, "nameMax",
-  ),
-});
+export const displayNameSchema = z.string({ error: "nameRequired" }).trim()
+  .min(1, "nameRequired")
+  .refine((value) => Array.from(value).length <= 80, "nameMax");
+
+export const signUpSchema = loginSchema.extend({ name: displayNameSchema });
 
 export const signInFormSchema = loginSchema.extend({ name: z.string() });
 export type AuthFormValues = z.infer<typeof signUpSchema>;

@@ -73,6 +73,8 @@ test("login return targets preserve local filters and reject external or malform
   }
   assert.equal(safeReturnTo("/dashboard?filter=品牌#monitoring"), "/dashboard?filter=%E5%93%81%E7%89%8C#monitoring");
   assert.equal(safeReturnTo("/dashboard/maintenance?filter=权限#current"), "/dashboard/maintenance?filter=%E6%9D%83%E9%99%90#current");
+  assert.equal(safeReturnTo("/dashboard/settings?from=工作台#data-management"), "/dashboard/settings?from=%E5%B7%A5%E4%BD%9C%E5%8F%B0#data-management");
+  assert.equal(safeReturnTo("/dashboard/settings/unknown"), "/dashboard");
   const login = new URL(loginPath("/dashboard?filter=品牌&reason=external#monitoring", "session-required"), "https://local.invalid");
   assert.equal(login.pathname, "/login");
   assert.equal(login.searchParams.get("reason"), "session-required");

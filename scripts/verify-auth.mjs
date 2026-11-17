@@ -30,7 +30,7 @@ let otherUserId;
 
 async function request(
   path,
-  { method = "GET", body, cookie, origin = baseURL.origin } = {},
+  { method = "GET", body, cookie, origin = baseURL.origin, headers = {} } = {},
 ) {
   const send = () => fetch(new URL(path, baseURL), {
     method,
@@ -39,6 +39,7 @@ async function request(
       Origin: origin,
       ...(body ? { "Content-Type": "application/json" } : {}),
       ...(cookie ? { Cookie: cookie } : {}),
+      ...headers,
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
@@ -188,19 +189,60 @@ try {
   otherUserId = (await otherSignUp.json()).user.id;
   const isolatedRead = await request(`/api/auth/get-session?userId=${encodeURIComponent(otherUserId)}`, { cookie: loginCookie });
   assert.equal((await isolatedRead.json()).user.id, createdUserId, "外部 ID 不能替换会话身份");
-  const isolatedWrite = await request("/api/auth/update-user", {
-    method: "POST", cookie: loginCookie,
-    body: { userId: otherUserId, id: otherUserId, name: "Updated own account" },
+  const update = (body, options = {}) => request("/api/auth/update-user", {
+    method: "POST", cookie: loginCookie, body, ...options,
   });
-  assert.equal(isolatedWrite.status, 200);
-  const users = await sql`select id, name from "user" where id in (${createdUserId}, ${otherUserId})`;
-  assert.equal(users.find((user) => user.id === createdUserId)?.name, "Updated own account");
-  assert.equal(users.find((user) => user.id === otherUserId)?.name, "Isolated account", "替换 ID 不得修改另一用户");
+  for (const [body, code] of [
+    [{ name: " \t " }, "nameRequired"],
+    [{ name: false }, "nameRequired"],
+    [{ name: "🚀".repeat(81) }, "nameMax"],
+    [{ name: "Unapplied", id: otherUserId, userId: otherUserId }, "INVALID_PROFILE_INPUT"],
+    [{ name: "Unapplied", email: otherEmail }, "INVALID_PROFILE_INPUT"],
+    [{ name: "Unapplied", image: "https://example.invalid/profile.png" }, "INVALID_PROFILE_INPUT"],
+  ]) {
+    const rejected = await update(body);
+    assert.equal(rejected.status, 400);
+    assert.equal((await rejected.json()).code, code);
+  }
+  const changedIdentity = await update({ name: "Unapplied" }, {
+    headers: { "x-geo-profile-user": otherUserId },
+  });
+  assert.equal(changedIdentity.status, 409);
+  assert.equal((await changedIdentity.json()).code, "PROFILE_SESSION_CHANGED");
+  assert.equal((await update({ name: "Unapplied" }, { origin: "https://untrusted.example.invalid" })).status, 403);
+  const profiles = () => sql`select id, name, email, image from "user" where id in (${createdUserId}, ${otherUserId})`;
+  const before = await profiles();
+  assert.equal(before.find((user) => user.id === createdUserId)?.name, "Phase 0 验证");
+  assert.equal(before.find((user) => user.id === otherUserId)?.name, "Isolated account");
+
+  const name = `界é${"🚀".repeat(78)}`;
+  const ownHeaders = { headers: { "x-geo-profile-user": createdUserId } };
+  assert.equal((await update({ name: ` ${name}\n` }, ownHeaders)).status, 200);
+  const updatedSession = await (await request("/api/auth/get-session", { cookie: loginCookie })).json();
+  assert.equal(updatedSession.user.name, name, "双库按 Unicode 字符计算边界并保留原文");
+  assert.equal(updatedSession.user.email, email);
+
+  const finalName = "Updated own account";
+  const concurrent = await Promise.all([
+    update({ name: finalName }, ownHeaders),
+    update({ name: finalName }, ownHeaders),
+  ]);
+  assert.ok(concurrent.every((response) => response.status === 200), "并发重复写入应得到一致称呼");
+  const after = await profiles();
+  for (const previous of before) {
+    const updated = after.find((user) => user.id === previous.id);
+    assert.ok(updated);
+    assert.deepEqual({ ...updated }, {
+      ...previous,
+      name: previous.id === createdUserId ? finalName : previous.name,
+    });
+  }
+  console.log(`PASS: ${connection.kind} 本人称呼写入、Unicode 边界、额外字段与旧身份拒绝、邮箱和另一账号隔离、并发重复写入`);
 
   await sql`update session set expires_at = ${new Date(Date.now() - 60_000)} where user_id = ${createdUserId}`;
   await expectRejectedSession(loginCookie);
   const expiredUser = await sql`select name from "user" where id = ${createdUserId}`;
-  assert.equal(expiredUser[0].name, "Updated own account", "失效会话写入没有改变数据");
+  assert.equal(expiredUser[0].name, finalName, "失效会话写入没有改变数据");
   const reauthenticated = await request("/api/auth/sign-in/email", {
     method: "POST", body: { email, password },
   });

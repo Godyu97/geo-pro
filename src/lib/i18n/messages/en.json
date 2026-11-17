@@ -28,7 +28,8 @@
     "notFoundMetadata": "Page not found",
     "genericError": "This content is temporarily unavailable. Please try again.",
     "sessionCheckFailed": "Could not check your session. Check your connection and retry before continuing.",
-    "maintenance": "Maintenance access"
+    "maintenance": "Maintenance access",
+    "accountSettings": "Account settings"
   },
   "marketing": {
     "nav": "Main navigation",
@@ -180,5 +181,22 @@
     "refresh": "Refresh access status",
     "back": "Back to workspace",
     "loading": "Checking maintenance access…"
+  },
+  "settings": {
+    "profile": "Personal profile",
+    "email": "Sign-in email (read-only)",
+    "displayName": "Display name",
+    "nameHint": "Use 1 to 80 characters.",
+    "nameRequired": "Enter a display name.",
+    "nameMax": "Use no more than 80 characters.",
+    "save": "Save name",
+    "saving": "Saving…",
+    "saved": "Display name saved.",
+    "saveFailed": "We couldn’t confirm the save. Try again or reload to check your name.",
+    "sessionChanged": "The signed-in account has changed. Reload to edit the current account.",
+    "security": "Sign-in security",
+    "dataManagement": "Data management",
+    "dataStatus": "Self-service data export and deletion are currently unavailable.",
+    "loading": "Loading account settings…"
   }
 }

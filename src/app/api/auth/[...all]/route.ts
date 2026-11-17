@@ -34,6 +34,7 @@ async function handle(request: NextRequest) {
       : handlers.POST(request));
   } catch {
     // Do not send driver errors, connection strings or stack traces to clients.
+    console.error("auth-api-unavailable");
     return unavailable(request);
   }
 }

@@ -6,7 +6,7 @@
 
 - **包名与版本**：`geo-pro` v`0.1.0`（`"private": true`，`"type": "module"`，见 [package.json](../../package.json)）
 - **定位**：GeoPro（AI GEO），面向中国大陆品牌经营者的品牌可见度监测与优化平台。
-- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)；T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)、[B03 可信官网](../../docs/tasks/B03-marketing-entry.md)子项，以及 [B08 维护授权基础](../../docs/tasks/B08-maintenance-access.md)；产品 M0–M2 尚无完整里程碑交付。
+- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)，T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)、[B03 可信官网](../../docs/tasks/B03-marketing-entry.md)子项，[B08 维护授权基础](../../docs/tasks/B08-maintenance-access.md)及 [B15 账户设置](../../docs/tasks/B15-account-settings.md)。产品 M0–M2 尚无完整里程碑交付。
 
 ## 2. 技术栈与实际版本
 
@@ -35,11 +35,12 @@
   - `api/auth/[...all]/route.ts`：Better Auth Next.js Handler（缺失配置时返回 503）
   - `api/health/route.ts`：固定存活状态 JSON（`{ status: "ok", service: "geo-pro" }`）
   - `(dashboard)/dashboard/maintenance/`、`api/maintenance/access/route.ts`：本人维护权限页面/接口，独立会话和服务端授权校验
+  - `(dashboard)/dashboard/settings/`：本人账户设置，显示只读邮箱、编辑称呼、切换界面语言及管理当前会话
 - `src/components/`：
   - `ui/`：已安装的 shadcn/ui 基础组件（button、card、input、badge、table、tabs、dialog、sidebar、skeleton、separator、dropdown-menu、form、label、sheet、tooltip）
   - `layout/`：`app-sidebar.tsx`、`auth-form.tsx`、`brand-mark.tsx`、`module-links.ts`、`sign-out-button.tsx`、`session-monitor.tsx`；会话失效/身份切换时整页恢复，服务暂不可用提供重试。
   - `charts/README.md`：仅边界说明，无图表实现
-- `src/features/`：`marketing/` 承载官网；`maintenance/` 承载授权合同、DAO、事务用例、服务、页面/API。另有 6 个仅含说明的业务占位域，尚未启动。
+- `src/features/` 包含官网 `marketing/`、维护授权 `maintenance/` 和账户设置 `account/`。另有 6 个仅含说明的业务占位域。
 - `src/lib/`：`i18n/`、`auth/`、`db/`；DB 下包含双方言认证/维护 Schema、显式配置、连接和 SQLite 迁移。`ai/`、`cache/` 仍仅有说明。
 - `src/hooks/use-mobile.ts`、`src/types/README.md`
 - `drizzle/`：PostgreSQL 认证基线及 `0001_colorful_dark_beast.sql` 维护迁移；`drizzle/sqlite/` 为独立 SQLite 迁移；每库 6 张表。
@@ -48,7 +49,7 @@
 - `scripts/maintenance-access.mjs`：仅受控服务器可执行的授权/撤销命令；无在线提权，详见 [维护说明](../../docs/architecture/maintenance-access.md)。
 - `docs/`：产品文档包（v3.0）、工程初始化任务书与 Phase 0 架构/任务记录。
 - `.agents/`：包含本轮接入的 `governance/`、`workflows/`、`references/`，以及仓库原有的 `skills/openspec-*`（保留不自动启用）。
-- `openspec/`：`account-session`、`public-product-entry`、`maintenance-access` 能力规格及对应归档；仅按当前任务授权加载相关规格。
+- `openspec/` 包含 `account-session`、`public-product-entry`、`maintenance-access`、`account-settings` 的能力规格及对应归档。按当前任务授权加载相关规格。
 
 ## 4. 可用命令与检查现状
 
@@ -64,13 +65,13 @@
 | `pnpm db:migrate` | `scripts/database.mjs migrate` | 只迁移所选后端；PG Drizzle Kit，SQLite Drizzle journal + 原生事务 |
 | `pnpm db:ddl` | `node scripts/export-ddl.mjs` | 离线导出双方言全量 DDL |
 | `pnpm db:ddl:check` | `node scripts/export-ddl.mjs --check` | 只读比较 Schema 导出与快照；过期或缺失返回失败 |
-| `pnpm verify:auth` | `node --conditions=react-server scripts/verify-auth.mjs` | 本地应用 + 所选后端的认证闭环，需先迁移 |
+| `pnpm verify:auth` | `node --conditions=react-server scripts/verify-auth.mjs` | 本地应用 + 所选后端的认证与本人资料更新，需先迁移 |
 | `pnpm maintenance:access` | `node --conditions=react-server scripts/maintenance-access.mjs` | 受控服务器授予/撤销单项维护权限 |
 | `pnpm test:maintenance` | Node.js 原生测试 | 双库 DAO/迁移/DDL/锁竞争/索引测试，需要本地 PG 隔离建库权限 |
 | `pnpm verify:maintenance` | Node.js HTTP/CLI 集成脚本 | 构建后，在 3103 端口、双方言隔离库验证维护和认证 |
 | `python docs/tools/validate_docs.py` | 标准库 Python 脚本 | 校验 `docs/` 产品文档链接、映射与指标样例 |
 
-- **测试现状**：消息检查、Node 基础测试、维护双库专项和 Playwright 已配置；E2E 在 `.cache/i18n-app` 的生产副本核验官网、认证、壳层及维护页面，精确清理测试账号。其他业务 DAO/Redis 专项仍未配置。
+- **测试现状**：消息检查、Node 基础测试、维护双库专项和 Playwright 已配置。E2E 在 `.cache/i18n-app` 的生产副本核验官网、认证、壳层、维护权限及账户设置，精确清理测试账号。其他业务 DAO/Redis 专项仍未配置。
 
 ## 5. 已确认工程要求与适配差距
 
@@ -78,7 +79,7 @@
 
 **当前事实**：认证和维护授权已适配 PostgreSQL/SQLite，保持独立 Schema、迁移与 DDL；原生 SQLite 外键、事务及 Auth provider 已实测。其他业务 DAO 和全部缓存实现仍待实施。Redis 暂缓规则仅描述历史 Phase 0，不表示选型未定。
 
-**多语言现状**：当前官网、账号、工作台壳层和维护权限均提供 `zh-CN` / `en`，请求解析、Cookie 偏好、Metadata、消息/参数检查与浏览器 E2E 已接入。详见 [Web 多语言规范](../../docs/architecture/i18n.md) 和对应交付记录。未来业务页面、图表、导出与真实采样 scope 的语言隔离仍需随业务任务验收。
+**多语言现状**：当前官网、账号入口、工作台壳层、维护权限和账户设置均提供 `zh-CN` / `en`，请求解析、Cookie 偏好、Metadata、消息/参数检查与浏览器 E2E 已接入。详见 [Web 多语言规范](../../docs/architecture/i18n.md) 和对应交付记录。未来业务页面、图表、导出与真实采样 scope 的语言隔离仍需随业务任务验收。
 
 ## 6. 尚未确定的重要技术决策
 

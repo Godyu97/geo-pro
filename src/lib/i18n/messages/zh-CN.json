@@ -28,7 +28,8 @@
     "notFoundMetadata": "页面未找到",
     "genericError": "暂时无法显示此内容，请稍后重试。",
     "sessionCheckFailed": "暂时无法检查登录状态，请检查网络并重试后继续。",
-    "maintenance": "平台维护权限"
+    "maintenance": "平台维护权限",
+    "accountSettings": "账户设置"
   },
   "marketing": {
     "nav": "主导航",
@@ -180,5 +181,22 @@
     "refresh": "刷新权限状态",
     "back": "返回工作台",
     "loading": "正在核验维护权限…"
+  },
+  "settings": {
+    "profile": "个人资料",
+    "email": "登录邮箱（只读）",
+    "displayName": "称呼",
+    "nameHint": "请输入 1 至 80 个字符。",
+    "nameRequired": "请输入称呼。",
+    "nameMax": "称呼最多 80 个字符。",
+    "save": "保存称呼",
+    "saving": "正在保存…",
+    "saved": "称呼已保存。",
+    "saveFailed": "暂时无法确认是否已保存。可以重试，或重新加载后查看称呼。",
+    "sessionChanged": "当前登录账号已切换。请重新加载，再编辑当前账号。",
+    "security": "登录安全",
+    "dataManagement": "数据管理",
+    "dataStatus": "自助数据导出和删除暂未开放。",
+    "loading": "正在加载账户设置…"
   }
 }
