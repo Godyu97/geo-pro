@@ -1,7 +1,7 @@
 import { test as base, expect, type Page, type BrowserContext } from "@playwright/test";
 import { randomBytes } from "node:crypto";
 import postgres from "postgres";
-import { registerTestAccount } from "./auth-helpers";
+import { registerTestAccount, submitTestAccountForm } from "./auth-helpers";
 
 const baseURL = "http://localhost:3100";
 const name = `品牌🚀 Évidence ${"LongBrandName".repeat(4)}`;
@@ -220,9 +220,9 @@ for (const locale of ["zh-CN", "en"] as const) {
       await page.getByLabel(locale === "en" ? "Name" : "称呼", { exact: true }).fill("品牌🚀 Account É");
       await page.getByLabel(locale === "en" ? "Email" : "邮箱", { exact: true }).fill(email);
       await page.getByLabel(locale === "en" ? "Password" : "密码", { exact: true }).fill(password);
-      const submitted = page.waitForResponse(response => response.url().includes("/api/auth/sign-up/email"));
-      await page.getByRole("button", { name: locale === "en" ? "Create account and open workspace" : "创建账号并进入工作台" }).click();
-      const response = await submitted;
+      const response = await submitTestAccountForm(page,
+        page.getByRole("button", { name: locale === "en" ? "Create account and open workspace" : "创建账号并进入工作台" }),
+        "/api/auth/sign-up/email");
       expect(response.status(), "UI sign-up should succeed before replacing the document").toBe(200);
       await expect(page).toHaveURL(/\/dashboard\?filter=/);
       expect(new URL(page.url()).hash).toBe("#monitoring");
@@ -232,7 +232,10 @@ for (const locale of ["zh-CN", "en"] as const) {
       await expect(page.locator("html")).toHaveAttribute("lang", locale);
       await page.getByLabel(locale === "en" ? "Email" : "邮箱", { exact: true }).fill(email);
       await page.getByLabel(locale === "en" ? "Password" : "密码", { exact: true }).fill(password);
-      await page.getByRole("button", { name: locale === "en" ? "Sign in and open workspace" : "登录并进入工作台" }).click();
+      const signedIn = await submitTestAccountForm(page,
+        page.getByRole("button", { name: locale === "en" ? "Sign in and open workspace" : "登录并进入工作台" }),
+        "/api/auth/sign-in/email");
+      expect(signedIn.status(), "UI sign-in should succeed before replacing the document").toBe(200);
       await expect(page).toHaveURL(/\/dashboard$/);
       await expect(page.locator("html")).toHaveAttribute("lang", locale);
     } finally {

@@ -1,6 +1,6 @@
 # GeoPro Agent 统一开发约定
 
-GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、PostgreSQL / Drizzle ORM 与 Better Auth 的 AI GEO 监测与优化平台。**已完成 `docs/CODEX_INIT.md` 的 Phase 0 及 T-M0-01 的 B01 双语言、B02 认证恢复基础子项；产品 M0–M2 里程碑仍未完成，其他业务任务按授权与依赖推进。**
+GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、PostgreSQL / Drizzle ORM 与 Better Auth 的 AI GEO 监测与优化平台。**已完成 `docs/CODEX_INIT.md` 的 Phase 0 及 T-M0-01 的 B01 双语言、B02 认证恢复、B03 可信官网子项；产品 M0–M2 里程碑仍未完成，其他业务任务按授权与依赖推进。**
 
 已确认的工程目标：DAO 适配 SQLite3 与 PostgreSQL；cache 适配 memory 与 Redis（默认）；避免 N+1 与大量串行 SQL，优先批量操作；表结构精简并按查询路径审查索引；全量 DDL 随 Schema/migration 及时更新。**数据适配目标尚未实现**，详见 [数据访问与缓存工程约束](docs/architecture/data-access.md)；全量 DDL 维护与部署见 [数据库部署说明](docs/architecture/database-deployment.md)。
 
