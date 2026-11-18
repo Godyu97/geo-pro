@@ -43,6 +43,13 @@
       "when": 1794974803496,
       "tag": "0005_same_energizer",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794998229261,
+      "tag": "0006_slippery_senator_kelly",
+      "breakpoints": true
     }
   ]
 }

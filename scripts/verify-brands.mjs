@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
+import { shortenBrandRecoveryDeadline } from "../src/features/brands/commands.ts";
 import { initialBrandFields } from "../src/features/brands/contracts.ts";
+import { getExportSummary } from "../src/features/data-exports/service.ts";
 import { queryWithParameters } from "../src/lib/db/connection.ts";
 import { testDatabase } from "../tests/maintenance/helpers.mjs";
 
@@ -180,6 +182,34 @@ async function verify(kind, enabled) {
       await fixture.connection.query("ALTER TABLE brand_test_unavailable RENAME TO brand_version");
     }
     assert.ok(output.includes("brand-store-unavailable"));
+    phase = `${kind}: cleared brand and previous export are no longer available over HTTP`;
+    const previous = await getExportSummary(fixture.connection, owner.id);
+    const generated = await request("/api/data-exports", {
+      actor: owner, data: { actorId: owner.id, scopes: ["brands"], locale: "en", previousId: previous.id },
+    });
+    assert.equal(generated.status, 201);
+    const download = "/api/data-exports/" + (await generated.json()).id;
+    assert.equal((await request(download, { actor: owner })).status, 200);
+    const freeze = await request("/api/brands", { actor: owner,
+      data: mutation(owner, { action: "freeze", brandId: brand.id, expectedBrandRevision: 3, confirmed: true }) });
+    assert.equal(freeze.status, 200);
+    const frozen = await freeze.json();
+    const shortened = await shortenBrandRecoveryDeadline(fixture.connection, {
+      ownerId: owner.id, operatorId: other.id, brandId: brand.id, requestId: randomUUID(),
+      expectedBrandRevision: frozen.revision, restoreUntil: new Date().toISOString(),
+    });
+    assert.ok(shortened.mutation);
+    const purge = JSON.parse(execFileSync("pnpm", ["--silent", "brands:purge", "retry", owner.id, brand.id],
+      { env, encoding: "utf8", stdio: "pipe" }));
+    assert.equal(purge.status, "cleared");
+    await assertError(await request(resource, { actor: owner }), 404, "NOT_FOUND");
+    await assertError(await request("/api/brands", { actor: owner,
+      data: mutation(owner, { action: "recover", brandId: brand.id, expectedBrandRevision: shortened.mutation.revision }) }), 404, "NOT_FOUND");
+    assert.equal((await request(download, { actor: owner })).status, 404);
+    assert.equal((await request(download, { actor: other })).status, 404);
+    console.log(`PASS: ${phase}`);
+
+    phase = `${kind}: revoked sessions`;
     const expires = kind === "sqlite" ? Date.now() - 60_000 : new Date(Date.now() - 60_000).toISOString();
     await queryWithParameters(fixture.connection, "UPDATE session SET expires_at = ? WHERE user_id = ?", [expires, owner.id]);
     await assertError(await request(resource, { actor: owner }), 401, "SESSION_REQUIRED");

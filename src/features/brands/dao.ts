@@ -227,9 +227,9 @@ export class BrandDao {
     return { fingerprint, mutation: brandMutationSchema.parse(JSON.parse(result)) };
   }
 
-  async recordOperation(ownerId: string, id: string, fingerprint: string, result: BrandMutation, time: string) {
-    await this.query(`INSERT INTO brand_operation (owner_id, operation_id, fingerprint, result, created_at)
-      VALUES (?, ?, ?, ?, ?)`, [ownerId, id, fingerprint, JSON.stringify(result), time]);
+  async recordOperation(ownerId: string, id: string, fingerprint: string, result: BrandMutation, time: string, scope: string) {
+    await this.query(`INSERT INTO brand_operation (owner_id, operation_id, fingerprint, result, created_at, scope)
+      VALUES (?, ?, ?, ?, ?, ?)`, [ownerId, id, fingerprint, JSON.stringify(result), time, scope]);
   }
 }
 

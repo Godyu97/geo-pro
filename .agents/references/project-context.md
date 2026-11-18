@@ -6,7 +6,7 @@
 
 - **包名与版本**：`geo-pro` v`0.1.0`（`"private": true`，`"type": "module"`，见 [package.json](../../package.json)）
 - **定位**：GeoPro（AI GEO），面向中国大陆品牌经营者的品牌可见度监测与优化平台。
-- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)，T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)、[B03 可信官网](../../docs/tasks/B03-marketing-entry.md)、[B04 品牌建档](../../docs/tasks/B04-brand-onboarding.md)、[B05 本人数据导出](../../docs/tasks/B05-owned-data-export.md)及 [B06 品牌删除与恢复](../../docs/tasks/B06-brand-deletion.md)子项，以及 [B08 维护授权基础](../../docs/tasks/B08-maintenance-access.md)、[B10 试点额度](../../docs/tasks/B10-pilot-quotas.md)和 [B15 账户设置](../../docs/tasks/B15-account-settings.md)。产品 M0–M2 尚无完整里程碑交付。
+- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)，T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)、[B03 可信官网](../../docs/tasks/B03-marketing-entry.md)、[B04 品牌建档](../../docs/tasks/B04-brand-onboarding.md)、[B05 本人数据导出](../../docs/tasks/B05-owned-data-export.md)、[B06 品牌删除与恢复](../../docs/tasks/B06-brand-deletion.md)及 [B07 品牌清除](../../docs/tasks/B07-brand-purge.md)子项，以及 [B08 维护授权基础](../../docs/tasks/B08-maintenance-access.md)、[B10 试点额度](../../docs/tasks/B10-pilot-quotas.md)和 [B15 账户设置](../../docs/tasks/B15-account-settings.md)。产品 M0–M2 尚无完整里程碑交付。
 
 ## 2. 技术栈与实际版本
 
@@ -46,7 +46,7 @@
 - `src/features/` 包含官网 `marketing/`、维护授权 `maintenance/`、账户设置 `account/`、品牌建档 `brands/`、本人导出 `data-exports/`、试点额度 `quotas/` 和 5 个业务占位域。
 - `src/lib/`：`i18n/`、`auth/`、`db/`、`http/`。DB 包含双方言认证、维护、品牌、导出与额度 Schema、显式配置、连接和 SQLite 迁移。`ai/`、`cache/` 仍仅有说明。
 - `src/hooks/use-mobile.ts`、`src/types/README.md`
-- `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证、维护权限、品牌建档、本人导出和试点额度，每库 14 张应用表。
+- `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证、维护权限、品牌建档、本人导出、品牌清除和试点额度，每库 16 张应用表。
 - `drizzle/ddl/postgresql.sql`、`sqlite.sql`：双方言全量 DDL；`scripts/export-ddl.mjs` 离线生成/只读检查，不含迁移历史或数据。
 - `scripts/verify-auth.mjs`：本地 HTTP + 所选后端的认证验证，临时账号清理；`verify-maintenance.mjs` 在双方言隔离库启动实际 Next 服务并运行维护/认证验证。
 - `scripts/maintenance-access.mjs`：仅受控服务器可执行的授权/撤销命令；无在线提权，详见 [维护说明](../../docs/architecture/maintenance-access.md)。
@@ -74,6 +74,7 @@
 | `pnpm verify:maintenance` | Node.js HTTP/CLI 集成脚本 | 构建后，在 3103 端口、双方言隔离库验证维护和认证 |
 | `pnpm test:brands` | Node.js 原生测试 | 品牌双库并发、版本、迁移、回滚、冻结及索引验证 |
 | `pnpm verify:brands` | Node.js HTTP 集成脚本 | 构建后，在 3105 端口及隔离库验证品牌接口、收集条件、删除与限期恢复 |
+| `pnpm brands:purge` | 受控服务端 CLI | 批量清除到期品牌、核对凭证及离线重放清除记录 |
 | `pnpm brands:shorten-recovery` | 受控服务端 CLI | 依据已核验的提前请求缩短冻结品牌的恢复期限 |
 | `pnpm test:data-exports` | Node.js 原生测试 | 导出双库升级、并发、回滚和查询验证 |
 | `pnpm verify:data-exports` | Node.js HTTP 集成脚本 | 构建后，在 3106 端口及隔离库验证导出授权和反馈 |

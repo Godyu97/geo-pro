@@ -5,6 +5,7 @@ import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { MaintenanceDao } from "../maintenance/dao.ts";
 import { brandDeadlineSchema, type BrandCommand, type BrandErrorCode, type BrandMutation } from "./contracts.ts";
 import { BrandDao, type BrandRecord } from "./dao.ts";
+import { PurgeDao } from "./purge-dao.ts";
 
 type CommandResult = { mutation: BrandMutation } | { error: BrandErrorCode };
 type DeletionState = NonNullable<Awaited<ReturnType<BrandDao["deletionState"]>>>;
@@ -116,6 +117,9 @@ export async function executeBrandCommand(
     if (!await dao.lockOwner(ownerId)) return { error: "SESSION_REQUIRED" };
     const deletion = command.action === "freeze" || command.action === "recover";
     const state = deletion ? await dao.deletionState(ownerId, command.brandId) : null;
+    if (command.action === "recover" && state && await new PurgeDao(transaction).receipt({ ownerId, brandId: command.brandId })) {
+      return { error: "RECOVERY_EXPIRED" };
+    }
     const current = !deletion && brandId ? await dao.owned(ownerId, brandId) : null;
     if (brandId && !state && !current) return { error: "NOT_FOUND" };
     const previous = await dao.operation(ownerId, command.operationId);
@@ -128,7 +132,10 @@ export async function executeBrandCommand(
     const result = command.action === "freeze" || command.action === "recover"
       ? state ? await applyDeletion(dao, ownerId, state, command, now, session) : { error: "NOT_FOUND" } as const
       : await applyCommand(dao, ownerId, brandId, current, command, now.toISOString());
-    if ("mutation" in result) await dao.recordOperation(ownerId, command.operationId, fingerprint, result.mutation, now.toISOString());
+    if ("mutation" in result) {
+      const scope = result.mutation.kind === "draft" ? brandId ?? "new" : result.mutation.id;
+      await dao.recordOperation(ownerId, command.operationId, fingerprint, result.mutation, now.toISOString(), scope);
+    }
     return result;
   });
 }
@@ -146,6 +153,7 @@ export async function shortenBrandRecoveryDeadline(connection: DatabaseConnectio
     if (!accounts.includes(ownerId) || !accounts.includes(operatorId)) return { error: "NOT_FOUND" };
     const current = await dao.deletionState(ownerId, brandId);
     if (!current) return { error: "NOT_FOUND" };
+    if (await new PurgeDao(transaction).receipt({ ownerId, brandId })) return { error: "RECOVERY_EXPIRED" };
     const previous = await dao.operation(ownerId, requestId);
     if (previous) return previous.fingerprint === fingerprint ? { mutation: previous.mutation } : { error: "OPERATION_CONFLICT" };
     if (!current.frozenAt || !current.restoreUntil) return { error: "NOT_FOUND" };
@@ -155,7 +163,7 @@ export async function shortenBrandRecoveryDeadline(connection: DatabaseConnectio
     if (!revision) return { error: "VERSION_CONFLICT" };
     await dao.rebaseDraft(ownerId, brandId, current.revision, revision);
     const mutation = { kind: "deletion", id: brandId, revision, restoreUntil, operatorId } as const;
-    await dao.recordOperation(ownerId, requestId, fingerprint, mutation, clock().toISOString());
+    await dao.recordOperation(ownerId, requestId, fingerprint, mutation, clock().toISOString(), brandId);
     return { mutation };
   });
 }
