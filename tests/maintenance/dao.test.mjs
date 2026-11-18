@@ -216,7 +216,8 @@ test("sqlite: the documented migration command creates and upgrades only the exp
     }
     assert.equal((await fixture.connection.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'maintenance_grant'")).length, 1);
     const history = await fixture.connection.query("SELECT id, hash, created_at FROM __drizzle_migrations");
-    assert.equal(history.length, 1);
+    const journal = JSON.parse(await readFile("drizzle/sqlite/meta/_journal.json", "utf8"));
+    assert.equal(history.length, journal.entries.length);
     await fixture.connection.query("UPDATE __drizzle_migrations SET hash = 'synthetic-invalid-checksum'");
     await assert.rejects(() => migrateSqlite(fixture.connection), /history differs/);
   } finally { await fixture.cleanup(); }

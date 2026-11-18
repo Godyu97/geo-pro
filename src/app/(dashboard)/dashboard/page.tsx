@@ -1,4 +1,6 @@
 import { ArrowDown, FolderOpen, Leaf, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { headers } from "next/headers";
 
 import { getModuleLinks } from "@/components/layout/module-links";
 import { Badge } from "@/components/ui/badge";
@@ -6,12 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
+import { brandFixtureOrigin } from "@/features/brands/intake";
 
 export default async function DashboardPage() {
   // Each protected page checks the session, including RSC navigation requests.
   const { user } = await requireSession();
   const locale = await getLocale();
   const t = await getTranslator("dashboard");
+  const brands = await getTranslator("brands");
+  const brandFixture = Boolean(brandFixtureOrigin(await headers()));
   const moduleLinks = getModuleLinks(getMessages(locale).modules);
 
   return (
@@ -27,12 +32,15 @@ export default async function DashboardPage() {
         <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
           {t("welcome")}
         </p>
-        <Button asChild variant="outline" className="mt-6 bg-white/70">
-          <a href="#modules">
-            {t("moduleStatus")}
-            <ArrowDown aria-hidden="true" />
-          </a>
-        </Button>
+        <div className="mt-6 flex flex-wrap gap-2">
+          <Button asChild><Link href="/dashboard/brands">{brands("title")}</Link></Button>
+          <Button asChild variant="outline" className="bg-white/70">
+            <a href="#modules">
+              {t("moduleStatus")}
+              <ArrowDown aria-hidden="true" />
+            </a>
+          </Button>
+        </div>
       </section>
       <section
         aria-labelledby="evidence-title"
@@ -48,7 +56,7 @@ export default async function DashboardPage() {
           {t("waitingEvidence")}
         </h2>
         <p className="mx-auto mt-2 max-w-lg text-sm leading-7 text-muted-foreground">
-          {t("emptyDescription")}
+          {brandFixture ? brands("monitorUnavailable") : t("emptyDescription")}
         </p>
       </section>
       <section id="modules" aria-labelledby="modules-title">
@@ -62,30 +70,28 @@ export default async function DashboardPage() {
           </span>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {moduleLinks.map(({ id, title, icon: Icon, description, empty }) => (
-            <Card key={id} id={id} className="scroll-mt-6 shadow-none">
-              <CardContent className="p-6">
-                <div className="mb-5 flex items-center justify-between">
-                  <span className="flex size-10 items-center justify-center rounded-xl bg-secondary text-primary">
-                    <Icon className="size-5" aria-hidden="true" />
-                  </span>
-                  <Badge
-                    variant="outline"
-                    className="font-normal text-muted-foreground"
-                  >
-                    {t("unavailable")}
-                  </Badge>
-                </div>
-                <h3 className="font-medium">{title}</h3>
-                <p className="mt-2 min-h-14 text-sm leading-7 text-muted-foreground">
-                  {description}
-                </p>
-                <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">
-                  {empty}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
+          {moduleLinks.map(({ id, title, icon: Icon, description, empty }) => {
+            const brandEntry = id === "brands" && brandFixture;
+            return (
+              <Card key={id} id={id} className="scroll-mt-6 shadow-none">
+                <CardContent className="p-6">
+                  <div className="mb-5 flex items-center justify-between">
+                    <span className="flex size-10 items-center justify-center rounded-xl bg-secondary text-primary">
+                      <Icon className="size-5" aria-hidden="true" />
+                    </span>
+                    <Badge variant="outline" className="font-normal text-muted-foreground">
+                      {brandEntry ? brands("fixtureStatus") : t("unavailable")}
+                    </Badge>
+                  </div>
+                  <h3 className="font-medium">{title}</h3>
+                  <p className="mt-2 min-h-14 text-sm leading-7 text-muted-foreground">
+                    {brandEntry ? brands("pageDescription") : description}
+                  </p>
+                  {!brandEntry && <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">{empty}</p>}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       </section>
     </div>

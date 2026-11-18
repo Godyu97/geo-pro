@@ -15,6 +15,13 @@
       "when": 1794938963212,
       "tag": "0001_colorful_dark_beast",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794966094993,
+      "tag": "0002_lame_jubilee",
+      "breakpoints": true
     }
   ]
 }

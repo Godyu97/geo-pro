@@ -1,7 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
-import type { QueryConnection, QueryValue } from "../../lib/db/connection.ts";
+import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
 import { auditSchema, opaqueIdSchema, permissionSchema, type GrantCommand, type MaintenanceAudit } from "./contracts.ts";
 
 export class MaintenanceDao {
@@ -12,11 +12,7 @@ export class MaintenanceDao {
   }
 
   query(sql: string, values: QueryValue[] = []) {
-    let parameter = 0;
-    return this.transaction.query(
-      this.transaction.kind === "postgresql" ? sql.replace(/\?/g, () => `$${++parameter}`) : sql,
-      values,
-    );
+    return queryWithParameters(this.transaction, sql, values);
   }
 
   async lockAccounts(ids: string[]) {

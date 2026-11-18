@@ -7,7 +7,7 @@
 当前采用单一 Next.js 全栈应用（模块化单体），保留现有目录分工，不得为套用外部模板而迁移源码：
 
 - `src/app/`：仅负责路由、布局、页面组合与 Route Handlers。保持页面与 Handler 薄层，不承载复杂领域逻辑。
-- `src/features/<domain>/`：按业务领域存放组件、服务、校验与用例。当前保留 6 个边界占位域（`brands`、`monitoring`、`prompts`、`citations`、`competitors`、`optimization`），业务未启动前不提前定义虚构子目录。
+- `src/features/<domain>/`：按业务领域存放组件、服务、校验与用例。`brands` 已承接 B04。其余业务占位域为 `monitoring`、`prompts`、`citations`、`competitors`、`optimization`。
 - `src/components/ui/`：仅放基础设计系统组件（shadcn/ui）；`src/components/layout/` 放页面壳层与导航交互组件。
 - `src/lib/`：基础设施封装（`db/`、`auth/`、`ai/`、`cache/`、`utils.ts`）。含数据库连接、密钥或服务端配置逻辑的模块必须标记 `"server-only"`。
 - `drizzle/`：纳入版本控制的 SQL migration、快照与迁移日志。

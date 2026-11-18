@@ -5,6 +5,6 @@ loadEnvConfig(process.cwd());
 
 export default defineConfig({
   dialect: "sqlite",
-  schema: ["./src/lib/db/auth-schema.sqlite.ts", "./src/lib/db/maintenance-schema.sqlite.ts"],
+  schema: ["./src/lib/db/auth-schema.sqlite.ts", "./src/lib/db/maintenance-schema.sqlite.ts", "./src/lib/db/brand-schema.sqlite.ts"],
   out: "./drizzle/sqlite",
 });

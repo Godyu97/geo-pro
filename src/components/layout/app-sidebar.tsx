@@ -24,7 +24,7 @@ import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
 import { useLocale } from "@/lib/i18n/client";
 
-export function AppSidebar({ messages, modules }: { messages: Messages["dashboard"]; modules: Messages["modules"] }) {
+export function AppSidebar({ messages, modules, brandFixture }: { messages: Messages["dashboard"]; modules: Messages["modules"]; brandFixture: boolean }) {
   const { locale, t: common } = useLocale();
   const t = createTranslator(locale, messages);
   const moduleLinks = getModuleLinks(modules);
@@ -81,22 +81,23 @@ export function AppSidebar({ messages, modules }: { messages: Messages["dashboar
             <SidebarGroupLabel>{t("modules")}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {moduleLinks.map(({ id, title, icon: Icon }) => (
-                  <SidebarMenuItem key={id}>
-                    <SidebarMenuButton asChild className="h-auto min-h-10 py-2">
-                      <a
-                        href={pathname === "/dashboard" ? `#${id}` : `/dashboard#${id}`}
-                        onClick={() => setOpenMobile(false)}
-                      >
-                        <Icon aria-hidden="true" />
-                        <span className="min-w-0 flex-1 whitespace-normal break-words">{title}</span>
-                        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-                          {t("notOpen")}
-                        </span>
-                      </a>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {moduleLinks.map(({ id, title, icon: Icon }) => {
+                  const brandEntry = id === "brands" && brandFixture;
+                  return (
+                    <SidebarMenuItem key={id}>
+                      <SidebarMenuButton asChild isActive={brandEntry && pathname.startsWith("/dashboard/brands")} className="h-auto min-h-10 py-2">
+                        <a
+                          href={brandEntry ? "/dashboard/brands" : pathname === "/dashboard" ? `#${id}` : `/dashboard#${id}`}
+                          onClick={() => setOpenMobile(false)}
+                        >
+                          <Icon aria-hidden="true" />
+                          <span className="min-w-0 flex-1 whitespace-normal break-words">{title}</span>
+                          {!brandEntry && <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{t("notOpen")}</span>}
+                        </a>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -107,7 +108,7 @@ export function AppSidebar({ messages, modules }: { messages: Messages["dashboar
           <CircleHelp className="mb-2 size-4 text-primary" aria-hidden="true" />
           <p className="text-xs font-medium">{t("startingPoint")}</p>
           <p className="mt-1.5 text-xs leading-6 text-muted-foreground">
-            {t("sidebarEmpty")}
+            {t(brandFixture ? "sidebarFixture" : "sidebarEmpty")}
           </p>
         </div>
         <Link

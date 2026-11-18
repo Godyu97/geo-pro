@@ -20,6 +20,6 @@ export default defineConfig({
     url: `${baseURL}/api/health`,
     timeout: 120_000,
     reuseExistingServer: false,
-    env: { BETTER_AUTH_URL: baseURL },
+    env: { BETTER_AUTH_URL: baseURL, GEO_BRANDS_FIXTURE: "1" },
   },
 });

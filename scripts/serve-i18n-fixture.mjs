@@ -73,6 +73,12 @@ await writeFile(settingsPage, (await readFile(settingsPage, "utf8")).replace(
   '  const { user } = await requireSession();\n  if ((await (await import("next/headers")).headers()).get("cookie")?.includes("geo-settings-slow=1")) await new Promise(resolve => setTimeout(resolve, 1500));',
 ));
 
+const brandService = path.join(fixture, "src/features/brands/service.ts");
+await writeFile(brandService, (await readFile(brandService, "utf8")).replace(
+  '    return { data: await read(new BrandDao(getConnection())) };',
+  '    if ((await (await import("next/headers")).headers()).get("cookie")?.includes("geo-brands-slow=1")) await new Promise(resolve => setTimeout(resolve, 1500));\n    return { data: await read(new BrandDao(getConnection())) };',
+));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

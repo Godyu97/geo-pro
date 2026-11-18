@@ -72,10 +72,59 @@ CREATE TABLE "maintenance_grant" (
 	CONSTRAINT "maintenance_grant_permission_check" CHECK ("maintenance_grant"."permission" in ('capabilities.manage', 'quotas.manage', 'support.read'))
 );
 
+CREATE TABLE "brand" (
+	"id" text PRIMARY KEY NOT NULL,
+	"owner_id" text NOT NULL,
+	"status" text NOT NULL,
+	"revision" integer NOT NULL,
+	"entity_version" integer NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "brand_status_check" CHECK ("brand"."status" in ('active', 'archived')),
+	CONSTRAINT "brand_revision_check" CHECK ("brand"."entity_version" > 0 and "brand"."revision" >= "brand"."entity_version")
+);
+
+CREATE TABLE "brand_draft" (
+	"owner_id" text NOT NULL,
+	"scope" text NOT NULL,
+	"version" text NOT NULL,
+	"base_revision" integer,
+	"step" integer NOT NULL,
+	"content" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "brand_draft_owner_id_scope_pk" PRIMARY KEY("owner_id","scope"),
+	CONSTRAINT "brand_draft_step_check" CHECK ("brand_draft"."step" between 0 and 2),
+	CONSTRAINT "brand_draft_scope_check" CHECK (("brand_draft"."scope" = 'new' and "brand_draft"."base_revision" is null) or ("brand_draft"."scope" <> 'new' and "brand_draft"."base_revision" is not null and "brand_draft"."base_revision" > 0))
+);
+
+CREATE TABLE "brand_operation" (
+	"owner_id" text NOT NULL,
+	"operation_id" text NOT NULL,
+	"fingerprint" text NOT NULL,
+	"result" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "brand_operation_owner_id_operation_id_pk" PRIMARY KEY("owner_id","operation_id")
+);
+
+CREATE TABLE "brand_version" (
+	"brand_id" text NOT NULL,
+	"version" integer NOT NULL,
+	"name" text NOT NULL,
+	"content" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "brand_version_brand_id_version_pk" PRIMARY KEY("brand_id","version"),
+	CONSTRAINT "brand_version_number_check" CHECK ("brand_version"."version" > 0)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand" ADD CONSTRAINT "brand_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand_draft" ADD CONSTRAINT "brand_draft_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand_operation" ADD CONSTRAINT "brand_operation_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand_version" ADD CONSTRAINT "brand_version_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
 CREATE INDEX "maintenance_audit_actor_time_idx" ON "maintenance_audit" USING btree ("actor_id","occurred_at","id");
+CREATE UNIQUE INDEX "brand_active_owner_uidx" ON "brand" USING btree ("owner_id") WHERE "brand"."status" = 'active';
+CREATE INDEX "brand_owner_status_created_idx" ON "brand" USING btree ("owner_id","status","created_at","id");

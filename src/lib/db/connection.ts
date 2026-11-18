@@ -15,6 +15,11 @@ export interface DatabaseConnection extends QueryConnection {
   close(): Promise<void>;
 }
 
+export function queryWithParameters(connection: QueryConnection, sql: string, values: QueryValue[] = []) {
+  let parameter = 0;
+  return connection.query(connection.kind === "postgresql" ? sql.replace(/\?/g, () => `$${++parameter}`) : sql, values);
+}
+
 export function openPostgres(url: string) {
   const client = postgres(url, { max: 10, connect_timeout: 5, idle_timeout: 20, connection: { statement_timeout: 5000, lock_timeout: 3000 } });
   const connection: DatabaseConnection = {

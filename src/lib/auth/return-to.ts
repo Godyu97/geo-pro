@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const safeDashboardPaths = ["/dashboard", "/dashboard/maintenance", "/dashboard/settings", "/dashboard/brands", "/dashboard/brands/new"];
+const brandPath = /^\/dashboard\/brands\/[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i;
+
 // Only existing protected app routes are eligible, never external origins.
 export function safeReturnTo(value: unknown): string {
   const result = z.string().max(2048).safeParse(value);
@@ -7,7 +10,7 @@ export function safeReturnTo(value: unknown): string {
     return "/dashboard";
   }
   const target = new URL(result.data, "https://local.invalid");
-  return target.origin === "https://local.invalid" && ["/dashboard", "/dashboard/maintenance", "/dashboard/settings"].includes(target.pathname)
+  return target.origin === "https://local.invalid" && (safeDashboardPaths.includes(target.pathname) || brandPath.test(target.pathname))
     ? `${target.pathname}${target.search}${target.hash}`
     : "/dashboard";
 }

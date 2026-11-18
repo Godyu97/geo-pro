@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
@@ -13,6 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
+import { brandFixtureOrigin } from "@/features/brands/intake";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator("common");
@@ -29,11 +31,12 @@ export default async function DashboardLayout({
   const locale = await getLocale();
   const messages = getMessages(locale);
   const t = await getTranslator("common");
+  const brandFixture = Boolean(brandFixtureOrigin(await headers()));
 
   return (
     <TooltipProvider>
       <SidebarProvider>
-        <AppSidebar messages={messages.dashboard} modules={messages.modules} />
+        <AppSidebar messages={messages.dashboard} modules={messages.modules} brandFixture={brandFixture} />
         <SidebarInset className="min-w-0 bg-background">
           <SessionMonitor userId={user.id} />
           <header className="flex min-h-18 flex-wrap items-center justify-between gap-3 border-b bg-card px-4 py-3 sm:px-8">

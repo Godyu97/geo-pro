@@ -1,10 +1,10 @@
 # 全量 DDL 维护与数据库部署
 
-> 2026-11-18｜支持 PostgreSQL / SQLite3；当前范围为认证和 B08 维护授权。
+> 2026-11-18｜支持 PostgreSQL / SQLite3，覆盖认证、维护授权和 B04 品牌建档。
 
 ## 权威来源与产物
 
-Drizzle Schema 是目标结构来源，按顺序审核过的 migration 是应用部署和升级记录。两种后端各有四张 Better Auth 生成表、`maintenance_grant` 与 `maintenance_audit` 两张维护表。
+Drizzle Schema 是目标结构来源，按顺序审核过的 migration 是应用部署和升级记录。两种后端各有四张 Better Auth 生成表、两张维护表与四张 [B04 品牌表](../tasks/B04-brand-onboarding.md)。
 
 | 后端 | Schema 配置 | 迁移 | 全量 DDL |
 | --- | --- | --- | --- |
@@ -62,6 +62,6 @@ SQLite 的全量文件同样只用于空库结构导入，并须在启用外键�
 
 ## 验证边界
 
-`pnpm db:ddl:check` 只证明两份文件与 Schema 一致。`pnpm test:maintenance` 在临时 SQLite 文件及随机本地 PostgreSQL 隔离库中对照全量导入和 migration 的列/约束/索引，并覆盖 PG 旧认证数据升级、SQLite 外键与迁移校验和。PostgreSQL 测试角色需要本地创建/删除隔离库权限；只清理本轮随机库。
+`pnpm db:ddl:check` 核对两份文件与 Schema 一致。`pnpm test:maintenance` 在临时 SQLite 文件及随机本地 PostgreSQL 隔离库中对照全量导入和 migration 的列、约束与索引，并覆盖旧认证数据升级、SQLite 外键与迁移校验和。`pnpm test:brands` 验证两种后端已有账号和维护授权记录的增量升级。PostgreSQL 测试角色需要创建和清理本轮本地隔离库的权限。
 
-`pnpm verify:maintenance` 需要先构建，使用独立 3103 端口和上述隔离库，对两个后端运行真实 HTTP、受控 CLI 和 `pnpm verify:auth`。浏览器入口仍为 `pnpm test:e2e`（本地 PostgreSQL、3100 端口）。这些结果仅覆盖认证与维护授权，具体证据见 [B08 记录](../tasks/B08-maintenance-access.md)，不代表未来业务实体或完整 M0 验收。
+`pnpm verify:maintenance` 构建后使用 3103 端口和隔离库验证两种后端的 HTTP、受控 CLI 和 `pnpm verify:auth`。`pnpm verify:brands` 使用 3105 端口验证品牌接口及默认停收。浏览器入口为 `pnpm test:e2e`（本地 PostgreSQL，3100 端口）。具体覆盖见 [B08 记录](../tasks/B08-maintenance-access.md) 和 [B04 记录](../tasks/B04-brand-onboarding.md)。
