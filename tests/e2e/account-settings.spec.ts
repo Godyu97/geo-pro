@@ -213,7 +213,7 @@ test("account settings are reachable from workspace navigation", async ({ page, 
   await page.getByRole("link", { name: copy.en.title, exact: true }).press("Enter");
   await expect(page).toHaveURL(`${baseURL}${settings}`);
   await expect(page.getByRole("heading", { name: copy.en.title })).toBeVisible();
-  await expect(page.getByRole("definition")).toHaveText(account.email);
+  await expect(page.getByRole("region", { name: copy.en.profile }).getByRole("definition")).toHaveText(account.email);
   await page.getByRole("button", { name: copy.en.signOut, exact: true }).press("Enter");
   await expect(page).toHaveURL(`${baseURL}/login`);
 });

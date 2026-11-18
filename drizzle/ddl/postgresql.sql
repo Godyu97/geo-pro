@@ -128,6 +128,59 @@ CREATE TABLE "user_data_export" (
 	CONSTRAINT "user_data_export_fingerprint_check" CHECK (("user_data_export"."included" = 0 and "user_data_export"."fingerprint" is null) or ("user_data_export"."included" <> 0 and "user_data_export"."fingerprint" is not null and length("user_data_export"."fingerprint") = 64))
 );
 
+CREATE TABLE "quota_attempt" (
+	"brand_id" text NOT NULL,
+	"kind" text NOT NULL,
+	"reservation_id" text NOT NULL,
+	"id" text NOT NULL,
+	"upper_minor" integer NOT NULL,
+	"actual_minor" integer,
+	"state" text NOT NULL,
+	"started_at" text NOT NULL,
+	"reconciled_at" text,
+	CONSTRAINT "quota_attempt_brand_id_kind_reservation_id_id_pk" PRIMARY KEY("brand_id","kind","reservation_id","id"),
+	CONSTRAINT "quota_attempt_cost_check" CHECK ("quota_attempt"."upper_minor" >= 0 and (
+    ("quota_attempt"."state" in ('pending', 'unknown') and "quota_attempt"."actual_minor" is null and "quota_attempt"."reconciled_at" is null) or
+    ("quota_attempt"."state" = 'known' and "quota_attempt"."actual_minor" is not null and "quota_attempt"."actual_minor" >= 0 and "quota_attempt"."reconciled_at" is not null)
+  ))
+);
+
+CREATE TABLE "quota_grant" (
+	"brand_id" text NOT NULL,
+	"kind" text NOT NULL,
+	"version" integer NOT NULL,
+	"operation_id" text NOT NULL,
+	"fingerprint" text NOT NULL,
+	"actor_id" text NOT NULL,
+	"reason" text NOT NULL,
+	"count_limit" integer NOT NULL,
+	"budget_minor" integer NOT NULL,
+	"currency" text NOT NULL,
+	"expires_at" text NOT NULL,
+	"changed_at" text NOT NULL,
+	"action" text NOT NULL,
+	CONSTRAINT "quota_grant_brand_id_kind_version_pk" PRIMARY KEY("brand_id","kind","version"),
+	CONSTRAINT "quota_grant_operation_unique" UNIQUE("brand_id","kind","operation_id"),
+	CONSTRAINT "quota_grant_limits_check" CHECK ("quota_grant"."kind" in ('sampling', 'generation') and "quota_grant"."action" in ('set', 'revoke')
+    and "quota_grant"."version" > 0 and "quota_grant"."count_limit" > 0 and "quota_grant"."budget_minor" >= 0 and length("quota_grant"."currency") = 3)
+);
+
+CREATE TABLE "quota_reservation" (
+	"brand_id" text NOT NULL,
+	"kind" text NOT NULL,
+	"id" text NOT NULL,
+	"grant_version" integer NOT NULL,
+	"upper_minor" integer NOT NULL,
+	"state" text NOT NULL,
+	"created_at" text NOT NULL,
+	"finalized_at" text,
+	CONSTRAINT "quota_reservation_brand_id_kind_id_pk" PRIMARY KEY("brand_id","kind","id"),
+	CONSTRAINT "quota_reservation_state_check" CHECK ("quota_reservation"."upper_minor" >= 0 and (
+    ("quota_reservation"."state" = 'reserved' and "quota_reservation"."finalized_at" is null) or
+    ("quota_reservation"."state" in ('settled', 'released') and "quota_reservation"."finalized_at" is not null)
+  ))
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -136,6 +189,9 @@ ALTER TABLE "brand_draft" ADD CONSTRAINT "brand_draft_owner_id_user_id_fk" FOREI
 ALTER TABLE "brand_operation" ADD CONSTRAINT "brand_operation_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_version" ADD CONSTRAINT "brand_version_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "user_data_export" ADD CONSTRAINT "user_data_export_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "quota_attempt" ADD CONSTRAINT "quota_attempt_reservation_fk" FOREIGN KEY ("brand_id","kind","reservation_id") REFERENCES "public"."quota_reservation"("brand_id","kind","id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "quota_grant" ADD CONSTRAINT "quota_grant_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "quota_reservation" ADD CONSTRAINT "quota_reservation_grant_fk" FOREIGN KEY ("brand_id","kind","grant_version") REFERENCES "public"."quota_grant"("brand_id","kind","version") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");

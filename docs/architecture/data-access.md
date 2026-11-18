@@ -1,6 +1,6 @@
 # 数据访问与缓存工程约束
 
-> 2026-11-18｜来源：项目负责人补充的工程要求｜状态：认证、维护授权、品牌建档和本人数据导出已适配双库，其他业务 DAO 和缓存待实施。
+> 2026-11-18｜来源：项目负责人补充的工程要求｜状态：认证、维护授权、品牌建档、本人数据导出和试点额度已适配双库，其他业务 DAO 和缓存待实施。
 
 本文件是 DAO、缓存、SQL 性能与表设计的工程约束正文，适用于涉及这些能力的设计、实现和评审。全量 DDL 的生成与部署流程见 [数据库部署说明](database-deployment.md)。产品语义仍以 [公共 SPEC](../04-产品功能规格-SPEC.md) 与 [指标合同](../07-指标与证据合同.md) 为准；本文件不增加产品功能或授权启动 M0–M2。
 
@@ -8,10 +8,10 @@
 
 | 已确认要求 | 当前实现 | 后续交付条件 |
 | --- | --- | --- |
-| DAO 适配 SQLite3、PostgreSQL（pg） | 认证、维护授权、B04 品牌建档及 B05 本人导出已接入两者 | 每个新增业务用例分别验证双库迁移与数据行为 |
+| DAO 适配 SQLite3、PostgreSQL（pg） | 认证、维护授权、B04 品牌建档、B05 本人导出及 B10 试点额度已接入两者 | 每个新增业务用例分别验证双库迁移与数据行为 |
 | cache 适配 memory、Redis，默认 Redis | `src/lib/cache/` 仅有说明，无缓存实现或客户端依赖 | 两个后端遵循同一缓存合同；默认选择 Redis，memory 显式选择 |
 | 优化批量 SQL，避免大量串行查询 | B08 权限读取为固定集合查询，已实测次数和双方言计划 | 新用例记录 SQL 次数、批量策略、查询计划与耗时，排除 N+1 |
-| 表设计保持精简，审查必要索引 | 各后端包含认证、维护授权、品牌与导出生成记录 | 新增表/索引继续按真实访问路径审查 |
+| 表设计保持精简，审查必要索引 | 各后端包含认证、维护授权、品牌、导出生成记录与试点额度 | 新增表/索引继续按真实访问路径审查 |
 | 维护并及时更新全量表 DDL，支持快速部署 | 已建立 PostgreSQL/SQLite 导出、一致性检查和空库对照 | Schema/migration/全量 DDL 同步交付，持续核验升级 |
 
 `drizzle.config.ts` 与 `drizzle.sqlite.config.ts` 分别维护双方言；`db:auth-schema` 通过同版本官方 CLI 生成两套认证表。`DATABASE_PROVIDER` 默认 `postgresql`，SQLite 显式配置 `SQLITE_PATH`，使用 Node 24 内置驱动和官方 Drizzle proxy/Auth adapter。`pnpm test:maintenance` 与 `pnpm verify:maintenance` 仅验证认证/维护用例，详见 [B08 记录](../tasks/B08-maintenance-access.md)。缓存合同仍未配置；未引入额外驱动依赖。
@@ -58,7 +58,7 @@ Redis 的缓存用途已确认；这不等于授权引入 Redis 队列、分布�
 
 ## 实施后的专项验收
 
-下表是对应实现必须提供的验证证据。双方言迁移、数据行为及查询计划见 [B08 维护授权](../tasks/B08-maintenance-access.md)、[B04 品牌建档](../tasks/B04-brand-onboarding.md)和 [B05 本人数据导出](../tasks/B05-owned-data-export.md)。其他业务 DAO 和 cache 尚待实施。优先沿用项目已有脚本。尚无命令的检查记录真实方式和输出。
+下表是对应实现必须提供的验证证据。双方言迁移、数据行为及查询计划见 [B08 维护授权](../tasks/B08-maintenance-access.md)、[B04 品牌建档](../tasks/B04-brand-onboarding.md)、[B05 本人数据导出](../tasks/B05-owned-data-export.md)和 [B10 试点额度](../tasks/B10-pilot-quotas.md)。其他业务 DAO 和 cache 尚待实施。优先沿用项目已有脚本。尚无命令的检查记录真实方式和输出。
 
 | 触发变更 | 最小验证范围 |
 | --- | --- |

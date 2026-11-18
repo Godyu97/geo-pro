@@ -43,7 +43,7 @@ export default async function MaintenanceAccessPage() {
                 <CardContent className="space-y-4 p-5">
                   <h2 className="break-words font-medium">{t(permission)}</h2>
                   <Badge variant="outline" className="max-w-full whitespace-normal">{t(granted ? "granted" : "notGranted")}</Badge>
-                  <p className="text-sm leading-7 text-muted-foreground">{t("operationsPending")}</p>
+                  <p className="text-sm leading-7 text-muted-foreground">{t(permission === "quotas.manage" && granted ? "quotaOperationsAvailable" : "operationsPending")}</p>
                 </CardContent>
               </Card>
             );

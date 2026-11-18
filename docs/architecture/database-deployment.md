@@ -1,10 +1,10 @@
 # 全量 DDL 维护与数据库部署
 
-> 2026-11-18｜支持 PostgreSQL / SQLite3，覆盖认证、维护授权、B04 品牌建档和 B05 本人数据导出。
+> 2026-11-18｜支持 PostgreSQL / SQLite3，覆盖认证、维护授权、B04 品牌建档、B05 本人数据导出和 B10 试点额度。
 
 ## 权威来源与产物
 
-Drizzle Schema 是目标结构来源，按顺序审核过的 migration 是应用部署和升级记录。两种后端各有四张 Better Auth 生成表、两张维护表、四张品牌表及一张导出记录表。 [B04 品牌建档](../tasks/B04-brand-onboarding.md) · [B05 本人数据导出](../tasks/B05-owned-data-export.md)
+Drizzle Schema 是目标结构来源，按顺序审核过的 migration 是应用部署和升级记录。两种后端各有四张 Better Auth 生成表、两张维护表、四张品牌表、一张导出记录表和三张试点额度表。 [B04 品牌建档](../tasks/B04-brand-onboarding.md) · [B05 本人数据导出](../tasks/B05-owned-data-export.md)
 
 | 后端 | Schema 配置 | 迁移 | 全量 DDL |
 | --- | --- | --- | --- |
@@ -62,6 +62,6 @@ SQLite 的全量文件同样只用于空库结构导入，并须在启用外键�
 
 ## 验证边界
 
-`pnpm db:ddl:check` 核对两份文件与 Schema 一致。`pnpm test:maintenance` 在临时 SQLite 文件及随机本地 PostgreSQL 隔离库中对照全量导入和 migration 的列、约束与索引，并覆盖旧认证数据升级、SQLite 外键与迁移校验和。`pnpm test:brands` 验证已有账号和维护授权记录的增量升级。`pnpm test:data-exports` 核验已有品牌数据升级和全量 DDL 对照。PostgreSQL 测试角色需要创建和清理本轮本地隔离库的权限。
+`pnpm db:ddl:check` 核对两份文件与 Schema 一致。`pnpm test:maintenance` 在临时 SQLite 文件及随机本地 PostgreSQL 隔离库中对照全量导入和 migration 的列、约束与索引，并覆盖旧认证数据升级、SQLite 外键与迁移校验和。`pnpm test:brands` 验证已有账号和维护授权记录的增量升级。`pnpm test:data-exports` 核验已有品牌数据升级和全量 DDL 对照。`pnpm test:quotas` 核验从 B05 升级后的品牌额度、并发和 DDL 对照。PostgreSQL 测试角色需要创建和清理本轮本地隔离库的权限。
 
-`pnpm verify:maintenance` 构建后使用 3103 端口和隔离库验证两种后端的 HTTP、受控 CLI 和 `pnpm verify:auth`。`pnpm verify:brands` 使用 3105 端口验证品牌接口及默认停收。`pnpm verify:data-exports` 使用 3106 端口验证会话、生成状态和下载。浏览器入口为 `pnpm test:e2e`（本地 PostgreSQL，3100 端口）。具体覆盖见 [B08](../tasks/B08-maintenance-access.md)、[B04](../tasks/B04-brand-onboarding.md)和 [B05](../tasks/B05-owned-data-export.md)。
+`pnpm verify:maintenance` 构建后使用 3103 端口和隔离库验证两种后端的 HTTP、受控 CLI 和 `pnpm verify:auth`。`pnpm verify:brands` 使用 3105 端口验证品牌接口及默认停收。`pnpm verify:data-exports` 使用 3106 端口验证会话、生成状态和下载。`pnpm verify:quotas` 使用 3107 端口验证双方言的维护接口、授权和中英文设置页。通用浏览器回归入口为 `pnpm test:e2e`（本地 PostgreSQL，3100 端口）。具体覆盖见 [B08](../tasks/B08-maintenance-access.md)、[B04](../tasks/B04-brand-onboarding.md)、[B05](../tasks/B05-owned-data-export.md)和 [B10](../tasks/B10-pilot-quotas.md)。

@@ -1,7 +1,10 @@
+import { Suspense } from "react";
+
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { SignOutButton } from "@/components/layout/sign-out-button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataExportPanel } from "@/features/data-exports/settings-panel";
+import { PilotQuotaPanel } from "@/features/quotas/settings-panel";
 import { requireSession } from "@/lib/auth/session";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { ProfileForm } from "./profile-form";
@@ -16,6 +19,7 @@ export default async function AccountSettingsPage() {
   const locale = await getLocale();
   const t = await getTranslator("settings");
   const common = await getTranslator("common");
+  const quota = await getTranslator("quotas");
 
   return (
     <div className="space-y-6">
@@ -52,6 +56,12 @@ export default async function AccountSettingsPage() {
             <div className="flex">
               <SignOutButton />
             </div>
+          </section>
+          <section id="pilot-quotas" aria-labelledby="quota-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
+            <h2 id="quota-heading" className="font-medium">{quota("title")}</h2>
+            <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">{quota("loading")}</p>}>
+              <PilotQuotaPanel ownerId={user.id} locale={locale} />
+            </Suspense>
           </section>
           <section id="data-management" aria-labelledby="data-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
             <h2 id="data-heading" className="font-medium">{t("dataManagement")}</h2>

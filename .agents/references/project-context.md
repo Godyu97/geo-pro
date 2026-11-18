@@ -6,7 +6,7 @@
 
 - **包名与版本**：`geo-pro` v`0.1.0`（`"private": true`，`"type": "module"`，见 [package.json](../../package.json)）
 - **定位**：GeoPro（AI GEO），面向中国大陆品牌经营者的品牌可见度监测与优化平台。
-- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)，T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)、[B03 可信官网](../../docs/tasks/B03-marketing-entry.md)、[B04 品牌建档](../../docs/tasks/B04-brand-onboarding.md)及 [B05 本人数据导出](../../docs/tasks/B05-owned-data-export.md)子项，以及 [B08 维护授权基础](../../docs/tasks/B08-maintenance-access.md)和 [B15 账户设置](../../docs/tasks/B15-account-settings.md)。产品 M0–M2 尚无完整里程碑交付。
+- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)，T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)、[B03 可信官网](../../docs/tasks/B03-marketing-entry.md)、[B04 品牌建档](../../docs/tasks/B04-brand-onboarding.md)及 [B05 本人数据导出](../../docs/tasks/B05-owned-data-export.md)子项，以及 [B08 维护授权基础](../../docs/tasks/B08-maintenance-access.md)、[B10 试点额度](../../docs/tasks/B10-pilot-quotas.md)和 [B15 账户设置](../../docs/tasks/B15-account-settings.md)。产品 M0–M2 尚无完整里程碑交付。
 
 ## 2. 技术栈与实际版本
 
@@ -35,6 +35,7 @@
   - `api/auth/[...all]/route.ts`：Better Auth Next.js Handler（缺失配置时返回 503）
   - `api/health/route.ts`：固定存活状态 JSON（`{ status: "ok", service: "geo-pro" }`）
   - `(dashboard)/dashboard/maintenance/`、`api/maintenance/access/route.ts`：本人维护权限页面/接口，独立会话和服务端授权校验
+  - `api/maintenance/quotas/route.ts`：试点额度维护写入，复用 `quotas.manage`
   - `(dashboard)/dashboard/settings/`：本人账户设置，显示只读邮箱、编辑称呼、切换界面语言及管理当前会话
   - `(dashboard)/dashboard/brands/`、`api/brands/`：单负责人品牌、草稿、历史版本。合成资料用于回环验收，常规入口暂停收集
   - `api/data-exports/`：本人数据生成和受保护下载。设置页显示范围与最近一次结果，品牌导出遵循 B04 的开放条件
@@ -42,16 +43,16 @@
   - `ui/`：已安装的 shadcn/ui 基础组件（button、card、input、badge、table、tabs、dialog、sidebar、skeleton、separator、dropdown-menu、form、label、sheet、tooltip）
   - `layout/`：`app-sidebar.tsx`、`auth-form.tsx`、`brand-mark.tsx`、`module-links.ts`、`sign-out-button.tsx`、`session-monitor.tsx`；会话失效/身份切换时整页恢复，服务暂不可用提供重试。
   - `charts/README.md`：仅边界说明，无图表实现
-- `src/features/` 包含官网 `marketing/`、维护授权 `maintenance/`、账户设置 `account/`、品牌建档 `brands/`、本人导出 `data-exports/` 和 5 个业务占位域。
-- `src/lib/`：`i18n/`、`auth/`、`db/`、`http/`。DB 包含双方言认证、维护、品牌与导出 Schema、显式配置、连接和 SQLite 迁移。`ai/`、`cache/` 仍仅有说明。
+- `src/features/` 包含官网 `marketing/`、维护授权 `maintenance/`、账户设置 `account/`、品牌建档 `brands/`、本人导出 `data-exports/`、试点额度 `quotas/` 和 5 个业务占位域。
+- `src/lib/`：`i18n/`、`auth/`、`db/`、`http/`。DB 包含双方言认证、维护、品牌、导出与额度 Schema、显式配置、连接和 SQLite 迁移。`ai/`、`cache/` 仍仅有说明。
 - `src/hooks/use-mobile.ts`、`src/types/README.md`
-- `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证、维护权限、品牌建档和本人导出，每库 11 张应用表。
+- `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证、维护权限、品牌建档、本人导出和试点额度，每库 14 张应用表。
 - `drizzle/ddl/postgresql.sql`、`sqlite.sql`：双方言全量 DDL；`scripts/export-ddl.mjs` 离线生成/只读检查，不含迁移历史或数据。
 - `scripts/verify-auth.mjs`：本地 HTTP + 所选后端的认证验证，临时账号清理；`verify-maintenance.mjs` 在双方言隔离库启动实际 Next 服务并运行维护/认证验证。
 - `scripts/maintenance-access.mjs`：仅受控服务器可执行的授权/撤销命令；无在线提权，详见 [维护说明](../../docs/architecture/maintenance-access.md)。
 - `docs/`：产品文档包（v3.0）、工程初始化任务书与 Phase 0 架构/任务记录。
 - `.agents/`：包含本轮接入的 `governance/`、`workflows/`、`references/`，以及仓库原有的 `skills/openspec-*`（保留不自动启用）。
-- `openspec/` 包含 `account-session`、`public-product-entry`、`maintenance-access`、`account-settings`、`brand-onboarding` 和 `owned-data-export` 的能力规格及对应归档。按当前任务授权加载相关规格。
+- `openspec/` 包含 `account-session`、`public-product-entry`、`maintenance-access`、`account-settings`、`brand-onboarding`、`owned-data-export` 和 `pilot-quotas` 的能力规格及对应归档。按当前任务授权加载相关规格。
 
 ## 4. 可用命令与检查现状
 
@@ -75,17 +76,19 @@
 | `pnpm verify:brands` | Node.js HTTP 集成脚本 | 构建后，在 3105 端口及隔离库验证品牌接口和收集条件 |
 | `pnpm test:data-exports` | Node.js 原生测试 | 导出双库升级、并发、回滚和查询验证 |
 | `pnpm verify:data-exports` | Node.js HTTP 集成脚本 | 构建后，在 3106 端口及隔离库验证导出授权和反馈 |
+| `pnpm test:quotas` | Node.js 原生测试 | 双库额度升级、授权、账本与并发 |
+| `pnpm verify:quotas` | Node.js HTTP + Playwright | 构建后在 3107 端口验证双方言会话、权限和额度页面 |
 | `python docs/tools/validate_docs.py` | 标准库 Python 脚本 | 校验 `docs/` 产品文档链接、映射与指标样例 |
 
-- **测试现状**：已配置消息检查、Node 基础测试、维护、品牌和导出双库专项及 Playwright。E2E 在 `.cache/i18n-app` 的生产副本核验官网、认证、壳层、维护权限、账户设置、品牌建档和本人导出，清理本轮测试账号。其他业务 DAO/Redis 专项仍待接入。
+- **测试现状**：已配置消息检查、Node 基础测试、维护、品牌、导出和额度双库专项及 Playwright。E2E 在 `.cache/i18n-app` 的生产副本核验官网、认证、壳层、维护权限、账户设置、品牌建档和本人导出，清理本轮测试账号。其他业务 DAO/Redis 专项仍待接入。
 
 ## 5. 已确认工程要求与适配差距
 
 完整约束与专项验收在 [数据访问与缓存工程约束](../../docs/architecture/data-access.md) 维护：DAO 适配 SQLite3 / PostgreSQL；cache 适配 memory / Redis（默认）；避免 N+1 和大量串行 SQL，优先批量操作；表结构精简并审查索引；全量 DDL 随 Schema/migration 更新。全量 DDL 生成、防漂移与快速部署流程见 [数据库部署说明](../../docs/architecture/database-deployment.md)。
 
-**当前事实**：认证、维护授权、品牌建档和本人导出适配 PostgreSQL/SQLite，保持独立 Schema、迁移与 DDL。原生 SQLite 外键、事务及 Auth provider 已实测。其他业务 DAO 和全部缓存实现仍待实施。
+**当前事实**：认证、维护授权、品牌建档、本人导出和试点额度适配 PostgreSQL/SQLite，保持独立 Schema、迁移与 DDL。原生 SQLite 外键、事务及 Auth provider 已实测。其他业务 DAO 和全部缓存实现仍待实施。
 
-**多语言现状**：当前官网、账号入口、工作台壳层、维护权限、账户设置、品牌建档和本人导出均提供 `zh-CN` / `en`。请求解析、Cookie 偏好、Metadata、消息和参数检查及浏览器 E2E 已接入。未来业务页面、图表及真实采样范围的语言隔离随业务任务验收。 [Web 多语言规范](../../docs/architecture/i18n.md)
+**多语言现状**：当前官网、账号入口、工作台壳层、维护权限、账户设置、品牌建档、本人导出和试点额度均提供 `zh-CN` / `en`。请求解析、Cookie 偏好、Metadata、消息和参数检查及浏览器 E2E 已接入。未来业务页面、图表及真实采样范围的语言隔离随业务任务验收。 [Web 多语言规范](../../docs/architecture/i18n.md)
 
 ## 6. 尚未确定的重要技术决策
 
