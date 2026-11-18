@@ -87,6 +87,7 @@ export class PurgeDao {
     const { ownerId, brandId } = target;
     await this.query("DELETE FROM brand_draft WHERE owner_id = ? AND scope = ?", [ownerId, brandId]);
     await this.query("DELETE FROM brand_version WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM brand_fact_paste WHERE brand_id = ?", [brandId]);
 
     // Before scope was recorded, only brand/deletion outcomes identified the
     // brand. A 'new' draft used during onboarding can also predate this brand.

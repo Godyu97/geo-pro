@@ -244,6 +244,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
             {brand.version > 1 && <Button asChild variant="outline"><Link href={href + "?version=" + (brand.version - 1)} prefetch={false}>{t("previousVersion")}</Link></Button>}
           </div>
           {!snapshot && <BrandStatusButton brand={{ id, status: brand.status, revision: brand.revision }} actorId={user.id} messages={messages} />}
+          {!snapshot && <Button asChild variant="outline"><Link href={href + "/facts"} prefetch={false}>{getMessages(locale).brandFacts.title}</Link></Button>}
           {!snapshot && <Button asChild variant="outline"><Link href={href + "/delete"} prefetch={false}>{t("reviewDeletion")}</Link></Button>}
         </div>
       </div>
@@ -271,6 +272,7 @@ export async function BrandDeletionPage({ params }: { params: Promise<{ id: stri
   const rows = [
     [t("fieldName"), impact.name],
     [t("deletionBrandData"), t("deletionBrandCounts", { versions: formatNumber(locale, impact.versions), drafts: formatNumber(locale, impact.drafts) })],
+    [getMessages(locale).brandFacts.title, t("deletionFactCounts", { facts: formatNumber(locale, impact.facts), materials: formatNumber(locale, impact.materials) })],
     [t("deletionAttachments"), t("deletionUnavailableScope")],
     [t("deletionReports"), t("deletionUnavailableScope")],
     [t("deletionInFlight"), t("deletionInFlightCounts", { reservations: formatNumber(locale, impact.reservations), attempts: formatNumber(locale, impact.unresolvedAttempts) })],

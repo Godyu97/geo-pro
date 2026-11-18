@@ -60,7 +60,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       readPlans.push([sql, values]);
       return db.query(sql, values);
     } });
-    const expectedImpact = { id: brandId, revision: 1, name: fields.name, versions: 1, drafts: 1, reservations: 1, unresolvedAttempts: 1 };
+    const expectedImpact = { id: brandId, revision: 1, name: fields.name, versions: 1, drafts: 1, facts: 0, materials: 0, reservations: 1, unresolvedAttempts: 1 };
     assert.deepEqual(await monitored.deletionImpact(owner, brandId), expectedImpact);
     assert.equal(await dao.deletionImpact(outsider, brandId), null);
     assert.equal((await dao.deletionState(owner, brandId)).revision, 1);
