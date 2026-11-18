@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
+import { hasVerifiedEmail } from "../../lib/auth/verified-email.ts";
 import { MaintenanceDao } from "../maintenance/dao.ts";
 import { brandDeadlineSchema, type BrandCommand, type BrandErrorCode, type BrandMutation } from "./contracts.ts";
 import { BrandDao, type BrandRecord } from "./dao.ts";
@@ -15,7 +16,7 @@ const recoveryLoginMs = 5 * 60 * 1000;
 
 export function brandRecoveryError(brand: { frozenAt: string; restoreUntil: string }, session: BrandRecoverySession | undefined, now: Date) {
   if (now.getTime() >= Date.parse(brand.restoreUntil)) return "RECOVERY_EXPIRED";
-  if (!session?.emailVerified) return "IDENTITY_UNVERIFIED";
+  if (!hasVerifiedEmail(session)) return "IDENTITY_UNVERIFIED";
   const loginTime = session.createdAt.getTime();
   if (!(loginTime > Date.parse(brand.frozenAt) && loginTime <= now.getTime() && now.getTime() - loginTime < recoveryLoginMs)) {
     return "REAUTH_REQUIRED";

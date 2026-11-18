@@ -31,6 +31,7 @@
   - `layout.tsx`、`globals.css`、`error.tsx`、`global-error.tsx`、`not-found.tsx`；`src/proxy.ts` 处理请求路径和禁用公共缓存
   - `(marketing)/page.tsx`：薄层导出公开中英文官网（`/`），按真实会话显示入口，并说明当前能力/试点限制
   - `(auth)/login/page.tsx`：邮箱/密码注册与登录页（`/login`）
+  - `(auth)/account-access/`、`api/account-email/`：双语邮箱验证和密码找回；由 `src/features/account/email/` 管理限流、投递与确认。 [B17 记录](../../docs/tasks/B17-account-email-recovery.md)
   - `(dashboard)/layout.tsx`、`(dashboard)/dashboard/page.tsx`、`error.tsx`、`loading.tsx`：受服务端会话保护的工作台（`/dashboard`）
   - `api/auth/[...all]/route.ts`：Better Auth Next.js Handler（缺失配置时返回 503）
   - `api/health/route.ts`：固定存活状态 JSON（`{ status: "ok", service: "geo-pro" }`）
@@ -46,7 +47,7 @@
 - `src/features/` 包含官网 `marketing/`、维护授权 `maintenance/`、账户设置 `account/`、品牌建档 `brands/`、本人导出 `data-exports/`、试点额度 `quotas/` 和 5 个业务占位域。
 - `src/lib/`：`i18n/`、`auth/`、`db/`、`http/`。DB 包含双方言认证、维护、品牌、导出与额度 Schema、显式配置、连接和 SQLite 迁移。`ai/`、`cache/` 仍仅有说明。
 - `src/hooks/use-mobile.ts`、`src/types/README.md`
-- `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证、维护权限、品牌建档、本人导出、品牌清除和试点额度，每库 16 张应用表。
+- `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证及账号邮件限流、维护权限、品牌建档、本人导出、品牌清除和试点额度，每库 17 张应用表。
 - `drizzle/ddl/postgresql.sql`、`sqlite.sql`：双方言全量 DDL；`scripts/export-ddl.mjs` 离线生成/只读检查，不含迁移历史或数据。
 - `scripts/verify-auth.mjs`：本地 HTTP + 所选后端的认证验证，临时账号清理；`verify-maintenance.mjs` 在双方言隔离库启动实际 Next 服务并运行维护/认证验证。
 - `scripts/maintenance-access.mjs`：仅受控服务器可执行的授权/撤销命令；无在线提权，详见 [维护说明](../../docs/architecture/maintenance-access.md)。
@@ -69,6 +70,7 @@
 | `pnpm db:ddl` | `node scripts/export-ddl.mjs` | 离线导出双方言全量 DDL |
 | `pnpm db:ddl:check` | `node scripts/export-ddl.mjs --check` | 只读比较 Schema 导出与快照；过期或缺失返回失败 |
 | `pnpm verify:auth` | `node --conditions=react-server scripts/verify-auth.mjs` | 本地应用 + 所选后端的认证与本人资料更新，需先迁移 |
+| `pnpm verify:account-email` | Node.js HTTP + Playwright | 构建后用 3117 端口、双方言隔离库、回环邮件接收器和 Chrome 验证账号邮件与品牌恢复 |
 | `pnpm maintenance:access` | `node --conditions=react-server scripts/maintenance-access.mjs` | 受控服务器授予/撤销单项维护权限 |
 | `pnpm test:maintenance` | Node.js 原生测试 | 双库 DAO/迁移/DDL/锁竞争/索引测试，需要本地 PG 隔离建库权限 |
 | `pnpm verify:maintenance` | Node.js HTTP/CLI 集成脚本 | 构建后，在 3103 端口、双方言隔离库验证维护和认证 |

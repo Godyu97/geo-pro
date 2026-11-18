@@ -11,6 +11,8 @@ import { PilotQuotaPanel } from "@/features/quotas/settings-panel";
 import { requireSession } from "@/lib/auth/session";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { ProfileForm } from "./profile-form";
+import { accountAccessPath } from "./email/contracts";
+import { hasVerifiedEmail } from "@/lib/auth/verified-email";
 
 export async function generateMetadata() {
   const t = await getTranslator("common");
@@ -23,7 +25,9 @@ export default async function AccountSettingsPage() {
   const t = await getTranslator("settings");
   const common = await getTranslator("common");
   const quota = await getTranslator("quotas");
+  const email = await getTranslator("accountEmail");
   const brandManagementAvailable = Boolean(brandFixtureOrigin(await headers()));
+  const emailVerified = hasVerifiedEmail(user);
 
   return (
     <div className="space-y-6">
@@ -38,6 +42,15 @@ export default async function AccountSettingsPage() {
                 <dt className="font-medium">{t("email")}</dt>
                 <dd className="break-all text-muted-foreground">{user.email}</dd>
               </dl>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+                <span className="text-muted-foreground">{email(emailVerified ? "verifiedLabel" : "unverifiedLabel")}</span>
+                {!emailVerified && (
+                  <Link href={accountAccessPath("verify", "/dashboard/settings")} prefetch={false}
+                    className="underline underline-offset-4">
+                    {email("verifyTitle")}
+                  </Link>
+                )}
+              </div>
               <ProfileForm
                 key={user.id}
                 userId={user.id}

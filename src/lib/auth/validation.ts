@@ -10,10 +10,10 @@ export function isValidationKey(value: unknown): value is ValidationKey {
   return validationKeys.some((key) => key === value);
 }
 
-export const loginSchema = z.object({
-  email: z.string().trim().max(254, "emailMax").pipe(z.email("emailInvalid")),
-  password: z.string().min(8, "passwordMin").max(128, "passwordMax"),
-});
+export const emailSchema = z.string().trim().max(254, "emailMax").pipe(z.email("emailInvalid"));
+export const passwordSchema = z.string().min(8, "passwordMin").max(128, "passwordMax");
+
+export const loginSchema = z.object({ email: emailSchema, password: passwordSchema });
 
 export const displayNameSchema = z.string({ error: "nameRequired" }).trim()
   .min(1, "nameRequired")

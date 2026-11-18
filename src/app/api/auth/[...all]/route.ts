@@ -1,7 +1,7 @@
 import { toNextJsHandler } from "better-auth/next-js";
 
 import { isAuthConfigured } from "@/lib/auth/env";
-import { getAuth } from "@/lib/auth/server";
+import { getAuth, withAuthTransaction } from "@/lib/auth/server";
 import { localeCookie, resolveLocale } from "@/lib/i18n/locale";
 import { getMessages } from "@/lib/i18n/server";
 import type { NextRequest } from "next/server";
@@ -23,11 +23,18 @@ function unavailable(request: NextRequest) {
 }
 
 async function handle(request: NextRequest) {
+  if (request.nextUrl.pathname.startsWith("/api/auth/reset-password/")) {
+    return new Response(null, { status: 404, headers: { "Cache-Control": "no-store" } });
+  }
   if (!isAuthConfigured()) {
     return unavailable(request);
   }
 
   try {
+    if (request.method === "POST" && request.nextUrl.pathname === "/api/auth/sign-in/email") {
+      // Serialize session creation with password reset for this account.
+      return await withAuthTransaction((auth) => toNextJsHandler(auth).POST(request));
+    }
     const handlers = toNextJsHandler(getAuth());
     return await (request.method === "GET"
       ? handlers.GET(request)

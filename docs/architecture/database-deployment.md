@@ -4,7 +4,7 @@
 
 ## 权威来源与产物
 
-Drizzle Schema 是目标结构来源，按顺序审核过的 migration 是应用部署和升级记录。两种后端各有四张 Better Auth 生成表、两张维护表、四张品牌表、一张导出记录表、两张品牌清除及费用凭证表和三张试点额度表。 [B04 品牌建档](../tasks/B04-brand-onboarding.md) · [B05 本人数据导出](../tasks/B05-owned-data-export.md)
+Drizzle Schema 是目标结构来源，按顺序审核过的 migration 是应用部署和升级记录。两种后端各有四张 Better Auth 生成表、一张账号邮件限流表、两张维护表、四张品牌表、一张导出记录表、两张品牌清除及费用凭证表和三张试点额度表。 [B04 品牌建档](../tasks/B04-brand-onboarding.md) · [B05 本人数据导出](../tasks/B05-owned-data-export.md) · [B17 账号邮件](../tasks/B17-account-email-recovery.md)
 
 | 后端 | Schema 配置 | 迁移 | 全量 DDL |
 | --- | --- | --- | --- |

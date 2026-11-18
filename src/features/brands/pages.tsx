@@ -7,6 +7,7 @@ import { SignOutButton } from "@/components/layout/sign-out-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { accountAccessPath } from "@/features/account/email/contracts";
 import { requireSession } from "@/lib/auth/session";
 import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
@@ -298,6 +299,7 @@ export async function BrandRecoveryPage({ params }: { params: Promise<{ id: stri
   const { user, session } = await requireSession();
   const locale = await getLocale();
   const t = await getTranslator("brands");
+  const email = await getTranslator("accountEmail");
   if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
   const { id } = await params;
   if (!brandIdSchema.safeParse(id).success) notFound();
@@ -326,6 +328,12 @@ export async function BrandRecoveryPage({ params }: { params: Promise<{ id: stri
         {error ? (
           <div className="space-y-3">
             <p role="status" className="text-sm leading-6">{t(brandErrorMessage[error])}</p>
+            {error === "IDENTITY_UNVERIFIED" && (
+              <Link href={accountAccessPath("verify", href)} prefetch={false}
+                className="inline-block text-sm underline underline-offset-4">
+                {email("verifyTitle")}
+              </Link>
+            )}
             {error === "REAUTH_REQUIRED" && <SignOutButton returnTo={href} label={t("reauthenticate")} />}
           </div>
         ) : <BrandDeletionButtons action="recover" id={id} revision={revision} actorId={user.id} messages={getMessages(locale).brands} />}

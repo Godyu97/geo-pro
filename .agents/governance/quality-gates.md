@@ -10,6 +10,7 @@
 | 基础静态门禁 | TypeScript 类型检查 | `pnpm typecheck` | 实际执行 `tsc --noEmit`；所有 TS/TSX 改动必须执行 |
 | 构建门禁 | Next.js 生产构建 | `pnpm build` | 实际执行 `next build`；不依赖数据库或 AI Key |
 | 专项认证门禁 | 本地认证与 DB 端到端校验 | `pnpm verify:auth` | HTTP + 显式选择的 PostgreSQL/SQLite；包含伪造/过期/撤销会话读写拒绝及账号隔离；需本地应用运行且开发库已迁移 |
+| 账号邮件专项 | 邮箱验证、限流、密码重设与品牌恢复 | `pnpm verify:account-email` | 先 `pnpm build`，在 3117 端口使用双方言隔离库、回环邮件接收器和本机 Chrome |
 | 数据库迁移核验 | Auth Schema 与迁移检查 | `pnpm db:auth-schema` / `pnpm db:generate` / `pnpm db:migrate` | 前两项生成双方言；迁移只执行显式选择后端。先审核 SQL 再迁移 |
 | 全量 DDL 一致性 | 防止建表快照过期 | `pnpm db:ddl:check` | 检查 PostgreSQL/SQLite；过期先运行 `pnpm db:ddl` 并审核；结构变化还须验证隔离空库部署 |
 | 维护 DAO 合同 | 双数据库事务/隔离/迁移 | `pnpm test:maintenance` | 本地 PostgreSQL 可创建隔离测试库；SQLite 临时文件；含约束、并发、回滚、审计失败、DDL 对照与查询计划 |

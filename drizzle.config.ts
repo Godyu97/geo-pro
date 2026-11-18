@@ -5,7 +5,7 @@ loadEnvConfig(process.cwd());
 
 export default defineConfig({
   dialect: "postgresql",
-  schema: ["./src/lib/db/auth-schema.ts", "./src/lib/db/maintenance-schema.ts", "./src/lib/db/brand-schema.ts", "./src/lib/db/data-export-schema.ts", "./src/lib/db/quota-schema.ts"],
+  schema: ["./src/lib/db/auth-schema.ts", "./src/lib/db/maintenance-schema.ts", "./src/lib/db/brand-schema.ts", "./src/lib/db/data-export-schema.ts", "./src/lib/db/quota-schema.ts", "./src/lib/db/auth-mail-schema.ts"],
   out: "./drizzle",
   // Schema generation does not need a URL. Migration requires an explicit URL.
   ...(process.env.DATABASE_URL

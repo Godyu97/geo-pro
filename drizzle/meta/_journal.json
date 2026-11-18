@@ -50,6 +50,13 @@
       "when": 1794998229261,
       "tag": "0006_slippery_senator_kelly",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795001592979,
+      "tag": "0007_mighty_jimmy_woo",
+      "breakpoints": true
     }
   ]
 }

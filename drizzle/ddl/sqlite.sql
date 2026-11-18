@@ -230,3 +230,11 @@ CREATE TABLE `quota_reservation` (
     ("quota_reservation"."state" in ('settled', 'released') and "quota_reservation"."finalized_at" is not null)
   ))
 );
+
+CREATE TABLE `auth_mail_rate` (
+	`key` text PRIMARY KEY NOT NULL,
+	`attempts` text NOT NULL,
+	`expires_at` integer NOT NULL
+);
+
+CREATE INDEX `auth_mail_rate_expiry_idx` ON `auth_mail_rate` (`expires_at`);

@@ -14,6 +14,7 @@
     "db:ddl:check": "node scripts/export-ddl.mjs --check",
     "db:auth-schema": "node --conditions=react-server scripts/database.mjs auth-schema",
     "verify:auth": "node --conditions=react-server scripts/verify-auth.mjs",
+    "verify:account-email": "node --conditions=react-server scripts/verify-account-email.mjs",
     "maintenance:access": "node --conditions=react-server scripts/maintenance-access.mjs",
     "test:maintenance": "node --conditions=react-server --test tests/maintenance/*.test.mjs",
     "test:brands": "node --conditions=react-server --test tests/brands/*.test.mjs",

@@ -53,7 +53,7 @@ export function openSqlite(filename: string, create = false) {
     }),
     close: () => exclusive(() => native.close()),
   };
-  const proxy: AsyncRemoteCallback = (sql, params: unknown[], method) => exclusive(() => {
+  const executeProxy: AsyncRemoteCallback = async (sql, params, method) => {
     const values: SQLInputValue[] = params.map((value) => {
       if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "bigint" || value instanceof Uint8Array) return value;
       throw new Error("Unsupported SQLite parameter");
@@ -66,6 +66,13 @@ export function openSqlite(filename: string, create = false) {
     statement.setReturnArrays(true);
     const rows = statement.all(...values).map((row) => Object.values(row));
     return { rows: method === "get" ? rows[0] : rows };
-  });
-  return { ...connection, proxy };
+  };
+  const proxy: AsyncRemoteCallback = (...args) => exclusive(() => executeProxy(...args));
+  return {
+    ...connection,
+    proxy,
+    proxyTransaction<T>(work: (callback: AsyncRemoteCallback) => Promise<T>) {
+      return connection.transaction(() => work(executeProxy));
+    },
+  };
 }

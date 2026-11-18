@@ -211,6 +211,12 @@ CREATE TABLE "quota_reservation" (
   ))
 );
 
+CREATE TABLE "auth_mail_rate" (
+	"key" text PRIMARY KEY NOT NULL,
+	"attempts" text NOT NULL,
+	"expires_at" bigint NOT NULL
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -231,3 +237,4 @@ CREATE UNIQUE INDEX "brand_active_owner_uidx" ON "brand" USING btree ("owner_id"
 CREATE INDEX "brand_due_purge_idx" ON "brand" USING btree ("restore_until","id") WHERE "brand"."restore_until" is not null;
 CREATE INDEX "brand_owner_frozen_idx" ON "brand" USING btree ("owner_id","frozen_at","id") WHERE "brand"."frozen_at" is not null;
 CREATE INDEX "brand_owner_status_created_idx" ON "brand" USING btree ("owner_id","status","created_at","id");
+CREATE INDEX "auth_mail_rate_expiry_idx" ON "auth_mail_rate" USING btree ("expires_at");

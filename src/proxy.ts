@@ -6,6 +6,9 @@ export function proxy(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   // Cookie / Accept-Language dependent HTML and RSC responses must not be shared.
   response.headers.set("Cache-Control", "private, no-store");
+  if (request.nextUrl.pathname === "/account-access") {
+    response.headers.set("Referrer-Policy", "no-referrer");
+  }
   return response;
 }
 
