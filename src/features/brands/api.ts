@@ -3,6 +3,7 @@ import "server-only";
 import { z } from "zod";
 import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { executeBrandCommand } from "./commands";
 import { brandCommandSchema, brandFieldNameSchema, brandIdSchema, brandVersionParam, type BrandErrorCode, type BrandFieldName } from "./contracts";
@@ -35,30 +36,6 @@ async function fail(code: BrandErrorCode, traceId?: string, fields?: BrandFieldN
   }, errorStatuses[code]);
 }
 
-async function readBoundedJson(request: Request): Promise<unknown> {
-  if (request.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json" || !request.body) return null;
-  const reader = request.body.getReader();
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  let size = 0;
-  let text = "";
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) return JSON.parse(text + decoder.decode());
-      size += value.byteLength;
-      if (size > 48 * 1024) {
-        await reader.cancel();
-        return null;
-      }
-      text += decoder.decode(value, { stream: true });
-    }
-  } catch {
-    return null;
-  } finally {
-    reader.releaseLock();
-  }
-}
-
 export async function readBrandResponse(request: Request) {
   const session = await getSessionState();
   if (session.status !== "authenticated") return fail(session.status === "anonymous" ? "SESSION_REQUIRED" : "SERVICE_UNAVAILABLE");
@@ -80,7 +57,7 @@ export async function writeBrandResponse(request: Request) {
   if (!origin) return fail("INTAKE_CLOSED");
   if (request.headers.get("origin") !== origin) return fail("FORBIDDEN");
 
-  const command = brandCommandSchema.safeParse(await readBoundedJson(request));
+  const command = brandCommandSchema.safeParse(await readBoundedJson(request, 48 * 1024));
   if (!command.success) {
     const fields = new Set<BrandFieldName>();
     for (const issue of command.error.issues) {

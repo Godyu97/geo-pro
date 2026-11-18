@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import type { AsyncRemoteCallback } from "drizzle-orm/sqlite-proxy";
-import type { DatabaseConnection, QueryConnection, QueryValue } from "./connection.ts";
+import type { DatabaseConnection, QueryValue, TransactionConnection } from "./connection.ts";
 
 export function openSqlite(filename: string, create = false) {
   const path = filename === ":memory:" ? filename : resolve(filename);
@@ -19,10 +19,22 @@ export function openSqlite(filename: string, create = false) {
     pending = result.then(() => {}, () => {});
     return result;
   }
-  const transaction: QueryConnection = {
+  const transaction: TransactionConnection = {
     kind: "sqlite",
     async query(sql, values: QueryValue[] = []) {
       return native.prepare(sql).all(...values);
+    },
+    async savepoint(work) {
+      native.exec("SAVEPOINT geo_savepoint");
+      try {
+        const result = await work(transaction);
+        native.exec("RELEASE SAVEPOINT geo_savepoint");
+        return result;
+      } catch (error) {
+        native.exec("ROLLBACK TO SAVEPOINT geo_savepoint");
+        native.exec("RELEASE SAVEPOINT geo_savepoint");
+        throw error;
+      }
     },
   };
   const connection: DatabaseConnection = {

@@ -1,18 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { test } from "node:test";
-import { drizzle } from "drizzle-orm/postgres-js";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { executeBrandCommand } from "../../src/features/brands/commands.ts";
 import { brandCommandSchema, brandFieldsSchema, initialBrandFields } from "../../src/features/brands/contracts.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
-import { migrateSqlite } from "../../src/lib/db/migrate-sqlite.ts";
-import { testDatabase } from "../maintenance/helpers.mjs";
+import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
 
 const fields = { ...initialBrandFields, name: "合成品牌 🚀", description: "用于品牌验收的合成业务" };
 const time = "2026-11-18T08:00:00.000Z";
@@ -38,32 +32,20 @@ function addUser(db, id) {
 }
 
 async function checkUpgrade(kind, fixture) {
-  const directory = await mkdtemp(join(tmpdir(), "geo-b04-prior-"));
-  const source = kind === "sqlite" ? "drizzle/sqlite" : "drizzle";
-  try {
-    await mkdir(join(directory, "meta"));
-    const journal = JSON.parse(await readFile(join(source, "meta/_journal.json"), "utf8"));
-    journal.entries.pop();
-    await writeFile(join(directory, "meta/_journal.json"), JSON.stringify(journal));
-    for (const { tag } of journal.entries) await cp(join(source, tag + ".sql"), join(directory, tag + ".sql"));
-    const db = fixture.connection;
-    if (kind === "sqlite") await migrateSqlite(db, directory);
-    else await migrate(drizzle(db.client), { migrationsFolder: directory });
-    const owner = randomUUID();
-    await addUser(db, owner);
-    await queryWithParameters(db, "INSERT INTO maintenance_grant (user_id, permission, granted_at, operator_id) VALUES (?, ?, ?, ?)",
-      [owner, "support.read", time, owner]);
-    for (let repeat = 0; repeat < 2; repeat++) {
-      execFileSync("pnpm", ["db:migrate"], { env: { ...process.env, ...fixture.env }, stdio: ["ignore", "pipe", "pipe"] });
-    }
-    const users = await queryWithParameters(db, 'SELECT name FROM "user" WHERE id = ?', [owner]);
-    const grants = await queryWithParameters(db, "SELECT permission FROM maintenance_grant WHERE user_id = ?", [owner]);
-    assert.deepEqual(users.map((row) => row.name), ["Synthetic brand owner"]);
-    assert.deepEqual(grants.map((row) => row.permission), ["support.read"]);
-    return owner;
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+  const db = fixture.connection;
+  await migrateThrough(db, kind === "sqlite" ? "0000_magical_stepford_cuckoos" : "0001_colorful_dark_beast");
+  const owner = randomUUID();
+  await addUser(db, owner);
+  await queryWithParameters(db, "INSERT INTO maintenance_grant (user_id, permission, granted_at, operator_id) VALUES (?, ?, ?, ?)",
+    [owner, "support.read", time, owner]);
+  for (let repeat = 0; repeat < 2; repeat++) {
+    execFileSync("pnpm", ["db:migrate"], { env: { ...process.env, ...fixture.env }, stdio: ["ignore", "pipe", "pipe"] });
   }
+  const users = await queryWithParameters(db, 'SELECT name FROM "user" WHERE id = ?', [owner]);
+  const grants = await queryWithParameters(db, "SELECT permission FROM maintenance_grant WHERE user_id = ?", [owner]);
+  assert.deepEqual(users.map((row) => row.name), ["Synthetic brand owner"]);
+  assert.deepEqual(grants.map((row) => row.permission), ["support.read"]);
+  return owner;
 }
 
 async function archiveQueryEvidence(db, owner) {

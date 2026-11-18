@@ -1,6 +1,7 @@
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { SignOutButton } from "@/components/layout/sign-out-button";
 import { Card, CardContent } from "@/components/ui/card";
+import { DataExportPanel } from "@/features/data-exports/settings-panel";
 import { requireSession } from "@/lib/auth/session";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { ProfileForm } from "./profile-form";
@@ -52,9 +53,10 @@ export default async function AccountSettingsPage() {
               <SignOutButton />
             </div>
           </section>
-          <section id="data-management" aria-labelledby="data-heading" className="space-y-2 rounded-xl border bg-card p-5">
+          <section id="data-management" aria-labelledby="data-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
             <h2 id="data-heading" className="font-medium">{t("dataManagement")}</h2>
-            <p className="text-sm leading-6 text-muted-foreground">{t("dataStatus")}</p>
+            <DataExportPanel userId={user.id} locale={locale} />
+            <p className="text-sm leading-6 text-muted-foreground">{t("dataDeletionStatus")}</p>
           </section>
         </div>
       </div>

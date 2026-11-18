@@ -10,8 +10,11 @@ export interface QueryConnection {
   kind: "postgresql" | "sqlite";
   query(sql: string, values?: QueryValue[]): Promise<QueryRow[]>;
 }
+export interface TransactionConnection extends QueryConnection {
+  savepoint<T>(work: (connection: QueryConnection) => Promise<T>): Promise<T>;
+}
 export interface DatabaseConnection extends QueryConnection {
-  transaction<T>(work: (transaction: QueryConnection) => Promise<T>): Promise<T>;
+  transaction<T>(work: (transaction: TransactionConnection) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -22,17 +25,23 @@ export function queryWithParameters(connection: QueryConnection, sql: string, va
 
 export function openPostgres(url: string) {
   const client = postgres(url, { max: 10, connect_timeout: 5, idle_timeout: 20, connection: { statement_timeout: 5000, lock_timeout: 3000 } });
+  function queries(sql: Pick<postgres.Sql, "unsafe">): QueryConnection {
+    return {
+      kind: "postgresql",
+      async query(query, values = []) {
+        return Array.from(await sql.unsafe<QueryRow[]>(query, values));
+      },
+    };
+  }
   const connection: DatabaseConnection = {
-    kind: "postgresql",
-    async query(query, values = []) {
-      return Array.from(await client.unsafe<QueryRow[]>(query, values));
-    },
+    ...queries(client),
     async transaction(work) {
       // A wrapper keeps postgres-js's array-aware transaction return type local.
       const result = await client.begin(async (sql) => ({ value: await work({
-        kind: "postgresql",
-        async query(query, values = []) {
-          return Array.from(await sql.unsafe<QueryRow[]>(query, values));
+        ...queries(sql),
+        async savepoint(work) {
+          const result = await sql.savepoint(async (nested) => ({ value: await work(queries(nested)) }));
+          return result.value;
         },
       }) }));
       return result.value;

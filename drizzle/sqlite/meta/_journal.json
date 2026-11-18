@@ -15,6 +15,13 @@
       "when": 1794966095962,
       "tag": "0001_lowly_domino",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794969051603,
+      "tag": "0002_cheerful_sugar_man",
+      "breakpoints": true
     }
   ]
 }

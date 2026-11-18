@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import nextEnv from "@next/env";
@@ -56,6 +56,24 @@ async function importDdl(connection) {
   await connection.transaction(async (transaction) => {
     for (const statement of statements) await transaction.query(statement);
   });
+}
+
+export async function migrateThrough(connection, lastTag) {
+  const source = connection.kind === "sqlite" ? "drizzle/sqlite" : "drizzle";
+  const directory = await mkdtemp(join(tmpdir(), "geo-migration-baseline-"));
+  try {
+    const journal = JSON.parse(await readFile(join(source, "meta/_journal.json"), "utf8"));
+    const last = journal.entries.findIndex(({ tag }) => tag === lastTag);
+    assert.notEqual(last, -1, `Unknown migration ${lastTag}`);
+    journal.entries = journal.entries.slice(0, last + 1);
+    await mkdir(join(directory, "meta"));
+    await writeFile(join(directory, "meta/_journal.json"), JSON.stringify(journal));
+    for (const { tag } of journal.entries) await cp(join(source, tag + ".sql"), join(directory, tag + ".sql"));
+    if (connection.kind === "sqlite") await migrateSqlite(connection, directory);
+    else await migrate(drizzle(connection.client), { migrationsFolder: directory });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 export async function structure(connection) {

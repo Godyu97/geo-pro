@@ -27,12 +27,22 @@ const versionRowSchema = brandRowSchema.extend({
   version: z.number().int().positive(),
   versionCreatedAt: z.iso.datetime(),
 });
+const exportDraftRowSchema = draftRowSchema.extend({
+  scope: z.union([z.literal("new"), brandIdSchema]),
+  updatedAt: z.iso.datetime(),
+});
 const summarySchema = brandRowSchema.extend({ name: z.string() });
 const operationRowSchema = z.object({ fingerprint: z.string(), result: z.string() });
 const brandColumns = 'b.id, b.status, b.revision, b.entity_version AS "entityVersion", b.created_at AS "createdAt"';
 
 export const brandPageSize = 20;
 export type BrandRecord = z.infer<typeof brandRowSchema>;
+type VersionCursor = Pick<z.infer<typeof versionRowSchema>, "status" | "createdAt" | "id" | "version">;
+
+function parseVersion(row: unknown) {
+  const { name, content, ...rest } = versionRowSchema.parse(row);
+  return { ...rest, fields: brandFieldsSchema.parse({ ...JSON.parse(content), name }) };
+}
 
 export class BrandDao {
   private readonly connection: QueryConnection;
@@ -82,9 +92,30 @@ export class BrandDao {
     const [row] = await this.query(`SELECT ${brandColumns}, v.name, v.content, v.version, v.created_at AS "versionCreatedAt"
       FROM brand b JOIN brand_version v ON v.brand_id = b.id AND v.version = coalesce(?, b.entity_version)
       WHERE b.owner_id = ? AND b.id = ?`, [version ?? null, ownerId, id]);
-    if (!row) return null;
-    const { name, content, ...rest } = versionRowSchema.parse(row);
-    return { ...rest, fields: brandFieldsSchema.parse({ ...JSON.parse(content), name }) };
+    return row ? parseVersion(row) : null;
+  }
+
+  async exportVersions(ownerId: string, limit: number, cursor?: VersionCursor) {
+    const after = cursor ? "AND (b.status, b.created_at, b.id, v.version) > (?, ?, ?, ?)" : "";
+    const rows = await this.query(`SELECT ${brandColumns}, v.name, v.content, v.version, v.created_at AS "versionCreatedAt"
+      FROM brand b JOIN brand_version v ON v.brand_id = b.id
+      WHERE b.owner_id = ? AND b.status IN ('active', 'archived') ${after}
+      ORDER BY b.status, b.created_at, b.id, v.version LIMIT ?`,
+    cursor ? [ownerId, cursor.status, cursor.createdAt, cursor.id, cursor.version, limit] : [ownerId, limit]);
+    return rows.map(parseVersion);
+  }
+
+  async exportDrafts(ownerId: string, limit: number, after: string) {
+    const rows = await this.query(`SELECT d.scope, d.version, d.base_revision AS "baseRevision", d.step, d.content, d.updated_at AS "updatedAt"
+      FROM brand_draft d
+      WHERE d.owner_id = ? AND d.scope > ? AND (d.scope = 'new' OR EXISTS (
+        SELECT 1 FROM brand b WHERE b.id = d.scope AND b.owner_id = d.owner_id AND b.status IN ('active', 'archived')
+      ))
+      ORDER BY d.scope LIMIT ?`, [ownerId, after, limit]);
+    return rows.map((row) => {
+      const { content, ...draft } = exportDraftRowSchema.parse(row);
+      return { ...draft, fields: brandDraftFieldsSchema.parse(JSON.parse(content)) };
+    });
   }
 
   async draft(ownerId: string, scope: string) {

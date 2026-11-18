@@ -17,8 +17,10 @@
     "maintenance:access": "node --conditions=react-server scripts/maintenance-access.mjs",
     "test:maintenance": "node --conditions=react-server --test tests/maintenance/*.test.mjs",
     "test:brands": "node --conditions=react-server --test tests/brands/*.test.mjs",
+    "test:data-exports": "node --conditions=react-server --test tests/data-exports/*.test.mjs",
     "verify:maintenance": "node --conditions=react-server scripts/verify-maintenance.mjs",
     "verify:brands": "node --conditions=react-server scripts/verify-brands.mjs",
+    "verify:data-exports": "node --conditions=react-server scripts/verify-data-exports.mjs",
     "check:i18n": "node scripts/check-i18n.mjs",
     "test:i18n": "node --test tests/i18n/*.test.mjs",
     "test:e2e": "playwright test"
