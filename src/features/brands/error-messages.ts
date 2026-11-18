@@ -11,6 +11,9 @@ export const brandErrorMessage = {
   INVALID_INPUT: "invalidInput",
   FORBIDDEN: "forbidden",
   SERVICE_UNAVAILABLE: "unavailable",
+  IDENTITY_UNVERIFIED: "identityUnverified",
+  REAUTH_REQUIRED: "reauthRequired",
+  RECOVERY_EXPIRED: "recoveryExpired",
 } as const satisfies Record<BrandErrorCode, string>;
 
 export const brandFieldMessage = {

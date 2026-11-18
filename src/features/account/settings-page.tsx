@@ -1,8 +1,11 @@
 import { Suspense } from "react";
+import Link from "next/link";
+import { headers } from "next/headers";
 
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { SignOutButton } from "@/components/layout/sign-out-button";
 import { Card, CardContent } from "@/components/ui/card";
+import { brandFixtureOrigin } from "@/features/brands/intake";
 import { DataExportPanel } from "@/features/data-exports/settings-panel";
 import { PilotQuotaPanel } from "@/features/quotas/settings-panel";
 import { requireSession } from "@/lib/auth/session";
@@ -20,6 +23,7 @@ export default async function AccountSettingsPage() {
   const t = await getTranslator("settings");
   const common = await getTranslator("common");
   const quota = await getTranslator("quotas");
+  const brandManagementAvailable = Boolean(brandFixtureOrigin(await headers()));
 
   return (
     <div className="space-y-6">
@@ -66,7 +70,9 @@ export default async function AccountSettingsPage() {
           <section id="data-management" aria-labelledby="data-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
             <h2 id="data-heading" className="font-medium">{t("dataManagement")}</h2>
             <DataExportPanel userId={user.id} locale={locale} />
-            <p className="text-sm leading-6 text-muted-foreground">{t("dataDeletionStatus")}</p>
+            {brandManagementAvailable ? (
+              <Link href="/dashboard/brands" prefetch={false} className="text-sm underline underline-offset-4">{t("manageBrandDeletion")}</Link>
+            ) : <p className="text-sm leading-6 text-muted-foreground">{t("dataDeletionStatus")}</p>}
           </section>
         </div>
       </div>

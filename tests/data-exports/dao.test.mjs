@@ -25,9 +25,10 @@ async function insertOwner(db, id, email = profile.email) {
 async function insertBrand(db, ownerId, status, name) {
   const dao = new BrandDao(db);
   const id = randomUUID();
-  await dao.insertBrand(ownerId, id, time);
+  // Seed the historical schema before introducing freeze columns.
+  await queryWithParameters(db, `INSERT INTO brand (id, owner_id, status, revision, entity_version, created_at)
+    VALUES (?, ?, ?, 1, 1, ?)`, [id, ownerId, status, time]);
   await dao.insertVersion(id, 1, { ...fields, name }, time);
-  if (status === "archived") await dao.updateBrand(ownerId, await dao.owned(ownerId, id), "archived", 1);
   return id;
 }
 

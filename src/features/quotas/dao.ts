@@ -63,9 +63,10 @@ export class QuotaDao {
 
   async lockBrand(brandId: string, ownerId?: string) {
     const lock = this.connection.kind === "postgresql" ? " FOR NO KEY UPDATE" : "";
-    const [row] = await this.query(`SELECT status FROM brand WHERE id = ?${ownerId === undefined ? "" : " AND owner_id = ?"}${lock}`,
+    const [row] = await this.query(`SELECT CASE WHEN frozen_at IS NULL THEN status ELSE 'frozen' END AS status
+      FROM brand WHERE id = ?${ownerId === undefined ? "" : " AND owner_id = ?"}${lock}`,
       ownerId === undefined ? [brandId] : [brandId, ownerId]);
-    return row ? z.enum(["active", "archived"]).parse(row.status) : null;
+    return row ? z.enum(["active", "archived", "frozen"]).parse(row.status) : null;
   }
 
   async grant(brandId: string, kind: QuotaKind, version?: number) {
@@ -96,7 +97,7 @@ export class QuotaDao {
   }
 
   async ownerSummary(ownerId: string) {
-    const rows = await this.query(`WITH target AS (SELECT id FROM brand WHERE owner_id = ? AND status = 'active'),
+    const rows = await this.query(`WITH target AS (SELECT id FROM brand WHERE owner_id = ? AND status = 'active' AND frozen_at IS NULL),
       kinds(kind) AS (VALUES ('sampling'), ('generation')), ${ledgerQuery}
       SELECT k.kind, ${grantColumns}, ${ledgerColumns} FROM target t CROSS JOIN kinds k
       LEFT JOIN quota_grant g ON g.brand_id = t.id AND g.kind = k.kind AND g.version = (

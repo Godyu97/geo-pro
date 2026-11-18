@@ -17,6 +17,7 @@ const errorStatuses: Record<BrandErrorCode, number> = {
   SESSION_REQUIRED: 401, SESSION_CHANGED: 409, NOT_FOUND: 404, LIMIT_REACHED: 409,
   VERSION_CONFLICT: 409, OPERATION_CONFLICT: 409, INTAKE_CLOSED: 403, INVALID_INPUT: 400,
   FORBIDDEN: 403, SERVICE_UNAVAILABLE: 503,
+  IDENTITY_UNVERIFIED: 403, REAUTH_REQUIRED: 403, RECOVERY_EXPIRED: 409,
 };
 
 function json(data: unknown, status = 200) {
@@ -26,7 +27,7 @@ function json(data: unknown, status = 200) {
 async function fail(code: BrandErrorCode, traceId?: string, fields?: BrandFieldName[]) {
   const t = await getTranslator("brands");
   const retryable = code === "SERVICE_UNAVAILABLE";
-  const nextStep = code === "SESSION_REQUIRED" || code === "SESSION_CHANGED" ? "signInAgain"
+  const nextStep = code === "SESSION_REQUIRED" || code === "SESSION_CHANGED" || code === "REAUTH_REQUIRED" ? "signInAgain"
     : code === "LIMIT_REACHED" ? "archiveFirst"
     : code === "VERSION_CONFLICT" || code === "OPERATION_CONFLICT" ? "refreshInstruction"
     : retryable ? "retryInstruction" : "reviewInstruction";
@@ -68,7 +69,10 @@ export async function writeBrandResponse(request: Request) {
     return fail("INVALID_INPUT", undefined, [...fields]);
   }
   try {
-    const result = await executeBrandCommand(getConnection(), session.session.user.id, command.data);
+    const result = await executeBrandCommand(getConnection(), session.session.user.id, command.data, {
+      emailVerified: session.session.user.emailVerified,
+      createdAt: session.session.session.createdAt,
+    });
     return "mutation" in result ? json(result.mutation) : fail(result.error);
   } catch {
     return fail("SERVICE_UNAVAILABLE", brandUnavailable().traceId);

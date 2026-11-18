@@ -20,6 +20,7 @@
     "test:data-exports": "node --conditions=react-server --test tests/data-exports/*.test.mjs",
     "verify:maintenance": "node --conditions=react-server scripts/verify-maintenance.mjs",
     "verify:brands": "node --conditions=react-server scripts/verify-brands.mjs",
+    "brands:shorten-recovery": "node --conditions=react-server scripts/brand-deletion.mjs",
     "verify:data-exports": "node --conditions=react-server scripts/verify-data-exports.mjs",
     "test:quotas": "node --conditions=react-server --test tests/quotas/*.test.mjs",
     "verify:quotas": "node --conditions=react-server scripts/verify-quotas.mjs",

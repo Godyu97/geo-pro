@@ -33,6 +33,25 @@ const exportDraftRowSchema = draftRowSchema.extend({
 });
 const summarySchema = brandRowSchema.extend({ name: z.string() });
 const operationRowSchema = z.object({ fingerprint: z.string(), result: z.string() });
+const frozenBrandSchema = z.object({
+  id: brandIdSchema,
+  revision: z.number().int().positive(),
+  frozenAt: z.iso.datetime(),
+  restoreUntil: z.iso.datetime(),
+});
+const deletionStateSchema = brandRowSchema.extend({
+  frozenAt: z.iso.datetime().nullable(),
+  restoreUntil: z.iso.datetime().nullable(),
+}).refine(({ frozenAt, restoreUntil }) => (frozenAt === null) === (restoreUntil === null));
+const deletionImpactSchema = z.object({
+  id: brandIdSchema,
+  revision: z.number().int().positive(),
+  name: z.string(),
+  versions: z.coerce.number().int().nonnegative(),
+  drafts: z.coerce.number().int().nonnegative(),
+  reservations: z.coerce.number().int().nonnegative(),
+  unresolvedAttempts: z.coerce.number().int().nonnegative(),
+});
 const brandColumns = 'b.id, b.status, b.revision, b.entity_version AS "entityVersion", b.created_at AS "createdAt"';
 
 export const brandPageSize = 20;
@@ -64,7 +83,7 @@ export class BrandDao {
   async active(ownerId: string) {
     const [row] = await this.query(`SELECT ${brandColumns}, v.name
       FROM brand b JOIN brand_version v ON v.brand_id = b.id AND v.version = b.entity_version
-      WHERE b.owner_id = ? AND b.status = 'active'`, [ownerId]);
+      WHERE b.owner_id = ? AND b.status = 'active' AND b.frozen_at IS NULL`, [ownerId]);
     return row ? summarySchema.parse(row) : null;
   }
 
@@ -72,7 +91,7 @@ export class BrandDao {
     const before = cursor ? "AND (b.created_at, b.id) < (?, ?)" : "";
     const rows = await this.query(`SELECT ${brandColumns},
       (SELECT v.name FROM brand_version v WHERE v.brand_id = b.id AND v.version = b.entity_version) AS name
-      FROM brand b WHERE b.owner_id = ? AND b.status = 'archived' ${before}
+      FROM brand b WHERE b.owner_id = ? AND b.status = 'archived' AND b.frozen_at IS NULL ${before}
       ORDER BY b.created_at DESC, b.id DESC LIMIT ?`,
     cursor ? [ownerId, cursor.at, cursor.id, brandPageSize + 1] : [ownerId, brandPageSize + 1]);
     const items = z.array(summarySchema).parse(rows);
@@ -84,14 +103,58 @@ export class BrandDao {
   }
 
   async owned(ownerId: string, id: string) {
-    const [row] = await this.query(`SELECT ${brandColumns} FROM brand b WHERE b.owner_id = ? AND b.id = ?`, [ownerId, id]);
+    const [row] = await this.query(`SELECT ${brandColumns} FROM brand b
+      WHERE b.owner_id = ? AND b.id = ? AND b.frozen_at IS NULL`, [ownerId, id]);
     return row ? brandRowSchema.parse(row) : null;
+  }
+
+  async deletionState(ownerId: string, id: string) {
+    const [row] = await this.query(`SELECT ${brandColumns}, b.frozen_at AS "frozenAt", b.restore_until AS "restoreUntil"
+      FROM brand b WHERE b.owner_id = ? AND b.id = ?`, [ownerId, id]);
+    return row ? deletionStateSchema.parse(row) : null;
+  }
+
+  async deletionImpact(ownerId: string, id: string) {
+    const [row] = await this.query(`SELECT b.id, b.revision, v.name,
+      (SELECT count(*) FROM brand_version WHERE brand_id = b.id) AS versions,
+      (SELECT count(*) FROM brand_draft WHERE owner_id = b.owner_id AND scope = b.id) AS drafts,
+      (SELECT count(*) FROM quota_reservation WHERE brand_id = b.id AND state = 'reserved') AS reservations,
+      (SELECT count(*) FROM quota_attempt WHERE brand_id = b.id AND state <> 'known') AS "unresolvedAttempts"
+      FROM brand b JOIN brand_version v ON v.brand_id = b.id AND v.version = b.entity_version
+      WHERE b.owner_id = ? AND b.id = ? AND b.frozen_at IS NULL`, [ownerId, id]);
+    return row ? deletionImpactSchema.parse(row) : null;
+  }
+
+  async frozen(ownerId: string, cursor?: ArchiveCursor) {
+    const before = cursor ? "AND (frozen_at, id) < (?, ?)" : "";
+    const rows = await this.query(`SELECT id, revision, frozen_at AS "frozenAt", restore_until AS "restoreUntil"
+      FROM brand WHERE owner_id = ? AND frozen_at IS NOT NULL ${before}
+      ORDER BY frozen_at DESC, id DESC LIMIT ?`,
+    cursor ? [ownerId, cursor.at, cursor.id, brandPageSize + 1] : [ownerId, brandPageSize + 1]);
+    const items = z.array(frozenBrandSchema).parse(rows);
+    const last = items[brandPageSize - 1];
+    return {
+      items: items.slice(0, brandPageSize),
+      next: items.length > brandPageSize && last ? { at: last.frozenAt, id: last.id } : null,
+    };
+  }
+
+  async updateDeletion(ownerId: string, current: BrandRecord, frozenAt: string | null, restoreUntil: string | null) {
+    const [row] = await this.query(`UPDATE brand SET frozen_at = ?, restore_until = ?, revision = revision + 1
+      WHERE owner_id = ? AND id = ? AND revision = ? RETURNING revision`,
+    [frozenAt, restoreUntil, ownerId, current.id, current.revision]);
+    return row ? z.number().int().positive().parse(row.revision) : null;
+  }
+
+  async rebaseDraft(ownerId: string, id: string, fromRevision: number, toRevision: number) {
+    await this.query("UPDATE brand_draft SET base_revision = ? WHERE owner_id = ? AND scope = ? AND base_revision = ?",
+      [toRevision, ownerId, id, fromRevision]);
   }
 
   async version(ownerId: string, id: string, version?: number) {
     const [row] = await this.query(`SELECT ${brandColumns}, v.name, v.content, v.version, v.created_at AS "versionCreatedAt"
       FROM brand b JOIN brand_version v ON v.brand_id = b.id AND v.version = coalesce(?, b.entity_version)
-      WHERE b.owner_id = ? AND b.id = ?`, [version ?? null, ownerId, id]);
+      WHERE b.owner_id = ? AND b.id = ? AND b.frozen_at IS NULL`, [version ?? null, ownerId, id]);
     return row ? parseVersion(row) : null;
   }
 
@@ -99,7 +162,7 @@ export class BrandDao {
     const after = cursor ? "AND (b.status, b.created_at, b.id, v.version) > (?, ?, ?, ?)" : "";
     const rows = await this.query(`SELECT ${brandColumns}, v.name, v.content, v.version, v.created_at AS "versionCreatedAt"
       FROM brand b JOIN brand_version v ON v.brand_id = b.id
-      WHERE b.owner_id = ? AND b.status IN ('active', 'archived') ${after}
+      WHERE b.owner_id = ? AND b.status IN ('active', 'archived') AND b.frozen_at IS NULL ${after}
       ORDER BY b.status, b.created_at, b.id, v.version LIMIT ?`,
     cursor ? [ownerId, cursor.status, cursor.createdAt, cursor.id, cursor.version, limit] : [ownerId, limit]);
     return rows.map(parseVersion);
@@ -107,11 +170,9 @@ export class BrandDao {
 
   async exportDrafts(ownerId: string, limit: number, after: string) {
     const rows = await this.query(`SELECT d.scope, d.version, d.base_revision AS "baseRevision", d.step, d.content, d.updated_at AS "updatedAt"
-      FROM brand_draft d
-      WHERE d.owner_id = ? AND d.scope > ? AND (d.scope = 'new' OR EXISTS (
-        SELECT 1 FROM brand b WHERE b.id = d.scope AND b.owner_id = d.owner_id AND b.status IN ('active', 'archived')
-      ))
-      ORDER BY d.scope LIMIT ?`, [ownerId, after, limit]);
+      FROM brand_draft d LEFT JOIN brand b ON b.id = d.scope AND b.owner_id = ? AND b.frozen_at IS NULL
+      WHERE d.owner_id = ? AND d.scope > ? AND (d.scope = 'new' OR b.id IS NOT NULL)
+      ORDER BY d.scope LIMIT ?`, [ownerId, ownerId, after, limit]);
     return rows.map((row) => {
       const { content, ...draft } = exportDraftRowSchema.parse(row);
       return { ...draft, fields: brandDraftFieldsSchema.parse(JSON.parse(content)) };
@@ -120,7 +181,9 @@ export class BrandDao {
 
   async draft(ownerId: string, scope: string) {
     const [row] = await this.query(`SELECT version, base_revision AS "baseRevision", step, content
-      FROM brand_draft WHERE owner_id = ? AND scope = ?`, [ownerId, scope]);
+      FROM brand_draft d WHERE d.owner_id = ? AND d.scope = ? AND (d.scope = 'new' OR EXISTS (
+        SELECT 1 FROM brand b WHERE b.id = d.scope AND b.owner_id = d.owner_id AND b.frozen_at IS NULL
+      ))`, [ownerId, scope]);
     if (!row) return null;
     const { content, ...rest } = draftRowSchema.parse(row);
     return { ...rest, fields: brandDraftFieldsSchema.parse(JSON.parse(content)) };
@@ -145,7 +208,7 @@ export class BrandDao {
 
   async updateBrand(ownerId: string, current: BrandRecord, status: BrandRecord["status"], entityVersion: number) {
     const [row] = await this.query(`UPDATE brand SET status = ?, entity_version = ?, revision = revision + 1
-      WHERE owner_id = ? AND id = ? AND revision = ?
+      WHERE owner_id = ? AND id = ? AND revision = ? AND frozen_at IS NULL
       RETURNING id, status, revision, entity_version AS "entityVersion", created_at AS "createdAt"`,
     [status, entityVersion, ownerId, current.id, current.revision]);
     return row ? brandRowSchema.parse(row) : null;

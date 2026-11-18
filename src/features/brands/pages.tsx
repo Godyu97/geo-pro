@@ -3,6 +3,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Building2 } from "lucide-react";
+import { SignOutButton } from "@/components/layout/sign-out-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,7 +12,10 @@ import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { BrandForm } from "./brand-form";
 import { BrandStatusButton } from "./brand-status-button";
+import { brandRecoveryError } from "./commands";
 import { archiveCursorSchema, brandIdSchema, brandVersionParam } from "./contracts";
+import { BrandDeletionButtons } from "./deletion-buttons";
+import { brandErrorMessage } from "./error-messages";
 import { brandFixtureOrigin } from "./intake";
 import { readBrandData } from "./service";
 
@@ -22,7 +26,7 @@ function BrandFrame({ title, back, backLabel, children }: { title: string; back:
   return (
     <div className="space-y-6">
       <header className="space-y-3">
-        <Link href={back} className="inline-flex items-center gap-2 rounded-sm text-sm text-muted-foreground underline-offset-4 hover:underline">
+        <Link href={back} prefetch={false} className="inline-flex items-center gap-2 rounded-sm text-sm text-muted-foreground underline-offset-4 hover:underline">
           <ArrowLeft aria-hidden="true" className="size-4" />
           {backLabel}
         </Link>
@@ -66,13 +70,15 @@ function BrandLoadFailure({ t, href }: { t: Translate; href: string }) {
 
 export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Query> }) {
   const { user } = await requireSession();
+  const locale = await getLocale();
   const t = await getTranslator("brands");
   if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
   const query = await searchParams;
   const cursor = archiveCursorSchema.safeParse({ at: query.before, id: query.id });
+  const frozenCursor = archiveCursorSchema.safeParse({ at: query.frozenBefore, id: query.frozenId });
   const result = await readBrandData(async (dao) => {
-    const [active, archive] = await Promise.all([dao.active(user.id), dao.archived(user.id, cursor.data)]);
-    return { active, archive };
+    const [active, archive, frozen] = await Promise.all([dao.active(user.id), dao.archived(user.id, cursor.data), dao.frozen(user.id, frozenCursor.data)]);
+    return { active, archive, frozen };
   });
   return (
     <BrandFrame title={t("title")} back="/dashboard" backLabel={t("workspace")}>
@@ -84,9 +90,9 @@ export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Q
             {result.data.active ? (
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="min-w-0 break-words text-lg">{result.data.active.name}</p>
-                <Button asChild><Link href={"/dashboard/brands/" + result.data.active.id}>{t("viewBrand")}</Link></Button>
+                <Button asChild><Link href={"/dashboard/brands/" + result.data.active.id} prefetch={false}>{t("viewBrand")}</Link></Button>
               </div>
-            ) : <Button asChild><Link href="/dashboard/brands/new">{t("newOrResume")}</Link></Button>}
+            ) : <Button asChild><Link href="/dashboard/brands/new" prefetch={false}>{t("newOrResume")}</Link></Button>}
           </section>
           <section aria-labelledby="brand-archived" className="max-w-3xl space-y-3">
             <h2 id="brand-archived" className="font-semibold">{t("archivedBrands")}</h2>
@@ -94,15 +100,39 @@ export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Q
               <ul className="divide-y rounded-xl border bg-card">
                 {result.data.archive.items.map((brand) => (
                   <li key={brand.id}>
-                    <Link href={"/dashboard/brands/" + brand.id} className="block rounded-sm p-4 text-sm break-words underline-offset-4 hover:underline">{brand.name}</Link>
+                    <Link href={"/dashboard/brands/" + brand.id} prefetch={false} className="block rounded-sm p-4 text-sm break-words underline-offset-4 hover:underline">{brand.name}</Link>
                   </li>
                 ))}
               </ul>
             )}
             {result.data.archive.next && (
               <Button asChild variant="outline">
-                <Link href={{ pathname: "/dashboard/brands", query: { before: result.data.archive.next.at, id: result.data.archive.next.id } }}>
+                <Link href={{ pathname: "/dashboard/brands", query: { before: result.data.archive.next.at, id: result.data.archive.next.id,
+                  frozenBefore: frozenCursor.data?.at, frozenId: frozenCursor.data?.id } }} prefetch={false}>
                   {t("olderBrands")}
+                </Link>
+              </Button>
+            )}
+          </section>
+          <section aria-labelledby="brand-frozen" className="max-w-3xl space-y-3">
+            <h2 id="brand-frozen" className="font-semibold">{t("frozenBrands")}</h2>
+            {result.data.frozen.items.length === 0 ? <p className="text-sm text-muted-foreground">{t("noFrozenBrands")}</p> : (
+              <ul className="divide-y rounded-xl border bg-card">
+                {result.data.frozen.items.map((brand) => (
+                  <li key={brand.id}>
+                    <Link href={"/dashboard/brands/" + brand.id + "/recovery"} prefetch={false} className="block space-y-1 rounded-sm p-4 text-sm underline-offset-4 hover:underline">
+                      <span className="block">{t("brandFrozenAt", { time: formatDateTime(locale, new Date(brand.frozenAt)) })}</span>
+                      <span className="block break-all text-muted-foreground">{brand.id}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {result.data.frozen.next && (
+              <Button asChild variant="outline">
+                <Link href={{ pathname: "/dashboard/brands", query: { frozenBefore: result.data.frozen.next.at, frozenId: result.data.frozen.next.id,
+                  before: cursor.data?.at, id: cursor.data?.id } }} prefetch={false}>
+                  {t("olderFrozenBrands")}
                 </Link>
               </Button>
             )}
@@ -128,7 +158,7 @@ export async function NewBrandPage() {
       {"unavailable" in result ? <BrandLoadFailure t={t} href="/dashboard/brands/new" /> : result.data.active ? (
         <div className="max-w-3xl space-y-3 rounded-xl border bg-card p-5">
           <p role="status" className="text-sm leading-6">{t("limitReached")} {t("archiveFirst")}</p>
-          <Button asChild><Link href={"/dashboard/brands/" + result.data.active.id}>{t("viewBrand")}</Link></Button>
+          <Button asChild><Link href={"/dashboard/brands/" + result.data.active.id} prefetch={false}>{t("viewBrand")}</Link></Button>
         </div>
       ) : <BrandForm key={user.id} actorId={user.id} draft={result.data.draft} target={null} messages={getMessages(locale).brands} />}
     </BrandFrame>
@@ -208,13 +238,98 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
         <div className="space-y-4 rounded-xl border bg-card p-5">
           <p className="text-sm leading-6 text-muted-foreground">{t("monitorUnavailable")}</p>
           <div className="flex flex-wrap gap-2">
-            {!snapshot && brand.status === "active" && <Button asChild><Link href={href + "?edit=1"}>{t("edit")}</Link></Button>}
-            {snapshot && <Button asChild><Link href={href}>{t("currentVersion")}</Link></Button>}
-            {brand.version > 1 && <Button asChild variant="outline"><Link href={href + "?version=" + (brand.version - 1)}>{t("previousVersion")}</Link></Button>}
+            {!snapshot && brand.status === "active" && <Button asChild><Link href={href + "?edit=1"} prefetch={false}>{t("edit")}</Link></Button>}
+            {snapshot && <Button asChild><Link href={href} prefetch={false}>{t("currentVersion")}</Link></Button>}
+            {brand.version > 1 && <Button asChild variant="outline"><Link href={href + "?version=" + (brand.version - 1)} prefetch={false}>{t("previousVersion")}</Link></Button>}
           </div>
           {!snapshot && <BrandStatusButton brand={{ id, status: brand.status, revision: brand.revision }} actorId={user.id} messages={messages} />}
+          {!snapshot && <Button asChild variant="outline"><Link href={href + "/delete"} prefetch={false}>{t("reviewDeletion")}</Link></Button>}
         </div>
       </div>
+    </BrandFrame>
+  );
+}
+
+export async function BrandDeletionPage({ params }: { params: Promise<{ id: string }> }) {
+  const { user } = await requireSession();
+  const locale = await getLocale();
+  const t = await getTranslator("brands");
+  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  const { id } = await params;
+  if (!brandIdSchema.safeParse(id).success) notFound();
+  const href = "/dashboard/brands/" + id;
+  const result = await readBrandData((dao) => dao.deletionImpact(user.id, id));
+  if ("unavailable" in result) return (
+    <BrandFrame title={t("deletionImpact")} back={href} backLabel={t("viewBrand")}>
+      <BrandLoadFailure t={t} href={href + "/delete"} />
+    </BrandFrame>
+  );
+  if (!result.data) notFound();
+
+  const impact = result.data;
+  const rows = [
+    [t("fieldName"), impact.name],
+    [t("deletionBrandData"), t("deletionBrandCounts", { versions: formatNumber(locale, impact.versions), drafts: formatNumber(locale, impact.drafts) })],
+    [t("deletionAttachments"), t("deletionUnavailableScope")],
+    [t("deletionReports"), t("deletionUnavailableScope")],
+    [t("deletionInFlight"), t("deletionInFlightCounts", { reservations: formatNumber(locale, impact.reservations), attempts: formatNumber(locale, impact.unresolvedAttempts) })],
+    [t("deletionRetained"), t("deletionRetainedDetails")],
+  ];
+  return (
+    <BrandFrame title={t("deletionImpact")} back={href} backLabel={t("viewBrand")}>
+      <FixtureNotice t={t} />
+      <section aria-label={t("deletionImpact")} className="max-w-3xl space-y-5 rounded-xl border bg-card p-5">
+        <p className="text-sm leading-6">{t("deletionConsequences")}</p>
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          {rows.map(([label, value]) => (
+            <div key={label} className="min-w-0 space-y-1 border-t pt-3">
+              <dt className="font-medium">{label}</dt>
+              <dd className="wrap-anywhere text-muted-foreground">{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <BrandDeletionButtons action="freeze" id={id} revision={impact.revision} actorId={user.id} messages={getMessages(locale).brands} />
+      </section>
+    </BrandFrame>
+  );
+}
+
+export async function BrandRecoveryPage({ params }: { params: Promise<{ id: string }> }) {
+  const { user, session } = await requireSession();
+  const locale = await getLocale();
+  const t = await getTranslator("brands");
+  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  const { id } = await params;
+  if (!brandIdSchema.safeParse(id).success) notFound();
+  const href = "/dashboard/brands/" + id + "/recovery";
+  const result = await readBrandData((dao) => dao.deletionState(user.id, id));
+  if ("unavailable" in result) return (
+    <BrandFrame title={t("recoveryTitle")} back="/dashboard/brands" backLabel={t("allBrands")}>
+      <BrandLoadFailure t={t} href={href} />
+    </BrandFrame>
+  );
+  if (!result.data?.frozenAt || !result.data.restoreUntil) notFound();
+  const { frozenAt, restoreUntil, revision } = result.data;
+  const error = brandRecoveryError({ frozenAt, restoreUntil },
+    { emailVerified: user.emailVerified, createdAt: session.createdAt }, new Date());
+  return (
+    <BrandFrame title={t("recoveryTitle")} back="/dashboard/brands" backLabel={t("allBrands")}>
+      <FixtureNotice t={t} />
+      <section aria-label={t("recoveryTitle")} className="max-w-3xl space-y-4 rounded-xl border bg-card p-5">
+        <p className="text-sm leading-6">{t("frozenDescription")}</p>
+        <dl className="space-y-3 text-sm">
+          <div><dt className="font-medium">{t("brandReference")}</dt><dd className="break-all">{id}</dd></div>
+          <div><dt className="font-medium">{t("recoveryDeadline")}</dt>
+            <dd><time dateTime={restoreUntil}>{formatDateTime(locale, new Date(restoreUntil))}</time></dd>
+          </div>
+        </dl>
+        {error ? (
+          <div className="space-y-3">
+            <p role="status" className="text-sm leading-6">{t(brandErrorMessage[error])}</p>
+            {error === "REAUTH_REQUIRED" && <SignOutButton returnTo={href} label={t("reauthenticate")} />}
+          </div>
+        ) : <BrandDeletionButtons action="recover" id={id} revision={revision} actorId={user.id} messages={getMessages(locale).brands} />}
+      </section>
     </BrandFrame>
   );
 }

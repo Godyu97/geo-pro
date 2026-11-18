@@ -33,7 +33,7 @@ export default async function DashboardPage() {
           {t("welcome")}
         </p>
         <div className="mt-6 flex flex-wrap gap-2">
-          <Button asChild><Link href="/dashboard/brands">{brands("title")}</Link></Button>
+          <Button asChild><Link href="/dashboard/brands" prefetch={false}>{brands("title")}</Link></Button>
           <Button asChild variant="outline" className="bg-white/70">
             <a href="#modules">
               {t("moduleStatus")}

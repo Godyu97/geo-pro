@@ -18,7 +18,7 @@ export async function updateQuota(connection: DatabaseConnection, actorId: strin
     const dao = new QuotaDao(transaction);
     const { brandId, kind } = parsed;
     const brandStatus = await dao.lockBrand(brandId);
-    if (!brandStatus) return { error: "NOT_FOUND" };
+    if (!brandStatus || brandStatus === "frozen") return { error: "NOT_FOUND" };
 
     const existing = await dao.previousChange(parsed);
     if (existing) {

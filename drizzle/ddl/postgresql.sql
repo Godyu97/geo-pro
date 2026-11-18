@@ -79,6 +79,8 @@ CREATE TABLE "brand" (
 	"revision" integer NOT NULL,
 	"entity_version" integer NOT NULL,
 	"created_at" text NOT NULL,
+	"frozen_at" text,
+	"restore_until" text,
 	CONSTRAINT "brand_status_check" CHECK ("brand"."status" in ('active', 'archived')),
 	CONSTRAINT "brand_revision_check" CHECK ("brand"."entity_version" > 0 and "brand"."revision" >= "brand"."entity_version")
 );
@@ -196,5 +198,6 @@ CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
 CREATE INDEX "maintenance_audit_actor_time_idx" ON "maintenance_audit" USING btree ("actor_id","occurred_at","id");
-CREATE UNIQUE INDEX "brand_active_owner_uidx" ON "brand" USING btree ("owner_id") WHERE "brand"."status" = 'active';
+CREATE UNIQUE INDEX "brand_active_owner_uidx" ON "brand" USING btree ("owner_id") WHERE "brand"."status" = 'active' and "brand"."frozen_at" is null;
+CREATE INDEX "brand_owner_frozen_idx" ON "brand" USING btree ("owner_id","frozen_at","id") WHERE "brand"."frozen_at" is not null;
 CREATE INDEX "brand_owner_status_created_idx" ON "brand" USING btree ("owner_id","status","created_at","id");

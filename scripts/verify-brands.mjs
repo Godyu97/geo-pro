@@ -25,13 +25,14 @@ function request(path, { actor, data, origin = baseURL, locale = "en", cookie } 
 }
 
 async function actor() {
+  const credentials = { email: `b04-${randomUUID()}@example.invalid`, password: randomBytes(24).toString("base64url") };
   const response = await request("/api/auth/sign-up/email", {
-    data: { name: "Synthetic owner", email: `b04-${randomUUID()}@example.invalid`, password: randomBytes(24).toString("base64url") },
+    data: { name: "Synthetic owner", ...credentials },
   });
   assert.equal(response.status, 200, "Disposable account registration must succeed");
   const cookie = response.headers.getSetCookie().map((value) => value.split(";", 1)[0]).join("; ");
   assert.ok(cookie.includes("session_token="), "Real authentication cookie is required");
-  return { cookie, id: (await response.json()).user.id };
+  return { cookie, id: (await response.json()).user.id, credentials };
 }
 
 function mutation(you, command) {
@@ -45,6 +46,59 @@ async function assertError(response, status, code) {
   assert.equal(body.error.code, code);
   assert.equal(body.error.externalCostPossible, false);
   return body;
+}
+
+async function verifyDeletion(fixture, owner, other, brand) {
+  const href = "/dashboard/brands/" + brand.id;
+  const resource = "/api/brands?id=" + brand.id;
+  const freeze = mutation(owner, { action: "freeze", brandId: brand.id, expectedBrandRevision: 1, confirmed: true });
+  for (const [locale, heading] of [["zh-CN", "预览删除影响"], ["en", "Review deletion impact"]]) {
+    const page = await request(href + "/delete", { actor: owner, locale });
+    assert.equal(page.status, 200);
+    assert.equal(page.headers.get("cache-control"), "private, no-store");
+    assert.match(await page.text(), new RegExp(heading));
+  }
+  assert.equal((await request(resource, { actor: owner })).status, 200);
+  await assertError(await request("/api/brands", { actor: owner, data: { ...freeze, confirmed: false } }), 400, "INVALID_INPUT");
+  await assertError(await request("/api/brands", { actor: other, data: { ...freeze, actorId: other.id } }), 404, "NOT_FOUND");
+  const foreignPreview = await request(href + "/delete", { actor: other });
+  assert.doesNotMatch(await foreignPreview.text(), /Synthetic B04|Confirm deletion and freeze access/);
+  const generated = await request("/api/data-exports", {
+    actor: owner, data: { actorId: owner.id, scopes: ["brands"], locale: "en", previousId: null },
+  });
+  assert.equal(generated.status, 201);
+  const download = "/api/data-exports/" + (await generated.json()).id;
+  assert.equal((await request(download, { actor: owner })).status, 200);
+
+  const response = await request("/api/brands", { actor: owner, data: freeze });
+  assert.equal(response.status, 200);
+  const deletion = await response.json();
+  assert.deepEqual(await (await request("/api/brands", { actor: owner, data: freeze })).json(), deletion);
+  await assertError(await request(resource + "&version=1", { actor: owner }), 404, "NOT_FOUND");
+  assert.equal((await request(download, { actor: owner })).status, 404);
+  const oldPage = await request(href + "?version=1", { actor: owner });
+  assert.doesNotMatch(await oldPage.text(), /Synthetic B04/);
+  const recovery = await request(href + "/recovery", { actor: owner, locale: "zh-CN" });
+  assert.equal(recovery.headers.get("cache-control"), "private, no-store");
+  const recoveryHtml = await recovery.text();
+  assert.match(recoveryHtml, /恢复截止时间/);
+  assert.doesNotMatch(recoveryHtml, /Synthetic B04|Synthetic brand verification only/);
+  const recover = mutation(owner, { action: "recover", brandId: brand.id, expectedBrandRevision: deletion.revision });
+  await assertError(await request("/api/brands", { actor: owner, data: recover }), 403, "IDENTITY_UNVERIFIED");
+  await assertError(await request("/api/brands", { actor: other, data: { ...recover, actorId: other.id } }), 404, "NOT_FOUND");
+  assert.doesNotMatch(await (await request(href + "/recovery", { actor: other })).text(), /Recovery deadline/);
+
+  // Fixture an already verified identity. Session renewal still uses the real Auth route.
+  await queryWithParameters(fixture.connection, 'UPDATE "user" SET email_verified = TRUE WHERE id = ?', [owner.id]);
+  await assertError(await request("/api/brands", { actor: owner, data: recover }), 403, "REAUTH_REQUIRED");
+  const login = await request("/api/auth/sign-in/email", { data: owner.credentials });
+  assert.equal(login.status, 200);
+  const refreshed = { ...owner, cookie: login.headers.getSetCookie().map((value) => value.split(";", 1)[0]).join("; ") };
+  const restored = await request("/api/brands", { actor: refreshed, data: recover });
+  assert.equal(restored.status, 200);
+  assert.equal((await restored.json()).restoreUntil, null);
+  assert.deepEqual((await (await request(resource, { actor: refreshed })).json()).fields, fields);
+  assert.equal((await request(download, { actor: refreshed })).status, 404);
 }
 
 async function verify(kind, enabled) {
@@ -109,6 +163,10 @@ async function verify(kind, enabled) {
       actor: other, data: mutation(other, { action: "archive", brandId: brand.id, expectedBrandRevision: 1 }),
     }), 404, "NOT_FOUND");
     await assertError(await request("/api/brands", { actor: other, data: create }), 409, "SESSION_CHANGED");
+
+    phase = `${kind}: bilingual preview, deletion freeze, old download revocation and renewed session recovery`;
+    await verifyDeletion(fixture, owner, other, brand);
+    console.log(`PASS: ${phase}`);
 
     phase = `${kind}: real storage failure and revoked sessions`;
     await fixture.connection.query("ALTER TABLE brand_version RENAME TO brand_test_unavailable");

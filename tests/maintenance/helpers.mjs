@@ -84,5 +84,7 @@ export async function structure(connection) {
       indexes: await connection.query("SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' ORDER BY tablename, indexname"),
     };
   }
-  return connection.query("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name != '__drizzle_migrations' ORDER BY type, name");
+  const definitions = await connection.query("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name != '__drizzle_migrations' ORDER BY type, name");
+  // SQLite places ADD COLUMN definitions on the same line in sqlite_master.
+  return definitions.map((row) => ({ ...row, sql: row.sql.replace(/\s+/g, " ") }));
 }

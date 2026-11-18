@@ -37,6 +37,7 @@ export async function applyQuotaLedger(
     const dao = new QuotaDao(transaction);
     const brand = await dao.lockBrand(command.brandId, opaqueIdSchema.parse(ownerId));
     if (!brand) return "not-found";
+    if (brand === "frozen" && (command.action === "reserve" || command.action === "start")) return "not-entitled";
     const time = now();
     const reservation = await dao.reservation(command);
 

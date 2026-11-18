@@ -1,5 +1,5 @@
 import { test as base, expect, type BrowserContext, type Page } from "@playwright/test";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { expectTextContrast } from "./appearance-helpers";
 import { registerTestAccount, submitTestAccountForm } from "./auth-helpers";
@@ -10,7 +10,11 @@ const synthetic = "北岸合成品牌 Studio 🚀";
 const description = "Synthetic brand for local testing only.";
 
 const test = base.extend<{
-  accounts: { create: (context: BrowserContext) => Promise<{ id: string; email: string; password: string }>; expire: (id: string) => Promise<void> };
+  accounts: {
+    create: (context: BrowserContext) => Promise<{ id: string; email: string; password: string }>;
+    expire: (id: string) => Promise<void>;
+    verifyEmail: (id: string) => Promise<void>;
+  };
 }>({
   accounts: async ({}, provide) => {
     const url = URL.parse(process.env.DATABASE_URL ?? "");
@@ -30,6 +34,9 @@ const test = base.extend<{
         },
         async expire(id) {
           await sql`update session set expires_at = ${new Date(Date.now() - 60_000)} where user_id = ${id}`;
+        },
+        async verifyEmail(id) {
+          await sql`update "user" set email_verified = true where id = ${id}`;
         },
       });
     } finally {
@@ -236,3 +243,95 @@ test("owner can edit, view old versions, archive and restore while another accou
     await other.close();
   }
 });
+
+const deletionCopy = {
+  "zh-CN": {
+    review: "预览品牌删除", impact: "预览删除影响", cancel: "取消删除",
+    confirm: "确认删除并冻结访问", recovery: "品牌恢复", deadline: "恢复截止时间（上海时间）",
+    reauthenticate: "退出以重新登录", restore: "恢复品牌访问",
+  },
+  en: {
+    review: "Review brand deletion", impact: "Review deletion impact", cancel: "Cancel deletion",
+    confirm: "Confirm deletion and freeze access", recovery: "Brand recovery", deadline: "Recovery deadline (Shanghai time)",
+    reauthenticate: "Sign out to sign in again", restore: "Restore brand access",
+  },
+} as const;
+
+for (const locale of ["zh-CN", "en"] as const) {
+  const current = deletionCopy[locale];
+  const otherLocale = locale === "en" ? "zh-CN" : "en";
+  for (const width of [375, 768, 1440]) {
+    test(`${locale}: brand deletion and recovery at ${width}px`, async ({ page, context, accounts }) => {
+      const account = await accounts.create(context);
+      await accounts.verifyEmail(account.id); // Verified identity fixture, with real sign-in for recovery.
+      await context.addCookies([{ name: "geo-locale", value: locale, url: baseURL }]);
+      await page.setViewportSize({ width, height: 900 });
+      const saved = await context.request.post("/api/brands", {
+        headers: { Origin: baseURL },
+        data: {
+          action: "submit", target: null, expectedDraft: null, actorId: account.id, operationId: randomUUID(),
+          fields: { name: synthetic, description, website: "", aliases: [], region: "CN", language: "zh-CN", competitors: [], questions: [] },
+        },
+      });
+      expect(saved.status()).toBe(200);
+      const { id } = await saved.json();
+      const href = brands + "/" + id;
+      const expectNoOverflow = async () => expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+      await page.goto(href);
+      await page.getByRole("link", { name: current.review, exact: true }).click();
+      await expect(page.getByRole("heading", { name: current.impact, exact: true })).toBeVisible();
+      await expectTextContrast(page);
+      await expectNoOverflow();
+      const cancel = page.getByRole("link", { name: current.cancel, exact: true });
+      await cancel.focus();
+      await expect(cancel).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("heading", { name: synthetic, exact: true })).toBeVisible();
+
+      await page.getByRole("link", { name: current.review, exact: true }).click();
+      await label(page, copy[locale].interfaceLanguage).selectOption(otherLocale);
+      await expect(page.getByRole("heading", { name: deletionCopy[otherLocale].impact, exact: true })).toBeVisible();
+      await expect(page).toHaveURL(href + "/delete");
+      await label(page, copy[otherLocale].interfaceLanguage).selectOption(locale);
+      const confirm = button(page, current.confirm);
+      await expect(confirm).toBeEnabled();
+      if (width === 375) {
+        await page.route("**/api/brands", (route) => route.fulfill({
+          status: 503, json: { error: { code: "SERVICE_UNAVAILABLE" } },
+        }), { times: 1 });
+        await confirm.click();
+        await expect(page.locator('main [role="alert"]')).toContainText(copy[locale].unavailable);
+        expect((await context.request.get("/api/brands?id=" + id)).status()).toBe(200);
+      }
+      await confirm.focus();
+      await expect(confirm).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL(href + "/recovery");
+      await expect(page.getByRole("heading", { name: current.recovery, exact: true })).toBeVisible();
+      await expect(page.getByText(current.deadline, { exact: true })).toBeVisible();
+      await expect(page.getByRole("region", { name: current.recovery })).not.toContainText(synthetic);
+      await expectNoOverflow();
+      await expectTextContrast(page);
+      await expect(button(page, current.restore)).toHaveCount(0);
+
+      if (width === 375) {
+        await page.goBack();
+        await expect(page).toHaveURL(href);
+        await expect(page.getByRole("heading", { name: locale === "en" ? "Page not found" : "找不到这个页面", exact: true })).toBeVisible();
+        await expect(page.getByRole("heading", { name: synthetic, exact: true })).toHaveCount(0);
+        await page.goto(href + "/recovery");
+      }
+      await button(page, current.reauthenticate).click();
+      await expect(page).toHaveURL(/\/login\?returnTo=/);
+      await label(page, copy[locale].email).fill(account.email);
+      await label(page, copy[locale].password).fill(account.password);
+      const login = await submitTestAccountForm(page, button(page, copy[locale].signIn), "/api/auth/sign-in/email");
+      expect(login.status()).toBe(200);
+      await expect(page).toHaveURL(href + "/recovery");
+      await button(page, current.restore).click();
+      await expect(page).toHaveURL(href);
+      await expect(page.getByRole("heading", { name: synthetic, exact: true })).toBeVisible();
+    });
+  }
+}

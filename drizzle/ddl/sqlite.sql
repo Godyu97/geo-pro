@@ -86,12 +86,15 @@ CREATE TABLE `brand` (
 	`revision` integer NOT NULL,
 	`entity_version` integer NOT NULL,
 	`created_at` text NOT NULL,
+	`frozen_at` text,
+	`restore_until` text,
 	FOREIGN KEY (`owner_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "brand_status_check" CHECK("brand"."status" in ('active', 'archived')),
 	CONSTRAINT "brand_revision_check" CHECK("brand"."entity_version" > 0 and "brand"."revision" >= "brand"."entity_version")
 );
 
-CREATE UNIQUE INDEX `brand_active_owner_uidx` ON `brand` (`owner_id`) WHERE "brand"."status" = 'active';
+CREATE UNIQUE INDEX `brand_active_owner_uidx` ON `brand` (`owner_id`) WHERE "brand"."status" = 'active' and "brand"."frozen_at" is null;
+CREATE INDEX `brand_owner_frozen_idx` ON `brand` (`owner_id`,`frozen_at`,`id`) WHERE "brand"."frozen_at" is not null;
 CREATE INDEX `brand_owner_status_created_idx` ON `brand` (`owner_id`,`status`,`created_at`,`id`);
 CREATE TABLE `brand_draft` (
 	`owner_id` text NOT NULL,

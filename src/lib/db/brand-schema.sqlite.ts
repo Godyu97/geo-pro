@@ -9,10 +9,13 @@ export const brand = sqliteTable("brand", {
   revision: integer("revision").notNull(),
   entityVersion: integer("entity_version").notNull(),
   createdAt: text("created_at").notNull(),
+  frozenAt: text("frozen_at"),
+  restoreUntil: text("restore_until"),
 }, (table) => [
   check("brand_status_check", sql`${table.status} in ('active', 'archived')`),
   check("brand_revision_check", sql`${table.entityVersion} > 0 and ${table.revision} >= ${table.entityVersion}`),
-  uniqueIndex("brand_active_owner_uidx").on(table.ownerId).where(sql`${table.status} = 'active'`),
+  uniqueIndex("brand_active_owner_uidx").on(table.ownerId).where(sql`${table.status} = 'active' and ${table.frozenAt} is null`),
+  index("brand_owner_frozen_idx").on(table.ownerId, table.frozenAt, table.id).where(sql`${table.frozenAt} is not null`),
   index("brand_owner_status_created_idx").on(table.ownerId, table.status, table.createdAt, table.id),
 ]);
 

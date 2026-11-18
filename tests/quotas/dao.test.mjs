@@ -33,9 +33,12 @@ async function measureOwnerRead(db, owner, outsideBrand, otherOwner, operator) {
     if (size === 10) await updateQuota(db, operator, command, now);
     const brands = size === 10 ? [outsideBrand] : Array.from({ length: 49 }, randomUUID);
     if (size > 10) {
+      // Exercise the active-owner index after ANALYZE with enough metadata
+      // to distinguish it from a scan of a one-page brand table.
+      const unrelated = [...brands, ...Array.from({ length: 500 }, randomUUID)];
       await queryWithParameters(db, `INSERT INTO brand (id, owner_id, status, revision, entity_version, created_at) VALUES
-        ${brands.map(() => "(?, ?, 'archived', 1, 1, ?)").join(", ")}`,
-      brands.flatMap((id) => [id, otherOwner, now()]));
+        ${unrelated.map(() => "(?, ?, 'archived', 1, 1, ?)").join(", ")}`,
+      unrelated.flatMap((id) => [id, otherOwner, now()]));
       await queryWithParameters(db, `INSERT INTO quota_grant
         (brand_id, kind, version, action, operation_id, fingerprint, actor_id, reason, count_limit, budget_minor, currency, expires_at, changed_at)
         VALUES ${brands.map(() => "(?, 'sampling', 1, 'set', ?, 'synthetic', ?, 'pilot-approval', 10, 0, 'CNY', ?, ?)").join(", ")}`,
@@ -46,7 +49,7 @@ async function measureOwnerRead(db, owner, outsideBrand, otherOwner, operator) {
       (brand_id, kind, id, grant_version, upper_minor, state, created_at) VALUES
       ${rows.map(() => "(?, 'sampling', ?, 1, 0, 'reserved', ?)").join(", ")}`,
     rows.flat());
-    if (db.kind === "postgresql") await db.query("ANALYZE quota_reservation, quota_attempt, quota_grant");
+    if (db.kind === "postgresql") await db.query("ANALYZE brand, quota_reservation, quota_attempt, quota_grant");
     const received = [];
     const monitored = new QuotaDao({
       kind: db.kind,

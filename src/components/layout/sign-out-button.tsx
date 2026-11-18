@@ -5,9 +5,10 @@ import { LoaderCircle, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth/client";
+import { safeReturnTo } from "@/lib/auth/return-to";
 import { useLocale } from "@/lib/i18n/client";
 
-export function SignOutButton() {
+export function SignOutButton({ returnTo, label }: { returnTo?: string; label?: string } = {}) {
   const { t } = useLocale();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(false);
@@ -24,7 +25,8 @@ export function SignOutButton() {
         setError(true);
         return;
       }
-      window.location.replace("/login");
+      const target = returnTo ? "/login?" + new URLSearchParams({ returnTo: safeReturnTo(returnTo) }) : "/login";
+      window.location.replace(target);
     } catch {
       setError(true);
     } finally {
@@ -45,7 +47,7 @@ export function SignOutButton() {
         ) : (
           <LogOut aria-hidden="true" />
         )}
-        <span>{t("signOut")}</span>
+        <span>{label ?? t("signOut")}</span>
       </Button>
     </div>
   );

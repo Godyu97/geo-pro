@@ -2,10 +2,52 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
-import type { BrandCommand, BrandErrorCode, BrandMutation } from "./contracts.ts";
+import { MaintenanceDao } from "../maintenance/dao.ts";
+import { brandDeadlineSchema, type BrandCommand, type BrandErrorCode, type BrandMutation } from "./contracts.ts";
 import { BrandDao, type BrandRecord } from "./dao.ts";
 
 type CommandResult = { mutation: BrandMutation } | { error: BrandErrorCode };
+type DeletionState = NonNullable<Awaited<ReturnType<BrandDao["deletionState"]>>>;
+export type BrandRecoverySession = { emailVerified: boolean; createdAt: Date };
+const dayMs = 24 * 60 * 60 * 1000;
+const recoveryLoginMs = 5 * 60 * 1000;
+
+export function brandRecoveryError(brand: { frozenAt: string; restoreUntil: string }, session: BrandRecoverySession | undefined, now: Date) {
+  if (now.getTime() >= Date.parse(brand.restoreUntil)) return "RECOVERY_EXPIRED";
+  if (!session?.emailVerified) return "IDENTITY_UNVERIFIED";
+  const loginTime = session.createdAt.getTime();
+  if (!(loginTime > Date.parse(brand.frozenAt) && loginTime <= now.getTime() && now.getTime() - loginTime < recoveryLoginMs)) {
+    return "REAUTH_REQUIRED";
+  }
+  return null;
+}
+
+function deletionResult(id: string, revision: number, restoreUntil: string | null): CommandResult {
+  return { mutation: { kind: "deletion", id, revision, restoreUntil } };
+}
+
+async function applyDeletion(
+  dao: BrandDao, ownerId: string, current: DeletionState, command: Extract<BrandCommand, { action: "freeze" | "recover" }>,
+  now: Date, session?: BrandRecoverySession,
+): Promise<CommandResult> {
+  if (current.revision !== command.expectedBrandRevision) return { error: "VERSION_CONFLICT" };
+  if (command.action === "freeze") {
+    if (current.frozenAt !== null) return { error: "NOT_FOUND" };
+    const restoreUntil = new Date(now.getTime() + 30 * dayMs).toISOString();
+    const revision = await dao.updateDeletion(ownerId, current, now.toISOString(), restoreUntil);
+    if (!revision) return { error: "VERSION_CONFLICT" };
+    await dao.rebaseDraft(ownerId, current.id, current.revision, revision);
+    return deletionResult(current.id, revision, restoreUntil);
+  }
+  if (!current.frozenAt || !current.restoreUntil) return { error: "NOT_FOUND" };
+  const error = brandRecoveryError({ frozenAt: current.frozenAt, restoreUntil: current.restoreUntil }, session, now);
+  if (error) return { error };
+  if (current.status === "active" && await dao.active(ownerId)) return { error: "LIMIT_REACHED" };
+  const revision = await dao.updateDeletion(ownerId, current, null, null);
+  if (!revision) return { error: "VERSION_CONFLICT" };
+  await dao.rebaseDraft(ownerId, current.id, current.revision, revision);
+  return deletionResult(current.id, revision, null);
+}
 
 function brandResult(brand: Pick<BrandRecord, "id" | "status" | "revision" | "entityVersion">): CommandResult {
   const { id, status, revision, entityVersion } = brand;
@@ -14,7 +56,7 @@ function brandResult(brand: Pick<BrandRecord, "id" | "status" | "revision" | "en
 
 async function applyCommand(
   dao: BrandDao, ownerId: string, id: string | null, current: BrandRecord | null,
-  command: BrandCommand, time: string,
+  command: Exclude<BrandCommand, { action: "freeze" | "recover" }>, time: string,
 ): Promise<CommandResult> {
   if (command.action === "archive" || command.action === "restore") {
     if (!current) return { error: "NOT_FOUND" };
@@ -59,7 +101,10 @@ async function applyCommand(
   return brandResult({ id: brandId, status: "active", revision: 1, entityVersion: 1 });
 }
 
-export async function executeBrandCommand(connection: DatabaseConnection, ownerId: string, command: BrandCommand): Promise<CommandResult> {
+export async function executeBrandCommand(
+  connection: DatabaseConnection, ownerId: string, command: BrandCommand,
+  session?: BrandRecoverySession, clock = () => new Date(),
+): Promise<CommandResult> {
   if (command.actorId !== ownerId) return { error: "SESSION_CHANGED" };
   const fingerprint = createHash("sha256").update(JSON.stringify(command)).digest("hex");
   const brandId = "target" in command ? command.target?.brandId ?? null : command.brandId;
@@ -69,17 +114,48 @@ export async function executeBrandCommand(connection: DatabaseConnection, ownerI
   return connection.transaction(async (transaction) => {
     const dao = new BrandDao(transaction);
     if (!await dao.lockOwner(ownerId)) return { error: "SESSION_REQUIRED" };
-    const current = brandId ? await dao.owned(ownerId, brandId) : null;
-    if (brandId && !current) return { error: "NOT_FOUND" };
+    const deletion = command.action === "freeze" || command.action === "recover";
+    const state = deletion ? await dao.deletionState(ownerId, command.brandId) : null;
+    const current = !deletion && brandId ? await dao.owned(ownerId, brandId) : null;
+    if (brandId && !state && !current) return { error: "NOT_FOUND" };
     const previous = await dao.operation(ownerId, command.operationId);
     if (previous) {
       return previous.fingerprint === fingerprint
         ? { mutation: previous.mutation }
         : { error: "OPERATION_CONFLICT" };
     }
-    const time = new Date().toISOString();
-    const result = await applyCommand(dao, ownerId, brandId, current, command, time);
-    if ("mutation" in result) await dao.recordOperation(ownerId, command.operationId, fingerprint, result.mutation, time);
+    const now = clock();
+    const result = command.action === "freeze" || command.action === "recover"
+      ? state ? await applyDeletion(dao, ownerId, state, command, now, session) : { error: "NOT_FOUND" } as const
+      : await applyCommand(dao, ownerId, brandId, current, command, now.toISOString());
+    if ("mutation" in result) await dao.recordOperation(ownerId, command.operationId, fingerprint, result.mutation, now.toISOString());
     return result;
+  });
+}
+
+// Controlled server CLI only. The operator verifies the earlier request using
+// the approved private process and supplies its opaque request ID for audit.
+export async function shortenBrandRecoveryDeadline(connection: DatabaseConnection, input: unknown, clock = () => new Date()): Promise<CommandResult> {
+  const parsed = brandDeadlineSchema.safeParse(input);
+  if (!parsed.success) return { error: "INVALID_INPUT" };
+  const { ownerId, brandId, requestId, operatorId, expectedBrandRevision, restoreUntil } = parsed.data;
+  const fingerprint = createHash("sha256").update(JSON.stringify(["shorten-recovery", parsed.data])).digest("hex");
+  return connection.transaction(async (transaction) => {
+    const dao = new BrandDao(transaction);
+    const accounts = await new MaintenanceDao(transaction).lockAccounts([ownerId, operatorId]);
+    if (!accounts.includes(ownerId) || !accounts.includes(operatorId)) return { error: "NOT_FOUND" };
+    const current = await dao.deletionState(ownerId, brandId);
+    if (!current) return { error: "NOT_FOUND" };
+    const previous = await dao.operation(ownerId, requestId);
+    if (previous) return previous.fingerprint === fingerprint ? { mutation: previous.mutation } : { error: "OPERATION_CONFLICT" };
+    if (!current.frozenAt || !current.restoreUntil) return { error: "NOT_FOUND" };
+    if (current.revision !== expectedBrandRevision) return { error: "VERSION_CONFLICT" };
+    if (restoreUntil >= current.restoreUntil) return { error: "INVALID_INPUT" };
+    const revision = await dao.updateDeletion(ownerId, current, current.frozenAt, restoreUntil);
+    if (!revision) return { error: "VERSION_CONFLICT" };
+    await dao.rebaseDraft(ownerId, brandId, current.revision, revision);
+    const mutation = { kind: "deletion", id: brandId, revision, restoreUntil, operatorId } as const;
+    await dao.recordOperation(ownerId, requestId, fingerprint, mutation, clock().toISOString());
+    return { mutation };
   });
 }

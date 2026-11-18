@@ -6,7 +6,7 @@
 
 - **包名与版本**：`geo-pro` v`0.1.0`（`"private": true`，`"type": "module"`，见 [package.json](../../package.json)）
 - **定位**：GeoPro（AI GEO），面向中国大陆品牌经营者的品牌可见度监测与优化平台。
-- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)，T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)、[B03 可信官网](../../docs/tasks/B03-marketing-entry.md)、[B04 品牌建档](../../docs/tasks/B04-brand-onboarding.md)及 [B05 本人数据导出](../../docs/tasks/B05-owned-data-export.md)子项，以及 [B08 维护授权基础](../../docs/tasks/B08-maintenance-access.md)、[B10 试点额度](../../docs/tasks/B10-pilot-quotas.md)和 [B15 账户设置](../../docs/tasks/B15-account-settings.md)。产品 M0–M2 尚无完整里程碑交付。
+- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)，T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)、[B03 可信官网](../../docs/tasks/B03-marketing-entry.md)、[B04 品牌建档](../../docs/tasks/B04-brand-onboarding.md)、[B05 本人数据导出](../../docs/tasks/B05-owned-data-export.md)及 [B06 品牌删除与恢复](../../docs/tasks/B06-brand-deletion.md)子项，以及 [B08 维护授权基础](../../docs/tasks/B08-maintenance-access.md)、[B10 试点额度](../../docs/tasks/B10-pilot-quotas.md)和 [B15 账户设置](../../docs/tasks/B15-account-settings.md)。产品 M0–M2 尚无完整里程碑交付。
 
 ## 2. 技术栈与实际版本
 
@@ -37,7 +37,7 @@
   - `(dashboard)/dashboard/maintenance/`、`api/maintenance/access/route.ts`：本人维护权限页面/接口，独立会话和服务端授权校验
   - `api/maintenance/quotas/route.ts`：试点额度维护写入，复用 `quotas.manage`
   - `(dashboard)/dashboard/settings/`：本人账户设置，显示只读邮箱、编辑称呼、切换界面语言及管理当前会话
-  - `(dashboard)/dashboard/brands/`、`api/brands/`：单负责人品牌、草稿、历史版本。合成资料用于回环验收，常规入口暂停收集
+  - `(dashboard)/dashboard/brands/`、`api/brands/`：单负责人品牌、草稿、历史版本、删除影响预览与冻结恢复。合成资料用于回环验收，常规入口暂停收集
   - `api/data-exports/`：本人数据生成和受保护下载。设置页显示范围与最近一次结果，品牌导出遵循 B04 的开放条件
 - `src/components/`：
   - `ui/`：已安装的 shadcn/ui 基础组件（button、card、input、badge、table、tabs、dialog、sidebar、skeleton、separator、dropdown-menu、form、label、sheet、tooltip）
@@ -72,8 +72,9 @@
 | `pnpm maintenance:access` | `node --conditions=react-server scripts/maintenance-access.mjs` | 受控服务器授予/撤销单项维护权限 |
 | `pnpm test:maintenance` | Node.js 原生测试 | 双库 DAO/迁移/DDL/锁竞争/索引测试，需要本地 PG 隔离建库权限 |
 | `pnpm verify:maintenance` | Node.js HTTP/CLI 集成脚本 | 构建后，在 3103 端口、双方言隔离库验证维护和认证 |
-| `pnpm test:brands` | Node.js 原生测试 | 品牌双库并发、版本、迁移、回滚和索引验证 |
-| `pnpm verify:brands` | Node.js HTTP 集成脚本 | 构建后，在 3105 端口及隔离库验证品牌接口和收集条件 |
+| `pnpm test:brands` | Node.js 原生测试 | 品牌双库并发、版本、迁移、回滚、冻结及索引验证 |
+| `pnpm verify:brands` | Node.js HTTP 集成脚本 | 构建后，在 3105 端口及隔离库验证品牌接口、收集条件、删除与限期恢复 |
+| `pnpm brands:shorten-recovery` | 受控服务端 CLI | 依据已核验的提前请求缩短冻结品牌的恢复期限 |
 | `pnpm test:data-exports` | Node.js 原生测试 | 导出双库升级、并发、回滚和查询验证 |
 | `pnpm verify:data-exports` | Node.js HTTP 集成脚本 | 构建后，在 3106 端口及隔离库验证导出授权和反馈 |
 | `pnpm test:quotas` | Node.js 原生测试 | 双库额度升级、授权、账本与并发 |

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { opaqueIdSchema } from "../maintenance/contracts.ts";
 
 export const brandIdSchema = z.uuidv4();
 const revisionSchema = z.number().int().positive().max(2_147_483_647);
@@ -83,6 +84,14 @@ const draftInput = {
 };
 
 const statusInput = { ...writeIdentity, brandId: brandIdSchema, expectedBrandRevision: revisionSchema };
+export const brandDeadlineSchema = z.strictObject({
+  brandId: brandIdSchema,
+  ownerId: opaqueIdSchema,
+  operatorId: opaqueIdSchema,
+  requestId: brandIdSchema,
+  expectedBrandRevision: revisionSchema,
+  restoreUntil: z.iso.datetime({ precision: 3 }),
+});
 
 export const brandCommandSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("saveDraft"), ...draftInput, fields: brandDraftFieldsSchema, step: brandStepSchema }),
@@ -90,6 +99,8 @@ export const brandCommandSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("discardDraft"), ...writeIdentity, brandId: brandIdSchema.nullable(), expectedDraft: brandIdSchema }),
   z.strictObject({ action: z.literal("archive"), ...statusInput }),
   z.strictObject({ action: z.literal("restore"), ...statusInput }),
+  z.strictObject({ action: z.literal("freeze"), ...statusInput, confirmed: z.literal(true) }),
+  z.strictObject({ action: z.literal("recover"), ...statusInput }),
 ]);
 
 export type BrandCommand = z.infer<typeof brandCommandSchema>;
@@ -101,6 +112,10 @@ export const brandMutationSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("brand"), id: brandIdSchema, status: brandStatusSchema,
     revision: revisionSchema, entityVersion: revisionSchema,
+  }),
+  z.object({
+    kind: z.literal("deletion"), id: brandIdSchema, revision: revisionSchema,
+    restoreUntil: z.iso.datetime().nullable(), operatorId: opaqueIdSchema.optional(),
   }),
 ]);
 export type BrandMutation = z.infer<typeof brandMutationSchema>;
@@ -114,5 +129,6 @@ export type BrandFieldName = z.infer<typeof brandFieldNameSchema>;
 export const brandErrorCodeSchema = z.enum([
   "SESSION_REQUIRED", "SESSION_CHANGED", "NOT_FOUND", "LIMIT_REACHED", "VERSION_CONFLICT", "OPERATION_CONFLICT",
   "INTAKE_CLOSED", "INVALID_INPUT", "FORBIDDEN", "SERVICE_UNAVAILABLE",
+  "IDENTITY_UNVERIFIED", "REAUTH_REQUIRED", "RECOVERY_EXPIRED",
 ]);
 export type BrandErrorCode = z.infer<typeof brandErrorCodeSchema>;

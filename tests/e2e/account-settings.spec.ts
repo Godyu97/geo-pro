@@ -45,7 +45,7 @@ const copy = {
     save: "保存称呼",
     saved: "称呼已保存。",
     failed: /暂时无法确认是否已保存/,
-    data: "自助删除待开放。",
+    data: "管理品牌删除和恢复",
     signOut: "退出登录",
     language: "界面语言",
     loading: "正在加载账户设置…",
@@ -61,7 +61,7 @@ const copy = {
     save: "Save name",
     saved: "Display name saved.",
     failed: /We couldn’t confirm the save/,
-    data: "Self-service deletion is pending.",
+    data: "Manage brand deletion and recovery",
     signOut: "Sign out",
     language: "Interface language",
     loading: "Loading account settings…",
@@ -95,7 +95,7 @@ for (const locale of ["zh-CN", "en"] as const) {
       await expect(profile.locator("form")).toHaveAttribute("method", "post");
       await expect(profile.getByRole("term")).toHaveText(current.email);
       await expect(profile.getByRole("definition")).toHaveText(account.email);
-      await expect(page.locator("#data-management:visible")).toContainText(current.data);
+      await expect(page.locator("#data-management:visible").getByRole("link", { name: current.data })).toHaveAttribute("href", "/dashboard/brands");
       await expect(page.getByRole("textbox")).toHaveCount(1);
       await expectTextContrast(page);
 

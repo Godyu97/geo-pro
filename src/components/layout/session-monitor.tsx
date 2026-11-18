@@ -14,6 +14,25 @@ export function SessionMonitor({ userId }: { userId: string }) {
   const { t } = useLocale();
 
   useEffect(() => {
+    function reloadBrandData() {
+      const { pathname } = window.location;
+      if (pathname !== "/dashboard/settings" && pathname !== "/dashboard/brands" && !pathname.startsWith("/dashboard/brands/")) return;
+      // Browser and router history can restore a rendered page past a freeze.
+      document.getElementById("main-content")?.setAttribute("hidden", "");
+      window.location.reload();
+    }
+    function onPageShow(event: PageTransitionEvent) {
+      if (event.persisted) reloadBrandData();
+    }
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("popstate", reloadBrandData);
+    return () => {
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("popstate", reloadBrandData);
+    };
+  }, []);
+
+  useEffect(() => {
     if (isPending) return;
     if ((!data && !error) || error?.status === 401) {
       window.location.replace(loginPath(
