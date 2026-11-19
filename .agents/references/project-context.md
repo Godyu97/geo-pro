@@ -37,7 +37,7 @@
   - `api/health/route.ts`：固定存活状态 JSON（`{ status: "ok", service: "geo-pro" }`）
   - `(dashboard)/dashboard/maintenance/`、`api/maintenance/access/route.ts`：本人维护权限页面/接口，独立会话和服务端授权校验
   - `api/maintenance/quotas/route.ts`：试点额度维护写入，复用 `quotas.manage`
-  - `api/maintenance/capabilities/`、`(dashboard)/dashboard/maintenance/capabilities/`、`(dashboard)/dashboard/monitoring/new/`：通道能力台账维护、用户范围与运行确认门禁
+  - `api/maintenance/capabilities/`、`(dashboard)/dashboard/maintenance/capabilities/`、`(dashboard)/dashboard/monitoring/new/`：通道能力台账维护、用户范围与运行确认门禁。`/dashboard/monitoring/runs/<id>` 与 `api/monitoring/runs/` 登记 queued 运行和预算预留，不启动采样
   - `(dashboard)/dashboard/settings/`：本人账户设置，显示只读邮箱、编辑称呼、切换界面语言及管理当前会话
   - `(dashboard)/dashboard/brands/`、`api/brands/`：单负责人品牌、草稿、历史版本、删除影响预览与冻结恢复。合成资料用于回环验收，常规入口暂停收集。品牌详情的事实与材料入口沿用该门禁。
   - `api/data-exports/`：本人数据生成和受保护下载。设置页显示范围与最近一次结果，品牌导出遵循 B04 的开放条件
@@ -45,16 +45,16 @@
   - `ui/`：已安装的 shadcn/ui 基础组件（button、card、input、badge、table、tabs、dialog、sidebar、skeleton、separator、dropdown-menu、form、label、sheet、tooltip）
   - `layout/`：`app-sidebar.tsx`、`auth-form.tsx`、`brand-mark.tsx`、`module-links.ts`、`sign-out-button.tsx`、`session-monitor.tsx`；会话失效/身份切换时整页恢复，服务暂不可用提供重试。
   - `charts/README.md`：仅边界说明，无图表实现
-- `src/features/` 包含官网 `marketing/`、维护授权 `maintenance/`、账户设置 `account/`、品牌建档 `brands/`、事实与补证 `brand-facts/`、购买问题簇 `prompts/`、本人导出 `data-exports/`、试点额度 `quotas/`、通道能力 `capabilities/` 和其余业务占位域。
-- `src/lib/`：`i18n/`、`auth/`、`db/`、`http/`。DB 包含双方言认证、维护、品牌、导出、额度、事实、题集与通道能力 Schema、显式配置、连接和 SQLite 迁移。`ai/`、`cache/` 仍仅有说明。
+- `src/features/` 包含官网 `marketing/`、维护授权 `maintenance/`、账户设置 `account/`、品牌建档 `brands/`、事实与补证 `brand-facts/`、购买问题簇 `prompts/`、本人导出 `data-exports/`、试点额度 `quotas/`、通道能力 `capabilities/`、监测登记 `monitoring/` 和其余业务占位域。
+- `src/lib/`：`i18n/`、`auth/`、`db/`、`http/`。DB 包含双方言认证、维护、品牌、导出、额度、事实、题集、通道能力与监测运行 Schema、显式配置、连接和 SQLite 迁移。`ai/`、`cache/` 仍仅有说明。
 - `src/hooks/use-mobile.ts`、`src/types/README.md`
-- `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证及账号邮件限流、维护权限、品牌建档、本人导出、品牌清除、试点额度、品牌事实、通道能力和购买问题簇，每库 26 张表。
+- `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证及账号邮件限流、维护权限、品牌建档、本人导出、品牌清除、试点额度、品牌事实、通道能力、购买问题簇和监测运行，每库 28 张表。
 - `drizzle/ddl/postgresql.sql`、`sqlite.sql`：双方言全量 DDL；`scripts/export-ddl.mjs` 离线生成/只读检查，不含迁移历史或数据。
 - `scripts/verify-auth.mjs`：本地 HTTP + 所选后端的认证验证，临时账号清理；`verify-maintenance.mjs` 在双方言隔离库启动实际 Next 服务并运行维护/认证验证。
 - `scripts/maintenance-access.mjs`：仅受控服务器可执行的授权/撤销命令；无在线提权，详见 [维护说明](../../docs/architecture/maintenance-access.md)。
 - `docs/`：产品文档包（v3.0）、工程初始化任务书与 Phase 0 架构/任务记录。
 - `.agents/`：包含本轮接入的 `governance/`、`workflows/`、`references/`，以及仓库原有的 `skills/openspec-*`（保留不自动启用）。
-- `openspec/` 包含 `account-session`、`public-product-entry`、`maintenance-access`、`account-settings`、`brand-onboarding`、`owned-data-export`、`pilot-quotas`、`brand-facts`、`channel-capabilities` 和 `prompt-sets` 的能力规格及对应归档。按当前任务授权加载相关规格。
+- `openspec/` 包含 `account-session`、`public-product-entry`、`maintenance-access`、`account-settings`、`brand-onboarding`、`owned-data-export`、`pilot-quotas`、`brand-facts`、`channel-capabilities`、`prompt-sets` 和 `monitoring-runs` 的能力规格及对应归档。按当前任务授权加载相关规格。
 
 ## 4. 可用命令与检查现状
 
@@ -78,6 +78,7 @@
 | `pnpm test:brand-facts` | Node.js 原生测试 | 双库迁移、事实版本、资格、撤销、权限和查询计划 |
 | `pnpm verify:brand-facts` | HTTP / Chrome | 生产构建后在 3118 端口使用双方言隔离库，含 `pnpm verify:auth` |
 | `pnpm test:prompts` | Node.js 原生测试 | 双库题集版本、重复题、引用、权限和查询计划 |
+| `pnpm test:monitoring` | Node.js 原生测试 | 双库排队运行、幂等预留、分轨免付费和查询计划 |
 | `pnpm verify:prompts` | HTTP / Chrome | 生产构建后在 3119 端口使用双方言隔离库，含 `pnpm verify:auth` |
 | `pnpm test:brands` | Node.js 原生测试 | 品牌双库并发、版本、迁移、回滚、冻结及索引验证 |
 | `pnpm verify:brands` | Node.js HTTP 集成脚本 | 构建后，在 3105 端口及隔离库验证品牌接口、收集条件、删除与限期恢复 |

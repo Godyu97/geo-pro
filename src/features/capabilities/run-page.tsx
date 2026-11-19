@@ -1,5 +1,6 @@
 import { requireSession } from "@/lib/auth/session";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
+import { MonitoringRegistration } from "../monitoring/registration";
 import { CapabilityRetryButton } from "./retry-button";
 import { RunConfirmForm } from "./run-confirm";
 import { readUserCapabilities } from "./service";
@@ -29,6 +30,7 @@ export default async function RunConfirmPage() {
       ) : (
         <RunConfirmForm locale={locale} messages={getMessages(locale).capabilities} channels={result.items} />
       )}
+      <MonitoringRegistration />
     </div>
   );
 }

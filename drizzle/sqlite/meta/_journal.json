@@ -71,6 +71,13 @@
       "when": 1795058658347,
       "tag": "0009_flimsy_vargas",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1795070614882,
+      "tag": "0010_special_exiles",
+      "breakpoints": true
     }
   ]
 }
