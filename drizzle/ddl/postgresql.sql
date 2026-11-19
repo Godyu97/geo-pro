@@ -319,6 +319,41 @@ CREATE TABLE "sampling_answer_network" (
     and "sampling_answer_network"."qualifies_required_search" in (0, 1))
 );
 
+CREATE TABLE "prompt_draft" (
+	"brand_id" text PRIMARY KEY NOT NULL,
+	"revision" integer NOT NULL,
+	"base_set_id" text,
+	"content" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "prompt_draft_revision_check" CHECK ("prompt_draft"."revision" > 0),
+	CONSTRAINT "prompt_draft_content_check" CHECK (length("prompt_draft"."content") > 1)
+);
+
+CREATE TABLE "prompt_reference" (
+	"brand_id" text NOT NULL,
+	"set_version_id" text NOT NULL,
+	"question_id" text NOT NULL,
+	"consumer_id" text NOT NULL,
+	CONSTRAINT "prompt_reference_pk" PRIMARY KEY("brand_id","set_version_id","question_id","consumer_id")
+);
+
+CREATE TABLE "prompt_set" (
+	"brand_id" text NOT NULL,
+	"id" text NOT NULL,
+	"set_id" text NOT NULL,
+	"version" integer NOT NULL,
+	"entity_version" integer NOT NULL,
+	"region" text NOT NULL,
+	"language" text NOT NULL,
+	"content" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "prompt_set_brand_id_id_pk" PRIMARY KEY("brand_id","id"),
+	CONSTRAINT "prompt_set_version_check" CHECK ("prompt_set"."version" > 0),
+	CONSTRAINT "prompt_set_region_check" CHECK (length("prompt_set"."region") = 2),
+	CONSTRAINT "prompt_set_language_check" CHECK (length("prompt_set"."language") BETWEEN 2 AND 40),
+	CONSTRAINT "prompt_set_content_check" CHECK (length("prompt_set"."content") > 1)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -339,6 +374,9 @@ ALTER TABLE "brand_fact_version" ADD CONSTRAINT "fact_version_paste_fk" FOREIGN 
 ALTER TABLE "capability_version" ADD CONSTRAINT "capability_version_channel_id_capability_channel_id_fk" FOREIGN KEY ("channel_id") REFERENCES "public"."capability_channel"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "sampling_answer_network" ADD CONSTRAINT "sampling_answer_network_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sampling_answer_network" ADD CONSTRAINT "sampling_answer_network_version_fk" FOREIGN KEY ("channel_id","channel_version") REFERENCES "public"."capability_version"("channel_id","version") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "prompt_draft" ADD CONSTRAINT "prompt_draft_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "prompt_reference" ADD CONSTRAINT "prompt_reference_set_fk" FOREIGN KEY ("brand_id","set_version_id") REFERENCES "public"."prompt_set"("brand_id","id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "prompt_set" ADD CONSTRAINT "prompt_set_entity_fk" FOREIGN KEY ("brand_id","entity_version") REFERENCES "public"."brand_version"("brand_id","version") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -358,3 +396,6 @@ CREATE INDEX "fact_version_recent_idx" ON "brand_fact_version" USING btree ("bra
 CREATE INDEX "capability_channel_vendor_kind_idx" ON "capability_channel" USING btree ("vendor_id","kind","id");
 CREATE INDEX "sampling_answer_network_brand_created_idx" ON "sampling_answer_network" USING btree ("brand_id","created_at","id");
 CREATE INDEX "sampling_answer_network_channel_version_idx" ON "sampling_answer_network" USING btree ("channel_id","channel_version");
+CREATE INDEX "prompt_reference_question_idx" ON "prompt_reference" USING btree ("brand_id","question_id");
+CREATE UNIQUE INDEX "prompt_set_version_uidx" ON "prompt_set" USING btree ("brand_id","set_id","version");
+CREATE INDEX "prompt_set_recent_idx" ON "prompt_set" USING btree ("brand_id","created_at","id");

@@ -51,6 +51,7 @@ const deletionImpactSchema = z.object({
   drafts: z.coerce.number().int().nonnegative(),
   facts: z.coerce.number().int().nonnegative(),
   materials: z.coerce.number().int().nonnegative(),
+  promptSets: z.coerce.number().int().nonnegative(),
   reservations: z.coerce.number().int().nonnegative(),
   unresolvedAttempts: z.coerce.number().int().nonnegative(),
 });
@@ -122,6 +123,7 @@ export class BrandDao {
       (SELECT count(*) FROM brand_draft WHERE owner_id = b.owner_id AND scope = b.id) AS drafts,
       (SELECT count(*) FROM brand_fact_version WHERE brand_id = b.id) AS facts,
       (SELECT count(*) FROM brand_fact_paste WHERE brand_id = b.id) AS materials,
+      (SELECT count(*) FROM prompt_set WHERE brand_id = b.id) AS "promptSets",
       (SELECT count(*) FROM quota_reservation WHERE brand_id = b.id AND state = 'reserved') AS reservations,
       (SELECT count(*) FROM quota_attempt WHERE brand_id = b.id AND state <> 'known') AS "unresolvedAttempts"
       FROM brand b JOIN brand_version v ON v.brand_id = b.id AND v.version = b.entity_version

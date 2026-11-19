@@ -3,6 +3,7 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection, TransactionConnection } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { PromptDao } from "../prompts/dao.ts";
 import { exportScopes, type ExportRequest, type ExportScope, type ExportSummary } from "./contracts.ts";
 import { readExportProfile, readExportRecord, saveExportRecord, type ExportRecord } from "./dao.ts";
 
@@ -31,7 +32,7 @@ export async function getExportSummary(db: QueryConnection, ownerId: string) {
   return record ? summarize(record) : null;
 }
 
-async function readBrands(dao: BrandDao, ownerId: string) {
+async function readBrands(dao: BrandDao, db: QueryConnection, ownerId: string) {
   const versions: Awaited<ReturnType<BrandDao["exportVersions"]>> = [];
   const drafts: Awaited<ReturnType<BrandDao["exportDrafts"]>> = [];
   let bytes = 0;
@@ -57,7 +58,25 @@ async function readBrands(dao: BrandDao, ownerId: string) {
     draftPage = await dao.exportDrafts(ownerId, pageSize, after.scope);
   }
 
-  return { versions, drafts };
+  const prompts = new PromptDao(db);
+  const promptDrafts: Awaited<ReturnType<PromptDao["exportDrafts"]>> = [];
+  const promptSets: Awaited<ReturnType<PromptDao["exportSets"]>> = [];
+  let promptDraftPage = await prompts.exportDrafts(ownerId, pageSize, "");
+  for (;;) {
+    append(promptDrafts, promptDraftPage);
+    const after = promptDraftPage.at(-1);
+    if (promptDraftPage.length < pageSize || !after) break;
+    promptDraftPage = await prompts.exportDrafts(ownerId, pageSize, after.brandId);
+  }
+  let promptSetPage = await prompts.exportSets(ownerId, pageSize);
+  for (;;) {
+    append(promptSets, promptSetPage);
+    const after = promptSetPage.at(-1);
+    if (promptSetPage.length < pageSize || !after) break;
+    promptSetPage = await prompts.exportSets(ownerId, pageSize, { brandId: after.brandId, at: after.createdAt, id: after.id });
+  }
+
+  return promptDrafts.length || promptSets.length ? { versions, drafts, promptDrafts, promptSets } : { versions, drafts };
 }
 
 async function readSection<T>(db: TransactionConnection, scope: ExportScope, read: (connection: QueryConnection) => Promise<T>) {
@@ -83,7 +102,7 @@ export async function prepareExport(db: DatabaseConnection, ownerId: string, inp
     const requested = input.scopes.reduce((mask, scope) => mask | scopeBits[scope], 0);
     const data = {
       profile: input.scopes.includes("profile") ? await readSection(tx, "profile", (section) => readExportProfile(section, ownerId)) : undefined,
-      brands: input.scopes.includes("brands") ? await readSection(tx, "brands", (section) => readBrands(new BrandDao(section), ownerId)) : undefined,
+      brands: input.scopes.includes("brands") ? await readSection(tx, "brands", (section) => readBrands(new BrandDao(section), section, ownerId)) : undefined,
     };
     const included = (data.profile ? scopeBits.profile : 0) | (data.brands ? scopeBits.brands : 0);
     const record = {
@@ -106,7 +125,7 @@ export async function readExportFile(db: DatabaseConnection, ownerId: string, id
 
     const data = {
       profile: summary.included.includes("profile") ? await readExportProfile(tx, ownerId) : undefined,
-      brands: summary.included.includes("brands") ? await readBrands(brands, ownerId) : undefined,
+      brands: summary.included.includes("brands") ? await readBrands(brands, tx, ownerId) : undefined,
     };
     if (fingerprint(data) !== record.fingerprint) return null;
 

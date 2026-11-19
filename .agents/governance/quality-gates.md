@@ -17,6 +17,8 @@
 | 维护 HTTP 集成 | 实际会话、CLI 与维护边界 | `pnpm verify:maintenance` | 先 `pnpm build`；启动独立 3103 端口，分别使用双方言隔离库，并分别执行 `pnpm verify:auth` |
 | 品牌事实 DAO | 双库升级、版本、审批、资格和撤销 | `pnpm test:brand-facts` |
 | 品牌事实集成 | 双语工作台、归属和公开投影 | `pnpm verify:brand-facts` |
+| 题集 DAO | 双库升级、版本、重复题、引用和查询计划 | `pnpm test:prompts` | SQLite 临时文件及本地 PostgreSQL 隔离库 |
+| 题集集成 | 双语监测问题、归属和冻结边界 | `pnpm verify:prompts` | 先 `pnpm build`，在 3119 端口使用双方言隔离库 |
 | 品牌 DAO | 双库迁移、归属、版本、并发与查询计划 | `pnpm test:brands` | SQLite 临时文件及本地 PostgreSQL 隔离库 |
 | 品牌 HTTP 集成 | 实际会话、归属和收集边界 | `pnpm verify:brands` | 先 `pnpm build`，在 3105 端口使用双方言隔离库 |
 | 本人数据导出 DAO | 双库升级、批量查询、生成状态与回滚 | `pnpm test:data-exports` | SQLite 临时文件及本地 PostgreSQL 隔离库 |
@@ -45,7 +47,7 @@
 
 涉及 DAO、数据库适配、缓存、SQL 或表/索引时，执行 [数据访问与缓存工程约束](../../docs/architecture/data-access.md) 中适用的专项验收：分别覆盖 SQLite3 / PostgreSQL、memory / Redis 的合同与失败行为，并提交查询次数、计划和表/索引用途证据。只改某个既有后端时说明实际覆盖范围；不能把单后端结果扩写成双后端通过。
 
-双库及 HTTP 专项证据见 [B08 维护授权](../../docs/tasks/B08-maintenance-access.md)、[B04 品牌建档](../../docs/tasks/B04-brand-onboarding.md)、[B05 本人数据导出](../../docs/tasks/B05-owned-data-export.md)和 [B10 试点额度](../../docs/tasks/B10-pilot-quotas.md)。品牌事实、补证和版本资格的专项证据见 [T-M0-02](../../docs/tasks/T-M0-02-brand-facts.md)。其他业务 DAO 与 cache 专项按对应任务补齐。
+双库及 HTTP 专项证据见 [B08 维护授权](../../docs/tasks/B08-maintenance-access.md)、[B04 品牌建档](../../docs/tasks/B04-brand-onboarding.md)、[B05 本人数据导出](../../docs/tasks/B05-owned-data-export.md)和 [B10 试点额度](../../docs/tasks/B10-pilot-quotas.md)。品牌事实、补证和版本资格的专项证据见 [T-M0-02](../../docs/tasks/T-M0-02-brand-facts.md)。购买问题簇与题集冻结的专项证据见 [T-M0-03](../../docs/tasks/T-M0-03-prompt-sets.md)。其他业务 DAO 与 cache 专项按对应任务补齐。
 
 全量 DDL 导出与检查入口已配置；其结果只证明与当前 Schema 一致。空库导入、migration 对照与持续升级的验证边界见 [数据库部署说明](../../docs/architecture/database-deployment.md)，不得对现有数据直接重复导入全量建表 SQL。
 

@@ -30,6 +30,8 @@
     "verify:quotas": "node --conditions=react-server scripts/verify-quotas.mjs",
     "test:capabilities": "node --conditions=react-server --test tests/capabilities/*.test.mjs",
     "verify:capabilities": "node --conditions=react-server scripts/verify-capabilities.mjs",
+    "test:prompts": "node --conditions=react-server --test tests/prompts/*.test.mjs",
+    "verify:prompts": "node --conditions=react-server scripts/verify-prompts.mjs",
     "check:i18n": "node scripts/check-i18n.mjs",
     "test:i18n": "node --test tests/i18n/*.test.mjs",
     "test:e2e": "playwright test"

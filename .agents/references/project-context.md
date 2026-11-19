@@ -1,6 +1,6 @@
 # 项目事实上下文（Project Context）
 
-> 更新日期：2026-11-18｜事实来源：仓库实际配置文件与源码检查（非模板假设）。若技术栈、版本或目录发生实质变化，须同步更新本文件。
+> 更新日期：2026-11-19｜事实来源：仓库实际配置文件与源码检查（非模板假设）。若技术栈、版本或目录发生实质变化，须同步更新本文件。
 
 ## 1. 项目概览
 
@@ -45,16 +45,16 @@
   - `ui/`：已安装的 shadcn/ui 基础组件（button、card、input、badge、table、tabs、dialog、sidebar、skeleton、separator、dropdown-menu、form、label、sheet、tooltip）
   - `layout/`：`app-sidebar.tsx`、`auth-form.tsx`、`brand-mark.tsx`、`module-links.ts`、`sign-out-button.tsx`、`session-monitor.tsx`；会话失效/身份切换时整页恢复，服务暂不可用提供重试。
   - `charts/README.md`：仅边界说明，无图表实现
-- `src/features/` 包含官网 `marketing/`、维护授权 `maintenance/`、账户设置 `account/`、品牌建档 `brands/`、事实与补证 `brand-facts/`、本人导出 `data-exports/`、试点额度 `quotas/`、通道能力 `capabilities/` 和 4 个业务占位域。
-- `src/lib/`：`i18n/`、`auth/`、`db/`、`http/`。DB 包含双方言认证、维护、品牌、导出、额度、事实与通道能力 Schema、显式配置、连接和 SQLite 迁移。`ai/`、`cache/` 仍仅有说明。
+- `src/features/` 包含官网 `marketing/`、维护授权 `maintenance/`、账户设置 `account/`、品牌建档 `brands/`、事实与补证 `brand-facts/`、购买问题簇 `prompts/`、本人导出 `data-exports/`、试点额度 `quotas/`、通道能力 `capabilities/` 和其余业务占位域。
+- `src/lib/`：`i18n/`、`auth/`、`db/`、`http/`。DB 包含双方言认证、维护、品牌、导出、额度、事实、题集与通道能力 Schema、显式配置、连接和 SQLite 迁移。`ai/`、`cache/` 仍仅有说明。
 - `src/hooks/use-mobile.ts`、`src/types/README.md`
-- `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证及账号邮件限流、维护权限、品牌建档、本人导出、品牌清除、试点额度、品牌事实和通道能力，每库 23 张应用表。
+- `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证及账号邮件限流、维护权限、品牌建档、本人导出、品牌清除、试点额度、品牌事实、通道能力和购买问题簇，每库 26 张表。
 - `drizzle/ddl/postgresql.sql`、`sqlite.sql`：双方言全量 DDL；`scripts/export-ddl.mjs` 离线生成/只读检查，不含迁移历史或数据。
 - `scripts/verify-auth.mjs`：本地 HTTP + 所选后端的认证验证，临时账号清理；`verify-maintenance.mjs` 在双方言隔离库启动实际 Next 服务并运行维护/认证验证。
 - `scripts/maintenance-access.mjs`：仅受控服务器可执行的授权/撤销命令；无在线提权，详见 [维护说明](../../docs/architecture/maintenance-access.md)。
 - `docs/`：产品文档包（v3.0）、工程初始化任务书与 Phase 0 架构/任务记录。
 - `.agents/`：包含本轮接入的 `governance/`、`workflows/`、`references/`，以及仓库原有的 `skills/openspec-*`（保留不自动启用）。
-- `openspec/` 包含 `account-session`、`public-product-entry`、`maintenance-access`、`account-settings`、`brand-onboarding`、`owned-data-export`、`pilot-quotas`、`brand-facts` 和 `channel-capabilities` 的能力规格及对应归档。按当前任务授权加载相关规格。
+- `openspec/` 包含 `account-session`、`public-product-entry`、`maintenance-access`、`account-settings`、`brand-onboarding`、`owned-data-export`、`pilot-quotas`、`brand-facts`、`channel-capabilities` 和 `prompt-sets` 的能力规格及对应归档。按当前任务授权加载相关规格。
 
 ## 4. 可用命令与检查现状
 
@@ -77,6 +77,8 @@
 | `pnpm verify:maintenance` | Node.js HTTP/CLI 集成脚本 | 构建后，在 3103 端口、双方言隔离库验证维护和认证 |
 | `pnpm test:brand-facts` | Node.js 原生测试 | 双库迁移、事实版本、资格、撤销、权限和查询计划 |
 | `pnpm verify:brand-facts` | HTTP / Chrome | 生产构建后在 3118 端口使用双方言隔离库，含 `pnpm verify:auth` |
+| `pnpm test:prompts` | Node.js 原生测试 | 双库题集版本、重复题、引用、权限和查询计划 |
+| `pnpm verify:prompts` | HTTP / Chrome | 生产构建后在 3119 端口使用双方言隔离库，含 `pnpm verify:auth` |
 | `pnpm test:brands` | Node.js 原生测试 | 品牌双库并发、版本、迁移、回滚、冻结及索引验证 |
 | `pnpm verify:brands` | Node.js HTTP 集成脚本 | 构建后，在 3105 端口及隔离库验证品牌接口、收集条件、删除与限期恢复 |
 | `pnpm brands:purge` | 受控服务端 CLI | 批量清除到期品牌、核对凭证及离线重放清除记录 |
