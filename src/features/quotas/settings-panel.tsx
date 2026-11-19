@@ -1,6 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import Link from "next/link";
 import { getConnection } from "@/lib/db/connection";
 import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
@@ -73,6 +74,7 @@ export async function PilotQuotaPanel({ ownerId, locale }: { ownerId: string; lo
         })}
       </div>
       {result.items.some(({ grant }) => grant) && <p className="text-sm text-muted-foreground">{t("pilotCharge")}</p>}
+      <Link href="/dashboard/settings/usage" prefetch={false} className="inline-block text-sm underline underline-offset-4">{t("openUsage")}</Link>
     </>
   );
 }

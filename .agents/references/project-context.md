@@ -78,7 +78,7 @@
 | `pnpm test:brand-facts` | Node.js 原生测试 | 双库迁移、事实版本、资格、撤销、权限和查询计划 |
 | `pnpm verify:brand-facts` | HTTP / Chrome | 生产构建后在 3118 端口使用双方言隔离库，含 `pnpm verify:auth` |
 | `pnpm test:prompts` | Node.js 原生测试 | 双库题集版本、重复题、引用、权限和查询计划 |
-| `pnpm test:monitoring` | Node.js 原生测试 | 双库排队运行、幂等预留、分轨免付费和查询计划 |
+| `pnpm test:monitoring` | Node.js 原生测试 | 双库排队、隔离执行、恢复、额度核对和查询计划 |
 | `pnpm verify:prompts` | HTTP / Chrome | 生产构建后在 3119 端口使用双方言隔离库，含 `pnpm verify:auth` |
 | `pnpm test:brands` | Node.js 原生测试 | 品牌双库并发、版本、迁移、回滚、冻结及索引验证 |
 | `pnpm verify:brands` | Node.js HTTP 集成脚本 | 构建后，在 3105 端口及隔离库验证品牌接口、收集条件、删除与限期恢复 |

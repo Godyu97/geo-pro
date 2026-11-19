@@ -72,13 +72,15 @@ export async function readOwnedRun(ownerId: string, runId: string) {
     const dao = new MonitoringDao(connection);
     const run = await dao.runForOwner(ownerId, runId);
     if (!run) return null;
-    const [slots, prompt] = await Promise.all([
+    const [slots, attempts, prompt] = await Promise.all([
       dao.slots([run.id]),
+      dao.attempts([run.id]),
       new PromptDao(connection, run.brandId).version(run.promptSetId),
     ]);
     const text = new Map((prompt?.content.questions ?? []).map((question) => [question.id, question.text]));
     return {
       ...run,
+      attempts,
       slots: slots.map((slot) => ({ ...slot, questionText: text.get(slot.questionId) ?? slot.questionId })),
     };
   } catch {

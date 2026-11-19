@@ -5,7 +5,7 @@ import { queryWithParameters, type QueryConnection, type QueryValue } from "../.
 import { brandIdSchema } from "../brands/contracts.ts";
 import { networkModes } from "../capabilities/contracts.ts";
 import { minorAmountSchema, quotaCurrencySchema } from "../quotas/contracts.ts";
-import { monitoringTrackSchema } from "./contracts.ts";
+import { attemptDispositions, attemptKinds, monitoringTrackSchema, runStatuses, slotStatuses } from "./contracts.ts";
 
 const flag = z.union([z.literal(0), z.literal(1)]);
 const runRow = z.object({
@@ -29,8 +29,8 @@ const runRow = z.object({
   upperMinor: minorAmountSchema.nullable(),
   estimateHighMinor: minorAmountSchema.nullable(),
   customerPayableMinor: z.literal(0),
-  status: z.literal("queued"),
-  samplingComplete: z.literal(0),
+  status: z.enum(runStatuses),
+  samplingComplete: flag,
   createdAt: z.iso.datetime({ precision: 3 }),
 });
 const slotRow = z.object({
@@ -43,12 +43,34 @@ const slotRow = z.object({
   channelVersion: z.int().positive(),
   repeatIndex: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   reservationId: brandIdSchema.nullable(),
-  status: z.literal("queued"),
+  status: z.enum(slotStatuses),
+  adoptedAttemptId: brandIdSchema.nullable(),
+  late: flag,
+  createdAt: z.iso.datetime({ precision: 3 }),
+});
+const attemptRow = z.object({
+  id: brandIdSchema,
+  slotId: brandIdSchema,
+  runId: brandIdSchema,
+  brandId: brandIdSchema,
+  kind: z.enum(attemptKinds),
+  ordinal: z.int().min(1).max(20),
+  transport: z.enum(["isolated", "official_api"]),
+  synthetic: flag,
+  disposition: z.enum(attemptDispositions),
+  rawText: z.string().nullable(),
+  currency: quotaCurrencySchema.nullable(),
+  upperMinor: minorAmountSchema.nullable(),
+  actualMinor: minorAmountSchema.nullable(),
+  costState: z.enum(["none", "pending", "known", "unknown"]),
+  quotaAttemptId: brandIdSchema.nullable(),
+  late: flag,
   createdAt: z.iso.datetime({ precision: 3 }),
 });
 
 export type MonitoringRunRow = z.infer<typeof runRow>;
 export type MonitoringSlotRow = z.infer<typeof slotRow>;
+export type MonitoringAttemptRow = z.infer<typeof attemptRow>;
 
 const runColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", operation_id AS "operationId", fingerprint,
   track, prompt_set_id AS "promptSetId", prompt_set_version AS "promptSetVersion", repeat_count AS "repeatCount",
@@ -59,7 +81,10 @@ const runColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", operation_
   created_at AS "createdAt"`;
 const slotColumns = `id, run_id AS "runId", brand_id AS "brandId", question_id AS "questionId", natural_question AS "natural",
   channel_id AS "channelId", channel_version AS "channelVersion", repeat_index AS "repeatIndex",
-  reservation_id AS "reservationId", status, created_at AS "createdAt"`;
+  reservation_id AS "reservationId", status, adopted_attempt_id AS "adoptedAttemptId", late, created_at AS "createdAt"`;
+const attemptColumns = `id, slot_id AS "slotId", run_id AS "runId", brand_id AS "brandId", kind, ordinal, transport,
+  synthetic, disposition, raw_text AS "rawText", currency, upper_minor AS "upperMinor", actual_minor AS "actualMinor",
+  cost_state AS "costState", quota_attempt_id AS "quotaAttemptId", late, created_at AS "createdAt"`;
 
 export class MonitoringDao {
   private readonly connection: QueryConnection;
@@ -117,10 +142,71 @@ export class MonitoringDao {
   async insertSlots(rows: MonitoringSlotRow[]) {
     if (!rows.length) return;
     await this.query(`INSERT INTO monitoring_slot
-      (id, run_id, brand_id, question_id, natural_question, channel_id, channel_version, repeat_index, reservation_id, status, created_at)
-      VALUES ${rows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)").join(", ")}`,
+      (id, run_id, brand_id, question_id, natural_question, channel_id, channel_version, repeat_index, reservation_id, status, adopted_attempt_id, late, created_at)
+      VALUES ${rows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, 0, ?)").join(", ")}`,
     rows.flatMap((row) => [row.id, row.runId, row.brandId, row.questionId, row.natural, row.channelId,
       row.channelVersion, row.repeatIndex, row.reservationId, row.createdAt]));
+  }
+
+  async attempts(runIds: string[]) {
+    if (!runIds.length) return [];
+    const rows = await this.query(`SELECT ${attemptColumns} FROM monitoring_attempt
+      WHERE run_id IN (${runIds.map(() => "?").join(", ")})
+      ORDER BY run_id, slot_id, kind, ordinal`, runIds);
+    return z.array(attemptRow).parse(rows);
+  }
+
+  async attemptForOwner(ownerId: string, attemptId: string) {
+    const columns = attemptColumns.split(",").map((column) => `a.${column.trim()}`).join(", ");
+    const [row] = await this.query(`SELECT ${columns} FROM monitoring_attempt a
+      JOIN monitoring_run r ON r.id = a.run_id AND r.owner_id = ?
+      WHERE a.id = ?`, [ownerId, attemptId]);
+    return row ? attemptRow.parse(row) : null;
+  }
+
+  async insertAttempt(row: MonitoringAttemptRow) {
+    await this.query(`INSERT INTO monitoring_attempt
+      (id, slot_id, run_id, brand_id, kind, ordinal, transport, synthetic, disposition, raw_text, currency,
+       upper_minor, actual_minor, cost_state, quota_attempt_id, late, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [row.id, row.slotId, row.runId, row.brandId, row.kind, row.ordinal, row.transport, row.synthetic,
+      row.disposition, row.rawText, row.currency, row.upperMinor, row.actualMinor, row.costState,
+      row.quotaAttemptId, row.late, row.createdAt]);
+  }
+
+  async updateAttempt(row: Pick<MonitoringAttemptRow, "id" | "disposition" | "rawText" | "actualMinor" | "costState" | "late">) {
+    await this.query(`UPDATE monitoring_attempt
+      SET disposition = ?, raw_text = ?, actual_minor = ?, cost_state = ?, late = ? WHERE id = ?`,
+    [row.disposition, row.rawText, row.actualMinor, row.costState, row.late, row.id]);
+  }
+
+  async setRun(runId: string, status: MonitoringRunRow["status"], samplingComplete: 0 | 1) {
+    await this.query("UPDATE monitoring_run SET status = ?, sampling_complete = ? WHERE id = ?", [status, samplingComplete, runId]);
+  }
+
+  async setSlot(slotId: string, status: MonitoringSlotRow["status"], adoptedAttemptId: string | null, late: 0 | 1) {
+    await this.query("UPDATE monitoring_slot SET status = ?, adopted_attempt_id = ?, late = ? WHERE id = ?",
+      [status, adoptedAttemptId, late, slotId]);
+  }
+
+  async pauseQueued(runId: string) {
+    await this.query("UPDATE monitoring_slot SET status = 'paused' WHERE run_id = ? AND status = 'queued'", [runId]);
+  }
+
+  async cancelWaiting(runId: string) {
+    await this.query("UPDATE monitoring_slot SET status = 'cancelled' WHERE run_id = ? AND status IN ('queued', 'paused')", [runId]);
+  }
+
+  async samplingUsage(brandId: string) {
+    const [row] = await this.query(`SELECT COUNT(DISTINCT reservation_id) AS "startedReservations",
+      COALESCE(SUM(CASE WHEN state = 'known' THEN actual_minor ELSE 0 END), 0) AS "knownActual",
+      COALESCE(SUM(CASE WHEN state <> 'known' THEN upper_minor ELSE 0 END), 0) AS "pendingUpper"
+      FROM quota_attempt WHERE brand_id = ? AND kind = 'sampling'`, [brandId]);
+    return z.object({
+      startedReservations: z.coerce.number().int().nonnegative(),
+      knownActual: z.coerce.number().int().nonnegative(),
+      pendingUpper: z.coerce.number().int().nonnegative(),
+    }).parse(row);
   }
 
   async insertReservations(brandId: string, grantVersion: number, rows: Array<{ id: string; upperMinor: number }>, time: string) {

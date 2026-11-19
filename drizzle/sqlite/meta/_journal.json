@@ -78,6 +78,13 @@
       "when": 1795070614882,
       "tag": "0010_special_exiles",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795076054059,
+      "tag": "0011_natural_epoch",
+      "breakpoints": true
     }
   ]
 }

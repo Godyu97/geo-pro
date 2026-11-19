@@ -17,7 +17,7 @@ import {
   type PreviewRequest,
   type PreviewSnapshot,
 } from "./contracts.ts";
-import { MonitoringDao, type MonitoringRunRow, type MonitoringSlotRow } from "./dao.ts";
+import { MonitoringDao, type MonitoringAttemptRow, type MonitoringRunRow, type MonitoringSlotRow } from "./dao.ts";
 import { expiresAtFor, previewToken, previewTokenMatches, runFingerprint, scaleMinor } from "./rules.ts";
 
 type Denied = { error: MonitoringError; next: MonitoringNextStep | null };
@@ -28,7 +28,11 @@ type Prepared = {
   estimateHighMinor: number | null;
 };
 
-export type StoredRun = MonitoringRunRow & { slots: MonitoringSlotRow[]; replayed?: boolean };
+export type StoredRun = MonitoringRunRow & {
+  slots: MonitoringSlotRow[];
+  attempts: MonitoringAttemptRow[];
+  replayed?: boolean;
+};
 
 function denied(error: MonitoringError, next: MonitoringNextStep | null = null): Denied {
   return { error, next };
@@ -140,7 +144,8 @@ export async function previewMonitoringRun(
 }
 
 async function withSlots(dao: MonitoringDao, run: MonitoringRunRow, replayed = false): Promise<StoredRun> {
-  return { ...run, slots: await dao.slots([run.id]), replayed };
+  const [slots, attempts] = await Promise.all([dao.slots([run.id]), dao.attempts([run.id])]);
+  return { ...run, slots, attempts, replayed };
 }
 
 export async function acceptMonitoringRun(
@@ -193,7 +198,7 @@ export async function acceptMonitoringRun(
               channelId: channel.channelId, channelVersion: channel.version,
               repeatIndex: repeatIndex as 1 | 2 | 3,
               reservationId: parsed.track === "model_api" ? id : null,
-              status: "queued", createdAt: time,
+              status: "queued", adoptedAttemptId: null, late: 0, createdAt: time,
             });
           }
         }
@@ -218,7 +223,7 @@ export async function acceptMonitoringRun(
       await new PromptDao(transaction, parsed.brandId).reference(
         parsed.promptSetId, current.questions.map((question) => question.id), runId,
       );
-      return { ...run, slots, replayed: false };
+      return { ...run, slots, attempts: [], replayed: false };
     });
   } catch {
     return denied("SERVICE_UNAVAILABLE");

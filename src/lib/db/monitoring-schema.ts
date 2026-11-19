@@ -35,7 +35,10 @@ export const monitoringRun = pgTable("monitoring_run", {
     and ${table.channelCount} > 0 and ${table.slotCount} = ${table.questionCount} * ${table.channelCount} * ${table.repeatCount}
     and length(${table.region}) = 2 and length(${table.language}) between 2 and 40
     and ${table.requestedNetworkMode} in ('on', 'off', 'unknown')
-    and ${table.status} = 'queued' and ${table.samplingComplete} = 0 and ${table.customerPayableMinor} = 0
+    and ${table.status} in ('queued', 'running', 'paused', 'succeeded', 'partial', 'failed', 'cancelled')
+    and ${table.samplingComplete} in (0, 1) and ${table.customerPayableMinor} = 0
+    and ((${table.status} in ('queued', 'running', 'paused') and ${table.samplingComplete} = 0)
+      or ${table.status} in ('succeeded', 'partial', 'failed', 'cancelled'))
     and (
       (${table.track} = 'consumer_ui' and ${table.currency} is null and ${table.upperMinor} is null and ${table.estimateHighMinor} is null)
       or (${table.track} = 'model_api' and ${table.currency} is not null and length(${table.currency}) = 3
@@ -55,10 +58,55 @@ export const monitoringSlot = pgTable("monitoring_slot", {
   reservationId: text("reservation_id"),
   status: text("status").notNull(),
   createdAt: text("created_at").notNull(),
+  adoptedAttemptId: text("adopted_attempt_id"),
+  late: integer("late").notNull().default(0),
 }, (table) => [
   foreignKey({ name: "monitoring_slot_run_fk", columns: [table.runId], foreignColumns: [monitoringRun.id] }).onDelete("cascade"),
   uniqueIndex("monitoring_slot_position_uidx").on(table.runId, table.questionId, table.channelId, table.repeatIndex),
   index("monitoring_slot_brand_idx").on(table.brandId, table.runId),
+  index("monitoring_slot_reservation_idx").on(table.brandId, table.reservationId),
   check("monitoring_slot_state_check", sql`${table.naturalQuestion} in (0, 1) and ${table.repeatIndex} between 1 and 3
-    and ${table.channelVersion} > 0 and ${table.status} = 'queued'`),
+    and ${table.channelVersion} > 0 and ${table.late} in (0, 1)
+    and ${table.status} in ('queued', 'running', 'paused', 'succeeded', 'failed', 'cancelled', 'reconciliation_required')
+    and ((${table.status} = 'succeeded' and ${table.adoptedAttemptId} is not null)
+      or (${table.status} <> 'succeeded' and ${table.adoptedAttemptId} is null))`),
+]);
+
+export const monitoringAttempt = pgTable("monitoring_attempt", {
+  id: text("id").primaryKey(),
+  slotId: text("slot_id").notNull(),
+  runId: text("run_id").notNull(),
+  brandId: text("brand_id").notNull(),
+  kind: text("kind").notNull(),
+  ordinal: integer("ordinal").notNull(),
+  transport: text("transport").notNull(),
+  synthetic: integer("synthetic").notNull(),
+  disposition: text("disposition").notNull(),
+  rawText: text("raw_text"),
+  currency: text("currency"),
+  upperMinor: integer("upper_minor"),
+  actualMinor: integer("actual_minor"),
+  costState: text("cost_state").notNull(),
+  quotaAttemptId: text("quota_attempt_id"),
+  late: integer("late").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  foreignKey({ name: "monitoring_attempt_slot_fk", columns: [table.slotId], foreignColumns: [monitoringSlot.id] }).onDelete("cascade"),
+  uniqueIndex("monitoring_attempt_ordinal_uidx").on(table.slotId, table.kind, table.ordinal),
+  uniqueIndex("monitoring_attempt_adopted_uidx").on(table.slotId).where(sql`${table.disposition} = 'adopted'`),
+  index("monitoring_attempt_run_idx").on(table.runId, table.slotId, table.ordinal),
+  index("monitoring_attempt_brand_idx").on(table.brandId, table.createdAt, table.id),
+  check("monitoring_attempt_state_check", sql`${table.ordinal} between 1 and 20 and ${table.synthetic} in (0, 1) and ${table.late} in (0, 1)
+    and ${table.transport} in ('isolated', 'official_api')
+    and ((${table.transport} = 'isolated' and ${table.synthetic} = 1) or (${table.transport} = 'official_api' and ${table.synthetic} = 0))
+    and (${table.currency} is null or length(${table.currency}) = 3)
+    and (${table.upperMinor} is null or ${table.upperMinor} >= 0)
+    and (
+      (${table.costState} in ('none', 'pending', 'unknown') and ${table.actualMinor} is null)
+      or (${table.costState} = 'known' and ${table.actualMinor} is not null and ${table.actualMinor} >= 0)
+    )
+    and (
+      (${table.kind} = 'sampling' and ${table.ordinal} <= 3 and ${table.disposition} in ('pending', 'adopted', 'safe_failure', 'unknown', 'late'))
+      or (${table.kind} = 'analysis' and ${table.disposition} = 'analysis_reuse' and ${table.costState} = 'none')
+    )`),
 ]);

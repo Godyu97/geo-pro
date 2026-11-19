@@ -7,7 +7,8 @@ import { getConnection } from "@/lib/db/connection";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { acceptMonitoringRun, previewMonitoringRun, readMonitoringRun } from "./commands";
-import { acceptRequestSchema, monitoringErrors, previewRequestSchema, type MonitoringError } from "./contracts";
+import { acceptRequestSchema, monitoringErrors, previewRequestSchema, runControlSchema, type MonitoringError } from "./contracts";
+import { cancelMonitoringRun, continueMonitoringRun, pauseMonitoringRun, reconcileMonitoringCost, redoMonitoringAnalysis } from "./execution";
 
 const privateHeaders = {
   "Cache-Control": "private, no-store",
@@ -58,6 +59,29 @@ export async function monitoringRunResponse(request: Request) {
   } catch {
     const traceId = randomUUID();
     console.error("monitoring-run-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function monitoringRunControlResponse(request: Request, runId: string) {
+  const gate = await requireSameOrigin(request);
+  if ("error" in gate) return gate.error;
+  try {
+    const body = await readBoundedJson(request, 8192);
+    const command = runControlSchema.safeParse(body);
+    if (!command.success || new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
+    const ownerId = gate.session.session.user.id;
+    const connection = getConnection();
+    const result = command.data.action === "pause" ? await pauseMonitoringRun(connection, ownerId, runId)
+      : command.data.action === "continue" ? await continueMonitoringRun(connection, ownerId, runId)
+        : command.data.action === "cancel" ? await cancelMonitoringRun(connection, ownerId, runId)
+        : command.data.action === "redo-analysis" ? await redoMonitoringAnalysis(connection, ownerId, runId, command.data.slotId)
+          : await reconcileMonitoringCost(connection, ownerId, runId, command.data.attemptId, command.data.actualMinor);
+    if ("error" in result) return failure(result.error, undefined, result.next);
+    return Response.json(result, { headers: privateHeaders });
+  } catch {
+    const traceId = randomUUID();
+    console.error("monitoring-run-control-unavailable", { traceId });
     return failure("SERVICE_UNAVAILABLE", traceId);
   }
 }

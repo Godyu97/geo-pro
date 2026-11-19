@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, foreignKey, integer, sqliteTable, primaryKey, text, unique } from "drizzle-orm/sqlite-core";
+import { check, foreignKey, index, integer, sqliteTable, primaryKey, text, unique } from "drizzle-orm/sqlite-core";
 import { brand } from "./brand-schema.sqlite";
 
 export const quotaGrant = sqliteTable("quota_grant", {
@@ -34,6 +34,7 @@ export const quotaReservation = sqliteTable("quota_reservation", {
   finalizedAt: text("finalized_at"),
 }, (table) => [
   primaryKey({ columns: [table.brandId, table.kind, table.id] }),
+  index("quota_reservation_brand_recent_idx").on(table.brandId, table.createdAt, table.id),
   foreignKey({ name: "quota_reservation_grant_fk",
     columns: [table.brandId, table.kind, table.grantVersion], foreignColumns: [quotaGrant.brandId, quotaGrant.kind, quotaGrant.version],
   }).onDelete("cascade"),
