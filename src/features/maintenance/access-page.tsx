@@ -46,11 +46,17 @@ export default async function MaintenanceAccessPage() {
                   <p className="text-sm leading-7 text-muted-foreground">{t(
                     permission === "quotas.manage" && granted ? "quotaOperationsAvailable"
                       : permission === "capabilities.manage" && granted ? "capabilityOperationsAvailable"
-                        : "operationsPending",
+                        : permission === "support.read" && granted ? "supportOperationsAvailable"
+                          : "operationsPending",
                   )}</p>
                   {permission === "capabilities.manage" && granted && (
                     <Button asChild variant="outline" className="h-auto min-h-10 whitespace-normal py-2">
                       <Link href="/dashboard/maintenance/capabilities">{t("openCapabilities")}</Link>
+                    </Button>
+                  )}
+                  {permission === "support.read" && granted && (
+                    <Button asChild variant="outline" className="h-auto min-h-10 whitespace-normal py-2">
+                      <Link href="/dashboard/maintenance/support">{t("openSupport")}</Link>
                     </Button>
                   )}
                 </CardContent>

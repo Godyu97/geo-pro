@@ -71,10 +71,18 @@ const operationPermissions = {
   "support.read": "support.read",
 } as const;
 
-// Future B09/B10/B14 use this guard with their own DAO on the same transaction.
+// Future maintenance actions use this guard with their own DAO on the same transaction.
 // No customer-data permission or online grant operation is represented here.
-export function runMaintenanceAction<T>(connection: DatabaseConnection, actorId: string | null, action: keyof typeof operationPermissions, work: (transaction: QueryConnection) => Promise<T>) {
-  return authorized(connection, { actorId, subjectId: actorId, action, permission: operationPermissions[action] }, work);
+// subjectId records the opaque object of a read; it never carries free text.
+export function runMaintenanceAction<T>(
+  connection: DatabaseConnection,
+  actorId: string | null,
+  action: keyof typeof operationPermissions,
+  work: (transaction: QueryConnection) => Promise<T>,
+  subjectId: string | null = actorId,
+  invalidInput = false,
+) {
+  return authorized(connection, { actorId, subjectId, action, permission: operationPermissions[action] }, work, invalidInput);
 }
 
 // Trusted server CLI only. This is intentionally not exported by a server action

@@ -503,6 +503,7 @@ CREATE UNIQUE INDEX "monitoring_attempt_adopted_uidx" ON "monitoring_attempt" US
 CREATE INDEX "monitoring_attempt_run_idx" ON "monitoring_attempt" USING btree ("run_id","slot_id","ordinal");
 CREATE INDEX "monitoring_attempt_brand_idx" ON "monitoring_attempt" USING btree ("brand_id","created_at","id");
 CREATE UNIQUE INDEX "monitoring_run_operation_uidx" ON "monitoring_run" USING btree ("brand_id","operation_id");
+CREATE INDEX "monitoring_run_operation_idx" ON "monitoring_run" USING btree ("operation_id");
 CREATE INDEX "monitoring_run_brand_recent_idx" ON "monitoring_run" USING btree ("brand_id","created_at","id");
 CREATE UNIQUE INDEX "monitoring_slot_position_uidx" ON "monitoring_slot" USING btree ("run_id","question_id","channel_id","repeat_index");
 CREATE INDEX "monitoring_slot_brand_idx" ON "monitoring_slot" USING btree ("brand_id","run_id");

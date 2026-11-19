@@ -28,6 +28,7 @@ export const monitoringRun = sqliteTable("monitoring_run", {
   createdAt: text("created_at").notNull(),
 }, (table) => [
   uniqueIndex("monitoring_run_operation_uidx").on(table.brandId, table.operationId),
+  index("monitoring_run_operation_idx").on(table.operationId),
   index("monitoring_run_brand_recent_idx").on(table.brandId, table.createdAt, table.id),
   check("monitoring_run_scope_check", sql`${table.track} in ('model_api', 'consumer_ui')
     and ${table.repeatCount} between 1 and 3

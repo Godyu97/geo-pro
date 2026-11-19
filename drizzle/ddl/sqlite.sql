@@ -481,6 +481,7 @@ CREATE TABLE `monitoring_run` (
 );
 
 CREATE UNIQUE INDEX `monitoring_run_operation_uidx` ON `monitoring_run` (`brand_id`,`operation_id`);
+CREATE INDEX `monitoring_run_operation_idx` ON `monitoring_run` (`operation_id`);
 CREATE INDEX `monitoring_run_brand_recent_idx` ON `monitoring_run` (`brand_id`,`created_at`,`id`);
 CREATE TABLE `monitoring_slot` (
 	`id` text PRIMARY KEY NOT NULL,

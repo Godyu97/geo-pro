@@ -85,6 +85,13 @@
       "when": 1795076054059,
       "tag": "0011_natural_epoch",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795079834834,
+      "tag": "0012_graceful_shaman",
+      "breakpoints": true
     }
   ]
 }

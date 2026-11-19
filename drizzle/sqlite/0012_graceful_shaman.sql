@@ -1,0 +1,1 @@
+CREATE INDEX `monitoring_run_operation_idx` ON `monitoring_run` (`operation_id`);
