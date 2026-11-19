@@ -74,6 +74,8 @@ test("login return targets preserve local filters and reject external or malform
   assert.equal(safeReturnTo("/dashboard?filter=品牌#monitoring"), "/dashboard?filter=%E5%93%81%E7%89%8C#monitoring");
   assert.equal(safeReturnTo("/dashboard/maintenance?filter=权限#current"), "/dashboard/maintenance?filter=%E6%9D%83%E9%99%90#current");
   assert.equal(safeReturnTo("/dashboard/settings?from=工作台#data-management"), "/dashboard/settings?from=%E5%B7%A5%E4%BD%9C%E5%8F%B0#data-management");
+  assert.equal(safeReturnTo("/dashboard/maintenance/capabilities?from=权限"), "/dashboard/maintenance/capabilities?from=%E6%9D%83%E9%99%90");
+  assert.equal(safeReturnTo("/dashboard/monitoring/new"), "/dashboard/monitoring/new");
   assert.equal(safeReturnTo("/dashboard/settings/unknown"), "/dashboard");
   assert.equal(safeReturnTo("/dashboard/brands/new?step=2"), "/dashboard/brands/new?step=2");
   const brand = "/dashboard/brands/3160d7dc-1cae-4d26-8ce4-fd2b886c8192?version=2";

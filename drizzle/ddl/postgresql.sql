@@ -258,6 +258,67 @@ CREATE TABLE "brand_fact_version" (
       (("brand_fact_version"."state" = 'approved' AND "brand_fact_version"."revoked_at" IS NULL) OR ("brand_fact_version"."state" = 'revoked' AND "brand_fact_version"."revoked_at" IS NOT NULL))))
 );
 
+CREATE TABLE "capability_channel" (
+	"id" text PRIMARY KEY NOT NULL,
+	"vendor_id" text NOT NULL,
+	"kind" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "capability_channel_kind_check" CHECK ("capability_channel"."kind" in ('consumer_ui', 'model_api', 'custom_pipeline'))
+);
+
+CREATE TABLE "capability_version" (
+	"channel_id" text NOT NULL,
+	"version" integer NOT NULL,
+	"operation_id" text NOT NULL,
+	"fingerprint" text NOT NULL,
+	"actor_id" text NOT NULL,
+	"reason" text NOT NULL,
+	"status" text NOT NULL,
+	"display_name" text NOT NULL,
+	"product_entry" text NOT NULL,
+	"mode" text NOT NULL,
+	"model_version" text NOT NULL,
+	"availability" text NOT NULL,
+	"search_required" integer NOT NULL,
+	"citation_capability" text NOT NULL,
+	"region_target" text NOT NULL,
+	"region_actual" text NOT NULL,
+	"limits_summary" text NOT NULL,
+	"sop_summary" text NOT NULL,
+	"verified_at" text,
+	"expires_at" text,
+	"public_visible" integer NOT NULL,
+	"changed_at" text NOT NULL,
+	CONSTRAINT "capability_version_channel_id_version_pk" PRIMARY KEY("channel_id","version"),
+	CONSTRAINT "capability_version_operation_unique" UNIQUE("operation_id"),
+	CONSTRAINT "capability_version_values_check" CHECK ("capability_version"."version" > 0
+    and "capability_version"."status" in ('candidate', 'verified', 'degraded', 'disabled')
+    and "capability_version"."reason" in ('initial-record', 'verification', 'significant-change', 'disable', 'restore', 'expiry-review')
+    and "capability_version"."citation_capability" in ('complete', 'partial', 'unsupported')
+    and "capability_version"."search_required" in (0, 1) and "capability_version"."public_visible" in (0, 1)
+    and (
+      ("capability_version"."status" = 'verified' and "capability_version"."verified_at" is not null and "capability_version"."expires_at" is not null)
+      or ("capability_version"."status" <> 'verified' and "capability_version"."public_visible" = 0)
+    ))
+);
+
+CREATE TABLE "sampling_answer_network" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"channel_id" text NOT NULL,
+	"channel_version" integer NOT NULL,
+	"requested_network_mode" text NOT NULL,
+	"actual_network" text NOT NULL,
+	"trigger_evidence" text NOT NULL,
+	"qualifies_required_search" integer NOT NULL,
+	"created_at" text NOT NULL,
+	"created_by" text NOT NULL,
+	CONSTRAINT "sampling_answer_network_values_check" CHECK ("sampling_answer_network"."requested_network_mode" in ('on', 'off', 'unknown')
+    and "sampling_answer_network"."actual_network" in ('true', 'false', 'unknown')
+    and "sampling_answer_network"."trigger_evidence" in ('none', 'observed')
+    and "sampling_answer_network"."qualifies_required_search" in (0, 1))
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -275,6 +336,9 @@ ALTER TABLE "brand_fact_paste" ADD CONSTRAINT "fact_paste_previous_fk" FOREIGN K
 ALTER TABLE "brand_fact_use" ADD CONSTRAINT "fact_use_version_fk" FOREIGN KEY ("brand_id","fact_version_id") REFERENCES "public"."brand_fact_version"("brand_id","id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_fact_version" ADD CONSTRAINT "fact_entity_version_fk" FOREIGN KEY ("brand_id","entity_version") REFERENCES "public"."brand_version"("brand_id","version") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_fact_version" ADD CONSTRAINT "fact_version_paste_fk" FOREIGN KEY ("brand_id","paste_id") REFERENCES "public"."brand_fact_paste"("brand_id","id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "capability_version" ADD CONSTRAINT "capability_version_channel_id_capability_channel_id_fk" FOREIGN KEY ("channel_id") REFERENCES "public"."capability_channel"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "sampling_answer_network" ADD CONSTRAINT "sampling_answer_network_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "sampling_answer_network" ADD CONSTRAINT "sampling_answer_network_version_fk" FOREIGN KEY ("channel_id","channel_version") REFERENCES "public"."capability_version"("channel_id","version") ON DELETE no action ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -291,3 +355,6 @@ CREATE UNIQUE INDEX "fact_version_number_uidx" ON "brand_fact_version" USING btr
 CREATE INDEX "fact_entity_version_idx" ON "brand_fact_version" USING btree ("brand_id","entity_version");
 CREATE INDEX "fact_version_paste_idx" ON "brand_fact_version" USING btree ("brand_id","paste_id") WHERE "brand_fact_version"."paste_id" IS NOT NULL;
 CREATE INDEX "fact_version_recent_idx" ON "brand_fact_version" USING btree ("brand_id","created_at","id");
+CREATE INDEX "capability_channel_vendor_kind_idx" ON "capability_channel" USING btree ("vendor_id","kind","id");
+CREATE INDEX "sampling_answer_network_brand_created_idx" ON "sampling_answer_network" USING btree ("brand_id","created_at","id");
+CREATE INDEX "sampling_answer_network_channel_version_idx" ON "sampling_answer_network" USING btree ("channel_id","channel_version");

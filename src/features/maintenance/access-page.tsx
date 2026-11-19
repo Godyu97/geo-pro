@@ -43,7 +43,16 @@ export default async function MaintenanceAccessPage() {
                 <CardContent className="space-y-4 p-5">
                   <h2 className="break-words font-medium">{t(permission)}</h2>
                   <Badge variant="outline" className="max-w-full whitespace-normal">{t(granted ? "granted" : "notGranted")}</Badge>
-                  <p className="text-sm leading-7 text-muted-foreground">{t(permission === "quotas.manage" && granted ? "quotaOperationsAvailable" : "operationsPending")}</p>
+                  <p className="text-sm leading-7 text-muted-foreground">{t(
+                    permission === "quotas.manage" && granted ? "quotaOperationsAvailable"
+                      : permission === "capabilities.manage" && granted ? "capabilityOperationsAvailable"
+                        : "operationsPending",
+                  )}</p>
+                  {permission === "capabilities.manage" && granted && (
+                    <Button asChild variant="outline" className="h-auto min-h-10 whitespace-normal py-2">
+                      <Link href="/dashboard/maintenance/capabilities">{t("openCapabilities")}</Link>
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             );

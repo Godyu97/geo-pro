@@ -20,6 +20,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { getSessionState } from "@/lib/auth/session";
+import { readPublicCapabilities } from "@/features/capabilities/service";
 
 export async function MarketingHomePage() {
   const { status } = await getSessionState();
@@ -29,12 +30,18 @@ export async function MarketingHomePage() {
   const t = await getTranslator("marketing");
   const common = await getTranslator("common");
   const moduleLinks = getModuleLinks(getMessages(locale).modules);
+  const publicCapabilities = await readPublicCapabilities();
   const entryHref = authenticated ? "/dashboard" : "/login?mode=signup";
   const entryLabel = authenticated ? t("continue") : accountUnavailable ? t("accountEntry") : t("start");
   const availability = [
     { icon: UserRound, title: t("accountTitle"), description: t("accountDescription"), status: t("foundation") },
     { icon: Building2, title: t("brandTitle"), description: t("brandDescription"), status: t("preparing") },
-    { icon: Radar, title: t("monitoringTitle"), description: t("monitoringDescription"), status: t("preparing") },
+    {
+      icon: Radar,
+      title: t("monitoringTitle"),
+      description: publicCapabilities.items.length ? t("monitoringVerifiedDescription") : t("monitoringDescription"),
+      status: t("preparing"),
+    },
   ];
   const steps = [
     {
@@ -173,6 +180,17 @@ export async function MarketingHomePage() {
                 </Card>
               ))}
             </div>
+            {publicCapabilities.items.length > 0 && (
+              <ul className="mt-4 grid gap-3 md:grid-cols-2">
+                {publicCapabilities.items.map((item) => (
+                  <li key={item.channelId} className="rounded-xl border bg-card p-4 text-sm leading-7">
+                    <p className="font-medium wrap-anywhere">{item.displayName}</p>
+                    <p className="text-muted-foreground wrap-anywhere">{item.kind} · {item.productEntry}</p>
+                    <p className="text-muted-foreground wrap-anywhere">{item.limitsSummary}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
             <div className="mt-6 rounded-xl border bg-card p-6">
               <h3 className="font-medium">{t("pilotTitle")}</h3>
               <p className="mt-2 text-sm leading-7 text-muted-foreground">{t("pilotDescription")}</p>

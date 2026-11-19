@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-const safeDashboardPaths = ["/dashboard", "/dashboard/maintenance", "/dashboard/settings", "/dashboard/brands", "/dashboard/brands/new"];
+const safeDashboardPaths = [
+  "/dashboard", "/dashboard/maintenance", "/dashboard/maintenance/capabilities",
+  "/dashboard/settings", "/dashboard/monitoring/new", "/dashboard/brands", "/dashboard/brands/new",
+];
 const brandPath = /^\/dashboard\/brands\/[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}(?:\/delete|\/recovery|\/facts)?$/i;
 
 // Only existing protected app routes are eligible, never external origins.

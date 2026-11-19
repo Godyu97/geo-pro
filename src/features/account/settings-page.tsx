@@ -7,6 +7,7 @@ import { SignOutButton } from "@/components/layout/sign-out-button";
 import { Card, CardContent } from "@/components/ui/card";
 import { brandFixtureOrigin } from "@/features/brands/intake";
 import { DataExportPanel } from "@/features/data-exports/settings-panel";
+import { MonitoringCapabilityPanel } from "@/features/capabilities/settings-panel";
 import { PilotQuotaPanel } from "@/features/quotas/settings-panel";
 import { requireSession } from "@/lib/auth/session";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
@@ -25,6 +26,7 @@ export default async function AccountSettingsPage() {
   const t = await getTranslator("settings");
   const common = await getTranslator("common");
   const quota = await getTranslator("quotas");
+  const capabilities = await getTranslator("capabilities");
   const email = await getTranslator("accountEmail");
   const brandManagementAvailable = Boolean(brandFixtureOrigin(await headers()));
   const emailVerified = hasVerifiedEmail(user);
@@ -73,6 +75,12 @@ export default async function AccountSettingsPage() {
             <div className="flex">
               <SignOutButton />
             </div>
+          </section>
+          <section id="monitoring-capabilities" aria-labelledby="capability-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
+            <h2 id="capability-heading" className="font-medium">{capabilities("title")}</h2>
+            <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">{capabilities("loading")}</p>}>
+              <MonitoringCapabilityPanel locale={locale} />
+            </Suspense>
           </section>
           <section id="pilot-quotas" aria-labelledby="quota-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
             <h2 id="quota-heading" className="font-medium">{quota("title")}</h2>

@@ -23,6 +23,8 @@
 | 本人数据导出 HTTP | 会话、归属、语言、失效和失败状态 | `pnpm verify:data-exports` | 先 `pnpm build`，在 3106 端口使用双方言隔离库 |
 | 试点额度 DAO | 双库升级、版本、权限、预算和回滚 | `pnpm test:quotas` | SQLite 临时文件及本地 PostgreSQL 隔离库 |
 | 试点额度集成 | 维护接口及双语设置 | `pnpm verify:quotas` | 先 `pnpm build`，3107 端口、双方言隔离库和本机 Chrome |
+| 通道能力 DAO | 双库升级、双轨版本、正式运行门禁与联网证据 | `pnpm test:capabilities` | SQLite 临时文件及本地 PostgreSQL 隔离库 |
+| 通道能力集成 | 维护接口、设置范围与运行确认 | `pnpm verify:capabilities` | 先 `pnpm build`，3108 端口、双方言隔离库和本机 Chrome |
 | 文档包核验 | 产品文档一致性检查 | `python docs/tools/validate_docs.py` | 仅当核对或变更 `docs/` 产品文档时运行（仅检查链接、映射与样例，不代表业务验收） |
 | 多语言消息 | key / 参数完整性 | `pnpm check:i18n` | 消息目录、页面与本地化变更执行 |
 | 多语言基础测试 | Node.js 原生测试 | `pnpm test:i18n` | 覆盖解析、缺 key/参数负例、格式化、校验与返回地址 |

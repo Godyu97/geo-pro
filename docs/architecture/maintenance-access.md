@@ -32,7 +32,7 @@ pnpm maintenance:access revoke "$GEO_OPERATOR_ID" "$GEO_MAINTAINER_ID" capabilit
 
 ## 页面与直接接口
 
-`/dashboard/maintenance` 展示本人三项当前授权、限制、刷新及返回入口，提供 zh-CN/en。普通用户看到无权限提示；服务不可用显示明确错误和追踪 ID，不冒充无权限或授权成功。
+`/dashboard/maintenance` 展示本人三项当前授权、限制、刷新及返回入口，提供 zh-CN/en。已授予 `capabilities.manage` 时可进入 `/dashboard/maintenance/capabilities` 维护通道台账。普通用户看到无权限提示；服务不可用显示明确错误和追踪 ID，不冒充无权限或授权成功。 B09 写入契约见 [通道能力记录](../tasks/B09-channel-capabilities.md)。
 
 `GET /api/maintenance/access` 返回本人的授权列表；可选 `permission` 检查单项。未知/重复参数拒绝。接口独立执行服务端会话及数据库授权校验，始终 `private, no-store`；不接收其他用户 ID 或角色。
 

@@ -57,6 +57,13 @@
       "when": 1795003837811,
       "tag": "0007_last_synch",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1795055089976,
+      "tag": "0008_sloppy_madrox",
+      "breakpoints": true
     }
   ]
 }
