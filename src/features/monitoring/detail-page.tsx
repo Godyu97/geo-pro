@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
+import { getConnection } from "@/lib/db/connection";
 import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
+import { BrandDao } from "../brands/dao";
 import { CapabilityRetryButton } from "../capabilities/retry-button";
+import { IngestEvidenceButton } from "../evidence/ingest-button";
+import { EvidenceDao } from "../evidence/dao";
 import { formatMinorUnits } from "./format";
 import { RunControls } from "./run-controls";
 import { readOwnedRun } from "./service";
@@ -18,6 +22,7 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
   const { runId } = await params;
   const locale = await getLocale();
   const t = await getTranslator("monitoring");
+  const te = await getTranslator("evidence");
   const result = await readOwnedRun(session.user.id, runId);
   if (!result) notFound();
   if ("traceId" in result && result.traceId) {
@@ -43,6 +48,15 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
     const list = attemptsBySlot.get(attempt.slotId) ?? [];
     list.push(attempt);
     attemptsBySlot.set(attempt.slotId, list);
+  }
+  const connection = getConnection();
+  const brand = await new BrandDao(connection).active(session.user.id);
+  const evidenceDao = new EvidenceDao(connection);
+  const evidenceBySlot = new Map<string, string>();
+  for (const slot of result.slots) {
+    if (slot.status !== "succeeded") continue;
+    const observation = await evidenceDao.observationBySlot(session.user.id, result.brandId, slot.id);
+    if (observation) evidenceBySlot.set(slot.id, observation.id);
   }
   const statusLabel = {
     queued: "statusQueued", running: "statusRunning", paused: "statusPaused", succeeded: "statusSucceeded",
@@ -136,6 +150,19 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
                         {attempt.rawText && <p>{t("rawLabel")}: {attempt.rawText}</p>}
                       </div>
                     ))}
+                    {slot.status === "succeeded" && (
+                      evidenceBySlot.get(slot.id)
+                        ? <Link className="text-sm underline underline-offset-4" href={`/dashboard/monitoring/evidence/${evidenceBySlot.get(slot.id)}`} prefetch={false}>{te("openEvidence")}</Link>
+                        : brand && (
+                          <IngestEvidenceButton
+                            brandId={result.brandId}
+                            slotId={slot.id}
+                            brandName={brand.name}
+                            officialWebsite={null}
+                            messages={getMessages(locale).evidence}
+                          />
+                        )
+                    )}
                   </td>
                 </tr>
               );

@@ -92,6 +92,13 @@
       "when": 1795079834834,
       "tag": "0012_graceful_shaman",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1795093328370,
+      "tag": "0013_small_stardust",
+      "breakpoints": true
     }
   ]
 }
