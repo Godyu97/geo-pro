@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { isPublicPageFetchEnabled } from "@/lib/http/public-page-fetch";
 import { getTranslator } from "@/lib/i18n/server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ export default async function ContentPublicationPage({
   const session = await requireSession();
   const { publicationId } = await params;
   const t = await getTranslator("content");
+  const liveFetchEnabled = isPublicPageFetchEnabled();
   const detail = await readPublication(getConnection(), session.user.id, publicationId);
   if ("error" in detail) notFound();
 
@@ -92,9 +94,16 @@ export default async function ContentPublicationPage({
           <section className="space-y-3 rounded-2xl border p-5">
             <h2 className="text-lg font-semibold">{t("runPublicCheck")}</h2>
             <p className="text-sm text-muted-foreground">{t("fixtureHint")}</p>
+            <p className="text-sm text-muted-foreground">
+              {liveFetchEnabled ? t("liveFetchEnabled") : t("liveFetchDisabled")}
+            </p>
             <form action={verifyPublicationAction} className="grid gap-3 sm:grid-cols-2">
               <input type="hidden" name="brandId" value={publication.brandId} />
               <input type="hidden" name="publicationId" value={publication.id} />
+              <label className="flex items-start gap-2 text-sm sm:col-span-2">
+                <input name="useLiveFetch" type="checkbox" value="true" className="mt-1" />
+                <span>{t("useLiveFetch")}</span>
+              </label>
               <label className="block text-sm">
                 <span className="mb-1 block text-muted-foreground">{t("accessClass")}</span>
                 <select name="accessClass" className={inputClass} defaultValue="public">

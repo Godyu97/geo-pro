@@ -273,18 +273,21 @@ export async function submitPublicationAction(formData: FormData): Promise<void>
 export async function verifyPublicationAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   const publicationId = String(formData.get("publicationId") ?? "");
+  const useLiveFetch = String(formData.get("useLiveFetch") ?? "") === "true";
   const parsed = verifyPublicationSchema.safeParse({
     action: "verify-publication",
     brandId: String(formData.get("brandId") ?? ""),
     operationId: randomUUID(),
     publicationId,
-    fixturePage: {
-      accessClass: String(formData.get("accessClass") ?? ""),
-      httpStatus: Number(formData.get("httpStatus") ?? 200),
-      title: String(formData.get("fixtureTitle") ?? ""),
-      bodyText: String(formData.get("fixtureBody") ?? ""),
-      pageMarker: String(formData.get("pageMarker") ?? "") || undefined,
-    },
+    ...(useLiveFetch ? {} : {
+      fixturePage: {
+        accessClass: String(formData.get("accessClass") ?? ""),
+        httpStatus: Number(formData.get("httpStatus") ?? 200),
+        title: String(formData.get("fixtureTitle") ?? ""),
+        bodyText: String(formData.get("fixtureBody") ?? ""),
+        pageMarker: String(formData.get("pageMarker") ?? "") || undefined,
+      },
+    }),
   });
   if (!parsed.success) return;
   await verifyPublication(getConnection(), session.user.id, parsed.data);

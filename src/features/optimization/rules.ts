@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { containsExecutableInstruction } from "../../lib/http/public-page-policy.ts";
 import type { GapType } from "./contracts.ts";
 
 export type DiagnosisInput = {
@@ -43,9 +44,6 @@ export type PriorityFields = {
   createdAt: string;
   manualRank: number | null;
 };
-
-const EXECUTABLE_INSTRUCTION =
-  /(立即发布|马上发布|修改权限|grant\s+access|change\s+permission|publish\s+now|执行以下命令|run\s+this\s+command)/i;
 
 export function normalizeQuestionCluster(questionText: string) {
   const normalized = questionText.trim().replace(/\s+/g, " ").toLowerCase();
@@ -221,7 +219,24 @@ export type PageFetchResult = {
   title?: string;
   body?: string;
   accessCondition?: string;
+  discoverability?: string;
 };
+
+function closedCheckNote(accessCondition: string | undefined) {
+  if (accessCondition === "public-fetch-disabled") {
+    return "公开抓取未开启，本次保持受控关闭；不据此判断页面可达或引擎收录。";
+  }
+  if (accessCondition === "blocked-non-public-address") {
+    return "目标不是允许的公开地址，已阻断且不记录解析结果；不据此判断网站损坏或引擎收录。";
+  }
+  if (accessCondition === "response-too-large") {
+    return "响应超过只读上限，已丢弃正文；不据此判断页面内容或引擎收录。";
+  }
+  if (accessCondition === "timeout") {
+    return "公开抓取超时，未采用部分正文；不据此判断页面损坏或引擎收录。";
+  }
+  return "单次检查不可推断引擎收录结果；访问受限不判网站损坏。";
+}
 
 export function inspectPage(result: PageFetchResult, checkedAt: string) {
   const normalizedUrl = normalizeTargetPage(result.url);
@@ -235,13 +250,16 @@ export function inspectPage(result: PageFetchResult, checkedAt: string) {
       title: result.title ?? null,
       bodyExcerpt: null,
       keyFacts: [] as string[],
-      discoverabilityNotes: "单次检查不可推断引擎收录结果；访问受限不判网站损坏。",
+      discoverabilityNotes: closedCheckNote(result.accessCondition),
       containsExecutableInstructions: 0 as 0 | 1,
     };
   }
 
   const body = result.body ?? "";
-  const containsExecutableInstructions = EXECUTABLE_INSTRUCTION.test(body) ? 1 : 0;
+  const containsExecutableInstructions = containsExecutableInstruction(body) ? 1 : 0;
+  const robotsNote = result.discoverability?.startsWith("robots:")
+    ? " robots 元信息只作线索，不代表已收录或未收录。"
+    : "";
   return {
     url: result.url,
     normalizedUrl,
@@ -253,7 +271,7 @@ export function inspectPage(result: PageFetchResult, checkedAt: string) {
     keyFacts: [] as string[],
     discoverabilityNotes: containsExecutableInstructions
       ? "正文含发布/改权限类指令文本，仅只读标记，未执行；不据此宣称收录结果。"
-      : "只读摘录公开正文；速度或结构化标记不等于引擎收录。",
+      : `只读摘录公开正文；速度或结构化标记不等于引擎收录。${robotsNote}`,
     containsExecutableInstructions: containsExecutableInstructions as 0 | 1,
   };
 }

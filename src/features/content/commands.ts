@@ -2,6 +2,12 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection, TransactionConnection } from "../../lib/db/connection.ts";
+import {
+  fetchPublicPage,
+  isPublicPageFetchEnabled,
+  type PublicPageFetcher,
+} from "../../lib/http/public-page-fetch.ts";
+import { containsExecutableInstruction } from "../../lib/http/public-page-policy.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { FactDao } from "../brand-facts/dao.ts";
 import { factGaps, factStatus } from "../brand-facts/rules.ts";
@@ -1506,23 +1512,102 @@ function parseClaims(version: ContentVersionRow): string[] {
   return [];
 }
 
+const preservedOnFetchFailure = new Set([
+  "draft_only",
+  "access_limited",
+  "verified_public",
+  "verified_manual",
+  "mismatch",
+  "removed",
+]);
+
+async function observePublicationPage(
+  fixture: FixturePage | undefined,
+  pageUrl: string,
+  fetchPage: PublicPageFetcher,
+) {
+  if (fixture) return { ok: true as const, source: "fixture" as const, fixture, robots: null };
+  if (!isPublicPageFetchEnabled()) return { ok: false as const, code: "public_fetch_disabled" };
+  try {
+    const outcome = await fetchPage(pageUrl);
+    if (!outcome.ok) return { ok: false as const, code: outcome.code };
+    return {
+      ok: true as const,
+      source: "public_fetch" as const,
+      robots: outcome.robots,
+      fixture: {
+        accessClass: outcome.accessClass,
+        httpStatus: outcome.httpStatus,
+        title: outcome.title,
+        bodyText: outcome.bodyText,
+      },
+    };
+  } catch {
+    return { ok: false as const, code: "fetch_error" };
+  }
+}
+
 async function applyPublicCheck(
   dao: ContentDao,
   ownerId: string,
   publicationId: string,
   brandId: string,
   version: ContentVersionRow,
-  fixture: FixturePage,
+  fixture: FixturePage | undefined,
+  pageUrl: string,
   checkedAt: string,
+  fetchPage: PublicPageFetcher,
 ) {
   const publication = await dao.getPublication(ownerId, publicationId);
   if (!publication) return null;
+  const observed = await observePublicationPage(fixture, pageUrl, fetchPage);
+  const checkId = randomUUID();
+  if (!observed.ok) {
+    const keep = preservedOnFetchFailure.has(publication.status);
+    const status = keep ? publication.status : "pending_check" as const;
+    await dao.insertPublicationCheck({
+      id: checkId,
+      publicationId,
+      brandId,
+      ownerId,
+      method: "public_fetch",
+      resultStatus: "pending_check",
+      evidenceJson: JSON.stringify({
+        source: "public_fetch",
+        reason: observed.code,
+        matches: [],
+        claimedPublishedAt: publication.claimedPublishedAt,
+      }),
+      actorId: ownerId,
+      checkedAt,
+      notes: observed.code,
+    });
+    if (!keep) {
+      await dao.updatePublicationOutcome({
+        id: publicationId,
+        status,
+        effectiveAt: publication.effectiveAt,
+        evidenceGrade: publication.evidenceGrade,
+        updatedAt: checkedAt,
+      });
+    }
+    return {
+      publicationId,
+      checkId,
+      status,
+      effectiveAt: publication.effectiveAt,
+      evidenceGrade: publication.evidenceGrade,
+      claimedPublishedAt: publication.claimedPublishedAt,
+      matches: [],
+    };
+  }
+
   const result = evaluatePublicCheck({
-    fixture,
+    fixture: observed.fixture,
     claims: parseClaims(version),
     alreadyHasEffectiveAt: Boolean(publication.effectiveAt),
   });
-  const checkId = randomUUID();
+  const instructionMarked = containsExecutableInstruction(observed.fixture.bodyText);
   await dao.insertPublicationCheck({
     id: checkId,
     publicationId,
@@ -1531,14 +1616,22 @@ async function applyPublicCheck(
     method: "public_fetch",
     resultStatus: result.status,
     evidenceJson: JSON.stringify({
-      fixture,
+      source: observed.source,
+      fixture: observed.source === "fixture" ? observed.fixture : {
+        accessClass: observed.fixture.accessClass,
+        httpStatus: observed.fixture.httpStatus,
+        title: observed.fixture.title,
+        bodyExcerpt: observed.fixture.bodyText.slice(0, 500),
+      },
+      robots: observed.robots,
       matches: result.matches,
       reason: result.reason,
+      containsExecutableInstructions: instructionMarked,
       claimedPublishedAt: publication.claimedPublishedAt,
     }),
     actorId: ownerId,
     checkedAt,
-    notes: result.reason,
+    notes: instructionMarked ? `${result.reason}; instruction_marked` : result.reason,
   });
   const effectiveAt = nextEffectiveAt(publication.effectiveAt, result.setsEffectiveAt, checkedAt);
   const evidenceGrade = result.evidenceGrade ?? publication.evidenceGrade;
@@ -1639,7 +1732,8 @@ export async function submitPublication(
     }
 
     const checked = await applyPublicCheck(
-      dao, ownerId, publicationId, input.brandId, version, input.fixturePage, now,
+      dao, ownerId, publicationId, input.brandId, version, input.fixturePage, input.pageUrl, now,
+      fetchPublicPage,
     );
     if (!checked) return denied("NOT_FOUND");
     return { ...checked, replayed: false };
@@ -1651,6 +1745,7 @@ export async function verifyPublication(
   ownerId: string,
   input: VerifyPublicationInput,
   clock: Clock = () => new Date().toISOString(),
+  fetchPage: PublicPageFetcher = fetchPublicPage,
 ) {
   return locked(db, ownerId, async (transaction) => {
     if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
@@ -1664,7 +1759,8 @@ export async function verifyPublication(
     if (versionFingerprint(version) !== publication.contentFingerprint) return denied("APPROVAL_INVALID");
 
     const checked = await applyPublicCheck(
-      dao, ownerId, publication.id, input.brandId, version, input.fixturePage, clock(),
+      dao, ownerId, publication.id, input.brandId, version, input.fixturePage, publication.pageUrl, clock(),
+      fetchPage,
     );
     if (!checked) return denied("NOT_FOUND");
     return { ...checked, replayed: false };

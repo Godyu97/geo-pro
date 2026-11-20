@@ -6,6 +6,12 @@ import type { CacheStore } from "../../lib/cache/store.ts";
 import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { queryWithParameters } from "../../lib/db/connection.ts";
+import {
+  fetchPublicPage,
+  isPublicPageFetchEnabled,
+  type PublicPageFetcher,
+  type PublicPageFetchOutcome,
+} from "../../lib/http/public-page-fetch.ts";
 import { invalidateEvidenceOverview } from "../evidence/overview-cache.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { readObservation } from "../evidence/commands.ts";
@@ -197,16 +203,68 @@ function pageCheckDraft(url: string, publicStatus: string, cluster: string): Fin
   };
 }
 
+function pageResultFromOutcome(url: string, outcome: PublicPageFetchOutcome): PageFetchResult {
+  if (!outcome.ok) {
+    return { url, status: "error", accessCondition: outcome.code.replace(/_/g, "-") };
+  }
+  if (outcome.accessClass === "public") {
+    return {
+      url,
+      status: "ok",
+      title: outcome.title,
+      body: outcome.bodyText,
+      accessCondition: "anonymous-get",
+      discoverability: outcome.robots ? `robots:${outcome.robots}` : undefined,
+    };
+  }
+  if (outcome.accessClass === "removed") {
+    return { url, status: "error", title: outcome.title, accessCondition: "removed" };
+  }
+  return {
+    url,
+    status: "restricted",
+    title: outcome.title,
+    body: outcome.bodyText,
+    accessCondition: outcome.accessClass === "draft_box" ? "draft-box" : "login-wall",
+  };
+}
+
+async function resolvePageFetch(
+  url: string,
+  fixture: NonNullable<CheckPagesInput["fixtures"]>[number] | undefined,
+  fetchPage: PublicPageFetcher,
+): Promise<PageFetchResult> {
+  if (fixture) {
+    return {
+      url,
+      status: fixture.status,
+      title: fixture.title,
+      body: fixture.body,
+      accessCondition: fixture.accessCondition,
+    };
+  }
+  if (!isPublicPageFetchEnabled()) {
+    return { url, status: "error", accessCondition: "public-fetch-disabled" };
+  }
+  try {
+    return pageResultFromOutcome(url, await fetchPage(url));
+  } catch {
+    return { url, status: "error", accessCondition: "fetch-error" };
+  }
+}
+
 export async function checkPages(
   db: DatabaseConnection,
   ownerId: string,
   input: CheckPagesInput,
   clock: Clock = () => new Date().toISOString(),
   cache?: CacheStore,
+  fetchPage: PublicPageFetcher = fetchPublicPage,
 ) {
   const brands = new BrandDao(db);
   const brand = await brands.owned(ownerId, input.brandId);
   if (!brand) return denied("NOT_FOUND");
+  if (input.urls.length < 1 || input.urls.length > 5) return denied("INVALID_INPUT");
 
   const dao = new OptimizationDao(db);
   if (input.taskId) {
@@ -220,20 +278,7 @@ export async function checkPages(
   const restrictedDrafts: FindingDraft[] = [];
 
   for (const url of input.urls) {
-    const fixture = fixtureByUrl.get(url);
-    const fetchResult: PageFetchResult = fixture
-      ? {
-          url,
-          status: fixture.status,
-          title: fixture.title,
-          body: fixture.body,
-          accessCondition: fixture.accessCondition,
-        }
-      : {
-          url,
-          status: "error",
-          accessCondition: "isolated-no-network",
-        };
+    const fetchResult = await resolvePageFetch(url, fixtureByUrl.get(url), fetchPage);
 
     const inspected = inspectPage(fetchResult, now);
     const id = randomUUID();
@@ -267,6 +312,7 @@ export async function checkPages(
       url: inspected.url,
       normalizedUrl: inspected.normalizedUrl,
       publicStatus: inspected.publicStatus,
+      accessCondition: inspected.accessCondition,
       containsExecutableInstructions: inspected.containsExecutableInstructions === 1,
       discoverabilityNotes: inspected.discoverabilityNotes,
       title: inspected.title,

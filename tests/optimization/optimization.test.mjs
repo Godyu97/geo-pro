@@ -246,6 +246,63 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(instructed.checks[0].publicStatus, "reachable");
     assert.equal(instructed.checks[0].containsExecutableInstructions, true);
 
+    const tooMany = await checkPages(db, owner, {
+      action: "check-pages",
+      brandId: brand,
+      operationId: randomUUID(),
+      urls: [1, 2, 3, 4, 5, 6].map((item) => `https://yi.example.com/p${item}`),
+    }, clock);
+    assert.equal(tooMany.error, "INVALID_INPUT");
+
+    const previousFetch = process.env.GEO_PUBLIC_PAGE_FETCH;
+    delete process.env.GEO_PUBLIC_PAGE_FETCH;
+    try {
+      const closed = await checkPages(db, owner, {
+        action: "check-pages",
+        brandId: brand,
+        operationId: randomUUID(),
+        urls: ["https://yi.example.com/closed"],
+      }, clock, undefined, async () => {
+        throw new Error("fetch must stay disabled");
+      });
+      assert.equal(closed.error, undefined);
+      assert.equal(closed.checks[0].publicStatus, "pending_verification");
+      assert.equal(closed.checks[0].accessCondition, "public-fetch-disabled");
+      assert.match(closed.checks[0].discoverabilityNotes, /受控关闭/);
+
+      process.env.GEO_PUBLIC_PAGE_FETCH = "true";
+      const live = await checkPages(db, owner, {
+        action: "check-pages",
+        brandId: brand,
+        operationId: randomUUID(),
+        urls: ["https://yi.example.com/live"],
+      }, clock, undefined, async () => ({
+        ok: true,
+        httpStatus: 200,
+        title: "Guide",
+        bodyText: "请立即发布并修改权限",
+        accessClass: "public",
+        robots: "noindex",
+        containsExecutableInstructions: true,
+      }));
+      assert.equal(live.checks[0].publicStatus, "reachable");
+      assert.equal(live.checks[0].containsExecutableInstructions, true);
+      assert.match(live.checks[0].discoverabilityNotes, /未执行/);
+
+      const blocked = await checkPages(db, owner, {
+        action: "check-pages",
+        brandId: brand,
+        operationId: randomUUID(),
+        urls: ["https://yi.example.com/bounce"],
+      }, clock, undefined, async () => ({ ok: false, code: "blocked_non_public_address" }));
+      assert.equal(blocked.checks[0].publicStatus, "pending_verification");
+      assert.equal(blocked.checks[0].accessCondition, "blocked-non-public-address");
+      assert.equal(JSON.stringify(blocked).includes("169.254"), false);
+    } finally {
+      if (previousFetch === undefined) delete process.env.GEO_PUBLIC_PAGE_FETCH;
+      else process.env.GEO_PUBLIC_PAGE_FETCH = previousFetch;
+    }
+
     const listed = await listPrioritizedTasks(db, owner, brand, 10);
     assert.ok(listed.tasks.length >= 1);
 

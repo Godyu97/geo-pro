@@ -251,7 +251,7 @@ export const verifyPublicationSchema = z.strictObject({
   brandId: brandIdSchema,
   operationId: brandIdSchema,
   publicationId: brandIdSchema,
-  fixturePage: fixturePageSchema,
+  fixturePage: fixturePageSchema.optional(),
 });
 export type VerifyPublicationInput = z.infer<typeof verifyPublicationSchema>;
 
