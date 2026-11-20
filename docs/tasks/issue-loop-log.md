@@ -30,6 +30,7 @@
 | 16 | #56 | 事实批准与内容批准分开；作者不能自批；历史单人记录不改 | `62cd4909e0f8af656313a0631ca5782200f2376f` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 17 | #58 | 登录墙或验证码停止辅助采集且不绕过；缺引用保持 partial，确认后也不标完整 | `a8d10c3b4cc2e9c04992713ee0734954d76b7f33` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 18 | #31 | 官方轨价格不明或能力未核验时不启用；消费者轨即使启用也只标人工，两轨不互相代替 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 19 | #32 | 缺真实品牌、官方 20 条、消费者 6 条或 4 人独立完成时阶段门禁不通过，函数不生成这些结果 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 
 这些 Issue 在 2026-11-20 用 `gh issue list --state all` 核对时仍是 open，评论只说明阻塞已解除、真实验收不要勾选。本表已有记录，后续轮次不重复。
 
