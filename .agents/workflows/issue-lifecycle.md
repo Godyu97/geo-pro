@@ -1,6 +1,6 @@
 # Issue 生命周期规范（Issue Lifecycle）
 
-本规范定义未来基于 GitHub Issues（及 `docs/tasks/` 拆分任务）开展增量开发的标准状态流转与门禁。本阶段仅建立流程约束，不实现 GitHub API 集成、队列调度、Webhook 或自动化轮询循环。
+本规范定义基于 GitHub Issues（及 `docs/tasks/` 拆分任务）开展增量开发的标准状态流转与门禁。应用内不实现 GitHub API、队列或 Webhook。仓库外的串行循环见文末「串行循环」，固定提示词在 `scripts/run-issue-loop.py` 的 `FIXED_PROMPT`。
 
 ## 状态模型
 
@@ -33,3 +33,14 @@ Ready ──▶ In Progress ──▶ Implemented ──▶ Verified ──▶ D
 6. **子 Issue 拆分与防扩散**：
    - 仅当发现明确超出当前 Issue 范围的独立缺口且确有必要时，才建议拆建新 Issue。
    - 创建前必须先检查已有 Issue 与 `docs/tasks/`，防止重复创建；禁止 Agent 在缺乏明确目标与边界的情况下自动批量或无限生成任务。
+
+## 串行循环
+
+`scripts/run-issue-loop.py` 每一轮新建 session，并注入同一份 `FIXED_PROMPT`。轮与轮之间不共享对话，只共享仓库、Git 历史和 Issue 评论。外层只在该轮进程退出码为 0 且 stream-json 结果为 success、`is_error=false` 时进入下一轮；任一失败中止后续轮次。进程成功只表示本轮干净收束，不表示 Issue 已 Done。
+
+固定提示词因此要保证下面四件事：
+
+1. **选任务**：Open Issue 按创建时间从早到晚。他人正在改的跳过；本循环留下的 `In Progress` 要续作，先读评论和提交，不重做已推送增量。`Blocked` 先对照最新代码，原因已消失则解阻。只有缺密钥、未授权付费或无法用代码推进的真人试点才算硬阻塞。
+2. **一轮一件事**：只做一个 Issue 的一个可验证增量，然后退出。不能把外层循环要做的“下一轮”提前在同一 session 里做掉。
+3. **验收后再交接**：适用质量门禁通过后才 commit 和 push。未通过不得标 `Done`。部分完成保持 `In Progress` 并评论 commit、已验证命令和剩余验收。本轮做不出增量时标 `Blocked` 并写解除条件，避免下一轮重复选中它空转。
+4. **不伪造完成**：隔离 fixture 不能勾选真实验收。评论使用提示词中的 `loop-round` 字段，让下一轮新 session 能接着做。
