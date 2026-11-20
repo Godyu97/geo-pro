@@ -14,7 +14,7 @@
 | 表设计保持精简，审查必要索引 | 各后端包含认证、维护授权、品牌、导出生成记录、试点额度与通道能力 | 新增表/索引继续按真实访问路径审查 |
 | 维护并及时更新全量表 DDL，支持快速部署 | 已建立 PostgreSQL/SQLite 导出、一致性检查和空库对照 | Schema/migration/全量 DDL 同步交付，持续核验升级 |
 
-`drizzle.config.ts` 与 `drizzle.sqlite.config.ts` 分别维护双方言；`db:auth-schema` 通过同版本官方 CLI 生成两套认证表。`DATABASE_PROVIDER` 默认 `postgresql`，SQLite 显式配置 `SQLITE_PATH`，使用 Node 24 内置驱动和官方 Drizzle proxy/Auth adapter。`pnpm test:maintenance` 与 `pnpm verify:maintenance` 仅验证认证/维护用例，详见 [B08 记录](../tasks/B08-maintenance-access.md)。监测运行的执行、恢复、本人用量和官方 HTTP loopback 契约由 `pnpm test:monitoring` 在两种隔离库验证。支持定位的数据库与缓存演练由 `pnpm test:support` 验证，详见 [B14 记录](../tasks/B14-support-recovery.md)。证据概览的批量读取、查询计划和 memory/Redis 读缓存由 `pnpm test:evidence` 验证，详见 [M0-35 记录](../tasks/M0-35-evidence-overview-cache.md)。M0 核心模块的旧版升级、重复迁移、全量 DDL 对照和零跳过双库测试由 `pnpm verify:dual-db` 执行，详见 [M0-38 记录](../tasks/M0-38-dual-database-verification.md)。未引入额外驱动依赖。
+`drizzle.config.ts` 与 `drizzle.sqlite.config.ts` 分别维护双方言；`db:auth-schema` 通过同版本官方 CLI 生成两套认证表。`DATABASE_PROVIDER` 默认 `postgresql`，SQLite 显式配置 `SQLITE_PATH`，使用 Node 24 内置驱动和官方 Drizzle proxy/Auth adapter。`pnpm test:maintenance` 与 `pnpm verify:maintenance` 仅验证认证/维护用例，详见 [B08 记录](../tasks/B08-maintenance-access.md)。监测运行的执行、恢复、本人用量和官方 HTTP loopback 契约由 `pnpm test:monitoring` 在两种隔离库验证。支持定位的数据库与缓存演练由 `pnpm test:support` 验证，详见 [B14 记录](../tasks/B14-support-recovery.md)。证据概览的批量读取、查询计划和 memory/Redis 读缓存由 `pnpm test:evidence` 验证，详见 [M0-35 记录](../tasks/M0-35-evidence-overview-cache.md)。固定竞品集与已观察提及由 `pnpm test:competitors` 在两种隔离库验证。M0 核心模块的旧版升级、重复迁移、全量 DDL 对照和零跳过双库测试由 `pnpm verify:dual-db` 执行，详见 [M0-38 记录](../tasks/M0-38-dual-database-verification.md)。未引入额外驱动依赖。
 
 ## DAO 边界与双数据库兼容
 

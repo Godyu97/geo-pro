@@ -148,6 +148,13 @@
       "when": 1795173766026,
       "tag": "0020_careless_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795198551086,
+      "tag": "0021_nifty_misty_knight",
+      "breakpoints": true
     }
   ]
 }

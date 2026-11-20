@@ -950,6 +950,34 @@ CREATE TABLE "report_todo" (
     and length("report_todo"."progress_json") > 1)
 );
 
+CREATE TABLE "competitor_mention" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"set_id" text NOT NULL,
+	"observation_id" text NOT NULL,
+	"competitor_label" text NOT NULL,
+	"ordered" integer NOT NULL,
+	"position" integer,
+	"created_at" text NOT NULL,
+	CONSTRAINT "competitor_mention_check" CHECK ("competitor_mention"."ordered" in (0, 1)
+    and length("competitor_mention"."competitor_label") between 1 and 80
+    and (
+      ("competitor_mention"."ordered" = 1 and "competitor_mention"."position" > 0)
+      or ("competitor_mention"."ordered" = 0 and "competitor_mention"."position" is null)
+    ))
+);
+
+CREATE TABLE "competitor_set" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"version" integer NOT NULL,
+	"labels_json" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "competitor_set_check" CHECK ("competitor_set"."version" > 0 and length("competitor_set"."labels_json") between 2 and 2000)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -1020,6 +1048,10 @@ ALTER TABLE "report_snapshot" ADD CONSTRAINT "report_snapshot_brand_id_brand_id_
 ALTER TABLE "report_snapshot" ADD CONSTRAINT "report_snapshot_retest_fk" FOREIGN KEY ("retest_id") REFERENCES "public"."report_retest"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "report_todo" ADD CONSTRAINT "report_todo_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "report_todo" ADD CONSTRAINT "report_todo_retest_fk" FOREIGN KEY ("retest_id") REFERENCES "public"."report_retest"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "competitor_mention" ADD CONSTRAINT "competitor_mention_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "competitor_mention" ADD CONSTRAINT "competitor_mention_set_id_competitor_set_id_fk" FOREIGN KEY ("set_id") REFERENCES "public"."competitor_set"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "competitor_mention" ADD CONSTRAINT "competitor_mention_observation_id_answer_observation_id_fk" FOREIGN KEY ("observation_id") REFERENCES "public"."answer_observation"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "competitor_set" ADD CONSTRAINT "competitor_set_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -1109,3 +1141,7 @@ CREATE INDEX "report_snapshot_owner_idx" ON "report_snapshot" USING btree ("owne
 CREATE INDEX "report_snapshot_predecessor_idx" ON "report_snapshot" USING btree ("predecessor_id");
 CREATE INDEX "report_todo_brand_idx" ON "report_todo" USING btree ("brand_id","due_at","id");
 CREATE INDEX "report_todo_owner_idx" ON "report_todo" USING btree ("owner_id","due_at","id");
+CREATE UNIQUE INDEX "competitor_mention_once_uidx" ON "competitor_mention" USING btree ("set_id","observation_id","competitor_label");
+CREATE INDEX "competitor_mention_set_idx" ON "competitor_mention" USING btree ("brand_id","set_id","observation_id");
+CREATE UNIQUE INDEX "competitor_set_brand_version_uidx" ON "competitor_set" USING btree ("brand_id","version");
+CREATE INDEX "competitor_set_owner_idx" ON "competitor_set" USING btree ("owner_id","brand_id","version");
