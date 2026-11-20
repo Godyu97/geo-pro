@@ -18,3 +18,16 @@ export function calendarRow(input: { plannedOn: string | null; verifiedOn: strin
     blocked: input.blocked,
   };
 }
+
+/** A blocked channel stays blocked. Already verified channels are not rolled back. */
+export function settleChannels(rows: readonly { channel: string; state: "verified" | "blocked" }[]) {
+  return {
+    verified: rows.filter((row) => row.state === "verified").map((row) => row.channel),
+    blocked: rows.filter((row) => row.state === "blocked").map((row) => row.channel),
+    rolledBack: [] as string[],
+  };
+}
+
+export function exportPackage(input: { markdown: string; tables: readonly string[] }) {
+  return { markdown: input.markdown, tables: [...input.tables], droppedTables: 0 };
+}
