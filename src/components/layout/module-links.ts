@@ -1,5 +1,5 @@
 import {
-  Building2, MessagesSquare, Radar, Link2, UsersRound, WandSparkles,
+  Building2, FilePenLine, MessagesSquare, Radar, Link2, UsersRound, WandSparkles,
 } from "lucide-react";
 import type { Messages } from "@/lib/i18n/server";
 
@@ -47,6 +47,13 @@ export function getModuleLinks(messages: Messages["modules"]) {
       title: messages.optimizationTitle,
       description: messages.optimizationDescription,
       empty: messages.optimizationEmpty,
+    },
+    {
+      id: "content",
+      icon: FilePenLine,
+      title: messages.contentTitle,
+      description: messages.contentDescription,
+      empty: messages.contentEmpty,
     },
   ] as const;
 }
