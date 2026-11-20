@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { queryWithParameters, type DatabaseConnection, type TransactionConnection } from "../../lib/db/connection.ts";
+import { officialNetworkFacts, unknownOfficialSample } from "../../lib/ai/official-sampling.ts";
 import { CapabilityDao } from "../capabilities/dao.ts";
 import { formalRunEligibility } from "../capabilities/rules.ts";
 import { QuotaDao } from "../quotas/dao.ts";
@@ -13,7 +14,13 @@ import {
   type MonitoringRunRow,
   type MonitoringSlotRow,
 } from "./dao.ts";
-import { type IsolatedSample, type SamplingRequest } from "./transport.ts";
+import { PromptDao } from "../prompts/dao.ts";
+import {
+  type IsolatedSample,
+  type OfficialSample,
+  type OfficialSamplingPort,
+  type SamplingRequest,
+} from "./transport.ts";
 
 export type { IsolatedSample } from "./transport.ts";
 
@@ -95,20 +102,26 @@ async function startQuota(quota: QuotaDao, brandId: string, reservationId: strin
   return "applied" as const;
 }
 
+function canAdopt(sample: IsolatedSample | OfficialSample, run: MonitoringRunRow) {
+  if (sample.disposition !== "adopted" || sample.rawText.length === 0 || sample.rawText.length > 8000) return false;
+  if (run.upperMinor !== null && sample.actualMinor > run.upperMinor) return false;
+  if (!sample.synthetic && (sample.costState !== "known" || sample.currency !== run.currency)) return false;
+  return true;
+}
+
 async function applySample(
   monitoring: MonitoringDao,
   quota: QuotaDao,
   run: MonitoringRunRow,
   slot: MonitoringSlotRow,
   attempt: MonitoringAttemptRow,
-  sample: IsolatedSample,
+  sample: IsolatedSample | OfficialSample,
   time: string,
   usage: Usage | null,
 ) {
   const upper = run.upperMinor ?? 0;
   const paid = Boolean(slot.reservationId && run.currency);
-  if (sample.disposition === "adopted" && sample.rawText.length > 0 && sample.rawText.length <= 8000
-    && (run.upperMinor === null || sample.actualMinor <= run.upperMinor)) {
+  if (canAdopt(sample, run) && sample.disposition === "adopted") {
     await monitoring.updateAttempt({
       id: attempt.id, disposition: "adopted", rawText: sample.rawText, actualMinor: paid ? sample.actualMinor : null,
       costState: paid ? "known" : "none", late: 0,
@@ -137,7 +150,9 @@ async function applySample(
     await monitoring.setSlot(slot.id, attempt.ordinal >= 3 ? "failed" : "queued", null, 0);
     return;
   }
-  const rawText = sample.disposition === "unknown" ? sample.rawText ?? null : null;
+  const rawText = sample.synthetic
+    ? sample.disposition === "unknown" ? sample.rawText ?? null : null
+    : sample.rawText;
   await monitoring.updateAttempt({
     id: attempt.id, disposition: "unknown", rawText, actualMinor: null, costState: paid ? "unknown" : "none", late: 0,
   });
@@ -175,11 +190,10 @@ export async function executeMonitoringRun(
   connection: DatabaseConnection,
   ownerId: string,
   runId: string,
-  transport: IsolatedTransport | { label: "official_api" },
+  transport: IsolatedTransport | OfficialSamplingPort,
   now = () => new Date().toISOString(),
   options: { failBeforeCommit?: boolean } = {},
 ) {
-  if (transport.label !== "isolated") return denied("REAL_CHANNEL_CLOSED", "await-channel");
   const time = now();
   return ownedRun(connection, ownerId, runId, async (transaction, monitoring, quota, run) => {
     if (run.status === "cancelled") return persist(monitoring, ownerId, run.id, true);
@@ -190,13 +204,40 @@ export async function executeMonitoringRun(
       list.push(attempt);
       grouped.set(attempt.slotId, list);
     }
+    const capabilityDao = new CapabilityDao(transaction);
+    const channels = await capabilityDao.latestByIds([...new Set(slots.map((slot) => slot.channelId))]);
+    const channelById = new Map(channels.map((channel) => [channel.channelId, channel]));
+    const official = transport.label === "official_api";
+    if (official) {
+      const pinned = slots.every((slot) => channelById.get(slot.channelId)?.version === slot.channelVersion);
+      if (!pinned || channels.length === 0) {
+        await monitoring.pauseQueued(run.id);
+        await persist(monitoring, ownerId, run.id, false);
+        return denied("CHANNEL_UNVERIFIED", "verify-channel");
+      }
+      for (const channel of channels) {
+        const decision = transport.probe({
+          channelId: channel.channelId,
+          kind: channel.kind,
+          status: channel.status,
+          productEntry: channel.productEntry,
+          modelVersion: channel.modelVersion,
+          verifiedAt: channel.verifiedAt,
+          expiresAt: channel.expiresAt,
+        }, time);
+        if (!decision.open && decision.code === "CHANNEL_UNVERIFIED") {
+          await monitoring.pauseQueued(run.id);
+          await persist(monitoring, ownerId, run.id, false);
+          return denied("CHANNEL_UNVERIFIED", "verify-channel");
+        }
+        if (!decision.open) return denied("REAL_CHANNEL_CLOSED", "await-channel");
+      }
+    }
     if (run.track === "model_api" && !(await monitoring.emailVerified(ownerId))) {
       await monitoring.pauseQueued(run.id);
       await persist(monitoring, ownerId, run.id, false);
       return denied("EMAIL_UNVERIFIED", "verify-email");
     }
-    const channels = await new CapabilityDao(transaction).latestByIds([...new Set(slots.map((slot) => slot.channelId))]);
-    const channelById = new Map(channels.map((channel) => [channel.channelId, channel]));
     const grant = run.track === "model_api" ? await quota.grant(run.brandId, "sampling") : null;
     if (run.track === "model_api" && (!grant || grantState(grant, time) !== "active" || grant.currency !== run.currency || run.upperMinor === null)) {
       await monitoring.pauseQueued(run.id);
@@ -204,6 +245,12 @@ export async function executeMonitoringRun(
       return denied(run.upperMinor === null ? "NO_TRUSTED_CEILING" : "NOT_ENTITLED", run.upperMinor === null ? "confirm-ceiling" : "request-quota");
     }
     const usage = run.track === "model_api" ? await monitoring.samplingUsage(run.brandId) : null;
+    const questionText = new Map<string, string>();
+    if (official) {
+      const prompt = await new PromptDao(transaction, run.brandId).version(run.promptSetId);
+      if (!prompt) return denied("NOT_READY");
+      for (const question of prompt.content.questions) questionText.set(question.id, question.text);
+    }
     let pausedForBudget = false;
     for (const slot of slots) {
       if (["succeeded", "failed", "cancelled", "reconciliation_required"].includes(slot.status)) continue;
@@ -258,18 +305,39 @@ export async function executeMonitoringRun(
       }
       const attempt: MonitoringAttemptRow = {
         id: attemptId, slotId: slot.id, runId: run.id, brandId: run.brandId, kind: "sampling", ordinal: sampling.length + 1,
-        transport: "isolated", synthetic: 1, disposition: "pending", rawText: null, currency: run.currency,
+        transport: official ? "official_api" : "isolated", synthetic: official ? 0 : 1, disposition: "pending", rawText: null, currency: run.currency,
         upperMinor: paid ? upper : null, actualMinor: null, costState: paid ? "pending" : "none",
         quotaAttemptId: paid ? attemptId : null, late: 0, createdAt: time,
       };
       await monitoring.insertAttempt(attempt);
-      let sample: IsolatedSample;
+      const request: SamplingRequest = {
+        slotId: slot.id, questionId: slot.questionId, channelId: slot.channelId, ordinal: attempt.ordinal,
+        questionText: questionText.get(slot.questionId), requestedNetworkMode: run.requestedNetworkMode,
+        upperMinor: run.upperMinor, currency: run.currency, now: time,
+        capability: channel ? {
+          channelId: channel.channelId, version: channel.version, kind: channel.kind, status: channel.status,
+          productEntry: channel.productEntry, modelVersion: channel.modelVersion,
+          citationCapability: channel.citationCapability, searchRequired: channel.searchRequired === 1 ? 1 : 0,
+          verifiedAt: channel.verifiedAt, expiresAt: channel.expiresAt,
+        } : undefined,
+      };
+      let sample: IsolatedSample | OfficialSample;
       try {
-        sample = await transport.sample({ slotId: slot.id, questionId: slot.questionId, channelId: slot.channelId, ordinal: attempt.ordinal });
+        sample = await transport.sample(request);
       } catch {
-        sample = { disposition: "unknown", synthetic: true };
+        sample = official ? unknownOfficialSample() : { disposition: "unknown", synthetic: true };
       }
-      await applySample(monitoring, quota, run, slot, attempt, sample.synthetic ? sample : { disposition: "unknown", synthetic: true }, time, usage);
+      if (official ? sample.synthetic : !sample.synthetic) {
+        sample = official ? unknownOfficialSample() : { disposition: "unknown", synthetic: true };
+      }
+      await applySample(monitoring, quota, run, slot, attempt, sample, time, usage);
+      if (!sample.synthetic && sample.disposition !== "safe_failure") {
+        const facts = officialNetworkFacts(sample.networkTrigger, channel.searchRequired === 1 ? 1 : 0);
+        await capabilityDao.insertAnswerNetwork({
+          id: randomUUID(), brandId: run.brandId, channelId: slot.channelId, channelVersion: slot.channelVersion,
+          requestedNetworkMode: run.requestedNetworkMode, ...facts, createdAt: time,
+        }, ownerId);
+      }
     }
     if (options.failBeforeCommit) throw new Error("forced-rollback");
     return persist(monitoring, ownerId, run.id, false, pausedForBudget);

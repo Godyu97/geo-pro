@@ -37,7 +37,7 @@
   - `api/health/route.ts`：固定存活状态 JSON（`{ status: "ok", service: "geo-pro" }`）
   - `(dashboard)/dashboard/maintenance/`、`api/maintenance/access/route.ts`：本人维护权限页面/接口，独立会话和服务端授权校验。`/dashboard/maintenance/support` 与 `api/maintenance/support` 按 `support.read` 返回运行、删除和通道元信息
   - `api/maintenance/quotas/route.ts`：试点额度维护写入，复用 `quotas.manage`
-  - `api/maintenance/capabilities/`、`(dashboard)/dashboard/maintenance/capabilities/`、`(dashboard)/dashboard/monitoring/new/`：通道能力台账维护、用户范围与运行确认门禁。`/dashboard/monitoring/runs/<id>` 与 `api/monitoring/runs/` 登记 queued 运行和预算预留，不启动采样。`/dashboard/monitoring/evidence/<id>` 与 `api/monitoring/answers/` 保存双轨原文证据与分析修订。`/dashboard/monitoring/overview`、`/dashboard/monitoring/answers` 与 `api/monitoring/overview` 提供同口径题等权概览与回答下钻
+  - `api/maintenance/capabilities/`、`(dashboard)/dashboard/maintenance/capabilities/`、`(dashboard)/dashboard/monitoring/new/`：通道能力台账维护、用户范围与运行确认门禁。`/dashboard/monitoring/runs/<id>` 与 `api/monitoring/runs/` 登记 queued 运行和预算预留，不启动采样。官方 HTTP 适配器只在调用方显式传入已配置端口时采样，缺配置保持关闭。`/dashboard/monitoring/evidence/<id>` 与 `api/monitoring/answers/` 保存双轨原文证据与分析修订。`/dashboard/monitoring/overview`、`/dashboard/monitoring/answers` 与 `api/monitoring/overview` 提供同口径题等权概览与回答下钻
   - `(dashboard)/dashboard/content/`、`api/content/`：问题驱动 Brief、小批次草稿与事实绑定（始终待审；隔离模板填充）
   - `(dashboard)/dashboard/settings/`：本人账户设置，显示只读邮箱、编辑称呼、切换界面语言及管理当前会话
   - `(dashboard)/dashboard/brands/`、`api/brands/`：单负责人品牌、草稿、历史版本、删除影响预览与冻结恢复。合成资料用于回环验收，常规入口暂停收集。品牌详情的事实与材料入口沿用该门禁。
@@ -79,7 +79,7 @@
 | `pnpm test:brand-facts` | Node.js 原生测试 | 双库迁移、事实版本、资格、撤销、权限和查询计划 |
 | `pnpm verify:brand-facts` | HTTP / Chrome | 生产构建后在 3118 端口使用双方言隔离库，含 `pnpm verify:auth` |
 | `pnpm test:prompts` | Node.js 原生测试 | 双库题集版本、重复题、引用、权限和查询计划 |
-| `pnpm test:monitoring` | Node.js 原生测试 | 双库排队、隔离执行、恢复、额度核对和查询计划 |
+| `pnpm test:monitoring` | Node.js 原生测试 | 双库排队、隔离执行、官方 HTTP loopback 契约、恢复、额度核对和查询计划 |
 | `pnpm test:evidence` | Node.js 原生测试 | 双库 Observation/Citation/AnalysisVersion、AC-M0-06/07 概览金样与归属隔离 |
 | `pnpm test:optimization` | Node.js 原生测试 | 优化任务诊断、去重、页面检查与归属隔离 |
 | `pnpm test:content` | Node.js 原生测试 | Brief 门禁、小批次草稿、失败重试、事实撤销阻塞与归属隔离 |
