@@ -29,3 +29,29 @@ export function revokedAssetReferences(input: { assetId: string; references: rea
 export function templateAllowsInvention(input: { asksToInventCaseStudy: boolean }) {
   return { allowed: false, reason: input.asksToInventCaseStudy ? "fact_gate" as const : "approval_gate" as const };
 }
+
+type ImportFile = { name: string; bytes: number; chars: number; encrypted: boolean; pages: readonly ImportPage[] };
+
+/** Files past the batch cap are reported instead of dropped. Extracted text is not an approved fact. */
+export function importBatchReport(files: readonly ImportFile[]) {
+  const kept = importBatch(files.slice(0, maxFiles));
+  const overflow = files.slice(maxFiles).map((file) => ({
+    name: file.name,
+    status: "failed" as const,
+    reason: "batch_limit" as const,
+    pages: [] as ImportPage[],
+  }));
+  return { files: [...kept, ...overflow], factsApproved: false as const };
+}
+
+export function candidateFact(input: { text: string | null; page: number | null; approvedValues: readonly string[] }) {
+  if (input.text === null || input.page === null) {
+    return { approved: false as const, page: input.page, conflicts: [] as string[], inventedPage: false as const };
+  }
+  return {
+    approved: false as const,
+    page: input.page,
+    conflicts: input.approvedValues.filter((value) => value !== input.text),
+    inventedPage: false as const,
+  };
+}
