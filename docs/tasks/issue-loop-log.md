@@ -33,6 +33,7 @@
 | 19 | #32 | 缺真实品牌、官方 20 条、消费者 6 条或 4 人独立完成时阶段门禁不通过，函数不生成这些结果 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 20 | #57 | 没有 200 条分析样本、团队观察和 8 项 M1 任务核对时阶段门禁不通过，不补造样本 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 21 | #59 | 入口结构变化退回人工且不更换账号；引用不完整时不计算节省时间 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 22 | #60 | 只有草稿权限不能公开发布；草稿回执不算公开；已受理或结果未知时先对账不再提交 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 
 这些 Issue 在 2026-11-20 用 `gh issue list --state all` 核对时仍是 open，评论只说明阻塞已解除、真实验收不要勾选。本表已有记录，后续轮次不重复。
 
