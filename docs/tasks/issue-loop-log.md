@@ -37,6 +37,7 @@
 | 23 | #61 | 通知授权撤销或正文含客户原文时不发送，历史发送记录不删除 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 24 | #62 | 代理成员身份不能代替品牌委托；委托失效时拒绝访问并停掉排队动作，组合行不展示证据 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 25 | #63 | 没有支付连接时订单停在待支付，不标已收款；白标报告保留轨道、样本量和结论等级 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 26 | #64 | 无理由的支持检索被拒绝且不返回客户正文；最后一位负责人不能注销，受理也不表示数据已清除 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 
 这些 Issue 在 2026-11-20 用 `gh issue list --state all` 核对时仍是 open，评论只说明阻塞已解除、真实验收不要勾选。本表已有记录，后续轮次不重复。
 
