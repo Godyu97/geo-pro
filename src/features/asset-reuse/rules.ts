@@ -44,6 +44,31 @@ export function importBatchReport(files: readonly ImportFile[]) {
   return { files: [...kept, ...overflow], factsApproved: false as const };
 }
 
+export type TemplateGates = { fact: boolean; publicLicense: boolean; review: boolean };
+
+/** System templates stay read-only. A clone cannot turn off fact, license, or review gates. */
+export function cloneTemplate(input: { system: boolean; gates: TemplateGates }) {
+  if (!input.gates.fact || !input.gates.publicLicense || !input.gates.review) {
+    return { cloned: false as const, reason: "gate_required" as const };
+  }
+  return {
+    cloned: true as const,
+    readOnlySource: input.system,
+    gates: { fact: true, publicLicense: true, review: true } as const,
+  };
+}
+
+export function revokeAsset(input: { assetId: string; references: readonly { contentId: string; assetVersion: number }[] }) {
+  const revoked = revokedAssetReferences(input);
+  return {
+    ...revoked,
+    todos: revoked.references.map((reference) => ({
+      contentId: reference.contentId,
+      assetVersion: reference.assetVersion,
+    })),
+  };
+}
+
 export function candidateFact(input: { text: string | null; page: number | null; approvedValues: readonly string[] }) {
   if (input.text === null || input.page === null) {
     return { approved: false as const, page: input.page, conflicts: [] as string[], inventedPage: false as const };
