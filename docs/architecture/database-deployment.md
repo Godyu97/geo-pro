@@ -1,17 +1,17 @@
 # 全量 DDL 维护与数据库部署
 
-> 2026-11-18｜支持 PostgreSQL / SQLite3，覆盖认证、维护授权、B04 品牌建档、B05 本人数据导出、B07 品牌清除和 B10 试点额度。
+> 2026-11-20｜支持 PostgreSQL / SQLite3。迁移和全量 DDL 覆盖当前 Schema。#38 对照时双方言各为 52 张表。早期只列到额度表的说明已被后续 M0 模块扩展，表清单以 DDL 文件为准。
 
 ## 权威来源与产物
 
-Drizzle Schema 是目标结构来源，按顺序审核过的 migration 是应用部署和升级记录。两种后端各有四张 Better Auth 生成表、一张账号邮件限流表、两张维护表、四张品牌表、一张导出记录表、两张品牌清除及费用凭证表和三张试点额度表。 [B04 品牌建档](../tasks/B04-brand-onboarding.md) · [B05 本人数据导出](../tasks/B05-owned-data-export.md) · [B17 账号邮件](../tasks/B17-account-email-recovery.md)
+Drizzle Schema 是目标结构来源，按顺序审核过的 migration 是应用部署和升级记录。双方言都包含认证表、账号邮件限流、维护授权、品牌、导出、清除凭证、额度和后续监测、证据、内容、报告等表。早期只统计到额度表的数量不再作为当前清单。 [B04 品牌建档](../tasks/B04-brand-onboarding.md) · [B05 本人数据导出](../tasks/B05-owned-data-export.md) · [B17 账号邮件](../tasks/B17-account-email-recovery.md)
 
 | 后端 | Schema 配置 | 迁移 | 全量 DDL |
 | --- | --- | --- | --- |
 | PostgreSQL | `drizzle.config.ts` | `drizzle/*.sql`、`drizzle/meta/` | `drizzle/ddl/postgresql.sql` |
 | SQLite3 | `drizzle.sqlite.config.ts` | `drizzle/sqlite/*.sql`、`drizzle/sqlite/meta/` | `drizzle/ddl/sqlite.sql` |
 
-两份 DDL 均由 `pnpm db:ddl` 生成，覆盖当前全部应用表、约束和索引，不含客户数据、密钥或迁移历史表。认证表来自同版本官方 CLI，不手改生成表。
+两份 DDL 均由 `pnpm db:ddl` 生成，覆盖当前全部应用表、约束和索引，不含客户数据、密钥或迁移历史表。认证表来自同版本官方 CLI，不手改生成表。本文不再维护逐表数量；结构以这两份 DDL 和 [M0-38](../tasks/M0-38-dual-database-verification.md) 的升级对照为准。
 
 全量 DDL 不手改。`scripts/export-ddl.mjs` 调用已安装的 Drizzle Kit，复用双方言配置离线导出，不连接数据库或执行迁移；某方言生成失败不覆盖其原文件。`db:ddl:check` 只比较，不改写文件。新增 Schema 须先纳入各自配置。
 
