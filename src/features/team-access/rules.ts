@@ -17,3 +17,23 @@ export function revokedAction(input: { queued: boolean; grantRevoked: boolean })
 export function brandVisible(grants: readonly { brandId: string; active: boolean }[], brandId: string) {
   return grants.some((grant) => grant.brandId === brandId && grant.active);
 }
+
+export function leaveWorkspace(input: { actorIsLastOwner: boolean }) {
+  if (input.actorIsLastOwner) return { allowed: false as const, reason: "transfer_required" as const };
+  return { allowed: true as const, reason: "ok" as const };
+}
+
+export function invitePreview() {
+  return { exposesPrivateBrandName: false as const };
+}
+
+export function canExport(input: { exportGrant: boolean }) {
+  return input.exportGrant;
+}
+
+export function batchExport(input: { grantedBrandIds: readonly string[]; requestedBrandIds: readonly string[] }) {
+  const allowed = new Set(input.grantedBrandIds);
+  const denied = input.requestedBrandIds.filter((brandId) => !allowed.has(brandId));
+  if (denied.length > 0) return { allowed: false as const, denied, rows: [] as string[] };
+  return { allowed: true as const, denied, rows: [...input.requestedBrandIds] };
+}
