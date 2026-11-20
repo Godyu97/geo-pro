@@ -777,6 +777,68 @@ CREATE TABLE "content_plan" (
 	CONSTRAINT "content_plan_state_check" CHECK (length("content_plan"."question_cluster") > 0 and length("content_plan"."coverage_json") > 1)
 );
 
+CREATE TABLE "content_publication" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"content_version_id" text NOT NULL,
+	"approval_id" text NOT NULL,
+	"content_fingerprint" text NOT NULL,
+	"target_account" text NOT NULL,
+	"page_url" text NOT NULL,
+	"publisher_id" text NOT NULL,
+	"claimed_published_at" text NOT NULL,
+	"channel_declaration" text NOT NULL,
+	"status" text NOT NULL,
+	"effective_at" text,
+	"evidence_grade" text,
+	"superseded_by" text,
+	"operation_id" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "content_publication_state_check" CHECK ("content_publication"."status" in (
+      'prepared', 'submitted', 'draft_only', 'pending_check', 'verified_public',
+      'verified_manual', 'mismatch', 'access_limited', 'removed')
+    and ("content_publication"."evidence_grade" is null or "content_publication"."evidence_grade" in ('public', 'manual'))
+    and length("content_publication"."content_fingerprint") > 0
+    and length("content_publication"."page_url") > 0
+    and length("content_publication"."target_account") > 0
+    and length("content_publication"."channel_declaration") > 0)
+);
+
+CREATE TABLE "content_publication_action" (
+	"id" text PRIMARY KEY NOT NULL,
+	"publication_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"kind" text NOT NULL,
+	"status" text NOT NULL,
+	"reason" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "content_publication_action_state_check" CHECK ("content_publication_action"."kind" in ('repair_mismatch', 'confirm_removal', 'reverify')
+    and "content_publication_action"."status" in ('open', 'done', 'cancelled')
+    and length("content_publication_action"."reason") > 0)
+);
+
+CREATE TABLE "content_publication_check" (
+	"id" text PRIMARY KEY NOT NULL,
+	"publication_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"method" text NOT NULL,
+	"result_status" text NOT NULL,
+	"evidence_json" text NOT NULL,
+	"actor_id" text NOT NULL,
+	"checked_at" text NOT NULL,
+	"notes" text,
+	CONSTRAINT "content_publication_check_state_check" CHECK ("content_publication_check"."method" in ('public_fetch', 'manual_evidence')
+    and "content_publication_check"."result_status" in (
+      'draft_only', 'pending_check', 'verified_public', 'verified_manual',
+      'mismatch', 'access_limited', 'removed')
+    and length("content_publication_check"."evidence_json") > 1)
+);
+
 CREATE TABLE "content_version" (
 	"id" text PRIMARY KEY NOT NULL,
 	"brand_id" text NOT NULL,
@@ -864,6 +926,13 @@ ALTER TABLE "content_delivery_package" ADD CONSTRAINT "content_delivery_package_
 ALTER TABLE "content_delivery_package" ADD CONSTRAINT "content_delivery_package_approval_fk" FOREIGN KEY ("approval_id") REFERENCES "public"."content_approval"("id") ON DELETE restrict ON UPDATE no action;
 ALTER TABLE "content_export_job" ADD CONSTRAINT "content_export_job_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_plan" ADD CONSTRAINT "content_plan_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_publication" ADD CONSTRAINT "content_publication_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_publication" ADD CONSTRAINT "content_publication_version_fk" FOREIGN KEY ("content_version_id") REFERENCES "public"."content_version"("id") ON DELETE restrict ON UPDATE no action;
+ALTER TABLE "content_publication" ADD CONSTRAINT "content_publication_approval_fk" FOREIGN KEY ("approval_id") REFERENCES "public"."content_approval"("id") ON DELETE restrict ON UPDATE no action;
+ALTER TABLE "content_publication_action" ADD CONSTRAINT "content_publication_action_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_publication_action" ADD CONSTRAINT "content_publication_action_publication_fk" FOREIGN KEY ("publication_id") REFERENCES "public"."content_publication"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_publication_check" ADD CONSTRAINT "content_publication_check_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_publication_check" ADD CONSTRAINT "content_publication_check_publication_fk" FOREIGN KEY ("publication_id") REFERENCES "public"."content_publication"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_version" ADD CONSTRAINT "content_version_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_version" ADD CONSTRAINT "content_version_brief_fk" FOREIGN KEY ("brief_id") REFERENCES "public"."content_brief"("id") ON DELETE restrict ON UPDATE no action;
 ALTER TABLE "content_version" ADD CONSTRAINT "content_version_brief_version_fk" FOREIGN KEY ("brief_version_id") REFERENCES "public"."content_brief_version"("id") ON DELETE restrict ON UPDATE no action;
@@ -937,6 +1006,14 @@ CREATE INDEX "content_export_job_owner_idx" ON "content_export_job" USING btree 
 CREATE INDEX "content_plan_brand_idx" ON "content_plan" USING btree ("brand_id","updated_at","id");
 CREATE INDEX "content_plan_owner_idx" ON "content_plan" USING btree ("owner_id","updated_at","id");
 CREATE UNIQUE INDEX "content_plan_cluster_uidx" ON "content_plan" USING btree ("brand_id","question_cluster");
+CREATE UNIQUE INDEX "content_publication_operation_uidx" ON "content_publication" USING btree ("brand_id","operation_id");
+CREATE INDEX "content_publication_version_idx" ON "content_publication" USING btree ("content_version_id","created_at","id");
+CREATE INDEX "content_publication_brand_idx" ON "content_publication" USING btree ("brand_id","updated_at","id");
+CREATE INDEX "content_publication_owner_idx" ON "content_publication" USING btree ("owner_id","updated_at","id");
+CREATE INDEX "content_publication_action_publication_idx" ON "content_publication_action" USING btree ("publication_id","created_at","id");
+CREATE INDEX "content_publication_action_brand_idx" ON "content_publication_action" USING btree ("brand_id","updated_at","id");
+CREATE INDEX "content_publication_check_publication_idx" ON "content_publication_check" USING btree ("publication_id","checked_at","id");
+CREATE INDEX "content_publication_check_brand_idx" ON "content_publication_check" USING btree ("brand_id","checked_at","id");
 CREATE INDEX "content_version_brand_idx" ON "content_version" USING btree ("brand_id","created_at","id");
 CREATE INDEX "content_version_owner_idx" ON "content_version" USING btree ("owner_id","created_at","id");
 CREATE INDEX "content_version_brief_idx" ON "content_version" USING btree ("brief_id","created_at","id");

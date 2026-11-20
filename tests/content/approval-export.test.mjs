@@ -64,7 +64,11 @@ function previousTag(kind) {
     kind === "sqlite" ? "drizzle/sqlite/meta/_journal.json" : "drizzle/meta/_journal.json",
     "utf8",
   ));
-  return journal.entries.at(-2).tag;
+  // Migrate through the revision immediately before content approval export.
+  const target = kind === "sqlite" ? "0016_content_approval_export" : "0017_content_approval_export";
+  const index = journal.entries.findIndex((entry) => entry.tag === target);
+  if (index <= 0) throw new Error(`missing migration ${target}`);
+  return journal.entries[index - 1].tag;
 }
 
 async function account(db) {

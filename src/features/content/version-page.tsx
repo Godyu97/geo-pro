@@ -10,6 +10,7 @@ import {
   exportPreflightAction,
   registerAssetAction,
   reviewVersionAction,
+  submitPublicationAction,
   updateVariantAction,
 } from "./actions";
 import { readContentVersion, readExportJob } from "./commands";
@@ -37,7 +38,7 @@ export default async function ContentVersionPage({
   const detail = await readContentVersion(db, session.user.id, versionId);
   if ("error" in detail) notFound();
 
-  const { version, approvals, packages, assets, approvalCurrent, readOnly } = detail;
+  const { version, approvals, packages, assets, publications, approvalCurrent, readOnly } = detail;
   const operationId = typeof query.op === "string" ? query.op : null;
   const exported = operationId
     ? await readExportJob(db, session.user.id, version.brandId, operationId)
@@ -296,6 +297,78 @@ export default async function ContentVersionPage({
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="space-y-3 rounded-2xl border p-5">
+        <h2 className="text-lg font-semibold">{t("publications")}</h2>
+        <p className="text-sm text-muted-foreground">{t("publicationHint")}</p>
+        {publications.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("publicationsEmpty")}</p>
+        ) : (
+          <ul className="space-y-2 text-sm">
+            {publications.map((item) => (
+              <li key={item.id} className="rounded-md border px-3 py-2">
+                <Link
+                  href={`/dashboard/content/publications/${item.id}`}
+                  prefetch={false}
+                  className="underline-offset-4 hover:underline"
+                >
+                  {item.status} · {item.pageUrl}
+                </Link>
+                <p className="text-xs text-muted-foreground">
+                  {t("effectiveAt")}: {item.effectiveAt ?? t("noEffectiveAt")}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+        {canEdit && version.status === "approved" && approvalCurrent ? (
+          <form action={submitPublicationAction} className="mt-4 grid gap-3 sm:grid-cols-2">
+            <input type="hidden" name="brandId" value={version.brandId} />
+            <input type="hidden" name="versionId" value={version.id} />
+            <label className="block text-sm sm:col-span-2">
+              <span className="mb-1 block text-muted-foreground">{t("pageUrl")}</span>
+              <input name="pageUrl" required placeholder="https://example.com/published" className={inputClass} />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("targetAccount")}</span>
+              <input name="targetAccount" required className={inputClass} />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("claimedPublishedAt")}</span>
+              <input name="claimedPublishedAt" required placeholder="2026-11-20T10:00:00.000Z" className={inputClass} />
+            </label>
+            <label className="block text-sm sm:col-span-2">
+              <span className="mb-1 block text-muted-foreground">{t("channelDeclaration")}</span>
+              <input name="channelDeclaration" required className={inputClass} />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("accessClass")}</span>
+              <select name="accessClass" className={inputClass} defaultValue="">
+                <option value="">{t("skipFixture")}</option>
+                <option value="public">public</option>
+                <option value="login_wall">login_wall</option>
+                <option value="draft_box">draft_box</option>
+                <option value="removed">removed</option>
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("httpStatus")}</span>
+              <input name="httpStatus" type="number" defaultValue={200} className={inputClass} />
+            </label>
+            <label className="block text-sm sm:col-span-2">
+              <span className="mb-1 block text-muted-foreground">{t("fixtureTitle")}</span>
+              <input name="fixtureTitle" className={inputClass} />
+            </label>
+            <label className="block text-sm sm:col-span-2">
+              <span className="mb-1 block text-muted-foreground">{t("fixtureBody")}</span>
+              <textarea name="fixtureBody" rows={5} className={areaClass} />
+            </label>
+            <div className="sm:col-span-2">
+              <Button type="submit">{t("submitPublication")}</Button>
+            </div>
+          </form>
+        ) : null}
       </section>
     </div>
   );

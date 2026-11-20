@@ -68,6 +68,41 @@ export const contentGapCodes = [
 export const contentGapCodeSchema = z.enum(contentGapCodes);
 export type ContentGapCode = z.infer<typeof contentGapCodeSchema>;
 
+export const publicationStatuses = [
+  "prepared",
+  "submitted",
+  "draft_only",
+  "pending_check",
+  "verified_public",
+  "verified_manual",
+  "mismatch",
+  "access_limited",
+  "removed",
+] as const;
+export const publicationStatusSchema = z.enum(publicationStatuses);
+export type PublicationStatus = z.infer<typeof publicationStatusSchema>;
+
+export const publicationCheckMethods = ["public_fetch", "manual_evidence"] as const;
+export const publicationCheckMethodSchema = z.enum(publicationCheckMethods);
+
+export const publicationEvidenceGrades = ["public", "manual"] as const;
+export const publicationEvidenceGradeSchema = z.enum(publicationEvidenceGrades);
+
+export const publicationActionKinds = ["repair_mismatch", "confirm_removal", "reverify"] as const;
+export const publicationActionKindSchema = z.enum(publicationActionKinds);
+
+export const publicationActionStatuses = ["open", "done", "cancelled"] as const;
+export const publicationActionStatusSchema = z.enum(publicationActionStatuses);
+
+export const fixturePageSchema = z.strictObject({
+  accessClass: z.enum(["public", "login_wall", "draft_box", "removed"]),
+  httpStatus: z.int().min(100).max(599),
+  title: z.string().max(500),
+  bodyText: z.string().max(100_000),
+  pageMarker: z.string().max(500).optional(),
+});
+export type FixturePageInput = z.infer<typeof fixturePageSchema>;
+
 export const contentErrors = {
   SESSION_REQUIRED: 401,
   FORBIDDEN: 403,
@@ -80,6 +115,8 @@ export const contentErrors = {
   LABELING_UNVERIFIED: 422,
   PREFLIGHT_REQUIRED: 422,
   SUBSET_INVALID: 422,
+  APPROVAL_INVALID: 422,
+  PUBLICATION_CONFLICT: 409,
   SERVICE_UNAVAILABLE: 503,
 } as const;
 export type ContentError = keyof typeof contentErrors;
@@ -195,6 +232,51 @@ export const exportConfirmSchema = z.strictObject({
 });
 export type ExportConfirmInput = z.infer<typeof exportConfirmSchema>;
 
+export const submitPublicationSchema = z.strictObject({
+  action: z.literal("submit-publication"),
+  brandId: brandIdSchema,
+  operationId: brandIdSchema,
+  versionId: brandIdSchema,
+  targetAccount: z.string().trim().min(1).max(200),
+  pageUrl: z.string().trim().url().max(2000),
+  publisherId: z.string().trim().min(1).max(200),
+  claimedPublishedAt: z.iso.datetime({ precision: 3 }),
+  channelDeclaration: z.string().trim().min(1).max(500),
+  fixturePage: fixturePageSchema.optional(),
+});
+export type SubmitPublicationInput = z.infer<typeof submitPublicationSchema>;
+
+export const verifyPublicationSchema = z.strictObject({
+  action: z.literal("verify-publication"),
+  brandId: brandIdSchema,
+  operationId: brandIdSchema,
+  publicationId: brandIdSchema,
+  fixturePage: fixturePageSchema,
+});
+export type VerifyPublicationInput = z.infer<typeof verifyPublicationSchema>;
+
+export const submitManualEvidenceSchema = z.strictObject({
+  action: z.literal("submit-manual-evidence"),
+  brandId: brandIdSchema,
+  operationId: brandIdSchema,
+  publicationId: brandIdSchema,
+  screenshotRef: z.string().trim().min(1).max(2000),
+  pageMarker: z.string().trim().min(1).max(500),
+  observedAt: z.iso.datetime({ precision: 3 }),
+  bodyExcerpt: z.string().trim().min(1).max(50_000),
+  reviewerNote: z.string().trim().max(2000).optional(),
+});
+export type SubmitManualEvidenceInput = z.infer<typeof submitManualEvidenceSchema>;
+
+export const markPublicationRemovedSchema = z.strictObject({
+  action: z.literal("mark-publication-removed"),
+  brandId: brandIdSchema,
+  operationId: brandIdSchema,
+  publicationId: brandIdSchema,
+  reason: z.string().trim().min(1).max(1000),
+});
+export type MarkPublicationRemovedInput = z.infer<typeof markPublicationRemovedSchema>;
+
 export const contentWriteSchema = z.discriminatedUnion("action", [
   saveBriefDraftSchema,
   confirmBriefSchema,
@@ -207,8 +289,13 @@ export const contentWriteSchema = z.discriminatedUnion("action", [
   registerAssetSchema,
   exportPreflightSchema,
   exportConfirmSchema,
+  submitPublicationSchema,
+  verifyPublicationSchema,
+  submitManualEvidenceSchema,
+  markPublicationRemovedSchema,
 ]);
 export type ContentWriteInput = z.infer<typeof contentWriteSchema>;
+
 
 export const listContentQuerySchema = z.strictObject({
   brandId: brandIdSchema,

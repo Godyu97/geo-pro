@@ -272,3 +272,96 @@ export const contentExportJob = pgTable("content_export_job", {
     and length(${table.chosenSubsetJson}) > 1
     and length(${table.resultPackageIdsJson}) > 1`),
 ]);
+
+export const contentPublication = pgTable("content_publication", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  contentVersionId: text("content_version_id").notNull(),
+  approvalId: text("approval_id").notNull(),
+  contentFingerprint: text("content_fingerprint").notNull(),
+  targetAccount: text("target_account").notNull(),
+  pageUrl: text("page_url").notNull(),
+  publisherId: text("publisher_id").notNull(),
+  claimedPublishedAt: text("claimed_published_at").notNull(),
+  channelDeclaration: text("channel_declaration").notNull(),
+  status: text("status").notNull(),
+  effectiveAt: text("effective_at"),
+  evidenceGrade: text("evidence_grade"),
+  supersededBy: text("superseded_by"),
+  operationId: text("operation_id").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "content_publication_version_fk",
+    columns: [table.contentVersionId],
+    foreignColumns: [contentVersion.id],
+  }).onDelete("restrict"),
+  foreignKey({
+    name: "content_publication_approval_fk",
+    columns: [table.approvalId],
+    foreignColumns: [contentApproval.id],
+  }).onDelete("restrict"),
+  uniqueIndex("content_publication_operation_uidx").on(table.brandId, table.operationId),
+  index("content_publication_version_idx").on(table.contentVersionId, table.createdAt, table.id),
+  index("content_publication_brand_idx").on(table.brandId, table.updatedAt, table.id),
+  index("content_publication_owner_idx").on(table.ownerId, table.updatedAt, table.id),
+  check("content_publication_state_check", sql`${table.status} in (
+      'prepared', 'submitted', 'draft_only', 'pending_check', 'verified_public',
+      'verified_manual', 'mismatch', 'access_limited', 'removed')
+    and (${table.evidenceGrade} is null or ${table.evidenceGrade} in ('public', 'manual'))
+    and length(${table.contentFingerprint}) > 0
+    and length(${table.pageUrl}) > 0
+    and length(${table.targetAccount}) > 0
+    and length(${table.channelDeclaration}) > 0`),
+]);
+
+export const contentPublicationCheck = pgTable("content_publication_check", {
+  id: text("id").primaryKey(),
+  publicationId: text("publication_id").notNull(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  method: text("method").notNull(),
+  resultStatus: text("result_status").notNull(),
+  evidenceJson: text("evidence_json").notNull(),
+  actorId: text("actor_id").notNull(),
+  checkedAt: text("checked_at").notNull(),
+  notes: text("notes"),
+}, (table) => [
+  foreignKey({
+    name: "content_publication_check_publication_fk",
+    columns: [table.publicationId],
+    foreignColumns: [contentPublication.id],
+  }).onDelete("cascade"),
+  index("content_publication_check_publication_idx").on(table.publicationId, table.checkedAt, table.id),
+  index("content_publication_check_brand_idx").on(table.brandId, table.checkedAt, table.id),
+  check("content_publication_check_state_check", sql`${table.method} in ('public_fetch', 'manual_evidence')
+    and ${table.resultStatus} in (
+      'draft_only', 'pending_check', 'verified_public', 'verified_manual',
+      'mismatch', 'access_limited', 'removed')
+    and length(${table.evidenceJson}) > 1`),
+]);
+
+export const contentPublicationAction = pgTable("content_publication_action", {
+  id: text("id").primaryKey(),
+  publicationId: text("publication_id").notNull(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  kind: text("kind").notNull(),
+  status: text("status").notNull(),
+  reason: text("reason").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "content_publication_action_publication_fk",
+    columns: [table.publicationId],
+    foreignColumns: [contentPublication.id],
+  }).onDelete("cascade"),
+  index("content_publication_action_publication_idx").on(table.publicationId, table.createdAt, table.id),
+  index("content_publication_action_brand_idx").on(table.brandId, table.updatedAt, table.id),
+  check("content_publication_action_state_check", sql`${table.kind} in ('repair_mismatch', 'confirm_removal', 'reverify')
+    and ${table.status} in ('open', 'done', 'cancelled')
+    and length(${table.reason}) > 0`),
+]);

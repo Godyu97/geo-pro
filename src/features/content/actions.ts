@@ -18,8 +18,11 @@ import {
   resumeBatch,
   retryFailed,
   saveBriefDraft,
+  submitManualEvidence,
+  submitPublication,
   submitReview,
   updateVariant,
+  verifyPublication,
 } from "./commands";
 import {
   approveContentSchema,
@@ -31,9 +34,12 @@ import {
   registerAssetSchema,
   rejectContentSchema,
   saveBriefDraftSchema,
+  submitManualEvidenceSchema,
+  submitPublicationSchema,
   submitReviewSchema,
   templateKindSchema,
   updateVariantSchema,
+  verifyPublicationSchema,
 } from "./contracts";
 
 export async function saveBriefAction(formData: FormData): Promise<void> {
@@ -226,4 +232,80 @@ export async function exportConfirmAction(formData: FormData): Promise<void> {
   await exportConfirm(getConnection(), session.user.id, parsed.data);
   revalidatePath(versionPath(versionId));
   redirect(`${versionPath(versionId)}?op=${operationId}`);
+}
+
+function publicationPath(publicationId: string) {
+  return `/dashboard/content/publications/${publicationId}`;
+}
+
+export async function submitPublicationAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const versionId = String(formData.get("versionId") ?? "");
+  const accessClass = String(formData.get("accessClass") ?? "");
+  const fixturePage = accessClass
+    ? {
+      accessClass,
+      httpStatus: Number(formData.get("httpStatus") ?? 200),
+      title: String(formData.get("fixtureTitle") ?? ""),
+      bodyText: String(formData.get("fixtureBody") ?? ""),
+      pageMarker: String(formData.get("pageMarker") ?? "") || undefined,
+    }
+    : undefined;
+  const parsed = submitPublicationSchema.safeParse({
+    action: "submit-publication",
+    brandId: String(formData.get("brandId") ?? ""),
+    operationId: randomUUID(),
+    versionId,
+    targetAccount: String(formData.get("targetAccount") ?? ""),
+    pageUrl: String(formData.get("pageUrl") ?? ""),
+    publisherId: String(formData.get("publisherId") ?? session.user.id),
+    claimedPublishedAt: String(formData.get("claimedPublishedAt") ?? ""),
+    channelDeclaration: String(formData.get("channelDeclaration") ?? ""),
+    ...(fixturePage ? { fixturePage } : {}),
+  });
+  if (!parsed.success) return;
+  const result = await submitPublication(getConnection(), session.user.id, parsed.data);
+  if ("error" in result) return;
+  revalidatePath(versionPath(versionId));
+  redirect(publicationPath(result.publicationId));
+}
+
+export async function verifyPublicationAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const publicationId = String(formData.get("publicationId") ?? "");
+  const parsed = verifyPublicationSchema.safeParse({
+    action: "verify-publication",
+    brandId: String(formData.get("brandId") ?? ""),
+    operationId: randomUUID(),
+    publicationId,
+    fixturePage: {
+      accessClass: String(formData.get("accessClass") ?? ""),
+      httpStatus: Number(formData.get("httpStatus") ?? 200),
+      title: String(formData.get("fixtureTitle") ?? ""),
+      bodyText: String(formData.get("fixtureBody") ?? ""),
+      pageMarker: String(formData.get("pageMarker") ?? "") || undefined,
+    },
+  });
+  if (!parsed.success) return;
+  await verifyPublication(getConnection(), session.user.id, parsed.data);
+  revalidatePath(publicationPath(publicationId));
+}
+
+export async function submitManualEvidenceAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const publicationId = String(formData.get("publicationId") ?? "");
+  const parsed = submitManualEvidenceSchema.safeParse({
+    action: "submit-manual-evidence",
+    brandId: String(formData.get("brandId") ?? ""),
+    operationId: randomUUID(),
+    publicationId,
+    screenshotRef: String(formData.get("screenshotRef") ?? ""),
+    pageMarker: String(formData.get("pageMarker") ?? ""),
+    observedAt: String(formData.get("observedAt") ?? ""),
+    bodyExcerpt: String(formData.get("bodyExcerpt") ?? ""),
+    reviewerNote: String(formData.get("reviewerNote") ?? "") || undefined,
+  });
+  if (!parsed.success) return;
+  await submitManualEvidence(getConnection(), session.user.id, parsed.data);
+  revalidatePath(publicationPath(publicationId));
 }

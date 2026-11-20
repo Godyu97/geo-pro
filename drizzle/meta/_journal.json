@@ -127,6 +127,13 @@
       "when": 1795145747225,
       "tag": "0017_content_approval_export",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795147562646,
+      "tag": "0018_solid_jean_grey",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,11 @@ import {
   exportJobStatusSchema,
   labelingStatusSchema,
   packageKindSchema,
+  publicationActionKindSchema,
+  publicationActionStatusSchema,
+  publicationCheckMethodSchema,
+  publicationEvidenceGradeSchema,
+  publicationStatusSchema,
   templateKindSchema,
   unitStatusSchema,
   versionStatusSchema,
@@ -167,6 +172,52 @@ const exportJobRow = z.object({
   updatedAt: z.iso.datetime({ precision: 3 }),
 });
 
+const publicationRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  contentVersionId: brandIdSchema,
+  approvalId: brandIdSchema,
+  contentFingerprint: z.string().min(1),
+  targetAccount: z.string().min(1),
+  pageUrl: z.string().min(1),
+  publisherId: z.string().min(1),
+  claimedPublishedAt: z.iso.datetime({ precision: 3 }),
+  channelDeclaration: z.string().min(1),
+  status: publicationStatusSchema,
+  effectiveAt: z.iso.datetime({ precision: 3 }).nullable(),
+  evidenceGrade: publicationEvidenceGradeSchema.nullable(),
+  supersededBy: brandIdSchema.nullable(),
+  operationId: brandIdSchema,
+  createdAt: z.iso.datetime({ precision: 3 }),
+  updatedAt: z.iso.datetime({ precision: 3 }),
+});
+
+const publicationCheckRow = z.object({
+  id: brandIdSchema,
+  publicationId: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  method: publicationCheckMethodSchema,
+  resultStatus: publicationStatusSchema,
+  evidenceJson: z.string().min(2),
+  actorId: z.string().min(1),
+  checkedAt: z.iso.datetime({ precision: 3 }),
+  notes: z.string().nullable(),
+});
+
+const publicationActionRow = z.object({
+  id: brandIdSchema,
+  publicationId: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  kind: publicationActionKindSchema,
+  status: publicationActionStatusSchema,
+  reason: z.string().min(1),
+  createdAt: z.iso.datetime({ precision: 3 }),
+  updatedAt: z.iso.datetime({ precision: 3 }),
+});
+
 export type PlanRow = z.infer<typeof planRow>;
 export type BriefRow = z.infer<typeof briefRow>;
 export type BriefVersionRow = z.infer<typeof briefVersionRow>;
@@ -177,6 +228,9 @@ export type ApprovalRow = z.infer<typeof approvalRow>;
 export type AssetRow = z.infer<typeof assetRow>;
 export type PackageRow = z.infer<typeof packageRow>;
 export type ExportJobRow = z.infer<typeof exportJobRow>;
+export type PublicationRow = z.infer<typeof publicationRow>;
+export type PublicationCheckRow = z.infer<typeof publicationCheckRow>;
+export type PublicationActionRow = z.infer<typeof publicationActionRow>;
 
 const planColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", question_cluster AS "questionCluster",
   coverage_json AS "coverageJson", created_at AS "createdAt", updated_at AS "updatedAt"`;
@@ -230,6 +284,21 @@ const exportJobColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", oper
   selection_json AS "selectionJson", preflight_json AS "preflightJson",
   chosen_subset_json AS "chosenSubsetJson", result_package_ids_json AS "resultPackageIdsJson",
   error, created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+const publicationColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", content_version_id AS "contentVersionId",
+  approval_id AS "approvalId", content_fingerprint AS "contentFingerprint",
+  target_account AS "targetAccount", page_url AS "pageUrl", publisher_id AS "publisherId",
+  claimed_published_at AS "claimedPublishedAt", channel_declaration AS "channelDeclaration",
+  status, effective_at AS "effectiveAt", evidence_grade AS "evidenceGrade",
+  superseded_by AS "supersededBy", operation_id AS "operationId",
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+const publicationCheckColumns = `id, publication_id AS "publicationId", brand_id AS "brandId", owner_id AS "ownerId",
+  method, result_status AS "resultStatus", evidence_json AS "evidenceJson",
+  actor_id AS "actorId", checked_at AS "checkedAt", notes`;
+
+const publicationActionColumns = `id, publication_id AS "publicationId", brand_id AS "brandId", owner_id AS "ownerId",
+  kind, status, reason, created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 export class ContentDao {
   private readonly db: QueryConnection;
@@ -681,4 +750,122 @@ export class ContentDao {
       ],
     );
   }
+
+  async insertPublication(row: PublicationRow) {
+    await this.query(
+      `INSERT INTO content_publication (
+        id, brand_id, owner_id, content_version_id, approval_id, content_fingerprint,
+        target_account, page_url, publisher_id, claimed_published_at, channel_declaration,
+        status, effective_at, evidence_grade, superseded_by, operation_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.brandId, row.ownerId, row.contentVersionId, row.approvalId, row.contentFingerprint,
+        row.targetAccount, row.pageUrl, row.publisherId, row.claimedPublishedAt, row.channelDeclaration,
+        row.status, row.effectiveAt, row.evidenceGrade, row.supersededBy, row.operationId,
+        row.createdAt, row.updatedAt,
+      ],
+    );
+  }
+
+  async getPublication(ownerId: string, publicationId: string) {
+    const [row] = await this.query(
+      `SELECT ${publicationColumns} FROM content_publication WHERE owner_id = ? AND id = ?`,
+      [ownerId, publicationId],
+    );
+    return row ? publicationRow.parse(row) : null;
+  }
+
+  async getPublicationByOperation(ownerId: string, brandId: string, operationId: string) {
+    const [row] = await this.query(
+      `SELECT ${publicationColumns} FROM content_publication
+       WHERE owner_id = ? AND brand_id = ? AND operation_id = ?`,
+      [ownerId, brandId, operationId],
+    );
+    return row ? publicationRow.parse(row) : null;
+  }
+
+  async listPublicationsForVersion(ownerId: string, versionId: string) {
+    const rows = await this.query(
+      `SELECT ${publicationColumns} FROM content_publication
+       WHERE owner_id = ? AND content_version_id = ?
+       ORDER BY created_at DESC, id DESC`,
+      [ownerId, versionId],
+    );
+    return z.array(publicationRow).parse(rows);
+  }
+
+  async listPublicationsForBrand(ownerId: string, brandId: string, limit: number) {
+    const rows = await this.query(
+      `SELECT ${publicationColumns} FROM content_publication
+       WHERE owner_id = ? AND brand_id = ?
+       ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      [ownerId, brandId, limit],
+    );
+    return z.array(publicationRow).parse(rows);
+  }
+
+  async updatePublicationOutcome(
+    row: Pick<PublicationRow, "id" | "status" | "effectiveAt" | "evidenceGrade" | "updatedAt">,
+  ) {
+    await this.query(
+      `UPDATE content_publication SET
+        status = ?, effective_at = ?, evidence_grade = ?, updated_at = ?
+       WHERE id = ?`,
+      [row.status, row.effectiveAt, row.evidenceGrade, row.updatedAt, row.id],
+    );
+  }
+
+  async markPublicationsSuperseded(ownerId: string, versionId: string, successorId: string, updatedAt: string) {
+    await this.query(
+      `UPDATE content_publication SET superseded_by = ?, updated_at = ?
+       WHERE owner_id = ? AND content_version_id = ? AND id <> ? AND superseded_by IS NULL`,
+      [successorId, updatedAt, ownerId, versionId, successorId],
+    );
+  }
+
+  async insertPublicationCheck(row: PublicationCheckRow) {
+    await this.query(
+      `INSERT INTO content_publication_check (
+        id, publication_id, brand_id, owner_id, method, result_status,
+        evidence_json, actor_id, checked_at, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.publicationId, row.brandId, row.ownerId, row.method, row.resultStatus,
+        row.evidenceJson, row.actorId, row.checkedAt, row.notes,
+      ],
+    );
+  }
+
+  async listPublicationChecks(ownerId: string, publicationId: string) {
+    const rows = await this.query(
+      `SELECT ${publicationCheckColumns} FROM content_publication_check
+       WHERE owner_id = ? AND publication_id = ?
+       ORDER BY checked_at ASC, id ASC`,
+      [ownerId, publicationId],
+    );
+    return z.array(publicationCheckRow).parse(rows);
+  }
+
+  async insertPublicationAction(row: PublicationActionRow) {
+    await this.query(
+      `INSERT INTO content_publication_action (
+        id, publication_id, brand_id, owner_id, kind, status, reason, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.publicationId, row.brandId, row.ownerId, row.kind, row.status,
+        row.reason, row.createdAt, row.updatedAt,
+      ],
+    );
+  }
+
+  async listPublicationActions(ownerId: string, publicationId: string) {
+    const rows = await this.query(
+      `SELECT ${publicationActionColumns} FROM content_publication_action
+       WHERE owner_id = ? AND publication_id = ?
+       ORDER BY created_at DESC, id DESC`,
+      [ownerId, publicationId],
+    );
+    return z.array(publicationActionRow).parse(rows);
+  }
 }
+

@@ -11,18 +11,23 @@ import {
   exportPreflight,
   generateBatch,
   listBriefs,
+  markPublicationRemoved,
   pauseBatch,
   readBatch,
   readBriefDetail,
   readContentVersion,
   readDeliveryPackage,
+  readPublication,
   registerAsset,
   rejectContent,
   resumeBatch,
   retryFailed,
   saveBriefDraft,
+  submitManualEvidence,
+  submitPublication,
   submitReview,
   updateVariant,
+  verifyPublication,
   type ExportBlocker,
 } from "./commands";
 import {
@@ -108,6 +113,15 @@ const packageFiles = new Set([
   "publish-checklist.md", "public-images.json",
 ]);
 
+export async function contentPublicationResponse(request: Request, publicationId: string) {
+  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  const session = await requireSession().catch(() => null);
+  if (!session) return errorResponse("SESSION_REQUIRED");
+  const result = await readPublication(getConnection(), session.user.id, publicationId);
+  if ("error" in result) return errorResponse(result.error);
+  return Response.json(result, { headers });
+}
+
 export async function contentPackageResponse(request: Request, packageId: string) {
   if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
@@ -176,6 +190,12 @@ export async function contentWriteResponse(request: Request) {
   if (input.action === "register-asset") return respond(await registerAsset(db, session.user.id, input));
   if (input.action === "export-preflight") return respond(await exportPreflight(db, session.user.id, input));
   if (input.action === "export-confirm") return respond(await exportConfirm(db, session.user.id, input));
+  if (input.action === "submit-publication") return respond(await submitPublication(db, session.user.id, input));
+  if (input.action === "verify-publication") return respond(await verifyPublication(db, session.user.id, input));
+  if (input.action === "submit-manual-evidence") return respond(await submitManualEvidence(db, session.user.id, input));
+  if (input.action === "mark-publication-removed") {
+    return respond(await markPublicationRemoved(db, session.user.id, input));
+  }
   if (input.action === "pause-batch") {
     const result = await pauseBatch(db, session.user.id, input);
     if ("error" in result) return errorResponse(result.error);

@@ -20,13 +20,17 @@ import {
   type ExportMode,
   type ExportPreflightInput,
   type GenerateBatchInput,
+  type MarkPublicationRemovedInput,
   type PackageKind,
   type PreflightBlockerCode,
   type RegisterAssetInput,
   type RejectContentInput,
   type SaveBriefDraftInput,
+  type SubmitManualEvidenceInput,
+  type SubmitPublicationInput,
   type SubmitReviewInput,
   type UpdateVariantInput,
+  type VerifyPublicationInput,
 } from "./contracts.ts";
 import { ContentDao, type BriefVersionRow, type ContentVersionRow, type PackageRow, type UnitRow } from "./dao.ts";
 import {
@@ -47,6 +51,12 @@ import {
   deriveBatchStatus,
   fillDraftFromTemplate,
 } from "./rules.ts";
+import {
+  evaluateManualEvidence,
+  evaluatePublicCheck,
+  nextEffectiveAt,
+  type FixturePage,
+} from "./verify.ts";
 
 type Clock = () => string;
 export type ExportBlocker = { versionId: string; codes: PreflightBlockerCode[] };
@@ -840,10 +850,11 @@ export async function readContentVersion(
   // Frozen or foreign brands never expose approvals or package metadata.
   const brand = await new BrandDao(db).owned(ownerId, version.brandId);
   if (!brand) return denied("NOT_FOUND");
-  const [approvals, packageRows, assets] = await Promise.all([
+  const [approvals, packageRows, assets, publications] = await Promise.all([
     dao.listApprovals(ownerId, version.id),
     dao.listPackagesForVersion(ownerId, version.id),
     dao.getAssetsByIds(ownerId, version.brandId, parseIds(version.imageAssetIdsJson)),
+    dao.listPublicationsForVersion(ownerId, version.id),
   ]);
   const currentFingerprint = versionFingerprint(version);
   return {
@@ -851,6 +862,7 @@ export async function readContentVersion(
     approvals,
     packages: packageRows.map(summarizePackage),
     assets,
+    publications,
     currentFingerprint,
     approvalCurrent: version.status === "approved"
       && approvals.some((item) => item.decision === "approved" && item.contentFingerprint === currentFingerprint),
@@ -1475,5 +1487,353 @@ export async function readExportJob(
     items: stored.items,
     eligibleVersionIds: stored.eligibleVersionIds,
     packages: packages.map(summarizePackage),
+  };
+}
+
+function parseClaims(version: ContentVersionRow): string[] {
+  const parsed = JSON.parse(version.claimsJson) as unknown;
+  if (Array.isArray(parsed)) {
+    return parsed
+      .map((item) => (typeof item === "string" ? item : ""))
+      .filter((claim) => claim.trim().length > 0);
+  }
+  if (parsed && typeof parsed === "object") {
+    // Template drafts store claims as { [claimText]: factVersionId }.
+    return Object.keys(parsed as Record<string, unknown>)
+      .map((claim) => claim.trim())
+      .filter((claim) => claim.length > 0);
+  }
+  return [];
+}
+
+async function applyPublicCheck(
+  dao: ContentDao,
+  ownerId: string,
+  publicationId: string,
+  brandId: string,
+  version: ContentVersionRow,
+  fixture: FixturePage,
+  checkedAt: string,
+) {
+  const publication = await dao.getPublication(ownerId, publicationId);
+  if (!publication) return null;
+  const result = evaluatePublicCheck({
+    fixture,
+    claims: parseClaims(version),
+    alreadyHasEffectiveAt: Boolean(publication.effectiveAt),
+  });
+  const checkId = randomUUID();
+  await dao.insertPublicationCheck({
+    id: checkId,
+    publicationId,
+    brandId,
+    ownerId,
+    method: "public_fetch",
+    resultStatus: result.status,
+    evidenceJson: JSON.stringify({
+      fixture,
+      matches: result.matches,
+      reason: result.reason,
+      claimedPublishedAt: publication.claimedPublishedAt,
+    }),
+    actorId: ownerId,
+    checkedAt,
+    notes: result.reason,
+  });
+  const effectiveAt = nextEffectiveAt(publication.effectiveAt, result.setsEffectiveAt, checkedAt);
+  const evidenceGrade = result.evidenceGrade ?? publication.evidenceGrade;
+  await dao.updatePublicationOutcome({
+    id: publicationId,
+    status: result.status,
+    effectiveAt,
+    evidenceGrade,
+    updatedAt: checkedAt,
+  });
+  if (result.status === "mismatch") {
+    await dao.insertPublicationAction({
+      id: randomUUID(),
+      publicationId,
+      brandId,
+      ownerId,
+      kind: "repair_mismatch",
+      status: "open",
+      reason: "Public page facts diverge from the approved version.",
+      createdAt: checkedAt,
+      updatedAt: checkedAt,
+    });
+  }
+  return {
+    publicationId,
+    checkId,
+    status: result.status,
+    effectiveAt,
+    evidenceGrade,
+    claimedPublishedAt: publication.claimedPublishedAt,
+    matches: result.matches,
+  };
+}
+
+export async function submitPublication(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: SubmitPublicationInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  return locked(db, ownerId, async (transaction) => {
+    if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+    const dao = new ContentDao(transaction);
+    const existing = await dao.getPublicationByOperation(ownerId, input.brandId, input.operationId);
+    if (existing) {
+      return {
+        publicationId: existing.id,
+        status: existing.status,
+        effectiveAt: existing.effectiveAt,
+        evidenceGrade: existing.evidenceGrade,
+        claimedPublishedAt: existing.claimedPublishedAt,
+        replayed: true,
+      };
+    }
+
+    const version = await ownedVersion(dao, ownerId, input.brandId, input.versionId);
+    if (!version) return denied("NOT_FOUND");
+    if (version.status !== "approved") return denied("APPROVAL_REQUIRED");
+
+    const fingerprint = versionFingerprint(version);
+    const approval = (await dao.listApprovals(ownerId, version.id))
+      .find((item) => item.decision === "approved" && item.contentFingerprint === fingerprint);
+    if (!approval) return denied("APPROVAL_INVALID");
+
+    const now = clock();
+    const publicationId = randomUUID();
+    await dao.insertPublication({
+      id: publicationId,
+      brandId: input.brandId,
+      ownerId,
+      contentVersionId: version.id,
+      approvalId: approval.id,
+      contentFingerprint: fingerprint,
+      targetAccount: input.targetAccount,
+      pageUrl: input.pageUrl,
+      publisherId: input.publisherId,
+      claimedPublishedAt: input.claimedPublishedAt,
+      channelDeclaration: input.channelDeclaration,
+      status: input.fixturePage ? "pending_check" : "submitted",
+      effectiveAt: null,
+      evidenceGrade: null,
+      supersededBy: null,
+      operationId: input.operationId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await dao.markPublicationsSuperseded(ownerId, version.id, publicationId, now);
+
+    if (!input.fixturePage) {
+      return {
+        publicationId,
+        status: "submitted" as const,
+        effectiveAt: null,
+        evidenceGrade: null,
+        claimedPublishedAt: input.claimedPublishedAt,
+        replayed: false,
+      };
+    }
+
+    const checked = await applyPublicCheck(
+      dao, ownerId, publicationId, input.brandId, version, input.fixturePage, now,
+    );
+    if (!checked) return denied("NOT_FOUND");
+    return { ...checked, replayed: false };
+  });
+}
+
+export async function verifyPublication(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: VerifyPublicationInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  return locked(db, ownerId, async (transaction) => {
+    if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+    const dao = new ContentDao(transaction);
+    const publication = await dao.getPublication(ownerId, input.publicationId);
+    if (!publication || publication.brandId !== input.brandId) return denied("NOT_FOUND");
+
+    const version = await ownedVersion(dao, ownerId, input.brandId, publication.contentVersionId);
+    if (!version) return denied("NOT_FOUND");
+    if (version.status !== "approved") return denied("APPROVAL_REQUIRED");
+    if (versionFingerprint(version) !== publication.contentFingerprint) return denied("APPROVAL_INVALID");
+
+    const checked = await applyPublicCheck(
+      dao, ownerId, publication.id, input.brandId, version, input.fixturePage, clock(),
+    );
+    if (!checked) return denied("NOT_FOUND");
+    return { ...checked, replayed: false };
+  });
+}
+
+export async function submitManualEvidence(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: SubmitManualEvidenceInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  return locked(db, ownerId, async (transaction) => {
+    if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+    const dao = new ContentDao(transaction);
+    const publication = await dao.getPublication(ownerId, input.publicationId);
+    if (!publication || publication.brandId !== input.brandId) return denied("NOT_FOUND");
+
+    // Manual evidence is for restricted pages; refuse if already publicly verified.
+    if (publication.status === "verified_public") return denied("PUBLICATION_CONFLICT");
+
+    const version = await ownedVersion(dao, ownerId, input.brandId, publication.contentVersionId);
+    if (!version) return denied("NOT_FOUND");
+    if (version.status !== "approved") return denied("APPROVAL_REQUIRED");
+    if (versionFingerprint(version) !== publication.contentFingerprint) return denied("APPROVAL_INVALID");
+
+    const now = clock();
+    const result = evaluateManualEvidence({
+      evidence: {
+        screenshotRef: input.screenshotRef,
+        pageMarker: input.pageMarker,
+        observedAt: input.observedAt,
+        bodyExcerpt: input.bodyExcerpt,
+        reviewerNote: input.reviewerNote,
+      },
+      claims: parseClaims(version),
+      alreadyHasEffectiveAt: Boolean(publication.effectiveAt),
+    });
+    if (result.reason === "incomplete_evidence") return denied("EVIDENCE_REQUIRED");
+
+    const checkId = randomUUID();
+    await dao.insertPublicationCheck({
+      id: checkId,
+      publicationId: publication.id,
+      brandId: input.brandId,
+      ownerId,
+      method: "manual_evidence",
+      resultStatus: result.status,
+      evidenceJson: JSON.stringify({
+        screenshotRef: input.screenshotRef,
+        pageMarker: input.pageMarker,
+        observedAt: input.observedAt,
+        bodyExcerpt: input.bodyExcerpt,
+        reviewerNote: input.reviewerNote ?? null,
+        matches: result.matches,
+        reason: result.reason,
+        claimedPublishedAt: publication.claimedPublishedAt,
+      }),
+      actorId: ownerId,
+      checkedAt: now,
+      notes: result.reason,
+    });
+
+    const effectiveAt = nextEffectiveAt(publication.effectiveAt, result.setsEffectiveAt, now);
+    await dao.updatePublicationOutcome({
+      id: publication.id,
+      status: result.status,
+      effectiveAt,
+      evidenceGrade: result.evidenceGrade,
+      updatedAt: now,
+    });
+    if (result.status === "mismatch") {
+      await dao.insertPublicationAction({
+        id: randomUUID(),
+        publicationId: publication.id,
+        brandId: input.brandId,
+        ownerId,
+        kind: "repair_mismatch",
+        status: "open",
+        reason: "Manual evidence does not match approved claims.",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    return {
+      publicationId: publication.id,
+      checkId,
+      status: result.status,
+      effectiveAt,
+      evidenceGrade: result.evidenceGrade,
+      claimedPublishedAt: publication.claimedPublishedAt,
+      matches: result.matches,
+      replayed: false,
+    };
+  });
+}
+
+export async function markPublicationRemoved(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: MarkPublicationRemovedInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  return locked(db, ownerId, async (transaction) => {
+    if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+    const dao = new ContentDao(transaction);
+    const publication = await dao.getPublication(ownerId, input.publicationId);
+    if (!publication || publication.brandId !== input.brandId) return denied("NOT_FOUND");
+    const now = clock();
+    await dao.insertPublicationCheck({
+      id: randomUUID(),
+      publicationId: publication.id,
+      brandId: input.brandId,
+      ownerId,
+      method: "public_fetch",
+      resultStatus: "removed",
+      evidenceJson: JSON.stringify({ reason: input.reason, claimedPublishedAt: publication.claimedPublishedAt }),
+      actorId: ownerId,
+      checkedAt: now,
+      notes: input.reason,
+    });
+    await dao.updatePublicationOutcome({
+      id: publication.id,
+      status: "removed",
+      effectiveAt: publication.effectiveAt,
+      evidenceGrade: publication.evidenceGrade,
+      updatedAt: now,
+    });
+    await dao.insertPublicationAction({
+      id: randomUUID(),
+      publicationId: publication.id,
+      brandId: input.brandId,
+      ownerId,
+      kind: "confirm_removal",
+      status: "open",
+      reason: input.reason,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return {
+      publicationId: publication.id,
+      status: "removed" as const,
+      effectiveAt: publication.effectiveAt,
+      replayed: false,
+    };
+  });
+}
+
+export async function readPublication(
+  db: DatabaseConnection,
+  ownerId: string,
+  publicationId: string,
+) {
+  const dao = new ContentDao(db);
+  const publication = await dao.getPublication(ownerId, publicationId);
+  if (!publication) return denied("NOT_FOUND");
+  const brand = await new BrandDao(db).owned(ownerId, publication.brandId);
+  if (!brand) return denied("NOT_FOUND");
+  const [checks, actions, version] = await Promise.all([
+    dao.listPublicationChecks(ownerId, publication.id),
+    dao.listPublicationActions(ownerId, publication.id),
+    dao.getContentVersion(ownerId, publication.contentVersionId),
+  ]);
+  if (!version) return denied("NOT_FOUND");
+  return {
+    publication,
+    checks,
+    actions,
+    version: { id: version.id, title: version.title, status: version.status },
+    readOnly: brand.status !== "active",
   };
 }

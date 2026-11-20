@@ -89,6 +89,9 @@ export class PurgeDao {
     await this.query("DELETE FROM prompt_reference WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM prompt_set WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM prompt_draft WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM content_publication_action WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM content_publication_check WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM content_publication WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_export_job WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_delivery_package WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_approval WHERE brand_id = ?", [brandId]);

@@ -28,3 +28,11 @@
 - 交付包：`formal`（需批准指纹匹配、标识已核实、事实可用，经 `withEligibleFacts(stage=delivery)`）或 `review`（标识未核实，标记 `非发布用`）。内部资产与未审核图片永不入包；HTML 经白名单净化。
 - 批量导出：`export-preflight`（逐项列阻塞项，`operationId` 幂等）→ `export-confirm`（显式 `chosenVersionIds` ⊆ 预检合格项，成功包数 = 子集大小）。导出成功不等于发布。
 - 入口：`/dashboard/content/versions/[versionId]`、`POST /api/content`、`GET /api/content/versions/:id`、`GET /api/content/packages/:id[?file=]`。
+
+## 发布回填与核验（Issue #29 / S-M0-11）
+
+- 回填：`submit-publication` 绑定当前批准指纹、URL、账号、申报时间与渠道声明；`operationId` 幂等。
+- 隔离公开核验：`fixturePage.accessClass` 区分 draft_box / login_wall / public / removed；HTTP 成功不足；claims 全匹配 → `verified_public`。
+- 人工证据：完整截图引用/页面标识/时间/正文摘录 → `verified_manual`（证据等级 manual）。
+- `effective_at` 仅首次核验通过写入；重核验追加历史不回写；mismatch 生成 `repair_mismatch` 待办。
+- 入口：稿件详情回填表单、`/dashboard/content/publications/[id]`、`GET /api/content/publications/:id`。
