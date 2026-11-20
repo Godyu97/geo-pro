@@ -3,8 +3,15 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { conditionalMeanPosition, mentionShare } from "../competitor-share/rules.ts";
-import { inspectSource } from "../source-opportunities/rules.ts";
-import type { CompetitorError, InspectCitationInput, RecordMentionsInput, SaveCompetitorSetInput } from "./contracts.ts";
+import { inspectCopiedBrief, inspectSource } from "../source-opportunities/rules.ts";
+import type {
+  BriefStatusInput,
+  CompetitorError,
+  InspectCitationInput,
+  ProposeBriefInput,
+  RecordMentionsInput,
+  SaveCompetitorSetInput,
+} from "./contracts.ts";
 import { normalizeCompetitorLabels } from "./contracts.ts";
 import { CompetitorDao, type CitationSourceRow, type CompetitorMentionRow, type CompetitorSetRow } from "./dao.ts";
 
@@ -255,4 +262,77 @@ export async function readCitationSources(db: DatabaseConnection, ownerId: strin
   const listed = await dao.listCitationSources(ownerId, brandId);
   const citations = listed.rows.map(presentCitation);
   return { citations, hosts: citationHosts(citations), truncated: listed.truncated };
+}
+
+export async function proposeResearchBrief(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: ProposeBriefInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  const judged = inspectCopiedBrief({
+    sourceText: input.sourceText,
+    briefText: input.briefText,
+    sourceBrand: input.sourceBrand,
+    ownBrand: input.ownBrand,
+    gap: input.gap,
+    sourceIds: input.sourceIds,
+  });
+  if (!judged.accepted) return { error: "INVALID_INPUT" as const, reason: judged.reason };
+  const sourceIds = [...new Set(input.sourceIds)];
+  return db.transaction(async (tx) => {
+    const dao = new CompetitorDao(tx);
+    if (!await dao.ownedBrand(ownerId, input.brandId)) return denied("NOT_FOUND");
+    const ownedIds = await dao.citationIdsOwned(ownerId, input.brandId, sourceIds);
+    if (ownedIds.length !== sourceIds.length) return { error: "INVALID_INPUT" as const, reason: "missing_evidence" as const };
+    const now = clock();
+    const row = {
+      id: randomUUID(),
+      brandId: input.brandId,
+      ownerId,
+      questionCluster: input.questionCluster,
+      gap: input.gap,
+      factsJson: JSON.stringify(input.facts),
+      sourceIdsJson: JSON.stringify(sourceIds),
+      status: "proposed" as const,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await dao.insertBrief(row);
+    return { brief: { ...row, copiedReplacement: false as const, facts: [...input.facts], sourceIds } };
+  });
+}
+
+export async function setResearchBriefStatus(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: BriefStatusInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  return db.transaction(async (tx) => {
+    const dao = new CompetitorDao(tx);
+    if (!await dao.ownedBrand(ownerId, input.brandId)) return denied("NOT_FOUND");
+    const updated = await dao.updateBriefStatus(ownerId, input.brandId, input.briefId, input.status, clock());
+    if (!updated) return denied("OPERATION_CONFLICT");
+    return { id: input.briefId, status: input.status };
+  });
+}
+
+export async function readResearchBriefs(db: DatabaseConnection, ownerId: string, brandId: string) {
+  const dao = new CompetitorDao(db);
+  if (!await dao.ownedBrand(ownerId, brandId)) return denied("NOT_FOUND");
+  const rows = await dao.listBriefs(ownerId, brandId);
+  return {
+    briefs: rows.map((row) => ({
+      ...row,
+      facts: zFacts(row.factsJson),
+      sourceIds: zFacts(row.sourceIdsJson),
+      copiedReplacement: false as const,
+    })),
+  };
+}
+
+function zFacts(json: string) {
+  const parsed: unknown = JSON.parse(json);
+  return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
 }

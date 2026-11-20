@@ -61,3 +61,24 @@ export const sourceInspection = pgTable("source_inspection", {
     and ${table.supportsBrand} in (0, 1)
     and (${table.support} = 'unknown' or (${table.pageLive} = 1 and ${table.readable} = 1 and ${table.supportsBrand} = 1))`),
 ]);
+
+export const researchBrief = pgTable("research_brief", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  questionCluster: text("question_cluster").notNull(),
+  gap: text("gap").notNull(),
+  factsJson: text("facts_json").notNull(),
+  sourceIdsJson: text("source_ids_json").notNull(),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  index("research_brief_brand_idx").on(table.brandId, table.status, table.createdAt, table.id),
+  index("research_brief_owner_idx").on(table.ownerId, table.brandId, table.createdAt, table.id),
+  check("research_brief_check", sql`${table.status} in ('proposed', 'accepted', 'dismissed')
+    and length(${table.questionCluster}) between 1 and 200
+    and length(${table.gap}) between 1 and 2000
+    and length(${table.factsJson}) between 2 and 8000
+    and length(${table.sourceIdsJson}) between 2 and 4000`),
+]);

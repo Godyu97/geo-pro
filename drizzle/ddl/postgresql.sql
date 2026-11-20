@@ -978,6 +978,24 @@ CREATE TABLE "competitor_set" (
 	CONSTRAINT "competitor_set_check" CHECK ("competitor_set"."version" > 0 and length("competitor_set"."labels_json") between 2 and 2000)
 );
 
+CREATE TABLE "research_brief" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"question_cluster" text NOT NULL,
+	"gap" text NOT NULL,
+	"facts_json" text NOT NULL,
+	"source_ids_json" text NOT NULL,
+	"status" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "research_brief_check" CHECK ("research_brief"."status" in ('proposed', 'accepted', 'dismissed')
+    and length("research_brief"."question_cluster") between 1 and 200
+    and length("research_brief"."gap") between 1 and 2000
+    and length("research_brief"."facts_json") between 2 and 8000
+    and length("research_brief"."source_ids_json") between 2 and 4000)
+);
+
 CREATE TABLE "source_inspection" (
 	"id" text PRIMARY KEY NOT NULL,
 	"brand_id" text NOT NULL,
@@ -1074,6 +1092,7 @@ ALTER TABLE "competitor_mention" ADD CONSTRAINT "competitor_mention_brand_id_bra
 ALTER TABLE "competitor_mention" ADD CONSTRAINT "competitor_mention_set_id_competitor_set_id_fk" FOREIGN KEY ("set_id") REFERENCES "public"."competitor_set"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "competitor_mention" ADD CONSTRAINT "competitor_mention_observation_id_answer_observation_id_fk" FOREIGN KEY ("observation_id") REFERENCES "public"."answer_observation"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "competitor_set" ADD CONSTRAINT "competitor_set_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "research_brief" ADD CONSTRAINT "research_brief_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "source_inspection" ADD CONSTRAINT "source_inspection_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "source_inspection" ADD CONSTRAINT "source_inspection_citation_id_answer_citation_id_fk" FOREIGN KEY ("citation_id") REFERENCES "public"."answer_citation"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
@@ -1169,5 +1188,7 @@ CREATE UNIQUE INDEX "competitor_mention_once_uidx" ON "competitor_mention" USING
 CREATE INDEX "competitor_mention_set_idx" ON "competitor_mention" USING btree ("brand_id","set_id","observation_id");
 CREATE UNIQUE INDEX "competitor_set_brand_version_uidx" ON "competitor_set" USING btree ("brand_id","version");
 CREATE INDEX "competitor_set_owner_idx" ON "competitor_set" USING btree ("owner_id","brand_id","version");
+CREATE INDEX "research_brief_brand_idx" ON "research_brief" USING btree ("brand_id","status","created_at","id");
+CREATE INDEX "research_brief_owner_idx" ON "research_brief" USING btree ("owner_id","brand_id","created_at","id");
 CREATE UNIQUE INDEX "source_inspection_citation_uidx" ON "source_inspection" USING btree ("citation_id");
 CREATE INDEX "source_inspection_brand_idx" ON "source_inspection" USING btree ("brand_id","citation_id");

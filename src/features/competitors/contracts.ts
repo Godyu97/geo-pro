@@ -54,6 +54,28 @@ export const inspectCitationSchema = z.strictObject({
 });
 export type InspectCitationInput = z.infer<typeof inspectCitationSchema>;
 
+export const briefStatuses = ["proposed", "accepted", "dismissed"] as const;
+
+export const proposeBriefSchema = z.strictObject({
+  brandId: brandIdSchema,
+  questionCluster: z.string().trim().min(1).max(200),
+  gap: z.string().trim().min(1).max(2000),
+  facts: z.array(z.string().trim().min(1).max(500)).max(20),
+  sourceIds: z.array(brandIdSchema).min(1).max(10),
+  sourceText: z.string().max(8000),
+  briefText: z.string().max(8000),
+  sourceBrand: z.string().trim().max(80),
+  ownBrand: z.string().trim().max(80),
+});
+export type ProposeBriefInput = z.infer<typeof proposeBriefSchema>;
+
+export const briefStatusSchema = z.strictObject({
+  brandId: brandIdSchema,
+  briefId: brandIdSchema,
+  status: z.enum(["accepted", "dismissed"]),
+});
+export type BriefStatusInput = z.infer<typeof briefStatusSchema>;
+
 export function normalizeCompetitorLabels(labels: readonly string[]) {
   const unique = [...new Set(labels.map((label) => label.trim()).filter((label) => label.length > 0))];
   unique.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));

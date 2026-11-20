@@ -119,6 +119,7 @@ export class PurgeDao {
     await this.query("UPDATE brand_fact_paste SET previous_id = NULL WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM brand_fact_paste WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM brand_version WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM research_brief WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM source_inspection WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM competitor_mention WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM competitor_set WHERE brand_id = ?", [brandId]);

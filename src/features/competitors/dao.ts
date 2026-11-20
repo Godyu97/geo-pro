@@ -226,4 +226,78 @@ export class CompetitorDao {
     );
     return { truncated: false as const, rows: rows.map((row) => citationViewRow.parse(row)) };
   }
+
+  async citationIdsOwned(ownerId: string, brandId: string, citationIds: readonly string[]) {
+    if (citationIds.length === 0) return [];
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT c.id FROM answer_citation c
+       JOIN answer_observation o ON o.id = c.observation_id
+       WHERE c.brand_id = ? AND o.brand_id = ? AND o.owner_id = ?
+         AND c.id IN (${citationIds.map(() => "?").join(", ")})`,
+      [brandId, brandId, ownerId, ...citationIds],
+    );
+    return rows.map((row) => z.object({ id: brandIdSchema }).parse(row).id);
+  }
+
+  async insertBrief(row: {
+    id: string;
+    brandId: string;
+    ownerId: string;
+    questionCluster: string;
+    gap: string;
+    factsJson: string;
+    sourceIdsJson: string;
+    status: "proposed" | "accepted" | "dismissed";
+    createdAt: string;
+    updatedAt: string;
+  }) {
+    await queryWithParameters(
+      this.db,
+      `INSERT INTO research_brief (
+        id, brand_id, owner_id, question_cluster, gap, facts_json, source_ids_json, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.brandId, row.ownerId, row.questionCluster, row.gap, row.factsJson,
+        row.sourceIdsJson, row.status, row.createdAt, row.updatedAt,
+      ],
+    );
+  }
+
+  async listBriefs(ownerId: string, brandId: string) {
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT id, brand_id AS "brandId", owner_id AS "ownerId", question_cluster AS "questionCluster",
+              gap, facts_json AS "factsJson", source_ids_json AS "sourceIdsJson", status,
+              created_at AS "createdAt", updated_at AS "updatedAt"
+       FROM research_brief
+       WHERE owner_id = ? AND brand_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT 50`,
+      [ownerId, brandId],
+    );
+    return rows.map((row) => z.object({
+      id: brandIdSchema,
+      brandId: brandIdSchema,
+      ownerId: z.string().min(1),
+      questionCluster: z.string(),
+      gap: z.string(),
+      factsJson: z.string(),
+      sourceIdsJson: z.string(),
+      status: z.enum(["proposed", "accepted", "dismissed"]),
+      createdAt: z.iso.datetime({ precision: 3 }),
+      updatedAt: z.iso.datetime({ precision: 3 }),
+    }).parse(row));
+  }
+
+  async updateBriefStatus(ownerId: string, brandId: string, briefId: string, status: "accepted" | "dismissed", updatedAt: string) {
+    const rows = await queryWithParameters(
+      this.db,
+      `UPDATE research_brief SET status = ?, updated_at = ?
+       WHERE id = ? AND brand_id = ? AND owner_id = ? AND status = 'proposed'
+       RETURNING id`,
+      [status, updatedAt, briefId, brandId, ownerId],
+    );
+    return rows.length === 1;
+  }
 }
