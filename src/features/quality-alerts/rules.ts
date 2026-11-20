@@ -22,3 +22,52 @@ export function mergeAlerts<T extends { brandId: string; kind: AlertKind; window
   const prior = existing.find((item) => item.brandId === incoming.brandId && item.kind === incoming.kind && item.windowId === incoming.windowId);
   return prior ? { created: false as const, alert: prior } : { created: true as const, alert: incoming };
 }
+
+export type WindowSample = {
+  windowId: string;
+  completed: boolean;
+  coverageSufficient: boolean;
+  citationFieldChanged: boolean;
+  modeChanged: boolean;
+  recommendationRate: number | null;
+};
+
+/** Quality problems suppress a brand-decline claim. A trend needs two completed comparable windows. */
+export function assessMonitoringAlert(windows: readonly WindowSample[], thresholdPp = defaultThresholdPp) {
+  const latest = windows[windows.length - 1];
+  if (!latest) return { kind: "none" as const, claimBrandDecline: false };
+  if (!latest.coverageSufficient || latest.citationFieldChanged || latest.modeChanged) {
+    return { kind: "data_quality" as const, claimBrandDecline: false };
+  }
+  const comparable = windows.filter((window) => (
+    window.completed && window.coverageSufficient && window.recommendationRate !== null
+  ));
+  const previous = comparable[comparable.length - 2];
+  const current = comparable[comparable.length - 1];
+  if (!previous || !current || previous.recommendationRate === null || current.recommendationRate === null) {
+    return { kind: "none" as const, claimBrandDecline: false };
+  }
+  const dropPp = (previous.recommendationRate - current.recommendationRate) * 100;
+  if (dropPp > thresholdPp) return { kind: "trend" as const, claimBrandDecline: true };
+  return { kind: "none" as const, claimBrandDecline: false };
+}
+
+export type StoredAlert = {
+  brandId: string;
+  kind: AlertKind;
+  windowId: string;
+  status: AlertStatus;
+  occurrences: readonly string[];
+};
+
+const alertTransitions: Record<AlertStatus, readonly AlertStatus[]> = {
+  open: ["acknowledged", "resolved", "snoozed"],
+  acknowledged: ["resolved", "snoozed"],
+  snoozed: ["open", "resolved"],
+  resolved: ["open"],
+};
+
+export function recordAlertOccurrence(alert: StoredAlert, next: AlertStatus, occurrenceId: string) {
+  if (next !== alert.status && !alertTransitions[alert.status].includes(next)) return null;
+  return { ...alert, status: next, occurrences: [...alert.occurrences, occurrenceId] };
+}
