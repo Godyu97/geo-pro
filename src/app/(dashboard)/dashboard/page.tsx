@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
-import { brandFixtureOrigin } from "@/features/brands/intake";
+import { MonitoringCapabilityPanel } from "@/features/capabilities/settings-panel";
+import { brandIntakeOrigin } from "@/features/brands/intake";
 
 export default async function DashboardPage() {
   // Each protected page checks the session, including RSC navigation requests.
@@ -16,7 +17,9 @@ export default async function DashboardPage() {
   const locale = await getLocale();
   const t = await getTranslator("dashboard");
   const brands = await getTranslator("brands");
-  const brandFixture = Boolean(brandFixtureOrigin(await headers()));
+  const intake = brandIntakeOrigin(await headers());
+  const brandFixture = intake?.mode === "fixture";
+  const brandReal = intake?.mode === "real";
   const moduleLinks = getModuleLinks(getMessages(locale).modules);
 
   return (
@@ -42,6 +45,11 @@ export default async function DashboardPage() {
           </Button>
         </div>
       </section>
+      <section aria-labelledby="channels-title" className="max-w-3xl space-y-3 rounded-2xl border bg-card p-6">
+        <h2 id="channels-title" className="text-lg font-semibold">{t("channelsTitle")}</h2>
+        <p className="text-sm leading-7 text-muted-foreground">{t("channelsDescription")}</p>
+        <MonitoringCapabilityPanel locale={locale} />
+      </section>
       <section
         aria-labelledby="evidence-title"
         className="rounded-2xl border border-dashed bg-card px-6 py-9 text-center sm:px-9"
@@ -56,7 +64,7 @@ export default async function DashboardPage() {
           {t("waitingEvidence")}
         </h2>
         <p className="mx-auto mt-2 max-w-lg text-sm leading-7 text-muted-foreground">
-          {brandFixture ? brands("monitorUnavailable") : t("emptyDescription")}
+          {intake ? brands("monitorUnavailable") : t("emptyDescription")}
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <Button asChild variant="outline" className="bg-white/70">
@@ -76,7 +84,7 @@ export default async function DashboardPage() {
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {moduleLinks.map(({ id, title, icon: Icon, description, empty }) => {
-            const brandEntry = id === "brands" && brandFixture;
+            const brandEntry = id === "brands" && Boolean(intake);
             return (
               <Card key={id} id={id} className="scroll-mt-6 shadow-none">
                 <CardContent className="p-6">
@@ -85,12 +93,12 @@ export default async function DashboardPage() {
                       <Icon className="size-5" aria-hidden="true" />
                     </span>
                     <Badge variant="outline" className="font-normal text-muted-foreground">
-                      {brandEntry ? brands("fixtureStatus") : t("unavailable")}
+                      {brandFixture ? brands("fixtureStatus") : brandReal ? brands("realStatus") : t("unavailable")}
                     </Badge>
                   </div>
                   <h3 className="font-medium">{title}</h3>
                   <p className="mt-2 min-h-14 text-sm leading-7 text-muted-foreground">
-                    {brandEntry ? brands("pageDescription") : description}
+                    {brandFixture ? brands("pageDescription") : brandReal ? brands("realDescription") : description}
                   </p>
                   {!brandEntry && <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">{empty}</p>}
                 </CardContent>

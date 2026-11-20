@@ -17,7 +17,8 @@ import { brandRecoveryError } from "./commands";
 import { archiveCursorSchema, brandIdSchema, brandVersionParam } from "./contracts";
 import { BrandDeletionButtons } from "./deletion-buttons";
 import { brandErrorMessage } from "./error-messages";
-import { brandFixtureOrigin } from "./intake";
+import { brandIntakeOrigin, type BrandIntakeMode } from "./intake";
+import { readPilotAdmission, type PilotAdmissionItem } from "./pilot-admission";
 import { readBrandData } from "./service";
 
 type Query = Record<string, string | string[] | undefined>;
@@ -38,24 +39,50 @@ function BrandFrame({ title, back, backLabel, children }: { title: string; back:
   );
 }
 
-function FixtureNotice({ t }: { t: Translate }) {
+const admissionLabel = {
+  emailDelivery: "admissionEmailDelivery",
+  accountRecovery: "admissionAccountRecovery",
+  retentionDisclosure: "admissionRetentionDisclosure",
+  backupDrill: "admissionBackupDrill",
+  pilotAuthorization: "admissionPilotAuthorization",
+} as const;
+
+function IntakeNotice({ t, mode }: { t: Translate; mode: BrandIntakeMode }) {
+  const real = mode === "real";
   return (
     <aside className="max-w-3xl space-y-2 rounded-xl border bg-muted/50 p-4">
-      <p className="text-sm font-semibold">{t("fixtureLabel")}</p>
-      <p className="text-sm leading-6 text-muted-foreground">{t("fixtureDescription")}</p>
+      <p className="text-sm font-semibold">{t(real ? "realLabel" : "fixtureLabel")}</p>
+      <p className="text-sm leading-6 text-muted-foreground">{t(real ? "realDescription" : "fixtureDescription")}</p>
     </aside>
   );
 }
 
-function ClosedBrandIntake({ t }: { t: Translate }) {
+function ClosedBrandIntake({ t, items }: { t: Translate; items: PilotAdmissionItem[] }) {
   return (
     <BrandFrame title={t("title")} back="/dashboard" backLabel={t("workspace")}>
       <section className="max-w-3xl space-y-2 rounded-xl border bg-card p-5">
         <h2 className="font-semibold">{t("closedTitle")}</h2>
         <p className="text-sm leading-6 text-muted-foreground">{t("closedDescription")}</p>
       </section>
+      <section aria-labelledby="pilot-admission" className="max-w-3xl space-y-3 rounded-xl border bg-card p-5">
+        <h2 id="pilot-admission" className="font-semibold">{t("admissionTitle")}</h2>
+        <p className="text-sm leading-6 text-muted-foreground">{t("admissionDescription")}</p>
+        <ul className="divide-y rounded-lg border">
+          {items.map((item) => (
+            <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
+              <span>{t(admissionLabel[item.id])}</span>
+              <span className="text-muted-foreground">{item.met ? t("admissionMet") : t("admissionUnmet")}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-sm leading-6 text-muted-foreground">{t("admissionRealIntakeClosed")}</p>
+      </section>
     </BrandFrame>
   );
+}
+
+function closedBrandIntake(t: Translate) {
+  return <ClosedBrandIntake t={t} items={readPilotAdmission(process.env).items} />;
 }
 
 function BrandLoadFailure({ t, href }: { t: Translate; href: string }) {
@@ -73,7 +100,8 @@ export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Q
   const { user } = await requireSession();
   const locale = await getLocale();
   const t = await getTranslator("brands");
-  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  const intake = brandIntakeOrigin(await headers());
+  if (!intake) return closedBrandIntake(t);
   const query = await searchParams;
   const cursor = archiveCursorSchema.safeParse({ at: query.before, id: query.id });
   const frozenCursor = archiveCursorSchema.safeParse({ at: query.frozenBefore, id: query.frozenId });
@@ -83,7 +111,7 @@ export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Q
   });
   return (
     <BrandFrame title={t("title")} back="/dashboard" backLabel={t("workspace")}>
-      <FixtureNotice t={t} />
+      <IntakeNotice t={t} mode={intake.mode} />
       {"unavailable" in result ? <BrandLoadFailure t={t} href="/dashboard/brands" /> : (
         <>
           <section aria-labelledby="brand-current" className="max-w-3xl rounded-xl border bg-card p-5 sm:p-6">
@@ -148,14 +176,15 @@ export async function NewBrandPage() {
   const { user } = await requireSession();
   const locale = await getLocale();
   const t = await getTranslator("brands");
-  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  const intake = brandIntakeOrigin(await headers());
+  if (!intake) return closedBrandIntake(t);
   const result = await readBrandData(async (dao) => {
     const active = await dao.active(user.id);
     return { active, draft: active ? null : await dao.draft(user.id, "new") };
   });
   return (
     <BrandFrame title={t("createTitle")} back="/dashboard/brands" backLabel={t("allBrands")}>
-      <FixtureNotice t={t} />
+      <IntakeNotice t={t} mode={intake.mode} />
       {"unavailable" in result ? <BrandLoadFailure t={t} href="/dashboard/brands/new" /> : result.data.active ? (
         <div className="max-w-3xl space-y-3 rounded-xl border bg-card p-5">
           <p role="status" className="text-sm leading-6">{t("limitReached")} {t("archiveFirst")}</p>
@@ -170,7 +199,8 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
   const { user } = await requireSession();
   const locale = await getLocale();
   const t = await getTranslator("brands");
-  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  const intake = brandIntakeOrigin(await headers());
+  if (!intake) return closedBrandIntake(t);
   const { id } = await params;
   const query = await searchParams;
   const version = brandVersionParam.safeParse(query.version);
@@ -192,7 +222,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
   const messages = getMessages(locale).brands;
   if (editing) return (
     <BrandFrame title={t("editTitle")} back={href} backLabel={t("viewBrand")}>
-      <FixtureNotice t={t} />
+      <IntakeNotice t={t} mode={intake.mode} />
       <BrandForm key={user.id + id} actorId={user.id} target={{ brandId: id, expectedBrandRevision: brand.revision }}
         current={brand.fields} draft={draft} messages={messages} />
     </BrandFrame>
@@ -212,7 +242,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
   ];
   return (
     <BrandFrame title={brand.fields.name} back="/dashboard/brands" backLabel={t("allBrands")}>
-      <FixtureNotice t={t} />
+      <IntakeNotice t={t} mode={intake.mode} />
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <Card className="py-0 shadow-none">
           <CardContent className="space-y-5 p-5 sm:p-6">
@@ -257,7 +287,8 @@ export async function BrandDeletionPage({ params }: { params: Promise<{ id: stri
   const { user } = await requireSession();
   const locale = await getLocale();
   const t = await getTranslator("brands");
-  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  const intake = brandIntakeOrigin(await headers());
+  if (!intake) return closedBrandIntake(t);
   const { id } = await params;
   if (!brandIdSchema.safeParse(id).success) notFound();
   const href = "/dashboard/brands/" + id;
@@ -282,7 +313,7 @@ export async function BrandDeletionPage({ params }: { params: Promise<{ id: stri
   ];
   return (
     <BrandFrame title={t("deletionImpact")} back={href} backLabel={t("viewBrand")}>
-      <FixtureNotice t={t} />
+      <IntakeNotice t={t} mode={intake.mode} />
       <section aria-label={t("deletionImpact")} className="max-w-3xl space-y-5 rounded-xl border bg-card p-5">
         <p className="text-sm leading-6">{t("deletionConsequences")}</p>
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
@@ -304,7 +335,8 @@ export async function BrandRecoveryPage({ params }: { params: Promise<{ id: stri
   const locale = await getLocale();
   const t = await getTranslator("brands");
   const email = await getTranslator("accountEmail");
-  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  const intake = brandIntakeOrigin(await headers());
+  if (!intake) return closedBrandIntake(t);
   const { id } = await params;
   if (!brandIdSchema.safeParse(id).success) notFound();
   const href = "/dashboard/brands/" + id + "/recovery";
@@ -320,7 +352,7 @@ export async function BrandRecoveryPage({ params }: { params: Promise<{ id: stri
     { emailVerified: user.emailVerified, createdAt: session.createdAt }, new Date());
   return (
     <BrandFrame title={t("recoveryTitle")} back="/dashboard/brands" backLabel={t("allBrands")}>
-      <FixtureNotice t={t} />
+      <IntakeNotice t={t} mode={intake.mode} />
       <section aria-label={t("recoveryTitle")} className="max-w-3xl space-y-4 rounded-xl border bg-card p-5">
         <p className="text-sm leading-6">{t("frozenDescription")}</p>
         <dl className="space-y-3 text-sm">
