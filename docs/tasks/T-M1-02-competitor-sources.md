@@ -6,11 +6,13 @@
 | --- | --- | --- |
 | 竞品份额 | 固定竞品集按版本保存。同一回答里每个品牌只计一次，分母可见；换版不并入旧提及。无序输出不产生名次，缺席不进入条件平均位置。清除品牌时一并删除这些行，本人导出包含这两张表。 | `621ea3e5b0907328fc534cf2e7fb53577e91ee2d` |
 | 来源支持性 | 已观察引用可以复核。页面不可读或失效时引用仍在，支持性为 unknown，不会写成正向支持。未复核的引用同样显示 unknown。 | `404f1e23e7b24a175d25d3be2b7a96826771b4fa` |
+| 研究 Brief | 只替换对方品牌名的文案不保存。有缺口、且来源是本品牌已有引用时，才保存待确认 Brief，并保留来源 ID。接受之后不能再改成搁置。 | `d333fb0819ebf63c778e9926ceab5fabe8f41a9c` |
+| 双语页面 | `/dashboard/monitoring/competitors`，从 AI 回答进入。中英文文案都在。份额表显示计次和分母；无序提及不排名；引用支持性沿用上面的规则。页面不抓取外部网址。 | `da95bfe06b1179c22c75438089a6c98cc3f507f1` |
 
 ## 这一步的检查
 
-份额和来源复核各自在提交前跑了 `pnpm test:competitors`、改动文件的 `pnpm exec eslint`、`pnpm typecheck` 和 `pnpm db:ddl:check`，退出码为 0。SQLite 与本机 PostgreSQL 隔离库都跑了。Node 是 v22.23.4，不是仓库要求的 Node 24。没有跑 `pnpm build`，没有浏览器。这些通过不表示 T-M1-02 已验收。
+份额、来源复核、研究 Brief 和页面各自在提交前跑了适用检查：`pnpm test:competitors`、改动文件的 `pnpm exec eslint`、`pnpm typecheck`。结构变更另跑了 `pnpm db:ddl:check`。页面另跑了 `pnpm check:i18n`。这些命令退出码为 0。SQLite 与本机 PostgreSQL 隔离库都跑了数据用例。页面推送之后补跑了 `pnpm build`，退出码为 0，路由表里有 `/dashboard/monitoring/competitors`。Node 是 v22.23.4，不是仓库要求的 Node 24。没有浏览器走查。这些通过不表示 T-M1-02 已验收。
 
 ## 还没有
 
-研究 Brief、双语页面。真实引用页没有去抓。来源复核只记录调用方给出的可读性，不发起抓取。
+真实引用页没有去抓。来源复核只记录调用方给出的可读性。任务勾选仍不做：没有真实竞品样本，也没有把本页走查记成验收。
