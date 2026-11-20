@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { getAuthEnvironment, isAuthConfigured } from "@/lib/auth/env";
+import { isTrustedAppOrigin } from "@/lib/auth/origin";
 import { getConnection } from "@/lib/db/connection";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getLocale } from "@/lib/i18n/server";
@@ -21,7 +22,7 @@ export async function accountEmailResponse(request: Request) {
   if (!isAuthConfigured()) return respond("unavailable", 503);
   const auth = getAuthEnvironment();
   const origin = new URL(auth.BETTER_AUTH_URL).origin;
-  if (request.headers.get("origin") !== origin) return respond("invalidInput", 403);
+  if (!isTrustedAppOrigin(auth.BETTER_AUTH_URL, request)) return respond("invalidInput", 403);
 
   const body = await readBoundedJson(request, 12 * 1024);
   const mail = emailRequest.safeParse(body);

@@ -9,6 +9,7 @@ import { sendResetMail } from "@/features/account/email/delivery";
 import { beforeProfileUpdate } from "@/features/account/profile-update";
 import { getAuthEnvironment } from "@/lib/auth/env";
 import { authOptions } from "@/lib/auth/options";
+import { trustedAppOrigins } from "@/lib/auth/origin";
 import { getDatabase, withAuthDatabaseTransaction } from "@/lib/db";
 
 type UserKey = { id: string } | { email: string };
@@ -43,7 +44,7 @@ function createAuth(scopedDatabase?: ReturnType<typeof getDatabase>, lockUser?: 
     database: drizzleAdapter(database, { provider, schema }),
     baseURL: environment.BETTER_AUTH_URL,
     secret: environment.BETTER_AUTH_SECRET,
-    trustedOrigins: [new URL(environment.BETTER_AUTH_URL).origin],
+    trustedOrigins: (request) => trustedAppOrigins(environment.BETTER_AUTH_URL, request),
   });
 }
 

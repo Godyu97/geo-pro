@@ -36,6 +36,7 @@ type AuthMode = "login" | "signup";
 
 const errorKeys: Record<string, keyof Messages["auth"]> = {
   INVALID_EMAIL_OR_PASSWORD: "invalidCredentials",
+  INVALID_EMAIL: "emailInvalid",
   USER_ALREADY_EXISTS: "accountExists",
   USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "accountExists",
   PASSWORD_TOO_SHORT: "passwordMin",
@@ -148,6 +149,7 @@ export function AuthForm({
         )}
         <Form {...form}>
           <form
+            method="post"
             onSubmit={form.handleSubmit(onSubmit)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && event.nativeEvent.isComposing) {

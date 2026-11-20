@@ -79,6 +79,7 @@ export default async function LoginPage({
               </p>
             )}
             <AuthForm
+              key={mode === "signup" ? "signup" : "login"}
               initialMode={mode === "signup" ? "signup" : "login"}
               configured={state.status !== "not-configured"}
               unavailable={state.status === "unavailable"}
