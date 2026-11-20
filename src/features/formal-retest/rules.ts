@@ -7,7 +7,31 @@ export function checkpointDue(input: { effectiveOn: string; today: string; check
   const today = Date.parse(`${input.today}T00:00:00Z`);
   if (Number.isNaN(start) || Number.isNaN(today)) return false;
   const elapsedDays = Math.floor((today - start) / 86_400_000);
-  return elapsedDays >= checkpointDays[input.checkpoint];
+  // The window starts the day after effective and lasts N full days, so it is due on day N+1.
+  return elapsedDays >= checkpointDays[input.checkpoint] + 1;
+}
+
+export function formalQualityGate(input: {
+  eligible: number;
+  planned: number;
+  perQuestion: readonly { eligible: number; planned: number }[];
+  comparableQuestions: number;
+  frozenNonBrand: number;
+}) {
+  const overall = input.planned === 0 ? 0 : input.eligible / input.planned;
+  const questionsOk = input.perQuestion.every((question) => question.planned > 0 && question.eligible / question.planned >= 0.8);
+  const common = input.frozenNonBrand === 0 ? 0 : input.comparableQuestions / input.frozenNonBrand;
+  const allowed = overall >= 0.9 && questionsOk && common >= 0.8;
+  return { allowed, mode: allowed ? "formal" as const : "exploratory" as const, overall, common };
+}
+
+export function stopObservation(input: { reason: string; slotIds: readonly string[] }) {
+  if (input.reason.trim().length === 0) return { stopped: false as const, retainedSlotIds: [...input.slotIds] };
+  return { stopped: true as const, reason: input.reason, retainedSlotIds: [...input.slotIds] };
+}
+
+export function recordConfounders(input: { factors: readonly string[]; thresholdPp: number }) {
+  return { factors: [...input.factors], thresholdPp: input.thresholdPp, thresholdChanged: false as const };
 }
 
 export function formalComparison(input: { comparableQuestions: number; frozenQuestions: number; excluded: readonly string[] }) {
