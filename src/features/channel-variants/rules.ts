@@ -31,3 +31,23 @@ export function settleChannels(rows: readonly { channel: string; state: "verifie
 export function exportPackage(input: { markdown: string; tables: readonly string[] }) {
   return { markdown: input.markdown, tables: [...input.tables], droppedTables: 0 };
 }
+
+/** One fact expiry lists every affected page and opens a single deduped maintenance task. */
+export function impactSurface(input: {
+  factId: string;
+  pages: readonly { pageId: string; draftId: string; channel: string }[];
+}) {
+  const queue = maintenanceQueue({ factId: input.factId, pageIds: input.pages.map((page) => page.pageId) });
+  return { factId: input.factId, pages: input.pages.map((page) => ({ ...page })), taskCount: queue.taskCount };
+}
+
+/** The planned date is not the live date. Retest due stays separate from public verification. */
+export function calendarSchedule(input: {
+  plannedOn: string | null;
+  verifiedOn: string | null;
+  retestDueOn: string | null;
+  blocked: boolean;
+}) {
+  const row = calendarRow(input);
+  return { ...row, retestDueOn: input.retestDueOn, liveOn: row.verifiedOn };
+}
