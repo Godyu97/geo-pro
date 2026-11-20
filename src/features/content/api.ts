@@ -4,17 +4,26 @@ import { getConnection } from "@/lib/db/connection";
 import { requireSession } from "@/lib/auth/session";
 import { getTranslator } from "@/lib/i18n/server";
 import {
+  approveContent,
   cancelBatch,
   confirmBrief,
+  exportConfirm,
+  exportPreflight,
   generateBatch,
   listBriefs,
   pauseBatch,
   readBatch,
   readBriefDetail,
   readContentVersion,
+  readDeliveryPackage,
+  registerAsset,
+  rejectContent,
   resumeBatch,
   retryFailed,
   saveBriefDraft,
+  submitReview,
+  updateVariant,
+  type ExportBlocker,
 } from "./commands";
 import {
   contentErrors,
@@ -35,7 +44,12 @@ function sameOrigin(request: Request) {
   }
 }
 
-async function errorResponse(code: ContentError, status = contentErrors[code], gaps?: Array<{ code: string }>) {
+async function errorResponse(
+  code: ContentError,
+  status = contentErrors[code],
+  gaps?: Array<{ code: string }>,
+  blockers?: ExportBlocker[],
+) {
   const t = await getTranslator("content");
   return Response.json({
     error: {
@@ -43,6 +57,7 @@ async function errorResponse(code: ContentError, status = contentErrors[code], g
       message: t(code),
       retryable: status === 503,
       ...(gaps ? { gaps } : {}),
+      ...(blockers ? { blockers } : {}),
     },
   }, { status, headers });
 }
@@ -88,6 +103,41 @@ export async function contentVersionResponse(request: Request, versionId: string
   return Response.json(result, { headers });
 }
 
+const packageFiles = new Set([
+  "content.md", "content.html", "manifest.json", "public-sources.json",
+  "publish-checklist.md", "public-images.json",
+]);
+
+export async function contentPackageResponse(request: Request, packageId: string) {
+  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  const session = await requireSession().catch(() => null);
+  if (!session) return errorResponse("SESSION_REQUIRED");
+  const result = await readDeliveryPackage(getConnection(), session.user.id, packageId);
+  if ("error" in result) return errorResponse(result.error);
+
+  const file = new URL(request.url).searchParams.get("file");
+  if (!file) return Response.json(result, { headers });
+  if (!packageFiles.has(file) || !(file in result.files)) return errorResponse("NOT_FOUND");
+  // Plain text + attachment: package HTML is never rendered inside this origin.
+  return new Response(result.files[file], {
+    headers: {
+      ...headers,
+      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${file}"`,
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "sandbox; default-src 'none'",
+    },
+  });
+}
+
+async function respond(result: object) {
+  if ("error" in result) {
+    const failure = result as { error: ContentError; gaps?: Array<{ code: string }>; blockers?: ExportBlocker[] };
+    return errorResponse(failure.error, undefined, failure.gaps, failure.blockers);
+  }
+  return Response.json(result, { headers });
+}
+
 export async function contentWriteResponse(request: Request) {
   if (!sameOrigin(request) || request.method !== "POST") return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
@@ -119,6 +169,13 @@ export async function contentWriteResponse(request: Request) {
     if ("error" in result) return errorResponse(result.error, undefined, result.gaps);
     return Response.json(result, { headers });
   }
+  if (input.action === "submit-review") return respond(await submitReview(db, session.user.id, input));
+  if (input.action === "approve-content") return respond(await approveContent(db, session.user.id, input));
+  if (input.action === "reject-content") return respond(await rejectContent(db, session.user.id, input));
+  if (input.action === "update-variant") return respond(await updateVariant(db, session.user.id, input));
+  if (input.action === "register-asset") return respond(await registerAsset(db, session.user.id, input));
+  if (input.action === "export-preflight") return respond(await exportPreflight(db, session.user.id, input));
+  if (input.action === "export-confirm") return respond(await exportConfirm(db, session.user.id, input));
   if (input.action === "pause-batch") {
     const result = await pauseBatch(db, session.user.id, input);
     if ("error" in result) return errorResponse(result.error);

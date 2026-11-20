@@ -17,6 +17,42 @@ export const unitStatuses = ["queued", "running", "succeeded", "failed", "blocke
 export const unitStatusSchema = z.enum(unitStatuses);
 export type UnitStatus = z.infer<typeof unitStatusSchema>;
 
+export const versionStatuses = ["draft", "in_review", "approved", "rejected", "invalidated"] as const;
+export const versionStatusSchema = z.enum(versionStatuses);
+export type VersionStatus = z.infer<typeof versionStatusSchema>;
+
+export const labelingStatuses = ["verified", "unverified"] as const;
+export const labelingStatusSchema = z.enum(labelingStatuses);
+export type LabelingStatus = z.infer<typeof labelingStatusSchema>;
+
+export const assetKinds = ["cover", "inline", "other"] as const;
+export const assetKindSchema = z.enum(assetKinds);
+export const assetVisibilities = ["public", "internal"] as const;
+export const assetVisibilitySchema = z.enum(assetVisibilities);
+export const assetReviewStatuses = ["pending", "approved", "rejected"] as const;
+export const assetReviewStatusSchema = z.enum(assetReviewStatuses);
+
+export const approvalDecisions = ["approved", "rejected"] as const;
+export const approvalDecisionSchema = z.enum(approvalDecisions);
+
+export const packageKinds = ["formal", "review"] as const;
+export const packageKindSchema = z.enum(packageKinds);
+export type PackageKind = z.infer<typeof packageKindSchema>;
+
+export const exportModes = ["auto", "formal", "review"] as const;
+export const exportModeSchema = z.enum(exportModes);
+export type ExportMode = z.infer<typeof exportModeSchema>;
+
+export const exportJobStatuses = ["queued", "ready", "failed"] as const;
+export const exportJobStatusSchema = z.enum(exportJobStatuses);
+
+export const preflightBlockerCodes = ["APPROVAL_REQUIRED", "FACT_INVALID", "LABELING_UNVERIFIED"] as const;
+export type PreflightBlockerCode = (typeof preflightBlockerCodes)[number];
+
+export const defaultTargetChannel = "primary_page";
+export const defaultLabelingProfileVersion = "unverified";
+export const targetChannelSchema = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9_-]*$/);
+
 export const contentGapCodes = [
   "audienceMissing",
   "targetGapMissing",
@@ -39,6 +75,11 @@ export const contentErrors = {
   INVALID_INPUT: 400,
   EVIDENCE_REQUIRED: 422,
   OPERATION_CONFLICT: 409,
+  APPROVAL_REQUIRED: 422,
+  FACT_INVALID: 422,
+  LABELING_UNVERIFIED: 422,
+  PREFLIGHT_REQUIRED: 422,
+  SUBSET_INVALID: 422,
   SERVICE_UNAVAILABLE: 503,
 } as const;
 export type ContentError = keyof typeof contentErrors;
@@ -97,11 +138,75 @@ export const batchControlSchema = z.strictObject({
 });
 export type BatchControlInput = z.infer<typeof batchControlSchema>;
 
+const versionCommandBase = {
+  brandId: brandIdSchema,
+  operationId: brandIdSchema,
+  versionId: brandIdSchema,
+};
+
+export const submitReviewSchema = z.strictObject({ action: z.literal("submit-review"), ...versionCommandBase });
+export const approveContentSchema = z.strictObject({ action: z.literal("approve-content"), ...versionCommandBase });
+export const rejectContentSchema = z.strictObject({ action: z.literal("reject-content"), ...versionCommandBase });
+export type SubmitReviewInput = z.infer<typeof submitReviewSchema>;
+export type ApproveContentInput = z.infer<typeof approveContentSchema>;
+export type RejectContentInput = z.infer<typeof rejectContentSchema>;
+
+export const updateVariantSchema = z.strictObject({
+  action: z.literal("update-variant"),
+  ...versionCommandBase,
+  title: z.string().trim().min(1).max(200).optional(),
+  bodyMarkdown: z.string().min(1).max(50_000).optional(),
+  imageAssetIds: z.array(brandIdSchema).max(10).optional(),
+  targetChannel: targetChannelSchema.optional(),
+  labelingProfileVersion: z.string().trim().min(1).max(64).optional(),
+  labelingProfileStatus: labelingStatusSchema.optional(),
+}).refine((value) => value.title !== undefined || value.bodyMarkdown !== undefined
+  || value.imageAssetIds !== undefined || value.targetChannel !== undefined
+  || value.labelingProfileVersion !== undefined || value.labelingProfileStatus !== undefined);
+export type UpdateVariantInput = z.infer<typeof updateVariantSchema>;
+
+export const registerAssetSchema = z.strictObject({
+  action: z.literal("register-asset"),
+  brandId: brandIdSchema,
+  operationId: brandIdSchema,
+  kind: assetKindSchema,
+  source: z.string().trim().min(1).max(500),
+  rightsStatement: z.string().trim().min(1).max(1000),
+  visibility: assetVisibilitySchema,
+  reviewStatus: assetReviewStatusSchema.default("pending"),
+  contentRef: z.string().trim().min(1).max(2000),
+});
+export type RegisterAssetInput = z.infer<typeof registerAssetSchema>;
+
+export const exportPreflightSchema = z.strictObject({
+  action: z.literal("export-preflight"),
+  brandId: brandIdSchema,
+  operationId: brandIdSchema,
+  versionIds: z.array(brandIdSchema).min(1).max(20).refine((ids) => new Set(ids).size === ids.length),
+  mode: exportModeSchema.default("auto"),
+});
+export type ExportPreflightInput = z.infer<typeof exportPreflightSchema>;
+
+export const exportConfirmSchema = z.strictObject({
+  action: z.literal("export-confirm"),
+  brandId: brandIdSchema,
+  operationId: brandIdSchema,
+  chosenVersionIds: z.array(brandIdSchema).min(1).max(20).refine((ids) => new Set(ids).size === ids.length),
+});
+export type ExportConfirmInput = z.infer<typeof exportConfirmSchema>;
+
 export const contentWriteSchema = z.discriminatedUnion("action", [
   saveBriefDraftSchema,
   confirmBriefSchema,
   generateBatchSchema,
   batchControlSchema,
+  submitReviewSchema,
+  approveContentSchema,
+  rejectContentSchema,
+  updateVariantSchema,
+  registerAssetSchema,
+  exportPreflightSchema,
+  exportConfirmSchema,
 ]);
 export type ContentWriteInput = z.infer<typeof contentWriteSchema>;
 

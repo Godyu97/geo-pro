@@ -2,23 +2,38 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import {
+  approveContent,
   cancelBatch,
   confirmBrief,
+  exportConfirm,
+  exportPreflight,
   generateBatch,
   pauseBatch,
+  registerAsset,
+  rejectContent,
   resumeBatch,
   retryFailed,
   saveBriefDraft,
+  submitReview,
+  updateVariant,
 } from "./commands";
 import {
+  approveContentSchema,
   batchControlSchema,
   confirmBriefSchema,
+  exportConfirmSchema,
+  exportPreflightSchema,
   generateBatchSchema,
+  registerAssetSchema,
+  rejectContentSchema,
   saveBriefDraftSchema,
+  submitReviewSchema,
   templateKindSchema,
+  updateVariantSchema,
 } from "./contracts";
 
 export async function saveBriefAction(formData: FormData): Promise<void> {
@@ -109,4 +124,106 @@ export async function batchControlAction(formData: FormData): Promise<void> {
   else await retryFailed(db, session.user.id, parsed.data);
   revalidatePath("/dashboard/content");
   revalidatePath(`/dashboard/content/batches/${parsed.data.batchId}`);
+}
+
+function splitIds(value: FormDataEntryValue | null) {
+  return String(value ?? "").split(/[\s,]+/).map((item) => item.trim()).filter(Boolean);
+}
+
+function versionPath(versionId: string) {
+  return `/dashboard/content/versions/${versionId}`;
+}
+
+export async function reviewVersionAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const base = {
+    action: String(formData.get("action") ?? ""),
+    brandId: String(formData.get("brandId") ?? ""),
+    versionId: String(formData.get("versionId") ?? ""),
+    operationId: randomUUID(),
+  };
+  const db = getConnection();
+  if (base.action === "submit-review") {
+    const parsed = submitReviewSchema.safeParse(base);
+    if (parsed.success) await submitReview(db, session.user.id, parsed.data);
+  } else if (base.action === "approve-content") {
+    const parsed = approveContentSchema.safeParse(base);
+    if (parsed.success) await approveContent(db, session.user.id, parsed.data);
+  } else if (base.action === "reject-content") {
+    const parsed = rejectContentSchema.safeParse(base);
+    if (parsed.success) await rejectContent(db, session.user.id, parsed.data);
+  }
+  revalidatePath("/dashboard/content");
+  revalidatePath(versionPath(base.versionId));
+}
+
+export async function updateVariantAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const parsed = updateVariantSchema.safeParse({
+    action: "update-variant",
+    brandId: String(formData.get("brandId") ?? ""),
+    versionId: String(formData.get("versionId") ?? ""),
+    operationId: randomUUID(),
+    title: String(formData.get("title") ?? ""),
+    bodyMarkdown: String(formData.get("bodyMarkdown") ?? ""),
+    imageAssetIds: splitIds(formData.get("imageAssetIds")),
+    targetChannel: String(formData.get("targetChannel") ?? ""),
+    labelingProfileVersion: String(formData.get("labelingProfileVersion") ?? ""),
+    labelingProfileStatus: String(formData.get("labelingProfileStatus") ?? ""),
+  });
+  if (!parsed.success) return;
+  await updateVariant(getConnection(), session.user.id, parsed.data);
+  revalidatePath("/dashboard/content");
+  revalidatePath(versionPath(parsed.data.versionId));
+}
+
+export async function registerAssetAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const versionId = String(formData.get("versionId") ?? "");
+  const parsed = registerAssetSchema.safeParse({
+    action: "register-asset",
+    brandId: String(formData.get("brandId") ?? ""),
+    operationId: randomUUID(),
+    kind: String(formData.get("kind") ?? ""),
+    source: String(formData.get("source") ?? ""),
+    rightsStatement: String(formData.get("rightsStatement") ?? ""),
+    visibility: String(formData.get("visibility") ?? ""),
+    reviewStatus: String(formData.get("reviewStatus") ?? "pending"),
+    contentRef: String(formData.get("contentRef") ?? ""),
+  });
+  if (!parsed.success) return;
+  await registerAsset(getConnection(), session.user.id, parsed.data);
+  if (versionId) revalidatePath(versionPath(versionId));
+}
+
+export async function exportPreflightAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const versionId = String(formData.get("versionId") ?? "");
+  const parsed = exportPreflightSchema.safeParse({
+    action: "export-preflight",
+    brandId: String(formData.get("brandId") ?? ""),
+    operationId: randomUUID(),
+    versionIds: [versionId],
+    mode: String(formData.get("mode") ?? "auto"),
+  });
+  if (!parsed.success) return;
+  const result = await exportPreflight(getConnection(), session.user.id, parsed.data);
+  if ("error" in result) return;
+  redirect(`${versionPath(versionId)}?op=${result.operationId}`);
+}
+
+export async function exportConfirmAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const versionId = String(formData.get("versionId") ?? "");
+  const operationId = String(formData.get("operationId") ?? "");
+  const parsed = exportConfirmSchema.safeParse({
+    action: "export-confirm",
+    brandId: String(formData.get("brandId") ?? ""),
+    operationId,
+    chosenVersionIds: splitIds(formData.get("chosenVersionIds")),
+  });
+  if (!parsed.success) return;
+  await exportConfirm(getConnection(), session.user.id, parsed.data);
+  revalidatePath(versionPath(versionId));
+  redirect(`${versionPath(versionId)}?op=${operationId}`);
 }

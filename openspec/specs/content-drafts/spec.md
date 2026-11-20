@@ -21,7 +21,7 @@ The system SHALL require an explicit Brief confirmation before any draft generat
 
 ### Requirement: Small-batch drafts with retry isolation
 
-The system SHALL generate batches of 1–5 confirmed Briefs (default 1). Each unit MUST record success, failure, or blocked independently. Pause, resume, cancel, and retry-failed MUST be supported. Successful ContentVersions MUST remain unchanged when failed units are retried; the batch ledger MUST retain original records and MUST NOT auto-expand unit count. Generated ContentVersions MUST remain `draft` (never auto-approved).
+The system SHALL generate batches of 1–5 confirmed Briefs (default 1). Each unit MUST record success, failure, or blocked independently. Pause, resume, cancel, and retry-failed MUST be supported. Successful ContentVersions MUST remain unchanged when failed units are retried; the batch ledger MUST retain original records and MUST NOT auto-expand unit count. Generated ContentVersions MUST start as `draft` and MUST NOT be auto-approved by generation; later review workflows MAY transition the same ContentVersion through `in_review` / `approved` / `rejected` / `invalidated` without changing batch retry isolation.
 
 #### Scenario: Retry only failed units
 
@@ -32,6 +32,11 @@ The system SHALL generate batches of 1–5 confirmed Briefs (default 1). Each un
 
 - **WHEN** a confirmed Brief's bound fact is revoked while a paused batch resumes
 - **THEN** affected units become `blocked` with补证, other units may continue, and no draft becomes approved
+
+#### Scenario: Generated drafts are never auto-approved
+
+- **WHEN** a confirmed Brief is generated into a ContentVersion
+- **THEN** the ContentVersion status is `draft` and no Approval row is created by generation alone
 
 ### Requirement: Fact binding and generation quota
 

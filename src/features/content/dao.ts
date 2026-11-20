@@ -4,10 +4,18 @@ import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import {
+  approvalDecisionSchema,
+  assetKindSchema,
+  assetReviewStatusSchema,
+  assetVisibilitySchema,
   batchStatusSchema,
   briefStatusSchema,
+  exportJobStatusSchema,
+  labelingStatusSchema,
+  packageKindSchema,
   templateKindSchema,
   unitStatusSchema,
+  versionStatusSchema,
 } from "./contracts.ts";
 
 const planRow = z.object({
@@ -86,9 +94,77 @@ const versionRow = z.object({
   title: z.string(),
   bodyMarkdown: z.string(),
   claimsJson: z.string(),
-  status: z.literal("draft"),
+  status: versionStatusSchema,
   fingerprint: z.string(),
+  targetChannel: z.string().min(1),
+  labelingProfileVersion: z.string().min(1),
+  labelingProfileStatus: labelingStatusSchema,
+  imageAssetIdsJson: z.string().min(2),
+  factVersionIdsJson: z.string().min(2),
   createdAt: z.iso.datetime({ precision: 3 }),
+  updatedAt: z.iso.datetime({ precision: 3 }),
+});
+
+const flag = z.union([z.literal(0), z.literal(1)]);
+
+const approvalRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  contentVersionId: brandIdSchema,
+  contentFingerprint: z.string().min(1),
+  factVersionIdsJson: z.string().min(2),
+  decision: approvalDecisionSchema,
+  actorId: z.string().min(1),
+  createdAt: z.iso.datetime({ precision: 3 }),
+});
+
+const assetRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  kind: assetKindSchema,
+  source: z.string(),
+  rightsStatement: z.string(),
+  visibility: assetVisibilitySchema,
+  reviewStatus: assetReviewStatusSchema,
+  contentRef: z.string().min(1),
+  fingerprint: z.string().min(1),
+  createdAt: z.iso.datetime({ precision: 3 }),
+});
+
+const packageRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  contentVersionId: brandIdSchema,
+  approvalId: brandIdSchema.nullable(),
+  targetChannel: z.string().min(1),
+  kind: packageKindSchema,
+  contentFingerprint: z.string().min(1),
+  factVersionIdsJson: z.string().min(2),
+  labelingProfileVersion: z.string().min(1),
+  doNotReuse: flag,
+  nonPublishable: flag,
+  manifestJson: z.string().min(2),
+  filesJson: z.string().min(2),
+  packageFingerprint: z.string().min(1),
+  createdAt: z.iso.datetime({ precision: 3 }),
+});
+
+const exportJobRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  operationId: brandIdSchema,
+  status: exportJobStatusSchema,
+  selectionJson: z.string().min(2),
+  preflightJson: z.string().min(2),
+  chosenSubsetJson: z.string().min(2),
+  resultPackageIdsJson: z.string().min(2),
+  error: z.string().nullable(),
+  createdAt: z.iso.datetime({ precision: 3 }),
+  updatedAt: z.iso.datetime({ precision: 3 }),
 });
 
 export type PlanRow = z.infer<typeof planRow>;
@@ -97,6 +173,10 @@ export type BriefVersionRow = z.infer<typeof briefVersionRow>;
 export type BatchRow = z.infer<typeof batchRow>;
 export type UnitRow = z.infer<typeof unitRow>;
 export type ContentVersionRow = z.infer<typeof versionRow>;
+export type ApprovalRow = z.infer<typeof approvalRow>;
+export type AssetRow = z.infer<typeof assetRow>;
+export type PackageRow = z.infer<typeof packageRow>;
+export type ExportJobRow = z.infer<typeof exportJobRow>;
 
 const planColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", question_cluster AS "questionCluster",
   coverage_json AS "coverageJson", created_at AS "createdAt", updated_at AS "updatedAt"`;
@@ -123,7 +203,33 @@ const unitColumns = `id, batch_id AS "batchId", brief_id AS "briefId", brand_id 
 const versionColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", brief_id AS "briefId",
   brief_version_id AS "briefVersionId", batch_unit_id AS "batchUnitId",
   template_kind AS "templateKind", title, body_markdown AS "bodyMarkdown",
-  claims_json AS "claimsJson", status, fingerprint, created_at AS "createdAt"`;
+  claims_json AS "claimsJson", status, fingerprint, target_channel AS "targetChannel",
+  labeling_profile_version AS "labelingProfileVersion", labeling_profile_status AS "labelingProfileStatus",
+  image_asset_ids_json AS "imageAssetIdsJson", fact_version_ids_json AS "factVersionIdsJson",
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+const approvalColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", content_version_id AS "contentVersionId",
+  content_fingerprint AS "contentFingerprint", fact_version_ids_json AS "factVersionIdsJson",
+  decision, actor_id AS "actorId", created_at AS "createdAt"`;
+
+const assetColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", kind, source,
+  rights_statement AS "rightsStatement", visibility, review_status AS "reviewStatus",
+  content_ref AS "contentRef", fingerprint, created_at AS "createdAt"`;
+
+const packageColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", content_version_id AS "contentVersionId",
+  approval_id AS "approvalId", target_channel AS "targetChannel", kind,
+  content_fingerprint AS "contentFingerprint", fact_version_ids_json AS "factVersionIdsJson",
+  labeling_profile_version AS "labelingProfileVersion", do_not_reuse AS "doNotReuse",
+  non_publishable AS "nonPublishable", manifest_json AS "manifestJson", files_json AS "filesJson",
+  package_fingerprint AS "packageFingerprint", created_at AS "createdAt"`;
+
+// List views omit the (potentially large) file bytes.
+const packageSummaryColumns = packageColumns.replace('files_json AS "filesJson"', `'{}' AS "filesJson"`);
+
+const exportJobColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", operation_id AS "operationId", status,
+  selection_json AS "selectionJson", preflight_json AS "preflightJson",
+  chosen_subset_json AS "chosenSubsetJson", result_package_ids_json AS "resultPackageIdsJson",
+  error, created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 export class ContentDao {
   private readonly db: QueryConnection;
@@ -340,12 +446,15 @@ export class ContentDao {
     await this.query(
       `INSERT INTO content_version (
         id, brand_id, owner_id, brief_id, brief_version_id, batch_unit_id,
-        template_kind, title, body_markdown, claims_json, status, fingerprint, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        template_kind, title, body_markdown, claims_json, status, fingerprint,
+        target_channel, labeling_profile_version, labeling_profile_status,
+        image_asset_ids_json, fact_version_ids_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.id, row.brandId, row.ownerId, row.briefId, row.briefVersionId, row.batchUnitId,
         row.templateKind, row.title, row.bodyMarkdown, row.claimsJson, row.status,
-        row.fingerprint, row.createdAt,
+        row.fingerprint, row.targetChannel, row.labelingProfileVersion, row.labelingProfileStatus,
+        row.imageAssetIdsJson, row.factVersionIdsJson, row.createdAt, row.updatedAt,
       ],
     );
   }
@@ -358,13 +467,218 @@ export class ContentDao {
     return row ? versionRow.parse(row) : null;
   }
 
-  async listContentVersionsForBrand(ownerId: string, brandId: string, limit: number) {
+  async listContentVersionsForBrand(ownerId: string, brandId: string, limit: number, statuses?: string[]) {
+    const filter = statuses?.length ? ` AND status IN (${statuses.map(() => "?").join(", ")})` : "";
     const rows = await this.query(
       `SELECT ${versionColumns} FROM content_version
+       WHERE owner_id = ? AND brand_id = ?${filter}
+       ORDER BY created_at DESC, id DESC LIMIT ?`,
+      [ownerId, brandId, ...(statuses?.length ? statuses : []), limit],
+    );
+    return rows.map((row) => versionRow.parse(row));
+  }
+
+  async getContentVersionsByIds(ownerId: string, brandId: string, ids: string[]) {
+    if (ids.length === 0) return [];
+    const rows = await this.query(
+      `SELECT ${versionColumns} FROM content_version
+       WHERE owner_id = ? AND brand_id = ? AND id IN (${ids.map(() => "?").join(", ")})`,
+      [ownerId, brandId, ...ids],
+    );
+    return rows.map((row) => versionRow.parse(row));
+  }
+
+  async updateContentVersionStatus(id: string, status: string, updatedAt: string) {
+    await this.query(
+      `UPDATE content_version SET status = ?, updated_at = ? WHERE id = ?`,
+      [status, updatedAt, id],
+    );
+  }
+
+  async updateContentVersionVariant(
+    row: Pick<ContentVersionRow,
+      "id" | "title" | "bodyMarkdown" | "targetChannel" | "labelingProfileVersion"
+      | "labelingProfileStatus" | "imageAssetIdsJson" | "status" | "updatedAt">,
+  ) {
+    await this.query(
+      `UPDATE content_version SET
+        title = ?, body_markdown = ?, target_channel = ?, labeling_profile_version = ?,
+        labeling_profile_status = ?, image_asset_ids_json = ?, status = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        row.title, row.bodyMarkdown, row.targetChannel, row.labelingProfileVersion,
+        row.labelingProfileStatus, row.imageAssetIdsJson, row.status, row.updatedAt, row.id,
+      ],
+    );
+  }
+
+  async insertApproval(row: ApprovalRow) {
+    await this.query(
+      `INSERT INTO content_approval (
+        id, brand_id, owner_id, content_version_id, content_fingerprint,
+        fact_version_ids_json, decision, actor_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.brandId, row.ownerId, row.contentVersionId, row.contentFingerprint,
+        row.factVersionIdsJson, row.decision, row.actorId, row.createdAt,
+      ],
+    );
+  }
+
+  async listApprovals(ownerId: string, versionId: string) {
+    const rows = await this.query(
+      `SELECT ${approvalColumns} FROM content_approval
+       WHERE owner_id = ? AND content_version_id = ?
+       ORDER BY created_at DESC, id DESC`,
+      [ownerId, versionId],
+    );
+    return rows.map((row) => approvalRow.parse(row));
+  }
+
+  async listApprovalsForVersions(ownerId: string, versionIds: string[]) {
+    if (versionIds.length === 0) return [];
+    const rows = await this.query(
+      `SELECT ${approvalColumns} FROM content_approval
+       WHERE owner_id = ? AND decision = 'approved'
+         AND content_version_id IN (${versionIds.map(() => "?").join(", ")})
+       ORDER BY created_at DESC, id DESC`,
+      [ownerId, ...versionIds],
+    );
+    return rows.map((row) => approvalRow.parse(row));
+  }
+
+  async insertAsset(row: AssetRow) {
+    await this.query(
+      `INSERT INTO content_asset (
+        id, brand_id, owner_id, kind, source, rights_statement, visibility,
+        review_status, content_ref, fingerprint, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.brandId, row.ownerId, row.kind, row.source, row.rightsStatement,
+        row.visibility, row.reviewStatus, row.contentRef, row.fingerprint, row.createdAt,
+      ],
+    );
+  }
+
+  async getAssetsByIds(ownerId: string, brandId: string, ids: string[]) {
+    if (ids.length === 0) return [];
+    const rows = await this.query(
+      `SELECT ${assetColumns} FROM content_asset
+       WHERE owner_id = ? AND brand_id = ? AND id IN (${ids.map(() => "?").join(", ")})`,
+      [ownerId, brandId, ...ids],
+    );
+    return rows.map((row) => assetRow.parse(row));
+  }
+
+  async listAssets(ownerId: string, brandId: string, limit: number) {
+    const rows = await this.query(
+      `SELECT ${assetColumns} FROM content_asset
        WHERE owner_id = ? AND brand_id = ?
        ORDER BY created_at DESC, id DESC LIMIT ?`,
       [ownerId, brandId, limit],
     );
-    return rows.map((row) => versionRow.parse(row));
+    return rows.map((row) => assetRow.parse(row));
+  }
+
+  async insertPackage(row: PackageRow) {
+    await this.query(
+      `INSERT INTO content_delivery_package (
+        id, brand_id, owner_id, content_version_id, approval_id, target_channel, kind,
+        content_fingerprint, fact_version_ids_json, labeling_profile_version,
+        do_not_reuse, non_publishable, manifest_json, files_json, package_fingerprint, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.brandId, row.ownerId, row.contentVersionId, row.approvalId, row.targetChannel,
+        row.kind, row.contentFingerprint, row.factVersionIdsJson, row.labelingProfileVersion,
+        row.doNotReuse, row.nonPublishable, row.manifestJson, row.filesJson,
+        row.packageFingerprint, row.createdAt,
+      ],
+    );
+  }
+
+  async getPackage(ownerId: string, packageId: string) {
+    const [row] = await this.query(
+      `SELECT ${packageColumns} FROM content_delivery_package WHERE owner_id = ? AND id = ?`,
+      [ownerId, packageId],
+    );
+    return row ? packageRow.parse(row) : null;
+  }
+
+  async getPackagesByIds(ownerId: string, brandId: string, ids: string[]) {
+    if (ids.length === 0) return [];
+    const rows = await this.query(
+      `SELECT ${packageColumns} FROM content_delivery_package
+       WHERE owner_id = ? AND brand_id = ? AND id IN (${ids.map(() => "?").join(", ")})
+       ORDER BY created_at ASC, id ASC`,
+      [ownerId, brandId, ...ids],
+    );
+    return rows.map((row) => packageRow.parse(row));
+  }
+
+  async listPackagesForVersion(ownerId: string, versionId: string) {
+    const rows = await this.query(
+      `SELECT ${packageSummaryColumns} FROM content_delivery_package
+       WHERE owner_id = ? AND content_version_id = ?
+       ORDER BY created_at DESC, id DESC`,
+      [ownerId, versionId],
+    );
+    return rows.map((row) => packageRow.parse(row));
+  }
+
+  /** Mark packages of a version as superseded unless they match the given fingerprint. */
+  async markPackagesDoNotReuse(ownerId: string, versionId: string, exceptFingerprint: string | null) {
+    if (exceptFingerprint === null) {
+      await this.query(
+        `UPDATE content_delivery_package SET do_not_reuse = 1
+         WHERE owner_id = ? AND content_version_id = ? AND do_not_reuse = 0`,
+        [ownerId, versionId],
+      );
+      return;
+    }
+    await this.query(
+      `UPDATE content_delivery_package SET do_not_reuse = 1
+       WHERE owner_id = ? AND content_version_id = ? AND do_not_reuse = 0 AND content_fingerprint <> ?`,
+      [ownerId, versionId, exceptFingerprint],
+    );
+  }
+
+  async insertExportJob(row: ExportJobRow) {
+    await this.query(
+      `INSERT INTO content_export_job (
+        id, brand_id, owner_id, operation_id, status, selection_json, preflight_json,
+        chosen_subset_json, result_package_ids_json, error, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.brandId, row.ownerId, row.operationId, row.status, row.selectionJson,
+        row.preflightJson, row.chosenSubsetJson, row.resultPackageIdsJson, row.error,
+        row.createdAt, row.updatedAt,
+      ],
+    );
+  }
+
+  async getExportJobByOperation(ownerId: string, brandId: string, operationId: string) {
+    const [row] = await this.query(
+      `SELECT ${exportJobColumns} FROM content_export_job
+       WHERE owner_id = ? AND brand_id = ? AND operation_id = ?`,
+      [ownerId, brandId, operationId],
+    );
+    return row ? exportJobRow.parse(row) : null;
+  }
+
+  async updateExportJob(
+    row: Pick<ExportJobRow,
+      "id" | "status" | "selectionJson" | "preflightJson" | "chosenSubsetJson"
+      | "resultPackageIdsJson" | "error" | "updatedAt">,
+  ) {
+    await this.query(
+      `UPDATE content_export_job SET
+        status = ?, selection_json = ?, preflight_json = ?, chosen_subset_json = ?,
+        result_package_ids_json = ?, error = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        row.status, row.selectionJson, row.preflightJson, row.chosenSubsetJson,
+        row.resultPackageIdsJson, row.error, row.updatedAt, row.id,
+      ],
+    );
   }
 }

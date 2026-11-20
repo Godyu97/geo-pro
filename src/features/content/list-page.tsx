@@ -6,7 +6,7 @@ import { BrandDao } from "../brands/dao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { generateBatchAction, saveBriefAction } from "./actions";
-import { listBriefs } from "./commands";
+import { listBriefs, listContentVersions, type ContentVersionFilter } from "./commands";
 
 export async function generateMetadata() {
   const t = await getTranslator("content");
@@ -44,6 +44,17 @@ export default async function ContentListPage({
       </div>
     );
   }
+
+  const filter: ContentVersionFilter | undefined = params.filter === "pending_review" || params.filter === "deliverable"
+    ? params.filter
+    : undefined;
+  const versionList = await listContentVersions(connection, session.user.id, brandId, 50, filter);
+  const versions = "versions" in versionList ? versionList.versions : [];
+  const filters = [
+    { key: undefined, label: t("filterAll") },
+    { key: "pending_review", label: t("filterPending") },
+    { key: "deliverable", label: t("filterDeliverable") },
+  ] as const;
 
   const confirmedIds = listed.briefs
     .filter((item) => item.brief.status === "confirmed")
@@ -149,6 +160,44 @@ export default async function ContentListPage({
                   </div>
                   <Badge variant="secondary">{brief.status}</Badge>
                 </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">{t("versions")}</h2>
+        <nav className="flex flex-wrap gap-2 text-sm" aria-label={t("versions")}>
+          {filters.map((item) => (
+            <Link
+              key={item.label}
+              href={item.key ? `/dashboard/content?brandId=${brandId}&filter=${item.key}` : `/dashboard/content?brandId=${brandId}`}
+              prefetch={false}
+              aria-current={item.key === filter ? "page" : undefined}
+              className={`rounded-full border px-3 py-1 ${item.key === filter ? "bg-muted font-medium" : ""}`}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+        {versions.length === 0 ? (
+          <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">{t("versionsEmpty")}</p>
+        ) : (
+          <ul className="space-y-3">
+            {versions.map((version) => (
+              <li key={version.id} className="rounded-2xl border px-4 py-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <Link
+                    href={`/dashboard/content/versions/${version.id}`}
+                    prefetch={false}
+                    className="font-medium underline-offset-4 hover:underline"
+                  >
+                    {version.title}
+                  </Link>
+                  <Badge variant="secondary">{version.status}</Badge>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">{version.targetChannel} · {version.updatedAt}</p>
               </li>
             ))}
           </ul>
