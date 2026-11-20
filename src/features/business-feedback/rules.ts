@@ -49,3 +49,40 @@ export function previewLeadImport(rows: readonly {
   });
   return { leads: dedupedLead(accepted), rejected };
 }
+
+export type ValidityRule = {
+  version: number;
+  frozen: boolean;
+  requiresRealNeed: boolean;
+  requiresIndustry: boolean;
+  requiresFollowUp: boolean;
+};
+
+export function reviseValidity(rule: ValidityRule): ValidityRule {
+  return { ...rule, version: rule.version + 1, frozen: false };
+}
+
+export function qualifyLead(rule: ValidityRule, lead: { realNeed: boolean; targetIndustry: boolean; followUp: boolean }) {
+  if (!rule.frozen) return { status: "unfrozen" as const, ruleVersion: rule.version };
+  const qualified = (!rule.requiresRealNeed || lead.realNeed)
+    && (!rule.requiresIndustry || lead.targetIndustry)
+    && (!rule.requiresFollowUp || lead.followUp);
+  return { status: qualified ? "qualified" as const : "disqualified" as const, ruleVersion: rule.version };
+}
+
+export function businessLayer(input: { raw: number; qualified: number; won: number }) {
+  return { raw: input.raw, qualified: input.qualified, won: input.won };
+}
+
+/** Identified referrals use a session denominator. Self-reported leads are not divided by all site visits. */
+export function aiReferralConversion(input: {
+  identifiedReferrals: number;
+  sessionDenominator: number | null;
+  selfReported: number;
+}) {
+  return {
+    identified: conversionRate({ numerator: input.identifiedReferrals, denominator: input.sessionDenominator }),
+    selfReported: input.selfReported,
+    selfReportedOverVisits: null,
+  };
+}
