@@ -48,3 +48,7 @@ next-env.d.ts
 .eslintcache
 .turbo
 .swc
+
+/tmplog
+/tmp
+scripts/__pycache__
