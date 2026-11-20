@@ -64,6 +64,29 @@ export class PromptDao {
     return z.array(setRow).parse(rows).map((row) => ({ ...row, content: parseContent(row.content) }));
   }
 
+  async questionTypes(ids: string[]) {
+    const found = new Map<string, Map<string, DraftContent["questions"][number]["type"]>>();
+    const unique = [...new Set(ids)];
+    for (let index = 0; index < unique.length; index += 100) {
+      const part = unique.slice(index, index + 100);
+      if (!part.length) continue;
+      const rows = await this.query(
+        `SELECT id, content FROM prompt_set WHERE brand_id = ? AND id IN (${part.map(() => "?").join(", ")})`,
+        [this.brandId, ...part],
+      );
+      for (const row of z.array(z.object({ id: brandIdSchema, content: z.string() })).parse(rows)) {
+        try {
+          const types = new Map<string, DraftContent["questions"][number]["type"]>();
+          for (const question of parseContent(row.content).questions) types.set(question.id, question.type);
+          found.set(row.id, types);
+        } catch {
+          // A historical prompt body that no longer parses does not invent a question type.
+        }
+      }
+    }
+    return found;
+  }
+
   async version(id: string) {
     const [row] = await this.query(`SELECT id, set_id AS "setId", version, entity_version AS "entityVersion",
       region, language, content, created_at AS "createdAt"

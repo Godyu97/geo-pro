@@ -83,6 +83,115 @@ const analysisColumns = `id, observation_id AS "observationId", brand_id AS "bra
   official_site_cited AS "officialSiteCited", evidence_span AS "evidenceSpan", status,
   revised_from AS "revisedFrom", reason, reviewer_id AS "reviewerId", created_at AS "createdAt"`;
 
+const sqlCount = z.preprocess((value) => {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
+}, z.number().int().nonnegative());
+
+const sqlText = z.preprocess((value) => typeof value === "string" ? value : "", z.string());
+
+const overviewContextSchema = z.object({
+  name: z.string().nullable(),
+  content: z.string().nullable(),
+  entityVersion: z.coerce.number().int().positive(),
+  revision: z.coerce.number().int().positive(),
+  observations: sqlCount,
+  observationAt: sqlText,
+  analyses: sqlCount,
+  analysisAt: sqlText,
+  tasks: sqlCount,
+  taskAt: sqlText,
+  taskStamp: sqlCount,
+});
+
+const adoptedPromptSchema = z.object({
+  slotId: brandIdSchema,
+  questionId: brandIdSchema,
+  promptSetId: brandIdSchema,
+});
+
+export const evidenceIdChunk = 100;
+
+export type ScopedObservationInput = {
+  ownerId: string;
+  brandId: string;
+  sourceMode: "model_api" | "consumer_ui";
+  region?: string;
+  requestedNetworkMode?: "on" | "off" | "unknown";
+  from?: string;
+  to?: string;
+};
+
+const scopedColumns = `o.id, o.brand_id AS "brandId", o.owner_id AS "ownerId", o.slot_id AS "slotId", o.attempt_id AS "attemptId",
+  o.source_mode AS "sourceMode", o.capture_method AS "captureMethod", o.question_text AS "questionText", o.answer_text AS "answerText",
+  o.fingerprint, o.captured_at AS "capturedAt", o.region, o.language, o.requested_network_mode AS "requestedNetworkMode",
+  o.entity_version AS "entityVersion", o.citation_set_state AS "citationSetState", o.evidence_state AS "evidenceState",
+  o.locator_ref AS "locatorRef", o.collector_id AS "collectorId", o.missing_reason AS "missingReason", o.created_at AS "createdAt"`;
+
+function chunkIds(ids: string[]) {
+  const unique = [...new Set(ids)];
+  const chunks: string[][] = [];
+  for (let index = 0; index < unique.length; index += evidenceIdChunk) {
+    chunks.push(unique.slice(index, index + evidenceIdChunk));
+  }
+  return chunks;
+}
+
+export function scopedObservationQuery(input: ScopedObservationInput) {
+  const values: QueryValue[] = [input.ownerId, input.brandId, input.sourceMode];
+  const filters = [
+    `o.owner_id = ?`,
+    `o.brand_id = ?`,
+    `o.source_mode = ?`,
+    `o.evidence_state IN ('complete', 'incomplete', 'contested', 'draft_evidence')`,
+  ];
+  if (input.region) {
+    filters.push(`o.region = ?`);
+    values.push(input.region);
+  }
+  if (input.requestedNetworkMode) {
+    filters.push(`o.requested_network_mode = ?`);
+    values.push(input.requestedNetworkMode);
+  }
+  if (input.from) {
+    filters.push(`o.captured_at >= ?`);
+    values.push(input.from);
+  }
+  if (input.to) {
+    filters.push(`o.captured_at <= ?`);
+    values.push(input.to);
+  }
+  return {
+    sql: `SELECT ${scopedColumns}
+         , s.question_id AS "questionId"
+         , a.mentioned AS "mentioned"
+         , a.recommended AS "recommended"
+         , a.official_site_cited AS "officialSiteCited"
+         , a.version AS "analysisVersion"
+       FROM answer_observation o
+       LEFT JOIN monitoring_slot s ON s.id = o.slot_id
+       LEFT JOIN answer_analysis_version a ON a.observation_id = o.id
+         AND a.version = (
+           SELECT MAX(a2.version) FROM answer_analysis_version a2 WHERE a2.observation_id = o.id
+         )
+       WHERE ${filters.join(" AND ")}
+       ORDER BY o.captured_at DESC, o.id DESC`,
+    values,
+  };
+}
+
+export function adoptedPromptQuery(brandId: string, ownerId: string, slotIds: string[]) {
+  return {
+    sql: `SELECT a.slot_id AS "slotId", s.question_id AS "questionId", r.prompt_set_id AS "promptSetId"
+       FROM monitoring_attempt a
+       JOIN monitoring_slot s ON s.id = a.slot_id AND s.adopted_attempt_id = a.id
+       JOIN monitoring_run r ON r.id = a.run_id
+       WHERE a.brand_id = ? AND a.disposition = 'adopted' AND r.owner_id = ?
+         AND a.slot_id IN (${slotIds.map(() => "?").join(", ")})`,
+    values: [brandId, ownerId, ...slotIds],
+  };
+}
+
 export class EvidenceDao {
   private readonly connection: QueryConnection;
 
@@ -254,62 +363,69 @@ export class EvidenceDao {
     await this.query(`DELETE FROM answer_observation WHERE brand_id = ?`, [brandId]);
   }
 
-  async listScopedObservations(input: {
-    ownerId: string;
-    brandId: string;
-    sourceMode: "model_api" | "consumer_ui";
-    region?: string;
-    requestedNetworkMode?: "on" | "off" | "unknown";
-    from?: string;
-    to?: string;
-  }) {
-    const values: QueryValue[] = [input.ownerId, input.brandId, input.sourceMode];
-    const filters = [
-      `o.owner_id = ?`,
-      `o.brand_id = ?`,
-      `o.source_mode = ?`,
-      `o.evidence_state IN ('complete', 'incomplete', 'contested', 'draft_evidence')`,
-    ];
-    if (input.region) {
-      filters.push(`o.region = ?`);
-      values.push(input.region);
-    }
-    if (input.requestedNetworkMode) {
-      filters.push(`o.requested_network_mode = ?`);
-      values.push(input.requestedNetworkMode);
-    }
-    if (input.from) {
-      filters.push(`o.captured_at >= ?`);
-      values.push(input.from);
-    }
-    if (input.to) {
-      filters.push(`o.captured_at <= ?`);
-      values.push(input.to);
-    }
-
-    const scopedColumns = `o.id, o.brand_id AS "brandId", o.owner_id AS "ownerId", o.slot_id AS "slotId", o.attempt_id AS "attemptId",
-      o.source_mode AS "sourceMode", o.capture_method AS "captureMethod", o.question_text AS "questionText", o.answer_text AS "answerText",
-      o.fingerprint, o.captured_at AS "capturedAt", o.region, o.language, o.requested_network_mode AS "requestedNetworkMode",
-      o.entity_version AS "entityVersion", o.citation_set_state AS "citationSetState", o.evidence_state AS "evidenceState",
-      o.locator_ref AS "locatorRef", o.collector_id AS "collectorId", o.missing_reason AS "missingReason", o.created_at AS "createdAt"`;
-
-    const rows = await this.query(
-      `SELECT ${scopedColumns}
-         , s.question_id AS "questionId"
-         , a.mentioned AS "mentioned"
-         , a.recommended AS "recommended"
-         , a.official_site_cited AS "officialSiteCited"
-         , a.version AS "analysisVersion"
-       FROM answer_observation o
-       LEFT JOIN monitoring_slot s ON s.id = o.slot_id
-       LEFT JOIN answer_analysis_version a ON a.observation_id = o.id
-         AND a.version = (
-           SELECT MAX(a2.version) FROM answer_analysis_version a2 WHERE a2.observation_id = o.id
-         )
-       WHERE ${filters.join(" AND ")}
-       ORDER BY o.captured_at DESC, o.id DESC`,
-      values,
+  async overviewReadContext(ownerId: string, brandId: string) {
+    const [row] = await this.query(
+      `SELECT v.name AS "name", v.content AS "content",
+              b.entity_version AS "entityVersion", b.revision AS "revision",
+              (SELECT COUNT(*) FROM answer_observation o WHERE o.brand_id = b.id AND o.owner_id = b.owner_id) AS "observations",
+              (SELECT COALESCE(MAX(o.created_at), '') FROM answer_observation o WHERE o.brand_id = b.id AND o.owner_id = b.owner_id) AS "observationAt",
+              (SELECT COUNT(*) FROM answer_analysis_version a WHERE a.brand_id = b.id) AS "analyses",
+              (SELECT COALESCE(MAX(a.created_at), '') FROM answer_analysis_version a WHERE a.brand_id = b.id) AS "analysisAt",
+              (SELECT COUNT(*) FROM optimization_task t WHERE t.brand_id = b.id AND t.owner_id = b.owner_id) AS "tasks",
+              (SELECT COALESCE(MAX(t.updated_at), '') FROM optimization_task t WHERE t.brand_id = b.id AND t.owner_id = b.owner_id) AS "taskAt",
+              (SELECT COALESCE(SUM(length(t.status) * 1000 + COALESCE(t.manual_rank, 0)), 0)
+                 FROM optimization_task t WHERE t.brand_id = b.id AND t.owner_id = b.owner_id) AS "taskStamp"
+       FROM brand b
+       LEFT JOIN brand_version v ON v.brand_id = b.id AND v.version = b.entity_version
+       WHERE b.owner_id = ? AND b.id = ? AND b.frozen_at IS NULL`,
+      [ownerId, brandId],
     );
+    if (!row) return null;
+    const parsed = overviewContextSchema.parse(row);
+    let hasOfficialWebsite = false;
+    if (parsed.content) {
+      try {
+        const raw = z.looseObject({ website: z.string().optional() }).safeParse(JSON.parse(parsed.content));
+        hasOfficialWebsite = Boolean(raw.success && raw.data.website?.trim());
+      } catch {
+        hasOfficialWebsite = false;
+      }
+    }
+    const token = [
+      parsed.entityVersion,
+      parsed.revision,
+      parsed.observations,
+      parsed.observationAt,
+      parsed.analyses,
+      parsed.analysisAt,
+      parsed.tasks,
+      parsed.taskAt,
+      parsed.taskStamp,
+    ].join("|");
+    return {
+      name: parsed.name ?? brandId,
+      hasOfficialWebsite,
+      entityVersion: parsed.entityVersion,
+      revision: parsed.revision,
+      token,
+    };
+  }
+
+  async adoptedPromptRefs(ownerId: string, brandId: string, slotIds: string[]) {
+    const refs = new Map<string, { promptSetId: string; questionId: string }>();
+    for (const ids of chunkIds(slotIds)) {
+      const built = adoptedPromptQuery(brandId, ownerId, ids);
+      const rows = await this.query(built.sql, built.values);
+      for (const row of z.array(adoptedPromptSchema).parse(rows)) {
+        refs.set(row.slotId, { promptSetId: row.promptSetId, questionId: row.questionId });
+      }
+    }
+    return refs;
+  }
+
+  async listScopedObservations(input: ScopedObservationInput) {
+    const built = scopedObservationQuery(input);
+    const rows = await this.query(built.sql, built.values);
 
     return rows.map((row) => ({
       observation: observationRow.parse(row),

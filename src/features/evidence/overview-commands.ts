@@ -1,13 +1,12 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import type { CacheStore } from "../../lib/cache/store.ts";
+import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
-import { queryWithParameters } from "../../lib/db/connection.ts";
-import { BrandDao } from "../brands/dao.ts";
+import { listPrioritizedTasks } from "../optimization/commands.ts";
 import { PromptDao } from "../prompts/dao.ts";
 import { questionType } from "../prompts/contracts.ts";
-import { listPrioritizedTasks } from "../optimization/commands.ts";
 import type { EvidenceError } from "./contracts.ts";
 import { EvidenceDao } from "./dao.ts";
 import {
@@ -15,6 +14,13 @@ import {
   type OverviewSample,
   type QuestionType,
 } from "./metrics.ts";
+import {
+  overviewCacheIdentity,
+  overviewPayloadSchema,
+  readOverviewCache,
+  storeOverviewCache,
+  type OverviewPayload,
+} from "./overview-cache.ts";
 import type { OverviewScope } from "./overview-contracts.ts";
 
 type Failure = { error: EvidenceError };
@@ -33,41 +39,32 @@ function parseQuestionType(value: unknown): QuestionType {
   return parsed.success ? parsed.data : "unknown";
 }
 
-async function brandDisplay(db: DatabaseConnection, ownerId: string, brandId: string) {
-  const [row] = await queryWithParameters(
-    db,
-    `SELECT v.name, v.content
-     FROM brand b
-     JOIN brand_version v ON v.brand_id = b.id AND v.version = b.entity_version
-     WHERE b.owner_id = ? AND b.id = ? AND b.frozen_at IS NULL`,
-    [ownerId, brandId],
-  );
-  if (!row) return null;
-  const parsed = z.object({ name: z.string(), content: z.string() }).parse(row);
-  let hasOfficialWebsite = false;
-  try {
-    const raw = JSON.parse(parsed.content) as { website?: unknown };
-    hasOfficialWebsite = typeof raw.website === "string" && raw.website.trim().length > 0;
-  } catch {
-    hasOfficialWebsite = false;
-  }
-  return { name: parsed.name, hasOfficialWebsite };
-}
-
 export async function readEvidenceOverview(
   db: DatabaseConnection,
   ownerId: string,
   scope: OverviewScope,
-) {
-  const brands = new BrandDao(db);
-  const brand = await brands.owned(ownerId, scope.brandId);
-  if (!brand) return denied("NOT_FOUND");
-
-  const display = await brandDisplay(db, ownerId, scope.brandId);
-  const brandName = display?.name ?? scope.brandId;
-  const hasOfficialWebsite = scope.hasOfficialWebsite ?? display?.hasOfficialWebsite ?? false;
-
+  cache: CacheStore = openCache(),
+): Promise<OverviewPayload | Failure> {
   const dao = new EvidenceDao(db);
+  const context = await dao.overviewReadContext(ownerId, scope.brandId);
+  if (!context) return denied("NOT_FOUND");
+
+  const brandName = context.name;
+  const hasOfficialWebsite = scope.hasOfficialWebsite ?? context.hasOfficialWebsite;
+  const identity = overviewCacheIdentity({
+    ownerId,
+    brandId: scope.brandId,
+    scope,
+    hasOfficialWebsite,
+    token: context.token,
+  });
+  const cached = await readOverviewCache(cache, identity, {
+    brandId: scope.brandId,
+    sourceMode: scope.sourceMode,
+    hasOfficialWebsite,
+  });
+  if (cached) return cached;
+
   const rows = await dao.listScopedObservations({
     ownerId,
     brandId: scope.brandId,
@@ -78,24 +75,27 @@ export async function readEvidenceOverview(
     to: scope.to,
   });
 
+  const slotIds = rows.flatMap((row) => row.questionId && row.observation.slotId ? [row.observation.slotId] : []);
+  const refs = slotIds.length ? await dao.adoptedPromptRefs(ownerId, scope.brandId, slotIds) : new Map();
+  const promptIds = [...new Set([...refs.values()].map((item) => item.promptSetId))];
+  const promptTypes = promptIds.length
+    ? await new PromptDao(db, scope.brandId).questionTypes(promptIds)
+    : new Map<string, Map<string, QuestionType>>();
   const typeByQuestionId = new Map<string, QuestionType>();
   const samples: OverviewSample[] = [];
 
   for (const row of rows) {
     let type: QuestionType = "unknown";
     if (row.questionId && row.observation.slotId) {
-      const cached = typeByQuestionId.get(row.questionId);
-      if (cached) {
-        type = cached;
+      const cachedType = typeByQuestionId.get(row.questionId);
+      if (cachedType) {
+        type = cachedType;
       } else {
-        const adopted = await dao.adoptedAttempt(ownerId, scope.brandId, row.observation.slotId);
-        if (adopted) {
-          const prompt = await new PromptDao(db, scope.brandId).version(adopted.promptSetId);
-          const found = prompt?.content.questions.find((item) => item.id === row.questionId);
-          if (found) {
-            type = parseQuestionType(found.type);
-            typeByQuestionId.set(row.questionId, type);
-          }
+        const ref = refs.get(row.observation.slotId);
+        const found = ref ? promptTypes.get(ref.promptSetId)?.get(row.questionId) : undefined;
+        if (found) {
+          type = parseQuestionType(found);
+          typeByQuestionId.set(row.questionId, type);
         }
       }
     }
@@ -158,7 +158,7 @@ export async function readEvidenceOverview(
     nextActions.push({ id: "tasks", kind: "view_tasks", href: tasksHref });
   }
 
-  return {
+  const payload = overviewPayloadSchema.parse({
     scope: {
       brandId: scope.brandId,
       brandName,
@@ -173,6 +173,8 @@ export async function readEvidenceOverview(
     answers,
     suggestions,
     nextActions: nextActions.slice(0, 3),
-    demo: false as const,
-  };
+    demo: false,
+  });
+  await storeOverviewCache(cache, identity, ownerId, scope.brandId, payload);
+  return payload;
 }

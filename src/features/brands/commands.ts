@@ -1,7 +1,10 @@
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
+import type { CacheStore } from "../../lib/cache/store.ts";
+import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
+import { invalidateEvidenceOverview } from "../evidence/overview-cache.ts";
 import { hasVerifiedEmail } from "../../lib/auth/verified-email.ts";
 import { MaintenanceDao } from "../maintenance/dao.ts";
 import { brandDeadlineSchema, type BrandCommand, type BrandErrorCode, type BrandMutation } from "./contracts.ts";
@@ -105,7 +108,7 @@ async function applyCommand(
 
 export async function executeBrandCommand(
   connection: DatabaseConnection, ownerId: string, command: BrandCommand,
-  session?: BrandRecoverySession, clock = () => new Date(),
+  session?: BrandRecoverySession, clock = () => new Date(), cache?: CacheStore,
 ): Promise<CommandResult> {
   if (command.actorId !== ownerId) return { error: "SESSION_CHANGED" };
   const fingerprint = createHash("sha256").update(JSON.stringify(command)).digest("hex");
@@ -113,7 +116,7 @@ export async function executeBrandCommand(
 
   // The owner lock serializes their writes in PostgreSQL. SQLite uses the
   // connection's BEGIN IMMEDIATE transaction, with the same consistency rules.
-  return connection.transaction(async (transaction) => {
+  const committed = await connection.transaction(async (transaction): Promise<CommandResult> => {
     const dao = new BrandDao(transaction);
     if (!await dao.lockOwner(ownerId)) return { error: "SESSION_REQUIRED" };
     const deletion = command.action === "freeze" || command.action === "recover";
@@ -139,6 +142,10 @@ export async function executeBrandCommand(
     }
     return result;
   });
+  if ("mutation" in committed && committed.mutation.kind !== "draft") {
+    await invalidateEvidenceOverview(ownerId, committed.mutation.id, cache ?? openCache());
+  }
+  return committed;
 }
 
 // Controlled server CLI only. The operator verifies the earlier request using

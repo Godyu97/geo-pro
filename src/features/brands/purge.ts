@@ -1,7 +1,10 @@
 import "server-only";
 
 import { z } from "zod";
+import type { CacheStore } from "../../lib/cache/store.ts";
+import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
+import { invalidateEvidenceOverview } from "../evidence/overview-cache.ts";
 import { brandIdSchema } from "./contracts.ts";
 import { BrandDao } from "./dao.ts";
 import {
@@ -27,10 +30,10 @@ type PurgeResult = {
 const serverClock = () => new Date().toISOString();
 
 async function purgeBrand(
-  db: DatabaseConnection, target: PurgeTarget, clock: () => string, marker?: PurgeMarker,
+  db: DatabaseConnection, target: PurgeTarget, clock: () => string, marker?: PurgeMarker, cache?: CacheStore,
 ): Promise<PurgeResult> {
   try {
-    return await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx): Promise<PurgeResult> => {
       const dao = new PurgeDao(tx);
       await new BrandDao(tx).lockOwner(target.ownerId);
       const brand = await dao.lockBrand(target.brandId);
@@ -84,6 +87,10 @@ async function purgeBrand(
         target, status: completed ? "cleared" : "incomplete", receipt: progress, remaining: steps.slice(index),
       };
     });
+    if (result.status === "cleared" || result.status === "incomplete") {
+      await invalidateEvidenceOverview(target.ownerId, target.brandId, cache ?? openCache());
+    }
+    return result;
   } catch {
     // The transaction outcome can be unknown. Inspect the persisted receipt
     // before acting on a failure, and never include SQL or customer data here.
@@ -106,8 +113,8 @@ export async function purgeDueBrands(db: DatabaseConnection, input: unknown, clo
   };
 }
 
-export function retryBrandPurge(db: DatabaseConnection, input: unknown, clock = serverClock) {
-  return purgeBrand(db, purgeTargetSchema.parse(input), clock);
+export function retryBrandPurge(db: DatabaseConnection, input: unknown, clock = serverClock, cache?: CacheStore) {
+  return purgeBrand(db, purgeTargetSchema.parse(input), clock, undefined, cache);
 }
 
 export async function inspectBrandPurge(db: QueryConnection, input: unknown, after?: unknown) {

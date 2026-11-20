@@ -1,6 +1,8 @@
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
+import type { CacheStore } from "../../lib/cache/store.ts";
+import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { PromptDao } from "../prompts/dao.ts";
 import {
@@ -11,6 +13,7 @@ import {
   qualifiesForC,
 } from "./contracts.ts";
 import { EvidenceDao, type AnalysisRow, type CitationRow, type ObservationRow } from "./dao.ts";
+import { invalidateEvidenceOverview } from "./overview-cache.ts";
 import {
   analysisRuleVersion,
   citationPoolEligibility,
@@ -24,6 +27,15 @@ type Clock = () => string;
 
 function denied(error: EvidenceError, next?: string | null): Failure {
   return { error, next: next ?? null };
+}
+
+function wroteObservation(result: unknown): result is { observation: unknown } {
+  return result !== null && typeof result === "object" && "observation" in result;
+}
+
+async function releaseOverview<T>(ownerId: string, brandId: string, result: T, cache?: CacheStore) {
+  if (wroteObservation(result)) await invalidateEvidenceOverview(ownerId, brandId, cache ?? openCache());
+  return result;
 }
 
 function operationFingerprint(input: unknown) {
@@ -91,8 +103,9 @@ export async function ingestAdoptedObservation(
   ownerId: string,
   input: IngestAdoptedInput,
   clock: Clock = () => new Date().toISOString(),
+  cache?: CacheStore,
 ) {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const dao = new EvidenceDao(tx);
     const existing = await dao.operation(ownerId, input.operationId);
     if (existing) return JSON.parse(existing) as ReturnType<typeof detailPayload> & { replayed: true };
@@ -175,6 +188,7 @@ export async function ingestAdoptedObservation(
     await dao.recordOperation(ownerId, input.operationId, operationFingerprint(input), payload, now, input.brandId);
     return payload;
   });
+  return releaseOverview(ownerId, input.brandId, result, cache);
 }
 
 export async function submitManualEvidence(
@@ -182,8 +196,9 @@ export async function submitManualEvidence(
   ownerId: string,
   input: SubmitManualInput,
   clock: Clock = () => new Date().toISOString(),
+  cache?: CacheStore,
 ) {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const dao = new EvidenceDao(tx);
     const existing = await dao.operation(ownerId, input.operationId);
     if (existing) return JSON.parse(existing) as ReturnType<typeof detailPayload> & { replayed: true };
@@ -293,6 +308,7 @@ export async function submitManualEvidence(
     }
     return payload;
   });
+  return releaseOverview(ownerId, input.brandId, result, cache);
 }
 
 export async function reviseAnalysis(
@@ -300,8 +316,9 @@ export async function reviseAnalysis(
   ownerId: string,
   input: ReviseAnalysisInput,
   clock: Clock = () => new Date().toISOString(),
+  cache?: CacheStore,
 ) {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const dao = new EvidenceDao(tx);
     const existing = await dao.operation(ownerId, input.operationId);
     if (existing) return JSON.parse(existing) as ReturnType<typeof detailPayload> & { replayed: true };
@@ -346,6 +363,7 @@ export async function reviseAnalysis(
     await dao.recordOperation(ownerId, input.operationId, operationFingerprint(input), payload, now, input.brandId);
     return payload;
   });
+  return releaseOverview(ownerId, input.brandId, result, cache);
 }
 
 export async function readObservation(

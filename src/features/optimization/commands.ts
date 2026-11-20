@@ -2,8 +2,11 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import type { CacheStore } from "../../lib/cache/store.ts";
+import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { queryWithParameters } from "../../lib/db/connection.ts";
+import { invalidateEvidenceOverview } from "../evidence/overview-cache.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { readObservation } from "../evidence/commands.ts";
 import type {
@@ -51,6 +54,7 @@ async function upsertDrafts(
   brandId: string,
   drafts: FindingDraft[],
   now: string,
+  cache?: CacheStore,
 ) {
   const created: Array<{ taskId: string; findingId: string; merged: boolean; title: string }> = [];
   await db.transaction(async (tx) => {
@@ -118,6 +122,7 @@ async function upsertDrafts(
       created.push({ taskId, findingId, merged: false, title: draft.title });
     }
   });
+  if (drafts.length > 0) await invalidateEvidenceOverview(ownerId, brandId, cache ?? openCache());
   return created;
 }
 
@@ -126,6 +131,7 @@ export async function generateFromEvidence(
   ownerId: string,
   input: GenerateFromEvidenceInput,
   clock: Clock = () => new Date().toISOString(),
+  cache?: CacheStore,
 ) {
   const brands = new BrandDao(db);
   const brand = await brands.owned(ownerId, input.brandId);
@@ -164,7 +170,7 @@ export async function generateFromEvidence(
     }
   }
 
-  const created = await upsertDrafts(db, ownerId, input.brandId, drafts, clock());
+  const created = await upsertDrafts(db, ownerId, input.brandId, drafts, clock(), cache);
   return { tasks: created, draftCount: drafts.length };
 }
 
@@ -196,6 +202,7 @@ export async function checkPages(
   ownerId: string,
   input: CheckPagesInput,
   clock: Clock = () => new Date().toISOString(),
+  cache?: CacheStore,
 ) {
   const brands = new BrandDao(db);
   const brand = await brands.owned(ownerId, input.brandId);
@@ -268,7 +275,7 @@ export async function checkPages(
   }
 
   const tasks = restrictedDrafts.length > 0
-    ? await upsertDrafts(db, ownerId, input.brandId, restrictedDrafts, now)
+    ? await upsertDrafts(db, ownerId, input.brandId, restrictedDrafts, now, cache)
     : [];
 
   return { checks: records, tasks };
@@ -279,6 +286,7 @@ export async function updateTask(
   ownerId: string,
   input: UpdateTaskInput,
   clock: Clock = () => new Date().toISOString(),
+  cache?: CacheStore,
 ) {
   const brands = new BrandDao(db);
   const brand = await brands.owned(ownerId, input.brandId);
@@ -316,6 +324,7 @@ export async function updateTask(
   if (input.retestConclusion) next.retestConclusion = input.retestConclusion;
 
   await dao.updateTask(next);
+  await invalidateEvidenceOverview(ownerId, input.brandId, cache ?? openCache());
   return { task: next };
 }
 
