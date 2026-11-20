@@ -57,9 +57,14 @@ export default async function EvidenceAnswersPage({
           <h1 className="text-2xl font-semibold tracking-tight">{t("answersTitle")}</h1>
           <p className="mt-2 max-w-2xl text-sm leading-7 text-muted-foreground">{t("answersDescription")}</p>
         </div>
-        <Button asChild variant="outline">
-          <Link href={overviewHref} prefetch={false}>{t("backOverview")}</Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link href={`/dashboard/monitoring/competitors?brandId=${brandId}`} prefetch={false}>{t("competitors")}</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={overviewHref} prefetch={false}>{t("backOverview")}</Link>
+          </Button>
+        </div>
       </div>
 
       {overview.answers.length === 0 ? (

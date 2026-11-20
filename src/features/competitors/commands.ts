@@ -336,3 +336,49 @@ function zFacts(json: string) {
   const parsed: unknown = JSON.parse(json);
   return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
 }
+
+export async function readCompetitorWorkspace(
+  db: DatabaseConnection,
+  ownerId: string,
+  brandId: string,
+  version?: number,
+) {
+  const dao = new CompetitorDao(db);
+  if (!await dao.ownedBrand(ownerId, brandId)) return denied("NOT_FOUND");
+  const sets = await dao.listSets(ownerId, brandId);
+  const selected = version === undefined ? sets.at(-1) ?? null : sets.find((item) => item.version === version) ?? null;
+  if (version !== undefined && !selected) return denied("NOT_FOUND");
+  const [mentions, observations, sources, briefs] = await Promise.all([
+    selected ? dao.listMentions(ownerId, brandId, selected.id) : Promise.resolve({ truncated: false as const, rows: [] }),
+    dao.listRecentObservations(ownerId, brandId),
+    dao.listCitationSources(ownerId, brandId),
+    dao.listBriefs(ownerId, brandId),
+  ]);
+  const labels = selected ? labelsOf(selected) : [];
+  const share = selected && !mentions.truncated
+    ? shareFromMentions(labels, mentions.rows)
+    : {
+      rows: [] as ReturnType<typeof shareFromMentions>["rows"],
+      rank: { ranked: false as const, mean: null, excludedAbsent: [...labels], unorderedCount: 0 },
+    };
+  return {
+    sets: sets.map((item) => ({ id: item.id, version: item.version, labels: labelsOf(item), createdAt: item.createdAt })),
+    selected: selected ? { id: selected.id, version: selected.version, labels, createdAt: selected.createdAt } : null,
+    rows: share.rows,
+    rank: share.rank,
+    truncated: mentions.truncated,
+    observations,
+    citations: sources.rows.map(presentCitation),
+    hosts: citationHosts(sources.rows),
+    sourcesTruncated: sources.truncated,
+    briefs: briefs.map((row) => ({
+      id: row.id,
+      questionCluster: row.questionCluster,
+      gap: row.gap,
+      status: row.status,
+      facts: zFacts(row.factsJson),
+      sourceIds: zFacts(row.sourceIdsJson),
+      copiedReplacement: false as const,
+    })),
+  };
+}

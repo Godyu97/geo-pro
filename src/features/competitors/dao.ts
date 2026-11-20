@@ -227,6 +227,22 @@ export class CompetitorDao {
     return { truncated: false as const, rows: rows.map((row) => citationViewRow.parse(row)) };
   }
 
+  async listRecentObservations(ownerId: string, brandId: string) {
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT id, question_text AS "questionText"
+       FROM answer_observation
+       WHERE owner_id = ? AND brand_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT 20`,
+      [ownerId, brandId],
+    );
+    return rows.map((row) => z.object({
+      id: brandIdSchema,
+      questionText: z.string(),
+    }).parse(row));
+  }
+
   async citationIdsOwned(ownerId: string, brandId: string, citationIds: readonly string[]) {
     if (citationIds.length === 0) return [];
     const rows = await queryWithParameters(
