@@ -27,3 +27,25 @@ export function conversionRate(input: { numerator: number | null; denominator: n
 export function crawlerVisitIsNotAiInclusion(input: { crawlerVisits: number; answerCitations: number }) {
   return { visits: input.crawlerVisits, citations: input.answerCitations, calledIncluded: false };
 }
+
+/** Rows with a direct identifier or no event id are rejected. Accepted rows still dedupe by event id. */
+export function previewLeadImport(rows: readonly {
+  eventId: string | null;
+  evidence: LeadEvidence;
+  directIdentifier: boolean;
+}[]) {
+  const rejected: { index: number; reason: "missing_id" | "direct_pii" }[] = [];
+  const accepted: { eventId: string; evidence: LeadEvidence }[] = [];
+  rows.forEach((row, index) => {
+    if (row.directIdentifier) {
+      rejected.push({ index, reason: "direct_pii" });
+      return;
+    }
+    if (row.eventId === null || row.eventId.trim().length === 0) {
+      rejected.push({ index, reason: "missing_id" });
+      return;
+    }
+    accepted.push({ eventId: row.eventId, evidence: row.evidence });
+  });
+  return { leads: dedupedLead(accepted), rejected };
+}
