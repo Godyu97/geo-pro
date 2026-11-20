@@ -8,7 +8,7 @@ import { getTranslator } from "@/lib/i18n/server";
 import { executeBrandCommand } from "./commands";
 import { brandCommandSchema, brandFieldNameSchema, brandIdSchema, brandVersionParam, type BrandErrorCode, type BrandFieldName } from "./contracts";
 import { brandErrorMessage } from "./error-messages";
-import { brandFixtureOrigin } from "./intake";
+import { brandIntakeOrigin } from "./intake";
 import { brandUnavailable, readBrandData } from "./service";
 
 const responseHeaders = { "Cache-Control": "private, no-store", Vary: "Cookie, Accept-Language" };
@@ -40,7 +40,7 @@ async function fail(code: BrandErrorCode, traceId?: string, fields?: BrandFieldN
 export async function readBrandResponse(request: Request) {
   const session = await getSessionState();
   if (session.status !== "authenticated") return fail(session.status === "anonymous" ? "SESSION_REQUIRED" : "SERVICE_UNAVAILABLE");
-  if (!brandFixtureOrigin(request.headers)) return fail("INTAKE_CLOSED");
+  if (!brandIntakeOrigin(request.headers)) return fail("INTAKE_CLOSED");
 
   const params = new URL(request.url).searchParams;
   const query = readQuery.safeParse(Object.fromEntries(params));
@@ -54,9 +54,9 @@ export async function readBrandResponse(request: Request) {
 export async function writeBrandResponse(request: Request) {
   const session = await getSessionState();
   if (session.status !== "authenticated") return fail(session.status === "anonymous" ? "SESSION_REQUIRED" : "SERVICE_UNAVAILABLE");
-  const origin = brandFixtureOrigin(request.headers);
-  if (!origin) return fail("INTAKE_CLOSED");
-  if (request.headers.get("origin") !== origin) return fail("FORBIDDEN");
+  const intake = brandIntakeOrigin(request.headers);
+  if (!intake) return fail("INTAKE_CLOSED");
+  if (request.headers.get("origin") !== intake.origin) return fail("FORBIDDEN");
 
   const command = brandCommandSchema.safeParse(await readBoundedJson(request, 48 * 1024));
   if (!command.success) {

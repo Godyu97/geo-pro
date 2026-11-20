@@ -20,11 +20,12 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 
+import type { BrandIntakeMode } from "@/features/brands/pilot-admission";
 import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
 import { useLocale } from "@/lib/i18n/client";
 
-export function AppSidebar({ messages, modules, brandFixture }: { messages: Messages["dashboard"]; modules: Messages["modules"]; brandFixture: boolean }) {
+export function AppSidebar({ messages, modules, brandIntake }: { messages: Messages["dashboard"]; modules: Messages["modules"]; brandIntake: BrandIntakeMode | "closed" }) {
   const { locale, t: common } = useLocale();
   const t = createTranslator(locale, messages);
   const moduleLinks = getModuleLinks(modules);
@@ -82,7 +83,7 @@ export function AppSidebar({ messages, modules, brandFixture }: { messages: Mess
             <SidebarGroupContent>
               <SidebarMenu>
                 {moduleLinks.map(({ id, title, icon: Icon }) => {
-                  const brandEntry = id === "brands" && brandFixture;
+                  const brandEntry = id === "brands" && brandIntake !== "closed";
                   return (
                     <SidebarMenuItem key={id}>
                       <SidebarMenuButton asChild isActive={brandEntry && pathname.startsWith("/dashboard/brands")} className="h-auto min-h-10 py-2">
@@ -108,7 +109,7 @@ export function AppSidebar({ messages, modules, brandFixture }: { messages: Mess
           <CircleHelp className="mb-2 size-4 text-primary" aria-hidden="true" />
           <p className="text-xs font-medium">{t("startingPoint")}</p>
           <p className="mt-1.5 text-xs leading-6 text-muted-foreground">
-            {t(brandFixture ? "sidebarFixture" : "sidebarEmpty")}
+            {t(brandIntake === "fixture" ? "sidebarFixture" : brandIntake === "real" ? "sidebarReal" : "sidebarEmpty")}
           </p>
         </div>
         <Link

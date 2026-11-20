@@ -8,6 +8,8 @@ export const pilotAdmissionIds = [
 
 export type PilotAdmissionId = (typeof pilotAdmissionIds)[number];
 
+export type BrandIntakeMode = "fixture" | "real";
+
 export type PilotAdmissionItem = {
   id: PilotAdmissionId;
   met: boolean;

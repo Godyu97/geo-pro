@@ -129,9 +129,15 @@ async function verify(kind, enabled) {
     if (!enabled) {
       phase = `${kind}: real intake stays closed`;
       await assertError(await request("/api/brands", { actor: owner, data: create }), 403, "INTAKE_CLOSED");
-      for (const [locale, notice] of [["zh-CN", "真实品牌建档尚未开放"], ["en", "Brand setup is closed to real data"]]) {
+      for (const [locale, notice, admission, unmet] of [
+        ["zh-CN", "真实品牌建档尚未开放", "正式开放条件", "未核验"],
+        ["en", "Brand setup is closed to real data", "Conditions for real brand setup", "Unverified"],
+      ]) {
         const page = await request("/dashboard/brands/new", { actor: owner, locale });
-        assert.match(await page.text(), new RegExp(notice));
+        const text = await page.text();
+        assert.match(text, new RegExp(notice));
+        assert.match(text, new RegExp(admission));
+        assert.match(text, new RegExp(unmet));
       }
       assert.equal((await fixture.connection.query("SELECT id FROM brand")).length, 0);
       console.log(`PASS: ${kind} default intake rejects writes and explains the closure in both languages`);
