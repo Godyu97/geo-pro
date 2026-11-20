@@ -31,6 +31,25 @@ export function canExport(input: { exportGrant: boolean }) {
   return input.exportGrant;
 }
 
+export function approveSeparated(input: {
+  dualControl: boolean;
+  kind: "fact" | "content";
+  authorId: string;
+  actorId: string;
+  actorFactApprover: boolean;
+  actorContentApprover: boolean;
+  historicalSingleApproval: boolean;
+}) {
+  const allowedDuty = input.kind === "fact" ? input.actorFactApprover : input.actorContentApprover;
+  if (!allowedDuty) {
+    return { allowed: false as const, reason: "duty" as const, historicalUntouched: input.historicalSingleApproval };
+  }
+  if (input.dualControl && input.authorId === input.actorId) {
+    return { allowed: false as const, reason: "separation" as const, historicalUntouched: input.historicalSingleApproval };
+  }
+  return { allowed: true as const, reason: "ok" as const, historicalUntouched: input.historicalSingleApproval };
+}
+
 export function batchExport(input: { grantedBrandIds: readonly string[]; requestedBrandIds: readonly string[] }) {
   const allowed = new Set(input.grantedBrandIds);
   const denied = input.requestedBrandIds.filter((brandId) => !allowed.has(brandId));
