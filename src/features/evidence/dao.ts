@@ -253,4 +253,71 @@ export class EvidenceDao {
     await this.query(`DELETE FROM answer_analysis_version WHERE brand_id = ?`, [brandId]);
     await this.query(`DELETE FROM answer_observation WHERE brand_id = ?`, [brandId]);
   }
+
+  async listScopedObservations(input: {
+    ownerId: string;
+    brandId: string;
+    sourceMode: "model_api" | "consumer_ui";
+    region?: string;
+    requestedNetworkMode?: "on" | "off" | "unknown";
+    from?: string;
+    to?: string;
+  }) {
+    const values: QueryValue[] = [input.ownerId, input.brandId, input.sourceMode];
+    const filters = [
+      `o.owner_id = ?`,
+      `o.brand_id = ?`,
+      `o.source_mode = ?`,
+      `o.evidence_state IN ('complete', 'incomplete', 'contested', 'draft_evidence')`,
+    ];
+    if (input.region) {
+      filters.push(`o.region = ?`);
+      values.push(input.region);
+    }
+    if (input.requestedNetworkMode) {
+      filters.push(`o.requested_network_mode = ?`);
+      values.push(input.requestedNetworkMode);
+    }
+    if (input.from) {
+      filters.push(`o.captured_at >= ?`);
+      values.push(input.from);
+    }
+    if (input.to) {
+      filters.push(`o.captured_at <= ?`);
+      values.push(input.to);
+    }
+
+    const scopedColumns = `o.id, o.brand_id AS "brandId", o.owner_id AS "ownerId", o.slot_id AS "slotId", o.attempt_id AS "attemptId",
+      o.source_mode AS "sourceMode", o.capture_method AS "captureMethod", o.question_text AS "questionText", o.answer_text AS "answerText",
+      o.fingerprint, o.captured_at AS "capturedAt", o.region, o.language, o.requested_network_mode AS "requestedNetworkMode",
+      o.entity_version AS "entityVersion", o.citation_set_state AS "citationSetState", o.evidence_state AS "evidenceState",
+      o.locator_ref AS "locatorRef", o.collector_id AS "collectorId", o.missing_reason AS "missingReason", o.created_at AS "createdAt"`;
+
+    const rows = await this.query(
+      `SELECT ${scopedColumns}
+         , s.question_id AS "questionId"
+         , a.mentioned AS "mentioned"
+         , a.recommended AS "recommended"
+         , a.official_site_cited AS "officialSiteCited"
+         , a.version AS "analysisVersion"
+       FROM answer_observation o
+       LEFT JOIN monitoring_slot s ON s.id = o.slot_id
+       LEFT JOIN answer_analysis_version a ON a.observation_id = o.id
+         AND a.version = (
+           SELECT MAX(a2.version) FROM answer_analysis_version a2 WHERE a2.observation_id = o.id
+         )
+       WHERE ${filters.join(" AND ")}
+       ORDER BY o.captured_at DESC, o.id DESC`,
+      values,
+    );
+
+    return rows.map((row) => ({
+      observation: observationRow.parse(row),
+      questionId: row.questionId == null ? null : brandIdSchema.parse(row.questionId),
+      mentioned: row.mentioned == null ? null : triStateSchema.parse(row.mentioned),
+      recommended: row.recommended == null ? null : triStateSchema.parse(row.recommended),
+      officialSiteCited: row.officialSiteCited == null ? null : triStateSchema.parse(row.officialSiteCited),
+      analysisVersion: row.analysisVersion == null ? null : z.coerce.number().int().positive().parse(row.analysisVersion),
+    }));
+  }
 }

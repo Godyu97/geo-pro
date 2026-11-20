@@ -37,7 +37,7 @@
   - `api/health/route.ts`：固定存活状态 JSON（`{ status: "ok", service: "geo-pro" }`）
   - `(dashboard)/dashboard/maintenance/`、`api/maintenance/access/route.ts`：本人维护权限页面/接口，独立会话和服务端授权校验。`/dashboard/maintenance/support` 与 `api/maintenance/support` 按 `support.read` 返回运行、删除和通道元信息
   - `api/maintenance/quotas/route.ts`：试点额度维护写入，复用 `quotas.manage`
-  - `api/maintenance/capabilities/`、`(dashboard)/dashboard/maintenance/capabilities/`、`(dashboard)/dashboard/monitoring/new/`：通道能力台账维护、用户范围与运行确认门禁。`/dashboard/monitoring/runs/<id>` 与 `api/monitoring/runs/` 登记 queued 运行和预算预留，不启动采样。`/dashboard/monitoring/evidence/<id>` 与 `api/monitoring/answers/` 保存双轨原文证据与分析修订
+  - `api/maintenance/capabilities/`、`(dashboard)/dashboard/maintenance/capabilities/`、`(dashboard)/dashboard/monitoring/new/`：通道能力台账维护、用户范围与运行确认门禁。`/dashboard/monitoring/runs/<id>` 与 `api/monitoring/runs/` 登记 queued 运行和预算预留，不启动采样。`/dashboard/monitoring/evidence/<id>` 与 `api/monitoring/answers/` 保存双轨原文证据与分析修订。`/dashboard/monitoring/overview`、`/dashboard/monitoring/answers` 与 `api/monitoring/overview` 提供同口径题等权概览与回答下钻
   - `(dashboard)/dashboard/settings/`：本人账户设置，显示只读邮箱、编辑称呼、切换界面语言及管理当前会话
   - `(dashboard)/dashboard/brands/`、`api/brands/`：单负责人品牌、草稿、历史版本、删除影响预览与冻结恢复。合成资料用于回环验收，常规入口暂停收集。品牌详情的事实与材料入口沿用该门禁。
   - `api/data-exports/`：本人数据生成和受保护下载。设置页显示范围与最近一次结果，品牌导出遵循 B04 的开放条件
@@ -54,7 +54,7 @@
 - `scripts/maintenance-access.mjs`：仅受控服务器可执行的授权/撤销命令；无在线提权，详见 [维护说明](../../docs/architecture/maintenance-access.md)。
 - `docs/`：产品文档包（v3.0）、工程初始化任务书与 Phase 0 架构/任务记录。
 - `.agents/`：包含本轮接入的 `governance/`、`workflows/`、`references/`，以及仓库原有的 `skills/openspec-*`（保留不自动启用）。
-- `openspec/` 包含 `account-session`、`public-product-entry`、`maintenance-access`、`account-settings`、`brand-onboarding`、`owned-data-export`、`pilot-quotas`、`brand-facts`、`channel-capabilities`、`prompt-sets`、`monitoring-runs`、`answer-evidence` 和 `support-recovery` 的能力规格及对应归档。按当前任务授权加载相关规格。
+- `openspec/` 包含 `account-session`、`public-product-entry`、`maintenance-access`、`account-settings`、`brand-onboarding`、`owned-data-export`、`pilot-quotas`、`brand-facts`、`channel-capabilities`、`prompt-sets`、`monitoring-runs`、`answer-evidence`、`evidence-overview` 和 `support-recovery` 的能力规格及对应归档。按当前任务授权加载相关规格。
 
 ## 4. 可用命令与检查现状
 
@@ -79,7 +79,7 @@
 | `pnpm verify:brand-facts` | HTTP / Chrome | 生产构建后在 3118 端口使用双方言隔离库，含 `pnpm verify:auth` |
 | `pnpm test:prompts` | Node.js 原生测试 | 双库题集版本、重复题、引用、权限和查询计划 |
 | `pnpm test:monitoring` | Node.js 原生测试 | 双库排队、隔离执行、恢复、额度核对和查询计划 |
-| `pnpm test:evidence` | Node.js 原生测试 | 双库 Observation/Citation/AnalysisVersion、AC-M0-06 与归属隔离 |
+| `pnpm test:evidence` | Node.js 原生测试 | 双库 Observation/Citation/AnalysisVersion、AC-M0-06/07 概览金样与归属隔离 |
 | `pnpm test:support` | Node.js 原生测试 | 双库支持定位、权限、清除重试、缓存受阻与操作编号索引 |
 | `pnpm verify:prompts` | HTTP / Chrome | 生产构建后在 3119 端口使用双方言隔离库，含 `pnpm verify:auth` |
 | `pnpm test:brands` | Node.js 原生测试 | 品牌双库并发、版本、迁移、回滚、冻结及索引验证 |

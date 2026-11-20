@@ -58,6 +58,11 @@ export default async function DashboardPage() {
         <p className="mx-auto mt-2 max-w-lg text-sm leading-7 text-muted-foreground">
           {brandFixture ? brands("monitorUnavailable") : t("emptyDescription")}
         </p>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          <Button asChild variant="outline" className="bg-white/70">
+            <Link href="/dashboard/monitoring/overview" prefetch={false}>{t("openOverview")}</Link>
+          </Button>
+        </div>
       </section>
       <section id="modules" aria-labelledby="modules-title">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
