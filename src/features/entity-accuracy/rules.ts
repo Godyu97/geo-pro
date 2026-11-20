@@ -52,3 +52,35 @@ export function reviewClaim(input: {
   if (input.normalizedEqual) return { judgment: "consistent" as const, autoError: false };
   return { judgment: "conflict" as const, autoError: false };
 }
+
+export type AnalysisSnapshot = { version: number; mentionIds: readonly string[] };
+
+/** A disambiguation revision writes a new analysis version and leaves the previous snapshot unchanged. */
+export function reviseDisambiguation(
+  prior: AnalysisSnapshot,
+  evidenceIds: readonly string[],
+  removedMentionIds: readonly string[],
+) {
+  const removed = new Set(removedMentionIds);
+  return {
+    prior: { version: prior.version, mentionIds: [...prior.mentionIds] },
+    next: {
+      version: prior.version + 1,
+      mentionIds: prior.mentionIds.filter((id) => !removed.has(id)),
+      evidenceIds: [...evidenceIds],
+    },
+  };
+}
+
+export function correctionTask(input: {
+  claimId: string;
+  questionIds: readonly string[];
+  pageIds: readonly string[];
+}) {
+  return {
+    claimId: input.claimId,
+    questionIds: [...input.questionIds],
+    pageIds: [...input.pageIds],
+    siteFixClosesEffect: false,
+  };
+}
