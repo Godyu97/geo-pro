@@ -1,5 +1,5 @@
 import {
-  Building2, FilePenLine, MessagesSquare, Radar, Link2, UsersRound, WandSparkles,
+  Building2, FilePenLine, MessagesSquare, Radar, Link2, UsersRound, WandSparkles, ChartNoAxesCombined,
 } from "lucide-react";
 import type { Messages } from "@/lib/i18n/server";
 
@@ -54,6 +54,13 @@ export function getModuleLinks(messages: Messages["modules"]) {
       title: messages.contentTitle,
       description: messages.contentDescription,
       empty: messages.contentEmpty,
+    },
+    {
+      id: "reports",
+      icon: ChartNoAxesCombined,
+      title: messages.reportsTitle,
+      description: messages.reportsDescription,
+      empty: messages.reportsEmpty,
     },
   ] as const;
 }

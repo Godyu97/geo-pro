@@ -189,7 +189,10 @@
     "optimizationEmpty": "暂无优化建议",
     "contentTitle": "内容草稿",
     "contentDescription": "确认 Brief 后，按小批次生成有事实依据的待审草稿。",
-    "contentEmpty": "暂无内容计划"
+    "contentEmpty": "暂无内容计划",
+    "reportsTitle": "复测与报告",
+    "reportsDescription": "同口径复测并导出可复算快照。",
+    "reportsEmpty": "暂无复测报告"
   },
   "maintenance": {
     "title": "平台维护权限",
@@ -1151,5 +1154,27 @@
     "observedAt": "观察时间",
     "bodyExcerpt": "关键正文摘录",
     "submitManualEvidence": "提交人工证据"
+  },
+  "reports": {
+    "title": "复测与报告",
+    "description": "按同口径比较前后窗口，下载不可变 HTML/JSON 快照。探索结论不声称因果。",
+    "noBrand": "请先选择品牌后再查看复测与报告。",
+    "goBrands": "前往品牌资料",
+    "empty": "暂无复测记录",
+    "retests": "复测请求",
+    "todos": "D+7 站内待办",
+    "todosEmpty": "暂无 D+7 待办",
+    "snapshots": "报告快照",
+    "snapshotsEmpty": "暂无报告快照",
+    "downloadJson": "下载 JSON",
+    "downloadHtml": "下载 HTML",
+    "noAutoCharge": "站内提醒不会自动发起付费调用",
+    "SESSION_REQUIRED": "请先登录后再访问复测与报告。",
+    "FORBIDDEN": "请求来源不被允许。",
+    "NOT_FOUND": "找不到该品牌或报告资源。",
+    "INVALID_INPUT": "输入无效，请检查后重试。",
+    "WINDOW_NOT_DUE": "观察窗口尚未到期，当前仅显示进度。",
+    "LOOP_NOT_READY": "缺少核验生效点，无法创建经营闭环 D+7 待办。",
+    "CONFLICT": "操作冲突，请刷新后重试。"
   }
 }

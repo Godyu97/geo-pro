@@ -134,6 +134,13 @@
       "when": 1795147562646,
       "tag": "0018_solid_jean_grey",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795160527530,
+      "tag": "0019_volatile_stranger",
+      "breakpoints": true
     }
   ]
 }

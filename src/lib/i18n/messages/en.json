@@ -189,7 +189,10 @@
     "optimizationEmpty": "No optimization suggestions",
     "contentTitle": "Content drafts",
     "contentDescription": "Confirm briefs, then generate small batches of fact-bound drafts for review.",
-    "contentEmpty": "No content plans yet"
+    "contentEmpty": "No content plans yet",
+    "reportsTitle": "Retest & reports",
+    "reportsDescription": "Retest on a shared scope and export recomputable snapshots.",
+    "reportsEmpty": "No retest reports yet"
   },
   "maintenance": {
     "title": "Platform maintenance access",
@@ -1151,5 +1154,27 @@
     "observedAt": "Observed at",
     "bodyExcerpt": "Relevant body excerpt",
     "submitManualEvidence": "Submit manual evidence"
+  },
+  "reports": {
+    "title": "Retest & reports",
+    "description": "Compare before/after windows on a shared scope and download immutable HTML/JSON snapshots. Exploratory conclusions do not claim causality.",
+    "noBrand": "Select a brand before opening retest and reports.",
+    "goBrands": "Go to brands",
+    "empty": "No retests yet",
+    "retests": "Retests",
+    "todos": "D+7 in-app todos",
+    "todosEmpty": "No D+7 todos yet",
+    "snapshots": "Report snapshots",
+    "snapshotsEmpty": "No report snapshots yet",
+    "downloadJson": "Download JSON",
+    "downloadHtml": "Download HTML",
+    "noAutoCharge": "In-app reminders never auto-charge paid runs",
+    "SESSION_REQUIRED": "Sign in to access retest and reports.",
+    "FORBIDDEN": "This request origin is not allowed.",
+    "NOT_FOUND": "Brand or report resource was not found.",
+    "INVALID_INPUT": "Invalid input. Check and retry.",
+    "WINDOW_NOT_DUE": "The observation window is not due yet; only progress is available.",
+    "LOOP_NOT_READY": "A verified effective time is required before creating a business-loop D+7 todo.",
+    "CONFLICT": "Conflict. Refresh and retry."
   }
 }
