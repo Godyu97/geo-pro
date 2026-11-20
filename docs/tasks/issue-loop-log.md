@@ -29,16 +29,16 @@
 | 15 | #55 | 最后一位负责人不能退出；无导出授权不能导出；批量请求其他品牌不返回行 | `06030a7bd6117972d5166c091f2107e1d20ba6e4` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 16 | #56 | 事实批准与内容批准分开；作者不能自批；历史单人记录不改 | `62cd4909e0f8af656313a0631ca5782200f2376f` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 17 | #58 | 登录墙或验证码停止辅助采集且不绕过；缺引用保持 partial，确认后也不标完整 | `a8d10c3b4cc2e9c04992713ee0734954d76b7f33` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
-| 18 | #31 | 官方轨价格不明或能力未核验时不启用；消费者轨即使启用也只标人工，两轨不互相代替 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
-| 19 | #32 | 缺真实品牌、官方 20 条、消费者 6 条或 4 人独立完成时阶段门禁不通过，函数不生成这些结果 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
-| 20 | #57 | 没有 200 条分析样本、团队观察和 8 项 M1 任务核对时阶段门禁不通过，不补造样本 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
-| 21 | #59 | 入口结构变化退回人工且不更换账号；引用不完整时不计算节省时间 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
-| 22 | #60 | 只有草稿权限不能公开发布；草稿回执不算公开；已受理或结果未知时先对账不再提交 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
-| 23 | #61 | 通知授权撤销或正文含客户原文时不发送，历史发送记录不删除 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
-| 24 | #62 | 代理成员身份不能代替品牌委托；委托失效时拒绝访问并停掉排队动作，组合行不展示证据 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
-| 25 | #63 | 没有支付连接时订单停在待支付，不标已收款；白标报告保留轨道、样本量和结论等级 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
-| 26 | #64 | 无理由的支持检索被拒绝且不返回客户正文；最后一位负责人不能注销，受理也不表示数据已清除 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
-| 27 | #65 | 同一事件从 CSV 和连接器进入只计 1 条并保留两个来源；字段预览未批准前不拉取 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 18 | #31 | 官方轨价格不明或能力未核验时不启用；消费者轨即使启用也只标人工，两轨不互相代替 | `a3e98d915285d29a8dc3023eaeaca486b8fd6ec2` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 19 | #32 | 缺真实品牌、官方 20 条、消费者 6 条或 4 人独立完成时阶段门禁不通过，函数不生成这些结果 | `d8e93d5f4a23415e68ca2093ac48b8e0c92655df` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 20 | #57 | 没有 200 条分析样本、团队观察和 8 项 M1 任务核对时阶段门禁不通过，不补造样本 | `73d15f835f4bd32faa6e6e9e1c4b57f76670c302` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 21 | #59 | 入口结构变化退回人工且不更换账号；引用不完整时不计算节省时间 | `9f09da658a1df7103703288816e91c89df356058` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 22 | #60 | 只有草稿权限不能公开发布；草稿回执不算公开；已受理或结果未知时先对账不再提交 | `01c88f792bccaee94f5bac82eb6514b180023eaa` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 23 | #61 | 通知授权撤销或正文含客户原文时不发送，历史发送记录不删除 | `7341185f0063edd103a8ad44845f6dae7077da77` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 24 | #62 | 代理成员身份不能代替品牌委托；委托失效时拒绝访问并停掉排队动作，组合行不展示证据 | `2e58893bb4109ad5ba95fb786af9339fd5894222` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 25 | #63 | 没有支付连接时订单停在待支付，不标已收款；白标报告保留轨道、样本量和结论等级 | `9bf59b082759a79c0a5d2eeb8dfe734336f373e0` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 26 | #64 | 无理由的支持检索被拒绝且不返回客户正文；最后一位负责人不能注销，受理也不表示数据已清除 | `2e2f7ba1160cf9cf97ac6b84b12df2a680e82ffc` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 27 | #65 | 同一事件从 CSV 和连接器进入只计 1 条并保留两个来源；字段预览未批准前不拉取 | `8f74f3de38c0c1d7ecaed141822d8f734fe60c0f` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 
 这些 Issue 在 2026-11-20 用 `gh issue list --state all` 核对时仍是 open，评论只说明阻塞已解除、真实验收不要勾选。本表已有记录，后续轮次不重复。
 
