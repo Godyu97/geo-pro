@@ -43,6 +43,7 @@
 | 29 | #67 | 采集文本里的指令不改预算或授权；草案最多 5 项；事实过期只阻塞该项；一次成功不标保证收益 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 30 | #68 | 目标城市和实际采样位置分开；采样未知时不声称本地排名；门店不混用另一门店的服务范围 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 31 | #69 | 图中价格与已批准事实不一致时阻止公开交付并指向事实版本；插图不能当成客户证明 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 32 | #70 | 缺少 M1、六项 M2 任务、真实连接、两个授权品牌或本地走查时 M2 阶段门禁不通过，不补造证据 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 
 这些 Issue 在 2026-11-20 用 `gh issue list --state all` 核对时仍是 open，评论只说明阻塞已解除、真实验收不要勾选。本表已有记录，后续轮次不重复。
 
