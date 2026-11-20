@@ -184,7 +184,14 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal((await readMonitoringRun(db, outsider, manual.id)).error, "NOT_FOUND");
 
     await queryWithParameters(db, 'UPDATE "user" SET email_verified = ? WHERE id = ?', [db.kind === "sqlite" ? 0 : false, owner]);
-    assert.equal((await previewMonitoringRun(db, owner, { action: "preview", ...base }, secret, clock)).error, "EMAIL_UNVERIFIED");
+    const previousEmailMock = process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK;
+    process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK = "false";
+    try {
+      assert.equal((await previewMonitoringRun(db, owner, { action: "preview", ...base }, secret, clock)).error, "EMAIL_UNVERIFIED");
+    } finally {
+      if (previousEmailMock === undefined) delete process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK;
+      else process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK = previousEmailMock;
+    }
     const manualAgain = await previewMonitoringRun(db, owner, {
       action: "preview", brandId: brand, track: "consumer_ui", promptSetId: setId, repeats: 2,
       requestedNetworkMode: "off", channelIds: [verifiedConsumer.channelId], ceiling: null,

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
+import { isEmailVerificationMocked } from "../../lib/auth/verified-email.ts";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { networkModes } from "../capabilities/contracts.ts";
@@ -100,7 +101,7 @@ export class MonitoringDao {
   async emailVerified(ownerId: string) {
     const [row] = await this.query('SELECT email_verified AS "emailVerified" FROM "user" WHERE id = ?', [ownerId]);
     if (!row) return false;
-    return row.emailVerified === true || row.emailVerified === 1;
+    return row.emailVerified === true || row.emailVerified === 1 || isEmailVerificationMocked();
   }
 
   async runByOperation(brandId: string, operationId: string) {

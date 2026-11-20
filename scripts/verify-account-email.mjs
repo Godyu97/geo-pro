@@ -406,7 +406,8 @@ async function withApplication(fixture, configured, work) {
   const { port } = gateway.address();
   const env = {
     ...process.env, ...fixture.env, BETTER_AUTH_URL: base, BETTER_AUTH_SECRET: randomBytes(48).toString("base64url"),
-    GEO_BRANDS_FIXTURE: "1", GEO_AUTH_MAIL_URL: configured ? `http://127.0.0.1:${port}/send` : "",
+    GEO_BRANDS_FIXTURE: "1", GEO_AUTH_MAIL_MOCK: "false", GEO_AUTH_EMAIL_VERIFIED_MOCK: "false",
+    GEO_AUTH_MAIL_URL: configured ? `http://127.0.0.1:${port}/send` : "",
     GEO_AUTH_MAIL_SECRET: mailSecret, GEO_AUTH_MAIL_IP_HEADER: sourceHeader,
   };
   const app = spawn(process.execPath, [resolve("node_modules/next/dist/bin/next"), "start", "--hostname", "localhost", "--port", "3117"], {

@@ -14,6 +14,11 @@ const mailEnvironmentSchema = z.object({
   GEO_AUTH_MAIL_IP_HEADER: z.string().regex(/^x-[a-z0-9-]{1,60}$/),
 });
 
+export function isMailMockEnabled(env: Record<string, string | undefined> = process.env) {
+  const value = env.GEO_AUTH_MAIL_MOCK?.trim().toLowerCase();
+  return value === "true" || value === "1";
+}
+
 export function getMailConfiguration(appOrigin: string) {
   const result = mailEnvironmentSchema.safeParse(process.env);
   if (!result.success) return null;
@@ -49,10 +54,16 @@ export async function deliverAccountMail(
 ) {
   try {
     const origin = new URL(getAuthEnvironment().BETTER_AUTH_URL).origin;
-    const config = getMailConfiguration(origin);
-    if (!config) throw new Error("Mail configuration unavailable");
     const link = new URL(accountAccessPath(kind === "verify" ? "confirm" : "reset", returnTo), origin);
     link.hash = new URLSearchParams({ token }).toString();
+
+    if (isMailMockEnabled()) {
+      console.info("account-mail-mocked", { kind, traceId, locale });
+      return;
+    }
+
+    const config = getMailConfiguration(origin);
+    if (!config) throw new Error("Mail configuration unavailable");
 
     const messages = getMessages(locale).accountEmail;
     const subject = kind === "verify" ? messages.confirmTitle : messages.resetTitle;

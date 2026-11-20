@@ -108,6 +108,7 @@ async function verify(kind, enabled) {
   const env = {
     ...process.env, ...fixture.env, BETTER_AUTH_URL: baseURL,
     BETTER_AUTH_SECRET: randomBytes(48).toString("base64url"), GEO_BRANDS_FIXTURE: enabled ? "1" : "",
+    GEO_AUTH_MAIL_MOCK: "false", GEO_AUTH_EMAIL_VERIFIED_MOCK: "false",
   };
   const child = spawn(process.execPath, [resolve("node_modules/next/dist/bin/next"), "start", "--hostname", "localhost", "--port", "3105"], {
     env, stdio: ["ignore", "pipe", "pipe"],

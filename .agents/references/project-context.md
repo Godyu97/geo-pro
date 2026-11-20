@@ -47,7 +47,7 @@
   - `layout/`：`app-sidebar.tsx`、`auth-form.tsx`、`brand-mark.tsx`、`module-links.ts`、`sign-out-button.tsx`、`session-monitor.tsx`；会话失效/身份切换时整页恢复，服务暂不可用提供重试。
   - `charts/README.md`：仅边界说明，无图表实现
 - `src/features/` 包含官网 `marketing/`、维护授权 `maintenance/`、账户设置 `account/`、品牌建档 `brands/`、事实与补证 `brand-facts/`、购买问题簇 `prompts/`、本人导出 `data-exports/`、试点额度 `quotas/`、通道能力 `capabilities/`、监测登记 `monitoring/`、回答证据 `evidence/`、优化任务 `optimization/`、内容草稿 `content/`、支持定位 `support/` 和其余业务占位域。
-- `src/lib/`：`i18n/`、`auth/`、`db/`、`http/`、`cache/`。DB 包含双方言认证、维护、品牌、导出、额度、事实、题集、通道能力、监测运行、回答证据、优化任务与内容草稿 Schema、显式配置、连接和 SQLite 迁移。`cache/store.ts` 为支持元信息提供默认 Redis 与显式 memory。`ai/` 仍仅有说明。
+- `src/lib/`：`i18n/`、`auth/`、`db/`、`http/`、`cache/`、`ai/`。DB 包含双方言认证、维护、品牌、导出、额度、事实、题集、通道能力、监测运行、回答证据、优化任务与内容草稿 Schema、显式配置、连接和 SQLite 迁移。`cache/store.ts` 为支持元信息提供默认 Redis 与显式 memory。`ai/responses.ts` 提供服务端 OpenAI Responses API 标准客户端（读取 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`）。`auth/verified-email.ts` 与 `account/email/delivery.ts` 支持由 `.env.local` 显式开关控制的开发期邮件/邮箱校验 mock（`GEO_AUTH_MAIL_MOCK` / `GEO_AUTH_EMAIL_VERIFIED_MOCK`）。
 - `src/hooks/use-mobile.ts`、`src/types/README.md`
 - `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证及账号邮件限流、维护权限、品牌建档、本人导出、品牌清除、试点额度、品牌事实、通道能力、购买问题簇、监测运行、回答证据、优化任务和内容草稿。支持定位为 `monitoring_run.operation_id` 增加双方言索引。
 - `drizzle/ddl/postgresql.sql`、`sqlite.sql`：双方言全量 DDL；`scripts/export-ddl.mjs` 离线生成/只读检查，不含迁移历史或数据。

@@ -20,6 +20,11 @@ GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、P
 - 遵循 **统一入口 → 按需发现 → 最小实现 → 质量验证 → 核验交付** 闭环（详见 [.agents/workflows/task-lifecycle.md](.agents/workflows/task-lifecycle.md)）。
 - 一个任务 / Issue 对应清晰可审核的最小改动范围；技术约束以仓库真实状态为准：仅用 `pnpm`（`pnpm-lock.yaml`）与 Node 24 LTS；`src/app/` 保持薄层，业务按 `src/features/<domain>/` 组织；默认 Server Components，服务端密钥/DB/Auth 模块保留 `server-only`，鉴权使用服务端 `auth.api.getSession`。
 
+## 开发阶段约定（临时本地配置）
+
+- **AI 接入规范**：所有 AI 模型接入均须支持 OpenAI **Responses API** 标准（`POST ${OPENAI_BASE_URL}/responses`），统一使用服务端模块 [src/lib/ai/responses.ts](src/lib/ai/responses.ts)；本地开发连接参数与模型名在 gitignored 的 `.env.local` 中通过 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL` 配置，严禁将真实密钥写入源码、`.env.example`、文档或 `NEXT_PUBLIC_*`。
+- **邮件发送与邮箱校验 Mock**：开发阶段暂通过 `.env.local` 中的 `GEO_AUTH_MAIL_MOCK=true`（跳过外发邮件网关并记录安全 mock 日志）与 `GEO_AUTH_EMAIL_VERIFIED_MOCK=true`（已登录/存在的账号邮箱校验按已验证放行）解阻本地联调；未显式开启或设为 `false` 时保持严格网关投递与数据库 `email_verified` 校验，隔离验收脚本（如 `verify:account-email`、`verify:brands`、`test:monitoring`、`test:brands`）须继续验证真实严格路径。
+
 ## 治理与上下文路由（渐进式披露）
 
 - **L0（必读）**：本文件 `AGENTS.md` + 用户当前任务。

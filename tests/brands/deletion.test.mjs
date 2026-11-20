@@ -113,7 +113,14 @@ for (const kind of ["sqlite", "postgresql"]) {
     const recover = action(owner, { action: "recover", brandId, expectedBrandRevision: 2 });
     const recoveryTime = "2026-11-18T08:02:00.000Z";
     assert.deepEqual(await run({ ...recover, actorId: outsider }, session, recoveryTime), { error: "NOT_FOUND" });
-    assert.deepEqual(await run(recover, { ...session, emailVerified: false }, recoveryTime), { error: "IDENTITY_UNVERIFIED" });
+    const previousEmailMock = process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK;
+    process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK = "false";
+    try {
+      assert.deepEqual(await run(recover, { ...session, emailVerified: false }, recoveryTime), { error: "IDENTITY_UNVERIFIED" });
+    } finally {
+      if (previousEmailMock === undefined) delete process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK;
+      else process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK = previousEmailMock;
+    }
     assert.deepEqual(await run(recover, { ...session, createdAt: new Date(frozenAt) }, recoveryTime), { error: "REAUTH_REQUIRED" });
     assert.deepEqual(await run(recover, session, "2026-11-18T08:06:00.000Z"), { error: "REAUTH_REQUIRED" });
     assert.deepEqual(await run(recover, session, restoreUntil), { error: "RECOVERY_EXPIRED" });

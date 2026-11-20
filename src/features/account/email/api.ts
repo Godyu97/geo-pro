@@ -9,7 +9,7 @@ import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getLocale } from "@/lib/i18n/server";
 import { emailConfirm, emailRequest, type EmailOutcome } from "./contracts";
 import { reserveMailRequest } from "./dao";
-import { getMailConfiguration, sourceIP } from "./delivery";
+import { getMailConfiguration, isMailMockEnabled, sourceIP } from "./delivery";
 import { confirmAccountMail, prepareAccountMail } from "./service";
 
 function respond(outcome: EmailOutcome, status: number, traceId?: string, retryAfter?: number) {
@@ -36,8 +36,10 @@ export async function accountEmailResponse(request: Request) {
     }
     if (!mail.success) return respond("invalidInput", 400);
 
+    const mockMail = isMailMockEnabled();
     const config = getMailConfiguration(origin);
-    const ip = config && sourceIP(request.headers.get(config.ipHeader));
+    const headerIp = config ? sourceIP(request.headers.get(config.ipHeader)) : null;
+    const ip = headerIp ?? (mockMail ? (sourceIP(request.headers.get("x-forwarded-for")?.split(",")[0] ?? null) ?? "127.0.0.1") : null);
     if (!ip) return respond("unavailable", 503);
 
     const { kind, email } = mail.data;
