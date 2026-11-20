@@ -41,6 +41,7 @@
 | 27 | #65 | 同一事件从 CSV 和连接器进入只计 1 条并保留两个来源；字段预览未批准前不拉取 | `8f74f3de38c0c1d7ecaed141822d8f734fe60c0f` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 28 | #66 | 仅凭 user-agent 声称 AI 爬虫时标未核验，不称收录；撤销后停止下一次拉取且不删已保留行 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 29 | #67 | 采集文本里的指令不改预算或授权；草案最多 5 项；事实过期只阻塞该项；一次成功不标保证收益 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 30 | #68 | 目标城市和实际采样位置分开；采样未知时不声称本地排名；门店不混用另一门店的服务范围 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 
 这些 Issue 在 2026-11-20 用 `gh issue list --state all` 核对时仍是 open，评论只说明阻塞已解除、真实验收不要勾选。本表已有记录，后续轮次不重复。
 
