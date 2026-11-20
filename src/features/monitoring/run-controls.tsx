@@ -50,7 +50,7 @@ export function RunControls({
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "cancel" })}>{messages.cancel}</Button>
       </div>
       {succeededSlots.map((slot) => (
-        <Button key={slot.id} type="button" variant="outline" disabled={pending} onClick={() => send({ action: "redo-analysis", slotId: slot.id })}>
+        <Button key={slot.id} type="button" variant="outline" disabled={pending} className="h-auto max-w-full whitespace-normal py-2 text-left" onClick={() => send({ action: "redo-analysis", slotId: slot.id })}>
           {messages.redo}: {slot.questionText}
         </Button>
       ))}

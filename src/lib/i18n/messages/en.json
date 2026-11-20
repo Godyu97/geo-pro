@@ -1048,6 +1048,7 @@
     "gapsTitle": "Evidence gaps",
     "generateBatch": "Small-batch generation",
     "briefIds": "Confirmed brief IDs (one per line, 1–5)",
+    "fixtureFailBriefs": "Isolated brief IDs to fail (optional, one per line)",
     "runGenerate": "Generate drafts",
     "units": "Batch units",
     "backToList": "Back to content",

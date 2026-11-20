@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
+import { brandFixtureOrigin } from "../brands/intake";
 import { BrandDao } from "../brands/dao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +61,7 @@ export default async function ContentListPage({
   const confirmedIds = listed.briefs
     .filter((item) => item.brief.status === "confirmed")
     .map((item) => item.brief.id);
+  const fixtureSampling = Boolean(brandFixtureOrigin(await headers()));
 
   return (
     <div className="space-y-8">
@@ -218,6 +221,12 @@ export default async function ContentListPage({
                 className="w-full rounded-md border bg-background px-3 py-2"
               />
             </label>
+            {fixtureSampling ? (
+              <label className="block text-sm">
+                <span className="mb-1 block text-muted-foreground">{t("fixtureFailBriefs")}</span>
+                <textarea name="failBriefIds" rows={2} className="w-full rounded-md border bg-background px-3 py-2" />
+              </label>
+            ) : null}
             <Button type="submit">{t("runGenerate")}</Button>
           </form>
         </section>

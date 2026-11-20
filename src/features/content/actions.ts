@@ -99,17 +99,22 @@ export async function generateBatchAction(formData: FormData): Promise<void> {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 5);
+  const failBriefIds = process.env.GEO_BRANDS_FIXTURE === "1"
+    ? String(formData.get("failBriefIds") ?? "").split(/[\s,]+/).map((item) => item.trim()).filter(Boolean).slice(0, 5)
+    : [];
   const parsed = generateBatchSchema.safeParse({
     action: "generate-batch",
     brandId: String(formData.get("brandId") ?? ""),
     operationId: randomUUID(),
     briefIds,
+    ...(failBriefIds.length ? { fixtures: { failBriefIds } } : {}),
   });
   if (!parsed.success) return;
   const result = await generateBatch(getConnection(), session.user.id, parsed.data);
   revalidatePath("/dashboard/content");
   if (!("error" in result) && result.batch) {
     revalidatePath(`/dashboard/content/batches/${result.batch.id}`);
+    redirect(`/dashboard/content/batches/${result.batch.id}`);
   }
 }
 

@@ -115,7 +115,7 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
           ))}
         </ul>
       </section>
-      <div className="overflow-x-auto">
+      <div className="max-w-full overflow-x-auto">
         <table className="w-full min-w-[40rem] text-left text-sm">
           <thead>
             <tr className="border-b">

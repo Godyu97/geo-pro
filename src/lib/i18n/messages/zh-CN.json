@@ -1048,6 +1048,7 @@
     "gapsTitle": "补证项",
     "generateBatch": "小批次生成",
     "briefIds": "已确认 Brief ID（每行一个，1–5）",
+    "fixtureFailBriefs": "隔离失败的 Brief ID（可选，每行一个）",
     "runGenerate": "生成草稿",
     "units": "批次单元",
     "backToList": "返回内容列表",
