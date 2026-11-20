@@ -40,6 +40,7 @@
 | 26 | #64 | 无理由的支持检索被拒绝且不返回客户正文；最后一位负责人不能注销，受理也不表示数据已清除 | `2e2f7ba1160cf9cf97ac6b84b12df2a680e82ffc` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 27 | #65 | 同一事件从 CSV 和连接器进入只计 1 条并保留两个来源；字段预览未批准前不拉取 | `8f74f3de38c0c1d7ecaed141822d8f734fe60c0f` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 28 | #66 | 仅凭 user-agent 声称 AI 爬虫时标未核验，不称收录；撤销后停止下一次拉取且不删已保留行 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 29 | #67 | 采集文本里的指令不改预算或授权；草案最多 5 项；事实过期只阻塞该项；一次成功不标保证收益 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 
 这些 Issue 在 2026-11-20 用 `gh issue list --state all` 核对时仍是 open，评论只说明阻塞已解除、真实验收不要勾选。本表已有记录，后续轮次不重复。
 
