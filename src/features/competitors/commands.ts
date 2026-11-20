@@ -1,11 +1,12 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { DatabaseConnection } from "../../lib/db/connection.ts";
+import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { conditionalMeanPosition, mentionShare } from "../competitor-share/rules.ts";
-import type { CompetitorError, RecordMentionsInput, SaveCompetitorSetInput } from "./contracts.ts";
+import { inspectSource } from "../source-opportunities/rules.ts";
+import type { CompetitorError, InspectCitationInput, RecordMentionsInput, SaveCompetitorSetInput } from "./contracts.ts";
 import { normalizeCompetitorLabels } from "./contracts.ts";
-import { CompetitorDao, type CompetitorMentionRow, type CompetitorSetRow } from "./dao.ts";
+import { CompetitorDao, type CitationSourceRow, type CompetitorMentionRow, type CompetitorSetRow } from "./dao.ts";
 
 type Clock = () => string;
 type Failure = { error: CompetitorError };
@@ -162,4 +163,96 @@ export async function readCompetitorShare(
     rank: share.rank,
     truncated: false,
   };
+}
+
+function bit(value: boolean): 0 | 1 {
+  return value ? 1 : 0;
+}
+
+export function presentCitation(row: CitationSourceRow) {
+  return {
+    citationId: row.citationId,
+    observationId: row.observationId,
+    rawUrl: row.rawUrl,
+    normalizedUrl: row.normalizedUrl,
+    ownership: row.ownership,
+    pageStatus: row.pageStatus,
+    state: row.state ?? "observed" as const,
+    support: row.support ?? "unknown" as const,
+    recorded: row.state !== null,
+  };
+}
+
+export function citationHosts(rows: readonly { normalizedUrl: string }[]) {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    let host = "unknown";
+    try {
+      host = new URL(row.normalizedUrl).hostname;
+    } catch {
+      host = "unknown";
+    }
+    counts.set(host, (counts.get(host) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([host, pages]) => ({ host, pages }))
+    .sort((left, right) => (left.host < right.host ? -1 : left.host > right.host ? 1 : 0));
+}
+
+export async function inspectCitationSource(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: InspectCitationInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  const judged = inspectSource(input);
+  return db.transaction(async (tx) => {
+    const dao = new CompetitorDao(tx);
+    if (!await dao.ownedBrand(ownerId, input.brandId)) return denied("NOT_FOUND");
+    if (!await dao.citationOwned(ownerId, input.brandId, input.citationId)) return denied("NOT_FOUND");
+    const now = clock();
+    const existing = await dao.findInspection(input.citationId);
+    const row = {
+      id: existing?.id ?? randomUUID(),
+      brandId: input.brandId,
+      ownerId,
+      citationId: input.citationId,
+      state: judged.state,
+      support: judged.support,
+      pageLive: bit(input.pageLive),
+      readable: bit(input.readable),
+      authorKnown: bit(input.authorKnown),
+      supportsBrand: bit(input.supportsBrand),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    if (existing) await dao.updateInspection(row);
+    else await dao.insertInspection(row);
+    const [citation] = await queryCitation(tx, ownerId, input.brandId, input.citationId);
+    return {
+      inspection: row,
+      citationKept: judged.citationKept && Boolean(citation),
+      support: judged.support,
+      state: judged.state,
+    };
+  });
+}
+
+async function queryCitation(
+  db: QueryConnection,
+  ownerId: string,
+  brandId: string,
+  citationId: string,
+) {
+  const dao = new CompetitorDao(db);
+  const listed = await dao.listCitationSources(ownerId, brandId);
+  return listed.rows.filter((row) => row.citationId === citationId);
+}
+
+export async function readCitationSources(db: DatabaseConnection, ownerId: string, brandId: string) {
+  const dao = new CompetitorDao(db);
+  if (!await dao.ownedBrand(ownerId, brandId)) return denied("NOT_FOUND");
+  const listed = await dao.listCitationSources(ownerId, brandId);
+  const citations = listed.rows.map(presentCitation);
+  return { citations, hosts: citationHosts(citations), truncated: listed.truncated };
 }

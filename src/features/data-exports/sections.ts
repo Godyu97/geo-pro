@@ -54,6 +54,8 @@ const sections: Record<Exclude<ExportScope, "profile" | "brands">, Slice[]> = {
       src.source_mode AS "sourceMode", src.region AS "region", src.language AS "language", src.captured_at AS "capturedAt",
       src.evidence_state AS "evidenceState"`),
     byId("competitorSets", "competitor_set", `src.version AS "version", src.labels_json AS "labelsJson", src.created_at AS "createdAt"`),
+    byId("sourceInspections", "source_inspection", `src.citation_id AS "citationId", src.state AS "state", src.support AS "support",
+      src.page_live AS "pageLive", src.readable AS "readable", src.updated_at AS "updatedAt"`),
     byId("competitorMentions", "competitor_mention", `src.set_id AS "setId", src.observation_id AS "observationId",
       src.competitor_label AS "competitorLabel", src."ordered" AS "ordered", src.position AS "position", src.created_at AS "createdAt"`),
     byId("citations", "answer_citation", `src.observation_id AS "observationId", src.raw_url AS "rawUrl",

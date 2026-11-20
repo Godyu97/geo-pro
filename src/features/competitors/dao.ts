@@ -28,6 +28,39 @@ const mentionRow = z.object({
 export type CompetitorSetRow = z.infer<typeof setRow>;
 export type CompetitorMentionRow = z.infer<typeof mentionRow>;
 
+const flag = z.union([z.literal(0), z.literal(1)]);
+const inspectionRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  citationId: brandIdSchema,
+  state: z.enum(["observed", "resolved", "limited", "unknown"]),
+  support: z.enum(["supports", "unknown"]),
+  pageLive: flag,
+  readable: flag,
+  authorKnown: flag,
+  supportsBrand: flag,
+  createdAt: z.iso.datetime({ precision: 3 }),
+  updatedAt: z.iso.datetime({ precision: 3 }),
+});
+const citationViewRow = z.object({
+  citationId: brandIdSchema,
+  observationId: brandIdSchema,
+  rawUrl: z.string(),
+  normalizedUrl: z.string(),
+  ownership: z.string(),
+  pageStatus: z.string(),
+  state: z.enum(["observed", "resolved", "limited", "unknown"]).nullable(),
+  support: z.enum(["supports", "unknown"]).nullable(),
+  pageLive: flag.nullable(),
+  readable: flag.nullable(),
+  authorKnown: flag.nullable(),
+  supportsBrand: flag.nullable(),
+});
+
+export type SourceInspectionRow = z.infer<typeof inspectionRow>;
+export type CitationSourceRow = z.infer<typeof citationViewRow>;
+
 const setColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", version, labels_json AS "labelsJson", created_at AS "createdAt"`;
 const mentionColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", set_id AS "setId",
   observation_id AS "observationId", competitor_label AS "competitorLabel", "ordered", position, created_at AS "createdAt"`;
@@ -115,5 +148,82 @@ export class CompetitorDao {
       [ownerId, brandId, setId],
     );
     return { truncated: false as const, rows: rows.map((row) => mentionRow.parse(row)) };
+  }
+
+  async citationOwned(ownerId: string, brandId: string, citationId: string) {
+    const [row] = await queryWithParameters(
+      this.db,
+      `SELECT c.id FROM answer_citation c
+       JOIN answer_observation o ON o.id = c.observation_id
+       WHERE c.id = ? AND c.brand_id = ? AND o.brand_id = ? AND o.owner_id = ?`,
+      [citationId, brandId, brandId, ownerId],
+    );
+    return Boolean(row);
+  }
+
+  async findInspection(citationId: string) {
+    const [row] = await queryWithParameters(
+      this.db,
+      `SELECT id, brand_id AS "brandId", owner_id AS "ownerId", citation_id AS "citationId",
+              state, support, page_live AS "pageLive", readable, author_known AS "authorKnown",
+              supports_brand AS "supportsBrand", created_at AS "createdAt", updated_at AS "updatedAt"
+       FROM source_inspection WHERE citation_id = ?`,
+      [citationId],
+    );
+    return row ? inspectionRow.parse(row) : null;
+  }
+
+  async insertInspection(row: SourceInspectionRow) {
+    await queryWithParameters(
+      this.db,
+      `INSERT INTO source_inspection (
+        id, brand_id, owner_id, citation_id, state, support, page_live, readable,
+        author_known, supports_brand, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.brandId, row.ownerId, row.citationId, row.state, row.support, row.pageLive,
+        row.readable, row.authorKnown, row.supportsBrand, row.createdAt, row.updatedAt,
+      ],
+    );
+  }
+
+  async updateInspection(row: SourceInspectionRow) {
+    await queryWithParameters(
+      this.db,
+      `UPDATE source_inspection SET
+        state = ?, support = ?, page_live = ?, readable = ?, author_known = ?, supports_brand = ?, updated_at = ?
+       WHERE id = ? AND brand_id = ? AND owner_id = ? AND citation_id = ?`,
+      [
+        row.state, row.support, row.pageLive, row.readable, row.authorKnown, row.supportsBrand, row.updatedAt,
+        row.id, row.brandId, row.ownerId, row.citationId,
+      ],
+    );
+  }
+
+  async listCitationSources(ownerId: string, brandId: string) {
+    const countRows = await queryWithParameters(
+      this.db,
+      `SELECT COUNT(*) AS "count"
+       FROM answer_citation c
+       JOIN answer_observation o ON o.id = c.observation_id
+       WHERE c.brand_id = ? AND o.brand_id = ? AND o.owner_id = ?`,
+      [brandId, brandId, ownerId],
+    );
+    const count = z.object({ count: z.coerce.number().int().nonnegative() }).parse(countRows[0]).count;
+    if (count > 200) return { truncated: true as const, rows: [] as CitationSourceRow[] };
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT c.id AS "citationId", c.observation_id AS "observationId", c.raw_url AS "rawUrl",
+              c.normalized_url AS "normalizedUrl", c.ownership, c.page_status AS "pageStatus",
+              i.state, i.support, i.page_live AS "pageLive", i.readable,
+              i.author_known AS "authorKnown", i.supports_brand AS "supportsBrand"
+       FROM answer_citation c
+       JOIN answer_observation o ON o.id = c.observation_id
+       LEFT JOIN source_inspection i ON i.citation_id = c.id AND i.brand_id = c.brand_id
+       WHERE c.brand_id = ? AND o.brand_id = ? AND o.owner_id = ?
+       ORDER BY c.created_at ASC, c.id ASC`,
+      [brandId, brandId, ownerId],
+    );
+    return { truncated: false as const, rows: rows.map((row) => citationViewRow.parse(row)) };
   }
 }

@@ -44,6 +44,16 @@ export const recordMentionsSchema = z.strictObject({
 });
 export type RecordMentionsInput = z.infer<typeof recordMentionsSchema>;
 
+export const inspectCitationSchema = z.strictObject({
+  brandId: brandIdSchema,
+  citationId: brandIdSchema,
+  pageLive: z.boolean(),
+  readable: z.boolean(),
+  authorKnown: z.boolean(),
+  supportsBrand: z.boolean(),
+});
+export type InspectCitationInput = z.infer<typeof inspectCitationSchema>;
+
 export function normalizeCompetitorLabels(labels: readonly string[]) {
   const unique = [...new Set(labels.map((label) => label.trim()).filter((label) => label.length > 0))];
   unique.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));

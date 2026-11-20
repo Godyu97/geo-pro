@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { brand } from "./brand-schema.sqlite";
-import { answerObservation } from "./evidence-schema.sqlite";
+import { answerCitation, answerObservation } from "./evidence-schema.sqlite";
 
 export const competitorSet = sqliteTable("competitor_set", {
   id: text("id").primaryKey(),
@@ -35,4 +35,29 @@ export const competitorMention = sqliteTable("competitor_mention", {
       (${table.ordered} = 1 and ${table.position} > 0)
       or (${table.ordered} = 0 and ${table.position} is null)
     )`),
+]);
+
+export const sourceInspection = sqliteTable("source_inspection", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  citationId: text("citation_id").notNull().references(() => answerCitation.id, { onDelete: "cascade" }),
+  state: text("state").notNull(),
+  support: text("support").notNull(),
+  pageLive: integer("page_live").notNull(),
+  readable: integer("readable").notNull(),
+  authorKnown: integer("author_known").notNull(),
+  supportsBrand: integer("supports_brand").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("source_inspection_citation_uidx").on(table.citationId),
+  index("source_inspection_brand_idx").on(table.brandId, table.citationId),
+  check("source_inspection_check", sql`${table.state} in ('observed', 'resolved', 'limited', 'unknown')
+    and ${table.support} in ('supports', 'unknown')
+    and ${table.pageLive} in (0, 1)
+    and ${table.readable} in (0, 1)
+    and ${table.authorKnown} in (0, 1)
+    and ${table.supportsBrand} in (0, 1)
+    and (${table.support} = 'unknown' or (${table.pageLive} = 1 and ${table.readable} = 1 and ${table.supportsBrand} = 1))`),
 ]);
