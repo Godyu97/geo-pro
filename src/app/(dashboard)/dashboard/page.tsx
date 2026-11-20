@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
+import { MonitoringCapabilityPanel } from "@/features/capabilities/settings-panel";
 import { brandFixtureOrigin } from "@/features/brands/intake";
 
 export default async function DashboardPage() {
@@ -41,6 +42,11 @@ export default async function DashboardPage() {
             </a>
           </Button>
         </div>
+      </section>
+      <section aria-labelledby="channels-title" className="max-w-3xl space-y-3 rounded-2xl border bg-card p-6">
+        <h2 id="channels-title" className="text-lg font-semibold">{t("channelsTitle")}</h2>
+        <p className="text-sm leading-7 text-muted-foreground">{t("channelsDescription")}</p>
+        <MonitoringCapabilityPanel locale={locale} />
       </section>
       <section
         aria-labelledby="evidence-title"

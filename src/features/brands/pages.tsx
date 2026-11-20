@@ -18,6 +18,7 @@ import { archiveCursorSchema, brandIdSchema, brandVersionParam } from "./contrac
 import { BrandDeletionButtons } from "./deletion-buttons";
 import { brandErrorMessage } from "./error-messages";
 import { brandFixtureOrigin } from "./intake";
+import { readPilotAdmission, type PilotAdmissionItem } from "./pilot-admission";
 import { readBrandData } from "./service";
 
 type Query = Record<string, string | string[] | undefined>;
@@ -47,15 +48,40 @@ function FixtureNotice({ t }: { t: Translate }) {
   );
 }
 
-function ClosedBrandIntake({ t }: { t: Translate }) {
+const admissionLabel = {
+  emailDelivery: "admissionEmailDelivery",
+  accountRecovery: "admissionAccountRecovery",
+  retentionDisclosure: "admissionRetentionDisclosure",
+  backupDrill: "admissionBackupDrill",
+  pilotAuthorization: "admissionPilotAuthorization",
+} as const;
+
+function ClosedBrandIntake({ t, items }: { t: Translate; items: PilotAdmissionItem[] }) {
   return (
     <BrandFrame title={t("title")} back="/dashboard" backLabel={t("workspace")}>
       <section className="max-w-3xl space-y-2 rounded-xl border bg-card p-5">
         <h2 className="font-semibold">{t("closedTitle")}</h2>
         <p className="text-sm leading-6 text-muted-foreground">{t("closedDescription")}</p>
       </section>
+      <section aria-labelledby="pilot-admission" className="max-w-3xl space-y-3 rounded-xl border bg-card p-5">
+        <h2 id="pilot-admission" className="font-semibold">{t("admissionTitle")}</h2>
+        <p className="text-sm leading-6 text-muted-foreground">{t("admissionDescription")}</p>
+        <ul className="divide-y rounded-lg border">
+          {items.map((item) => (
+            <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
+              <span>{t(admissionLabel[item.id])}</span>
+              <span className="text-muted-foreground">{item.met ? t("admissionMet") : t("admissionUnmet")}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-sm leading-6 text-muted-foreground">{t("admissionRealIntakeClosed")}</p>
+      </section>
     </BrandFrame>
   );
+}
+
+function closedBrandIntake(t: Translate) {
+  return <ClosedBrandIntake t={t} items={readPilotAdmission(process.env).items} />;
 }
 
 function BrandLoadFailure({ t, href }: { t: Translate; href: string }) {
@@ -73,7 +99,7 @@ export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Q
   const { user } = await requireSession();
   const locale = await getLocale();
   const t = await getTranslator("brands");
-  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  if (!brandFixtureOrigin(await headers())) return closedBrandIntake(t);
   const query = await searchParams;
   const cursor = archiveCursorSchema.safeParse({ at: query.before, id: query.id });
   const frozenCursor = archiveCursorSchema.safeParse({ at: query.frozenBefore, id: query.frozenId });
@@ -148,7 +174,7 @@ export async function NewBrandPage() {
   const { user } = await requireSession();
   const locale = await getLocale();
   const t = await getTranslator("brands");
-  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  if (!brandFixtureOrigin(await headers())) return closedBrandIntake(t);
   const result = await readBrandData(async (dao) => {
     const active = await dao.active(user.id);
     return { active, draft: active ? null : await dao.draft(user.id, "new") };
@@ -170,7 +196,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
   const { user } = await requireSession();
   const locale = await getLocale();
   const t = await getTranslator("brands");
-  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  if (!brandFixtureOrigin(await headers())) return closedBrandIntake(t);
   const { id } = await params;
   const query = await searchParams;
   const version = brandVersionParam.safeParse(query.version);
@@ -257,7 +283,7 @@ export async function BrandDeletionPage({ params }: { params: Promise<{ id: stri
   const { user } = await requireSession();
   const locale = await getLocale();
   const t = await getTranslator("brands");
-  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  if (!brandFixtureOrigin(await headers())) return closedBrandIntake(t);
   const { id } = await params;
   if (!brandIdSchema.safeParse(id).success) notFound();
   const href = "/dashboard/brands/" + id;
@@ -304,7 +330,7 @@ export async function BrandRecoveryPage({ params }: { params: Promise<{ id: stri
   const locale = await getLocale();
   const t = await getTranslator("brands");
   const email = await getTranslator("accountEmail");
-  if (!brandFixtureOrigin(await headers())) return <ClosedBrandIntake t={t} />;
+  if (!brandFixtureOrigin(await headers())) return closedBrandIntake(t);
   const { id } = await params;
   if (!brandIdSchema.safeParse(id).success) notFound();
   const href = "/dashboard/brands/" + id + "/recovery";

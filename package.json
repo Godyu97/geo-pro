@@ -43,6 +43,7 @@
     "test:ai": "node --conditions=react-server --test tests/ai/*.test.mjs tests/auth/*.test.mjs",
     "test:e2e": "playwright test",
     "test:reports": "node --conditions=react-server --test tests/reports/*.test.mjs",
+    "test:continued-operations": "node --conditions=react-server --test tests/continued-operations/*.test.mjs",
     "test:query-plans": "node --conditions=react-server --test tests/db/*.test.mjs",
     "verify:dual-db": "node --conditions=react-server scripts/verify-dual-databases.mjs"
   },
