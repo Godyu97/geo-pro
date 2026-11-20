@@ -28,3 +28,27 @@ export function rankDistribution(input: { ordered: boolean; positions: readonly 
   if (!input.ordered) return { ranked: false as const, positions: [] as number[] };
   return { ranked: true as const, positions: [...input.positions] };
 }
+
+/** A competitor-set change starts a new segment. Versions are not pooled. */
+export function shareBySetVersion(
+  mentions: readonly (Mention & { setVersion: number })[],
+  competitors: readonly string[],
+) {
+  const versions = [...new Set(mentions.map((mention) => mention.setVersion))].sort((left, right) => left - right);
+  return versions.map((setVersion) => ({
+    setVersion,
+    rows: mentionShare(mentions.filter((mention) => mention.setVersion === setVersion), competitors),
+  }));
+}
+
+/** Absent brands are left out of the mean. An unordered list has no rank at all. */
+export function conditionalMeanPosition(input: {
+  ordered: boolean;
+  ranked: readonly { brandId: string; position: number }[];
+  absentBrandIds: readonly string[];
+}) {
+  if (!input.ordered) return { ranked: false as const, mean: null, excludedAbsent: [...input.absentBrandIds] };
+  if (input.ranked.length === 0) return { ranked: true as const, mean: null, excludedAbsent: [...input.absentBrandIds] };
+  const mean = input.ranked.reduce((sum, item) => sum + item.position, 0) / input.ranked.length;
+  return { ranked: true as const, mean, excludedAbsent: [...input.absentBrandIds] };
+}
