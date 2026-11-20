@@ -39,6 +39,7 @@
 | 25 | #63 | 没有支付连接时订单停在待支付，不标已收款；白标报告保留轨道、样本量和结论等级 | `9bf59b082759a79c0a5d2eeb8dfe734336f373e0` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 26 | #64 | 无理由的支持检索被拒绝且不返回客户正文；最后一位负责人不能注销，受理也不表示数据已清除 | `2e2f7ba1160cf9cf97ac6b84b12df2a680e82ffc` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 | 27 | #65 | 同一事件从 CSV 和连接器进入只计 1 条并保留两个来源；字段预览未批准前不拉取 | `8f74f3de38c0c1d7ecaed141822d8f734fe60c0f` | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
+| 28 | #66 | 仅凭 user-agent 声称 AI 爬虫时标未核验，不称收录；撤销后停止下一次拉取且不删已保留行 | PENDING_SHA | 是 | 该轮测试、`pnpm lint`、`pnpm typecheck` |
 
 这些 Issue 在 2026-11-20 用 `gh issue list --state all` 核对时仍是 open，评论只说明阻塞已解除、真实验收不要勾选。本表已有记录，后续轮次不重复。
 
