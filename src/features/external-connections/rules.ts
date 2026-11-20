@@ -20,3 +20,9 @@ export function retryAction(input: { state: "acknowledged" | "unknown" | "failed
 export function receiptEffect(kind: "draft_created" | "public_url") {
   return { interventionEffective: kind === "public_url" };
 }
+
+/** A revoked endpoint or a body that contains customer text is not sent. History stays. */
+export function notifyNext(input: { revoked: boolean; bodyHasCustomerText: boolean }) {
+  if (input.revoked || input.bodyHasCustomerText) return { send: false, historyDeleted: false };
+  return { send: true, historyDeleted: false };
+}
