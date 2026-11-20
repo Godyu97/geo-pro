@@ -1,8 +1,21 @@
 import { z } from "zod";
 import { locales } from "../../lib/i18n/locale.ts";
 
-export const exportScopes = ["profile", "brands"] as const;
+export const exportScopes = [
+  "profile", "brands", "factsAndMaterials", "monitoringAndEvidence", "content", "reports", "usageAndCosts",
+] as const;
 export type ExportScope = (typeof exportScopes)[number];
+export const exportScopeBits: Record<ExportScope, number> = {
+  profile: 1,
+  brands: 2,
+  factsAndMaterials: 4,
+  monitoringAndEvidence: 8,
+  content: 16,
+  reports: 32,
+  usageAndCosts: 64,
+};
+export const exportScopeLimit = 127;
+export const brandLinkedExportMask = exportScopeLimit & ~exportScopeBits.profile;
 export const exportIdSchema = z.uuidv4();
 export const exportLocaleSchema = z.enum(locales);
 export const exportRequestSchema = z.strictObject({

@@ -1,0 +1,2 @@
+ALTER TABLE "user_data_export" DROP CONSTRAINT "user_data_export_scope_check";--> statement-breakpoint
+ALTER TABLE "user_data_export" ADD CONSTRAINT "user_data_export_scope_check" CHECK ("user_data_export"."requested" between 1 and 127 and "user_data_export"."included" between 0 and 127 and ("user_data_export"."included" & "user_data_export"."requested") = "user_data_export"."included");

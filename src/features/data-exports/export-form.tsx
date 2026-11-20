@@ -10,7 +10,15 @@ import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
 import { exportErrorMessage, exportFileName, exportScopes, type ExportErrorCode, type ExportScope, type ExportSummary } from "./contracts";
 
-const descriptionKeys = { profile: "profileScope", brands: "brandScope" } as const;
+const descriptionKeys = {
+  profile: "profileScope",
+  brands: "brandScope",
+  factsAndMaterials: "factsScope",
+  monitoringAndEvidence: "monitoringScope",
+  content: "contentScope",
+  reports: "reportsScope",
+  usageAndCosts: "usageScope",
+} as const;
 
 export function DataExportForm({ userId, messages, brandsAllowed, initialSummary }: {
   userId: string;
@@ -27,8 +35,8 @@ export function DataExportForm({ userId, messages, brandsAllowed, initialSummary
   const [error, setError] = useState<ExportErrorCode | null>(null);
   const initialId = initialSummary?.id ?? null;
   const summary = localResult?.initialId === initialId ? localResult.summary : initialSummary;
-  const scopes = exportScopes.filter((scope) => selection.includes(scope) && (scope !== "brands" || brandsAllowed));
-  const canDownload = summary && summary.status !== "failed" && (brandsAllowed || !summary.included.includes("brands"));
+  const scopes = exportScopes.filter((scope) => selection.includes(scope) && (scope === "profile" || brandsAllowed));
+  const canDownload = summary && summary.status !== "failed" && (brandsAllowed || summary.included.every((scope) => scope === "profile"));
 
   async function reportFailure(response: Response) {
     if (response.status === 401) {
@@ -94,7 +102,7 @@ export function DataExportForm({ userId, messages, brandsAllowed, initialSummary
                 <input
                   type="checkbox"
                   checked={scopes.includes(scope)}
-                  disabled={scope === "brands" && !brandsAllowed}
+                  disabled={scope !== "profile" && !brandsAllowed}
                   aria-describedby={`export-scope-${scope}`}
                   onChange={(event) => {
                     const checked = event.currentTarget.checked;
@@ -105,7 +113,7 @@ export function DataExportForm({ userId, messages, brandsAllowed, initialSummary
                 <span>{t(scope)}</span>
               </label>
               <p id={`export-scope-${scope}`} className="ml-6 text-muted-foreground">
-                {t(scope === "brands" && !brandsAllowed ? "brandsClosed" : descriptionKeys[scope])}
+                {t(scope !== "profile" && !brandsAllowed ? "brandsClosed" : descriptionKeys[scope])}
               </p>
             </div>
           ))}

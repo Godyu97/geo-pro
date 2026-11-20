@@ -106,6 +106,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(ready.status, "ready");
     const file = await readExportFile(db, owner, ready.id, true);
     const body = JSON.parse(file.body);
+    assert.deepEqual(body.unavailable, []);
     assert.deepEqual(body.data.profile, profile);
     assert.deepEqual(body.data.brands.versions.map(({ id }) => id), [current, archived]);
     assert.deepEqual(body.data.brands.drafts.map(({ scope }) => scope), ["new"]);

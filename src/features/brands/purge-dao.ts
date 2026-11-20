@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
+import { brandLinkedExportMask } from "../data-exports/contracts.ts";
 import { opaqueIdSchema } from "../maintenance/contracts.ts";
 import { minorAmountSchema, quotaCurrencySchema, quotaKindSchema } from "../quotas/contracts.ts";
 import { brandIdSchema } from "./contracts.ts";
@@ -85,6 +86,14 @@ export class PurgeDao {
 
   async clearContents(target: PurgeTarget, createdAt: string | null) {
     const { ownerId, brandId } = target;
+    await this.query("DELETE FROM page_check_record WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM optimization_task_evidence WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM optimization_task WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM optimization_finding WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM sampling_answer_network WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM monitoring_attempt WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM monitoring_slot WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM monitoring_run WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM brand_draft WHERE owner_id = ? AND scope = ?", [ownerId, brandId]);
     await this.query("DELETE FROM prompt_reference WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM prompt_set WHERE brand_id = ?", [brandId]);
@@ -105,8 +114,11 @@ export class PurgeDao {
     await this.query("DELETE FROM content_brief_version WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_brief WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_plan WHERE brand_id = ?", [brandId]);
-    await this.query("DELETE FROM brand_version WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM brand_fact_use WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM brand_fact_version WHERE brand_id = ?", [brandId]);
+    await this.query("UPDATE brand_fact_paste SET previous_id = NULL WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM brand_fact_paste WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM brand_version WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM answer_citation WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM answer_analysis_version WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM answer_observation WHERE brand_id = ?", [brandId]);
@@ -124,8 +136,8 @@ export class PurgeDao {
   async clearExports(marker: PurgeMarker) {
     // B05 persists one fingerprint per owner and rebuilds bytes on download.
     // A brand export generated while the brand was frozen excludes its content.
-    await this.query(`DELETE FROM user_data_export WHERE owner_id = ? AND (included & 2) <> 0 AND created_at <= ?`,
-      [marker.ownerId, marker.frozenAt]);
+    await this.query(`DELETE FROM user_data_export WHERE owner_id = ? AND (included & ?) <> 0 AND created_at <= ?`,
+      [marker.ownerId, brandLinkedExportMask, marker.frozenAt]);
   }
 
   async clearLedger(target: PurgeTarget) {

@@ -6,7 +6,7 @@
 
 - **包名与版本**：`geo-pro` v`0.1.0`（`"private": true`，`"type": "module"`，见 [package.json](../../package.json)）
 - **定位**：GeoPro（AI GEO），面向中国大陆品牌经营者的品牌可见度监测与优化平台。
-- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)，T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)、[B03 可信官网](../../docs/tasks/B03-marketing-entry.md)、[B04 品牌建档](../../docs/tasks/B04-brand-onboarding.md)、[B05 本人数据导出](../../docs/tasks/B05-owned-data-export.md)、[B06 品牌删除与恢复](../../docs/tasks/B06-brand-deletion.md)及 [B07 品牌清除](../../docs/tasks/B07-brand-purge.md)子项，以及 [B08 维护授权基础](../../docs/tasks/B08-maintenance-access.md)、[B09 通道能力台账](../../docs/tasks/B09-channel-capabilities.md)、[B10 试点额度](../../docs/tasks/B10-pilot-quotas.md)和 [B15 账户设置](../../docs/tasks/B15-account-settings.md)。产品 M0–M2 尚无完整里程碑交付。 T-M0-04 真实通道核验仍未完成。
+- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)，T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)、[B03 可信官网](../../docs/tasks/B03-marketing-entry.md)、[B04 品牌建档](../../docs/tasks/B04-brand-onboarding.md)、[B05 本人数据导出](../../docs/tasks/B05-owned-data-export.md)、[B06 品牌删除与恢复](../../docs/tasks/B06-brand-deletion.md)及 [B07 品牌清除](../../docs/tasks/B07-brand-purge.md)子项，以及 [B08 维护授权基础](../../docs/tasks/B08-maintenance-access.md)、[B09 通道能力台账](../../docs/tasks/B09-channel-capabilities.md)、[B10 试点额度](../../docs/tasks/B10-pilot-quotas.md)和 [B15 账户设置](../../docs/tasks/B15-account-settings.md)。产品 M0–M2 尚无完整里程碑交付。 [Issue #34](../../docs/tasks/M0-34-owned-export-and-purge.md) 已把已交付业务域纳入本人导出，并补齐优化任务清除顺序。 T-M0-04 真实通道核验仍未完成。
 
 ## 2. 技术栈与实际版本
 

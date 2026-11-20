@@ -42,7 +42,7 @@ export async function prepareExportResponse(request: Request) {
     if (!result.success) return failure("INVALID_INPUT");
     const ownerId = session.session.user.id;
     if (result.data.actorId !== ownerId) return failure("SESSION_CHANGED");
-    if (result.data.scopes.includes("brands") && !brandFixtureOrigin(request.headers)) return failure("BRAND_SCOPE_CLOSED");
+    if (result.data.scopes.some((scope) => scope !== "profile") && !brandFixtureOrigin(request.headers)) return failure("BRAND_SCOPE_CLOSED");
 
     const prepared = await prepareExport(getConnection(), ownerId, result.data);
     return "summary" in prepared

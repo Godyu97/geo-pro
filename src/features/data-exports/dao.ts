@@ -2,13 +2,13 @@ import "server-only";
 
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection } from "../../lib/db/connection.ts";
-import { exportIdSchema, exportLocaleSchema } from "./contracts.ts";
+import { exportIdSchema, exportLocaleSchema, exportScopeLimit } from "./contracts.ts";
 
 const recordSchema = z.object({
   id: exportIdSchema,
   locale: exportLocaleSchema,
-  requested: z.number().int().min(1).max(3),
-  included: z.number().int().min(0).max(3),
+  requested: z.number().int().min(1).max(exportScopeLimit),
+  included: z.number().int().min(0).max(exportScopeLimit),
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
   createdAt: z.iso.datetime(),
 }).refine(({ requested, included, fingerprint }) =>

@@ -4,16 +4,15 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection, TransactionConnection } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { PromptDao } from "../prompts/dao.ts";
-import { exportScopes, type ExportRequest, type ExportScope, type ExportSummary } from "./contracts.ts";
+import { exportScopeBits, exportScopes, type ExportRequest, type ExportScope, type ExportSummary } from "./contracts.ts";
 import { readExportProfile, readExportRecord, saveExportRecord, type ExportRecord } from "./dao.ts";
+import { exportSectionBytes, readExportSection } from "./sections.ts";
 
-const scopeBits: Record<ExportScope, number> = { profile: 1, brands: 2 };
 const formatVersion = 1;
 const pageSize = 64;
-const maxBrandBytes = 8 * 1024 * 1024;
 
 function selectedScopes(mask: number) {
-  return exportScopes.filter((scope) => (scopeBits[scope] & mask) !== 0);
+  return exportScopes.filter((scope) => (exportScopeBits[scope] & mask) !== 0);
 }
 
 function summarize(record: ExportRecord): ExportSummary {
@@ -38,7 +37,7 @@ async function readBrands(dao: BrandDao, db: QueryConnection, ownerId: string) {
   let bytes = 0;
   function append<T>(target: T[], page: T[]) {
     for (const row of page) bytes += Buffer.byteLength(JSON.stringify(row)) + 1;
-    if (bytes > maxBrandBytes) throw new Error("Brand export size exceeds the limit");
+    if (bytes > exportSectionBytes) throw new Error("Brand export size exceeds the limit");
     target.push(...page);
   }
 
@@ -92,6 +91,28 @@ function fingerprint(data: unknown) {
   return createHash("sha256").update(JSON.stringify([formatVersion, data])).digest("hex");
 }
 
+async function readScope(db: QueryConnection, ownerId: string, scope: ExportScope) {
+  if (scope === "profile") return readExportProfile(db, ownerId);
+  if (scope === "brands") return readBrands(new BrandDao(db), db, ownerId);
+  return readExportSection(db, ownerId, scope);
+}
+
+async function collectSections(db: TransactionConnection, ownerId: string, scopes: readonly ExportScope[], isolate: boolean) {
+  const data: Partial<Record<ExportScope, unknown>> = {};
+  for (const scope of exportScopes) {
+    if (!scopes.includes(scope)) continue;
+    const value = isolate
+      ? await readSection(db, scope, (section) => readScope(section, ownerId, scope))
+      : await readScope(db, ownerId, scope);
+    if (value !== undefined) data[scope] = value;
+  }
+  return data;
+}
+
+function includedMask(data: Partial<Record<ExportScope, unknown>>) {
+  return exportScopes.reduce((mask, scope) => data[scope] === undefined ? mask : mask | exportScopeBits[scope], 0);
+}
+
 export async function prepareExport(db: DatabaseConnection, ownerId: string, input: ExportRequest) {
   return db.transaction(async (tx) => {
     const brands = new BrandDao(tx);
@@ -99,12 +120,9 @@ export async function prepareExport(db: DatabaseConnection, ownerId: string, inp
     const previous = await readExportRecord(tx, ownerId);
     if ((previous?.id ?? null) !== input.previousId) return { error: "CONFLICT" } as const;
 
-    const requested = input.scopes.reduce((mask, scope) => mask | scopeBits[scope], 0);
-    const data = {
-      profile: input.scopes.includes("profile") ? await readSection(tx, "profile", (section) => readExportProfile(section, ownerId)) : undefined,
-      brands: input.scopes.includes("brands") ? await readSection(tx, "brands", (section) => readBrands(new BrandDao(section), section, ownerId)) : undefined,
-    };
-    const included = (data.profile ? scopeBits.profile : 0) | (data.brands ? scopeBits.brands : 0);
+    const requested = input.scopes.reduce((mask, scope) => mask | exportScopeBits[scope], 0);
+    const data = await collectSections(tx, ownerId, input.scopes, true);
+    const included = includedMask(data);
     const record = {
       id: randomUUID(), locale: input.locale, createdAt: new Date().toISOString(),
       requested, included, fingerprint: included ? fingerprint(data) : null,
@@ -121,22 +139,14 @@ export async function readExportFile(db: DatabaseConnection, ownerId: string, id
     const record = await readExportRecord(tx, ownerId, id);
     if (!record?.fingerprint) return null;
     const summary = summarize(record);
-    if (summary.included.includes("brands") && !brandsAllowed) return null;
+    if (summary.included.some((scope) => scope !== "profile") && !brandsAllowed) return null;
 
-    const data = {
-      profile: summary.included.includes("profile") ? await readExportProfile(tx, ownerId) : undefined,
-      brands: summary.included.includes("brands") ? await readBrands(brands, tx, ownerId) : undefined,
-    };
+    const data = await collectSections(tx, ownerId, summary.included, false);
     if (fingerprint(data) !== record.fingerprint) return null;
 
     return {
       summary,
-      body: JSON.stringify({
-        schemaVersion: formatVersion,
-        ...summary,
-        unavailable: ["factsAndMaterials", "monitoringAndEvidence", "content", "reports", "usageAndCosts"],
-        data,
-      }),
+      body: JSON.stringify({ schemaVersion: formatVersion, ...summary, unavailable: [], data }),
     };
   });
 }

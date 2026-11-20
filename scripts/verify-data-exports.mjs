@@ -79,7 +79,7 @@ async function readFile(owner, result) {
   const { schemaVersion, unavailable, data, ...summary } = JSON.parse(text);
   assert.equal(schemaVersion, 1);
   assert.deepEqual(summary, result);
-  assert.ok(unavailable.includes("factsAndMaterials") && unavailable.includes("reports"));
+  assert.deepEqual(unavailable, []);
   assert.doesNotMatch(text, /session_token|accessToken|refreshToken|password/);
   return data;
 }
@@ -174,6 +174,7 @@ async function verify(kind, enabled) {
     }
     phase = `${kind}: standard runtime scope`;
     await assertError(await request(exportsPath, { actor: owner, data: input(owner, ["brands"]) }), 403, "BRAND_SCOPE_CLOSED");
+    await assertError(await request(exportsPath, { actor: owner, data: input(owner, ["factsAndMaterials"]) }), 403, "BRAND_SCOPE_CLOSED");
     for (const [locale, notice] of [["zh-CN", "品牌数据导出目前仅在本地验收环境开放"], ["en", "Brand data export is currently limited to local testing"]]) {
       const page = await request("/dashboard/settings", { actor: owner, locale });
       assert.match(await page.text(), new RegExp(notice));

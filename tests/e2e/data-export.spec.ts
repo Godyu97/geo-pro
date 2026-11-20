@@ -40,6 +40,7 @@ const test = base.extend<{
 const copy = {
   "zh-CN": {
     management: "数据管理", language: "界面语言", profile: "个人资料", brands: "品牌数据",
+    facts: "事实与材料", monitoring: "监测与证据", content: "内容", reports: "报告", usage: "用量与费用",
     prepare: "生成导出文件", preparing: "正在生成导出文件…", download: "下载 JSON", empty: "尚未生成导出文件",
     ready: "导出文件已就绪", partial: "导出部分完成", failed: "导出文件生成失败",
     missing: "未能生成品牌数据。", fileUnavailable: "此下载已不可用。请重新生成导出文件。",
@@ -47,6 +48,7 @@ const copy = {
   },
   en: {
     management: "Data management", language: "Interface language", profile: "Personal profile", brands: "Brand data",
+    facts: "Facts and materials", monitoring: "Monitoring and evidence", content: "Content", reports: "Reports", usage: "Usage and costs",
     prepare: "Prepare export", preparing: "Preparing your export…", download: "Download JSON", empty: "No export prepared yet",
     ready: "Export ready", partial: "Export partially ready", failed: "Export could not be prepared",
     missing: "Could not include Brand data.", fileUnavailable: "This download is unavailable. Prepare a new export.",
@@ -95,6 +97,9 @@ for (const locale of ["zh-CN", "en"] as const) {
       const brands = region.getByRole("checkbox", { name: current.brands, exact: true });
       await expect(profile).toBeChecked();
       await expect(brands).toHaveAccessibleDescription(/合成资料|synthetic data/);
+      for (const label of [current.facts, current.monitoring, current.content, current.reports, current.usage]) {
+        await expect(region.getByRole("checkbox", { name: label, exact: true })).toBeEnabled();
+      }
       await profile.focus();
       await page.keyboard.press("Space");
       await expect(region.getByRole("button", { name: current.prepare })).toBeDisabled();
@@ -133,7 +138,7 @@ for (const locale of ["zh-CN", "en"] as const) {
       await page.getByRole("combobox", { name: current.language, exact: true }).selectOption(otherLocale);
       await expect(page.locator("html")).toHaveAttribute("lang", otherLocale);
       const file = await fileFromBrowser(page, translated.download, current.filename);
-      expect(file).toMatchObject({ locale, status: "ready", requested: ["brands"], included: ["brands"], missing: [] });
+      expect(file).toMatchObject({ locale, status: "ready", requested: ["brands"], included: ["brands"], missing: [], unavailable: [] });
       expect(file.data).toEqual({ brands: { versions: [expect.objectContaining({ id: brandId, fields })], drafts: [] } });
       await page.reload();
       await expect(switched.getByRole("status")).toContainText(translated.ready);
