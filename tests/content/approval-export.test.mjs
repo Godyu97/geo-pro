@@ -295,10 +295,6 @@ test("pure: export subset must be non-empty, selected and eligible", () => {
 
 for (const kind of ["sqlite", "postgresql"]) {
   const run = (name, body) => test(`${kind}: ${name}`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured for local PostgreSQL");
-      return;
-    }
     await body(t, await setup(t, kind));
   });
 
@@ -571,10 +567,6 @@ for (const kind of ["sqlite", "postgresql"]) {
 
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: migration upgrades existing draft versions in place`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured for local PostgreSQL");
-      return;
-    }
     const fixture = await testDatabase(kind, { migrateNow: false });
     t.after(() => fixture.cleanup());
     const db = fixture.connection;

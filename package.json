@@ -42,7 +42,9 @@
     "test:i18n": "node --test tests/i18n/*.test.mjs",
     "test:ai": "node --conditions=react-server --test tests/ai/*.test.mjs tests/auth/*.test.mjs",
     "test:e2e": "playwright test",
-    "test:reports": "node --conditions=react-server --test tests/reports/*.test.mjs"
+    "test:reports": "node --conditions=react-server --test tests/reports/*.test.mjs",
+    "test:query-plans": "node --conditions=react-server --test tests/db/*.test.mjs",
+    "verify:dual-db": "node --conditions=react-server scripts/verify-dual-databases.mjs"
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "1.7.25",

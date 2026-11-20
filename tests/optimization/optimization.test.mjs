@@ -115,10 +115,6 @@ test("priority comparator prefers urgent then importance", () => {
 
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: AC-M0-08-1/2/3 generate, dedupe, page check, ownership`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured for local PostgreSQL");
-      return;
-    }
     const fixture = await testDatabase(kind, { migrateNow: false });
     t.after(() => fixture.cleanup());
     const db = fixture.connection;

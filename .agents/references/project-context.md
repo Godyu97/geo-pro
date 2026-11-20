@@ -75,6 +75,8 @@
 | `pnpm verify:account-email` | Node.js HTTP + Playwright | 构建后用 3117 端口、双方言隔离库、回环邮件接收器和 Chrome 验证账号邮件与品牌恢复 |
 | `pnpm maintenance:access` | `node --conditions=react-server scripts/maintenance-access.mjs` | 受控服务器授予/撤销单项维护权限 |
 | `pnpm test:maintenance` | Node.js 原生测试 | 双库 DAO/迁移/DDL/锁竞争/索引测试，需要本地 PG 隔离建库权限 |
+| `pnpm test:query-plans` | Node.js 原生测试 | 双方言旧版升级、重复迁移、全量 DDL 对照，以及证据/任务/内容/报告列表的代表性查询计划 |
+| `pnpm verify:dual-db` | `scripts/verify-dual-databases.mjs` | 默认连接 Compose `127.0.0.1:55432`，跑通上述对照和 M0 模块测试；任一 PostgreSQL 用例跳过即失败 |
 | `pnpm verify:maintenance` | Node.js HTTP/CLI 集成脚本 | 构建后，在 3103 端口、双方言隔离库验证维护和认证 |
 | `pnpm test:brand-facts` | Node.js 原生测试 | 双库迁移、事实版本、资格、撤销、权限和查询计划 |
 | `pnpm verify:brand-facts` | HTTP / Chrome | 生产构建后在 3118 端口使用双方言隔离库，含 `pnpm verify:auth` |

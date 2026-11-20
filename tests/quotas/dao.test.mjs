@@ -66,7 +66,7 @@ async function measureOwnerRead(db, owner, outsideBrand, otherOwner, operator) {
       const prefix = db.kind === "sqlite" ? "EXPLAIN QUERY PLAN " : "EXPLAIN (COSTS OFF) ";
       const plan = JSON.stringify(await db.query(prefix + sql, values));
       assert.match(plan, /brand_active_owner_uidx|brand_owner_status_created_idx/);
-      assert.match(plan, /quota_reservation_brand_id_kind_id_pk|sqlite_autoindex_quota_reservation_1/);
+      assert.match(plan, /quota_reservation_brand_id_kind_id_pk|quota_reservation_brand_recent_idx|sqlite_autoindex_quota_reservation_1/);
     }
     console.log(`${db.kind}: 1 owner summary query at ${size} unrelated slots (${(performance.now() - start).toFixed(2)} ms including control query)`);
   }

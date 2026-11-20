@@ -55,10 +55,6 @@ function capability(actorId, overrides = {}) {
 
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: AC-M0-06-1/2/3 dual-track evidence contract`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured for local PostgreSQL");
-      return;
-    }
     const fixture = await testDatabase(kind, { migrateNow: false });
     t.after(() => fixture.cleanup());
     const db = fixture.connection;

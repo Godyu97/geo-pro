@@ -189,10 +189,6 @@ test("pure AC helpers: draft / public / manual", () => {
 
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: AC-M0-11-1 draft_only has no effective_at`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured");
-      return;
-    }
     const ctx = await setup(t, kind);
     const result = await submitPublication(ctx.db, ctx.owner, {
       action: "submit-publication",
@@ -218,10 +214,6 @@ for (const kind of ["sqlite", "postgresql"]) {
   });
 
   test(`${kind}: AC-M0-11-2 public match sets effective_at once`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured");
-      return;
-    }
     const ctx = await setup(t, kind);
     const first = await submitPublication(ctx.db, ctx.owner, {
       action: "submit-publication",
@@ -266,10 +258,6 @@ for (const kind of ["sqlite", "postgresql"]) {
   });
 
   test(`${kind}: AC-M0-11-3 manual evidence is verified_manual`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured");
-      return;
-    }
     const ctx = await setup(t, kind);
     const submitted = await submitPublication(ctx.db, ctx.owner, {
       action: "submit-publication",
@@ -315,10 +303,6 @@ for (const kind of ["sqlite", "postgresql"]) {
   });
 
   test(`${kind}: mismatch opens repair action; purge clears publications`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured");
-      return;
-    }
     const ctx = await setup(t, kind);
     const mismatch = await submitPublication(ctx.db, ctx.owner, {
       action: "submit-publication",
@@ -349,10 +333,6 @@ for (const kind of ["sqlite", "postgresql"]) {
   });
 
   test(`${kind}: live publication fetch is closed by default and HTTP 200 is not enough`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured");
-      return;
-    }
     const ctx = await setup(t, kind);
     const previousFetch = process.env.GEO_PUBLIC_PAGE_FETCH;
     delete process.env.GEO_PUBLIC_PAGE_FETCH;

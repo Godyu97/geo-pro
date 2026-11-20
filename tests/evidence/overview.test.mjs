@@ -90,10 +90,6 @@ test("track filter excludes the other sourceMode", () => {
 
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: overview command ownership, empty N/A, dual-track isolation`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured for local PostgreSQL");
-      return;
-    }
     const fixture = await testDatabase(kind, { migrateNow: false });
     t.after(() => fixture.cleanup());
     const db = fixture.connection;

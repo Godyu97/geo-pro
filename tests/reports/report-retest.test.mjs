@@ -134,10 +134,6 @@ test("pure rules: D+7 progress before due", () => {
 
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: AC-M0-12-1/2/3 + ownership + purge`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured");
-      return;
-    }
     const { db, owner, outsider, brandId } = await setup(t, kind);
     const shared = windows(
       [

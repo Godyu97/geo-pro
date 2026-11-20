@@ -14,6 +14,7 @@
 | 数据库迁移核验 | Auth Schema 与迁移检查 | `pnpm db:auth-schema` / `pnpm db:generate` / `pnpm db:migrate` | 前两项生成双方言；迁移只执行显式选择后端。先审核 SQL 再迁移 |
 | 全量 DDL 一致性 | 防止建表快照过期 | `pnpm db:ddl:check` | 检查 PostgreSQL/SQLite；过期先运行 `pnpm db:ddl` 并审核；结构变化还须验证隔离空库部署 |
 | 维护 DAO 合同 | 双数据库事务/隔离/迁移 | `pnpm test:maintenance` | 本地 PostgreSQL 可创建隔离测试库；SQLite 临时文件；含约束、并发、回滚、审计失败、DDL 对照与查询计划 |
+| M0 双库集成 | 迁移升级、全量 DDL 与模块测试零跳过 | `pnpm verify:dual-db` | 默认 `127.0.0.1:55432` 的 Compose PostgreSQL；`GEO_DUAL_DB_URL` 可指定其他回环库。创建并删除随机隔离库，不读取调用方其他数据库。证据、优化、内容、报告及既有模块测试有跳过即失败 |
 | 维护 HTTP 集成 | 实际会话、CLI 与维护边界 | `pnpm verify:maintenance` | 先 `pnpm build`；启动独立 3103 端口，分别使用双方言隔离库，并分别执行 `pnpm verify:auth` |
 | 品牌事实 DAO | 双库升级、版本、审批、资格和撤销 | `pnpm test:brand-facts` |
 | 品牌事实集成 | 双语工作台、归属和公开投影 | `pnpm verify:brand-facts` |

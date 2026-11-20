@@ -129,10 +129,6 @@ test("AC-M0-09-1 pure: missing source or boundary yields evidence gaps", () => {
 
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: AC-M0-09-1/2/3 content drafts, retry isolation, revoke resume, ownership`, async (t) => {
-    if (kind === "postgresql" && !process.env.DATABASE_URL) {
-      t.skip("DATABASE_URL not configured for local PostgreSQL");
-      return;
-    }
     const fixture = await testDatabase(kind, { migrateNow: false });
     t.after(() => fixture.cleanup());
     const db = fixture.connection;
