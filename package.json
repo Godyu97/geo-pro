@@ -33,6 +33,7 @@
     "test:prompts": "node --conditions=react-server --test tests/prompts/*.test.mjs",
     "test:monitoring": "node --conditions=react-server --test tests/monitoring/*.test.mjs",
     "test:evidence": "node --conditions=react-server --test tests/evidence/*.test.mjs",
+    "test:optimization": "node --conditions=react-server --test tests/optimization/*.test.mjs",
     "test:support": "node --conditions=react-server --test tests/support/*.test.mjs",
     "verify:prompts": "node --conditions=react-server scripts/verify-prompts.mjs",
     "check:i18n": "node scripts/check-i18n.mjs",

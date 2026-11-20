@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
+import { Button } from "@/components/ui/button";
+import { generateOptimizationAction } from "../optimization/actions";
 import { readObservation } from "./commands";
 import { ReviseAnalysisForm } from "./revise-form";
 
@@ -96,6 +98,13 @@ export default async function EvidenceDetailPage({
           />
         </section>
       )}
+      {observation.evidenceState !== "draft_evidence" ? (
+        <form action={generateOptimizationAction} className="rounded-2xl border px-4 py-4">
+          <input type="hidden" name="brandId" value={observation.brandId} />
+          <input type="hidden" name="observationId" value={observation.id} />
+          <Button type="submit">{t("generateOptimization")}</Button>
+        </form>
+      ) : null}
       <Link className="inline-block text-sm underline underline-offset-4" href="/dashboard/monitoring" prefetch={false}>
         {t("backToRun")}
       </Link>

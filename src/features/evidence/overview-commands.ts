@@ -7,6 +7,7 @@ import { queryWithParameters } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { PromptDao } from "../prompts/dao.ts";
 import { questionType } from "../prompts/contracts.ts";
+import { listPrioritizedTasks } from "../optimization/commands.ts";
 import type { EvidenceError } from "./contracts.ts";
 import { EvidenceDao } from "./dao.ts";
 import {
@@ -136,11 +137,26 @@ export async function readEvidenceOverview(
     }));
 
   const answerHref = `/dashboard/monitoring/answers?brandId=${scope.brandId}&sourceMode=${scope.sourceMode}`;
-  const nextActions: Array<{ id: string; kind: "start_monitoring" | "view_answers"; href: string }> = [];
+  const tasksHref = `/dashboard/optimization?brandId=${scope.brandId}`;
+  const nextActions: Array<{ id: string; kind: "start_monitoring" | "view_answers" | "view_tasks"; href: string }> = [];
   if (metrics.viewStatus === "empty") {
     nextActions.push({ id: "start", kind: "start_monitoring", href: "/dashboard/monitoring/new" });
   }
   nextActions.push({ id: "answers", kind: "view_answers", href: answerHref });
+
+  const prioritized = await listPrioritizedTasks(db, ownerId, scope.brandId, 3);
+  const suggestions = "error" in prioritized
+    ? []
+    : prioritized.tasks.map((task) => ({
+      id: task.id,
+      title: task.title,
+      status: task.status,
+      priorityBucket: task.priorityBucket,
+      href: `/dashboard/optimization/${task.id}`,
+    }));
+  if (suggestions.length > 0) {
+    nextActions.push({ id: "tasks", kind: "view_tasks", href: tasksHref });
+  }
 
   return {
     scope: {
@@ -155,7 +171,7 @@ export async function readEvidenceOverview(
     },
     ...metrics,
     answers,
-    suggestions: [] as Array<{ id: string; title: string; status: string }>,
+    suggestions,
     nextActions: nextActions.slice(0, 3),
     demo: false as const,
   };

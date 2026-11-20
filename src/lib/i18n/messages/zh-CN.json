@@ -933,7 +933,8 @@
     "VERSION_CONFLICT": "分析版本已变化，请刷新后重试。",
     "EVIDENCE_INCOMPLETE": "证据仍有缺项，已保存为草稿，补齐后才能进入有效样本。",
     "OPERATION_CONFLICT": "该槽位已有完成态证据，不能重复入证。",
-    "SERVICE_UNAVAILABLE": "暂时无法读写证据，请稍后重试。"
+    "SERVICE_UNAVAILABLE": "暂时无法读写证据，请稍后重试。",
+    "generateOptimization": "从此证据生成优化任务"
   },
   "evidenceOverview": {
     "title": "可解释概览",
@@ -965,8 +966,42 @@
     "question": "问题",
     "samples": "样本数",
     "suggestions": "优先建议与任务",
-    "suggestionsEmpty": "尚无优化任务建议。可先查看原文证据或补采；诊断任务将在后续交付后回接此处（最多 3 条）。",
+    "suggestionsEmpty": "尚无优化任务建议。可从回答证据生成诊断，或先补采。",
     "backOverview": "返回概览",
-    "emptyAnswers": "当前筛选下没有可展示的回答。"
+    "emptyAnswers": "当前筛选下没有可展示的回答。",
+    "viewTasks": "查看优化任务"
+  },
+  "optimization": {
+    "title": "优化任务",
+    "detailTitle": "优化任务详情",
+    "description": "把回答与页面证据转成可复测的少量动作，避免泛 SEO 列表。",
+    "noBrand": "请先完成品牌建档后再查看优化任务。",
+    "goBrands": "前往品牌",
+    "empty": "暂无开放优化任务。可从证据概览生成建议，或先做公开页检查。",
+    "openTasks": "开放任务",
+    "checkPagesTitle": "公开页面检查",
+    "checkPagesHint": "单次最多 5 个 URL。隔离验收可提供 fixture 正文；不会执行页面中的发布或改权限指令，也不宣称引擎收录结果。",
+    "urlsLabel": "公开 URL（每行一个）",
+    "fixtureStatus": "隔离 fixture 状态",
+    "fixtureBody": "隔离 fixture 正文（可选）",
+    "runCheck": "执行检查",
+    "backToList": "返回任务列表",
+    "findings": "发现与依据",
+    "assumption": "假设级别",
+    "completion": "完成标准",
+    "retest": "复测方法",
+    "pageChecks": "页面检查记录",
+    "updateTitle": "更新状态",
+    "status": "状态",
+    "completionNote": "完成说明 / 证据",
+    "dismissReason": "驳回理由",
+    "reorderReason": "改序（名次 + 理由）",
+    "save": "保存",
+    "SESSION_REQUIRED": "请先登录。",
+    "FORBIDDEN": "无权执行该操作。",
+    "NOT_FOUND": "未找到资源或无权访问。",
+    "INVALID_INPUT": "输入无效。",
+    "OPERATION_CONFLICT": "操作冲突。",
+    "SERVICE_UNAVAILABLE": "服务暂不可用。"
   }
 }

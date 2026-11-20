@@ -933,7 +933,8 @@
     "VERSION_CONFLICT": "The analysis version changed. Refresh and try again.",
     "EVIDENCE_INCOMPLETE": "Evidence is still incomplete and was saved as a draft until required fields are filled.",
     "OPERATION_CONFLICT": "This slot already has a completed observation and cannot be ingested again.",
-    "SERVICE_UNAVAILABLE": "Evidence is temporarily unavailable. Try again later."
+    "SERVICE_UNAVAILABLE": "Evidence is temporarily unavailable. Try again later.",
+    "generateOptimization": "Generate optimization tasks from this evidence"
   },
   "evidenceOverview": {
     "title": "Explainable overview",
@@ -965,8 +966,42 @@
     "question": "Question",
     "samples": "Samples",
     "suggestions": "Priority suggestions and tasks",
-    "suggestionsEmpty": "No optimization tasks yet. Review answer evidence or collect more samples; diagnostic tasks will appear here later (up to 3).",
+    "suggestionsEmpty": "No optimization suggestions yet. Generate diagnostics from answer evidence or collect more samples.",
     "backOverview": "Back to overview",
-    "emptyAnswers": "No answers match the current filters."
+    "emptyAnswers": "No answers match the current filters.",
+    "viewTasks": "View optimization tasks"
+  },
+  "optimization": {
+    "title": "Optimization tasks",
+    "detailTitle": "Optimization task detail",
+    "description": "Turn answer and page evidence into a few retestable actions—no generic SEO lists.",
+    "noBrand": "Create a brand profile before viewing optimization tasks.",
+    "goBrands": "Go to brands",
+    "empty": "No open optimization tasks. Generate from the evidence overview or run a public page check first.",
+    "openTasks": "Open tasks",
+    "checkPagesTitle": "Public page checks",
+    "checkPagesHint": "Up to 5 URLs per run. Isolated fixtures are allowed; page publish/permission instructions are never executed, and checks do not claim crawl indexing outcomes.",
+    "urlsLabel": "Public URLs (one per line)",
+    "fixtureStatus": "Isolated fixture status",
+    "fixtureBody": "Isolated fixture body (optional)",
+    "runCheck": "Run check",
+    "backToList": "Back to tasks",
+    "findings": "Findings and evidence",
+    "assumption": "Assumption level",
+    "completion": "Completion criteria",
+    "retest": "Retest method",
+    "pageChecks": "Page check records",
+    "updateTitle": "Update status",
+    "status": "Status",
+    "completionNote": "Completion note / evidence",
+    "dismissReason": "Dismiss reason",
+    "reorderReason": "Reorder (rank + reason)",
+    "save": "Save",
+    "SESSION_REQUIRED": "Sign in first.",
+    "FORBIDDEN": "You cannot perform this action.",
+    "NOT_FOUND": "Resource not found or not accessible.",
+    "INVALID_INPUT": "Invalid input.",
+    "OPERATION_CONFLICT": "Operation conflict.",
+    "SERVICE_UNAVAILABLE": "Service temporarily unavailable."
   }
 }

@@ -242,12 +242,32 @@ export default async function EvidenceOverviewPage({
       )}
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">{t("suggestions")}</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">{t("suggestions")}</h2>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/dashboard/optimization?brandId=${overview.scope.brandId}`} prefetch={false}>
+              {t("viewTasks")}
+            </Link>
+          </Button>
+        </div>
         {overview.suggestions.length === 0 ? (
           <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">
             {t("suggestionsEmpty")}
           </p>
-        ) : null}
+        ) : (
+          <ul className="space-y-3">
+            {overview.suggestions.map((item) => (
+              <li key={item.id} className="rounded-xl border px-4 py-3 text-sm">
+                <Link href={item.href} prefetch={false} className="font-medium underline-offset-4 hover:underline">
+                  {item.title}
+                </Link>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {item.priorityBucket} · {item.status}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );
