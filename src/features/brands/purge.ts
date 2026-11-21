@@ -4,15 +4,22 @@ import { z } from "zod";
 import type { CacheStore } from "../../lib/cache/store.ts";
 import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
+import { createObjectStorage } from "../../lib/storage/index.ts";
 import { invalidateEvidenceOverview } from "../evidence/overview-cache.ts";
+import { listBrandObjectsToPurge, listPurgedObjectAudit, tombstoneBrandObjects } from "../stored-objects/dao.ts";
 import { brandIdSchema } from "./contracts.ts";
 import { BrandDao } from "./dao.ts";
 import {
   costCursorSchema, PurgeDao, purgeCursorSchema, purgeMarkerSchema, purgePageSize, purgeTargetSchema,
   type PurgeIssue, type PurgeMarker, type PurgeTarget,
 } from "./purge-dao.ts";
+import { brandPurgeSteps } from "./purge-steps.ts";
 
-const steps = ["contents", "exports", "costs"] as const;
+const steps = brandPurgeSteps;
+
+type ObjectByteDeleter = {
+  deleteObject(input: { key: string }): Promise<{ ok: true } | { ok: false }>;
+};
 const batchSchema = z.strictObject({
   limit: z.int().min(1).max(purgePageSize).default(purgePageSize),
   after: purgeCursorSchema.optional(),
@@ -31,6 +38,7 @@ const serverClock = () => new Date().toISOString();
 
 async function purgeBrand(
   db: DatabaseConnection, target: PurgeTarget, clock: () => string, marker?: PurgeMarker, cache?: CacheStore,
+  storage?: ObjectByteDeleter,
 ): Promise<PurgeResult> {
   try {
     const result = await db.transaction(async (tx): Promise<PurgeResult> => {
@@ -69,6 +77,23 @@ async function purgeBrand(
             const stage = new PurgeDao(connection);
             if (step === "contents") await stage.clearContents(target, brand?.createdAt ?? null);
             if (step === "exports") await stage.clearExports(removal);
+            if (step === "objects") {
+              const keys = await listBrandObjectsToPurge(connection, target.ownerId, target.brandId);
+              if (keys.length > 0) {
+                const deleter = storage ?? createObjectStorage();
+                for (const row of keys) {
+                  const deleted = await deleter.deleteObject({ key: row.objectKey });
+                  if (!deleted.ok) throw new Error("object-delete-failed");
+                }
+                const marked = await tombstoneBrandObjects(connection, {
+                  ownerId: target.ownerId,
+                  brandId: target.brandId,
+                  ids: keys.map((row) => row.id),
+                  deletedAt: now,
+                });
+                if (marked !== keys.length) throw new Error("object-delete-failed");
+              }
+            }
             return step === "costs" ? stage.clearLedger(target) : true;
           });
           if (!done) {
@@ -99,12 +124,14 @@ async function purgeBrand(
 }
 
 // Controlled server operations. None of these functions are HTTP handlers.
-export async function purgeDueBrands(db: DatabaseConnection, input: unknown, clock = serverClock) {
+export async function purgeDueBrands(
+  db: DatabaseConnection, input: unknown, clock = serverClock, storage?: ObjectByteDeleter,
+) {
   const { limit, after } = batchSchema.parse(input);
   const candidates = await new PurgeDao(db).due(clock(), limit + 1, after);
   const results: PurgeResult[] = [];
   for (const { ownerId, brandId } of candidates.slice(0, limit)) {
-    results.push(await purgeBrand(db, { ownerId, brandId }, clock));
+    results.push(await purgeBrand(db, { ownerId, brandId }, clock, undefined, undefined, storage));
   }
   const last = candidates[limit - 1];
   return {
@@ -113,8 +140,10 @@ export async function purgeDueBrands(db: DatabaseConnection, input: unknown, clo
   };
 }
 
-export function retryBrandPurge(db: DatabaseConnection, input: unknown, clock = serverClock, cache?: CacheStore) {
-  return purgeBrand(db, purgeTargetSchema.parse(input), clock, undefined, cache);
+export function retryBrandPurge(
+  db: DatabaseConnection, input: unknown, clock = serverClock, cache?: CacheStore, storage?: ObjectByteDeleter,
+) {
+  return purgeBrand(db, purgeTargetSchema.parse(input), clock, undefined, cache, storage);
 }
 
 export async function inspectBrandPurge(db: QueryConnection, input: unknown, after?: unknown) {
@@ -127,10 +156,12 @@ export async function inspectBrandPurge(db: QueryConnection, input: unknown, aft
   const rows = receipt.step === steps.length ? await dao.costPage(target, cursor) : [];
   const costs = rows.slice(0, purgePageSize);
   const last = costs.at(-1);
+  const objects = await listPurgedObjectAudit(db, target.ownerId, target.brandId);
   return {
     receipt,
     remaining: steps.slice(receipt.step),
     costs,
+    objects,
     next: rows.length > purgePageSize && last
       ? { kind: last.kind, reservationId: last.reservationId, attemptId: last.attemptId }
       : null,
@@ -143,11 +174,13 @@ export async function exportPurgeMarkers(db: QueryConnection, after?: unknown) {
   return { markers, next: rows.length > purgePageSize ? markers.at(-1)?.brandId ?? null : null };
 }
 
-export async function replayBrandPurges(db: DatabaseConnection, input: unknown, clock = serverClock) {
+export async function replayBrandPurges(
+  db: DatabaseConnection, input: unknown, clock = serverClock, storage?: ObjectByteDeleter,
+) {
   const results: PurgeResult[] = [];
   for (const marker of replaySchema.parse(input)) {
     const { brandId, ownerId } = marker;
-    results.push(await purgeBrand(db, { brandId, ownerId }, clock, marker));
+    results.push(await purgeBrand(db, { brandId, ownerId }, clock, marker, undefined, storage));
   }
   return results;
 }

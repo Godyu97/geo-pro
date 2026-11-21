@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
+import { brandPurgeIssues, brandPurgeSteps } from "../brands/purge-steps.ts";
 import { capabilityStatuses } from "../capabilities/contracts.ts";
 import { opaqueIdSchema } from "../maintenance/contracts.ts";
 import { runStatuses, slotStatuses } from "../monitoring/contracts.ts";
@@ -25,8 +26,8 @@ const attemptSchema = z.object({
 });
 const purgeSchema = z.object({
   brandId: opaqueIdSchema,
-  step: z.int().min(0).max(3),
-  issue: z.enum(["contents-failed", "exports-failed", "costs-failed", "unresolved-costs"]).nullable(),
+  step: z.int().min(0).max(brandPurgeSteps.length),
+  issue: z.enum(brandPurgeIssues).nullable(),
 });
 const frozenSchema = z.object({
   id: opaqueIdSchema,

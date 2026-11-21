@@ -6,6 +6,7 @@ import { brandLinkedExportMask } from "../data-exports/contracts.ts";
 import { opaqueIdSchema } from "../maintenance/contracts.ts";
 import { minorAmountSchema, quotaCurrencySchema, quotaKindSchema } from "../quotas/contracts.ts";
 import { brandIdSchema } from "./contracts.ts";
+import { brandPurgeIssues, brandPurgeSteps } from "./purge-steps.ts";
 
 export const purgePageSize = 25;
 export const purgeTimeSchema = z.iso.datetime({ precision: 3 });
@@ -17,8 +18,8 @@ export type PurgeMarker = z.infer<typeof purgeMarkerSchema>;
 export type PurgeCursor = z.infer<typeof purgeCursorSchema>;
 const purgeCandidateSchema = purgeTargetSchema.extend({ restoreUntil: purgeTimeSchema });
 const receiptSchema = purgeMarkerSchema.extend({
-  step: z.int().min(0).max(3),
-  issue: z.enum(["contents-failed", "exports-failed", "costs-failed", "unresolved-costs"]).nullable(),
+  step: z.int().min(0).max(brandPurgeSteps.length),
+  issue: z.enum(brandPurgeIssues).nullable(),
   completedAt: purgeTimeSchema.nullable(),
 });
 const costSchema = z.object({

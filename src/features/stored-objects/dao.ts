@@ -213,3 +213,67 @@ export async function listStoredObjectsForOwner(db: QueryConnection, input: {
   );
   return z.array(listedObjectSchema).parse(rows);
 }
+
+const purgeKeySchema = z.object({
+  id: brandIdSchema,
+  objectKey: z.string().min(1),
+});
+
+const purgedObjectAuditSchema = z.object({
+  id: brandIdSchema,
+  class: objectClassSchema,
+  byteSize: z.number().int().positive(),
+  sha256: sha256Schema,
+  createdAt: timeSchema,
+  deletedAt: timeSchema,
+}).strict();
+
+export type PurgedObjectAudit = z.infer<typeof purgedObjectAuditSchema>;
+
+// Pending rows still store a file name and key. They are cleared with ready and
+// failed rows so a purge cannot leave a customer file name behind.
+const purgeableStatuses = "('pending', 'ready', 'failed')";
+
+export async function listBrandObjectsToPurge(db: QueryConnection, ownerId: string, brandId: string) {
+  const rows = await queryWithParameters(
+    db,
+    `SELECT id, object_key AS "objectKey" FROM stored_object
+     WHERE owner_id = ? AND brand_id = ? AND status IN ${purgeableStatuses} AND object_key IS NOT NULL
+     ORDER BY created_at ASC, id ASC`,
+    [ownerId, brandId],
+  );
+  return z.array(purgeKeySchema).parse(rows);
+}
+
+export async function tombstoneBrandObjects(db: QueryConnection, input: {
+  ownerId: string;
+  brandId: string;
+  ids: readonly string[];
+  deletedAt: string;
+}) {
+  if (input.ids.length === 0) return 0;
+  const updated = await queryWithParameters(
+    db,
+    `UPDATE stored_object
+     SET status = 'tombstoned', file_name = NULL, object_key = NULL, deleted_at = ?
+     WHERE owner_id = ? AND brand_id = ? AND status IN ${purgeableStatuses}
+       AND id IN (${input.ids.map(() => "?").join(", ")})
+     RETURNING id`,
+    [input.deletedAt, input.ownerId, input.brandId, ...input.ids],
+  );
+  return updated.length;
+}
+
+export async function listPurgedObjectAudit(db: QueryConnection, ownerId: string, brandId: string) {
+  const rows = await queryWithParameters(
+    db,
+    `SELECT id, "class", byte_size AS "byteSize", sha256,
+       created_at AS "createdAt", deleted_at AS "deletedAt"
+     FROM stored_object
+     WHERE owner_id = ? AND brand_id = ? AND status = 'tombstoned'
+     ORDER BY created_at ASC, id ASC
+     LIMIT 500`,
+    [ownerId, brandId],
+  );
+  return z.array(purgedObjectAuditSchema).parse(rows);
+}

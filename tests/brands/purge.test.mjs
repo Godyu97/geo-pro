@@ -158,7 +158,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       assert.equal(competing[0].error, "RECOVERY_EXPIRED");
     }
     assert.equal(failing.receipt.issue, "exports-failed");
-    assert.deepEqual(failing.remaining, ["exports", "costs"]);
+    assert.deepEqual(failing.remaining, ["exports", "objects", "costs"]);
     assert.equal(await count(db, "user_data_export"), 2);
     assert.equal(await count(db, "brand_version"), 1);
     assert.equal(await count(db, "brand_draft"), 0);

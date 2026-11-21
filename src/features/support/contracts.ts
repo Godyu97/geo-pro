@@ -1,7 +1,10 @@
 import { z } from "zod";
+import { brandPurgeSteps } from "../brands/purge-steps.ts";
 import { capabilityStatuses } from "../capabilities/contracts.ts";
 import { opaqueIdSchema } from "../maintenance/contracts.ts";
 import { runStatuses } from "../monitoring/contracts.ts";
+
+export { brandPurgeSteps as deletionSteps };
 
 export const supportQuerySchema = z.strictObject({ operationId: opaqueIdSchema });
 export const supportFailures = [
@@ -11,8 +14,6 @@ export const supportFailures = [
 export const supportRecoveries = [
   "none", "monitoring.reconcile", "brands.purge.retry", "owner.recover", "capabilities.review",
 ] as const;
-export const deletionSteps = ["contents", "exports", "costs"] as const;
-
 const subjectSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 export const supportMatchSchema = z.strictObject({
   kind: z.enum(["monitoring-run", "brand-deletion", "capability"]),

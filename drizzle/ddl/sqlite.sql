@@ -130,9 +130,9 @@ CREATE TABLE `brand_purge` (
 	`step` integer NOT NULL,
 	`issue` text,
 	`completed_at` text,
-	CONSTRAINT "brand_purge_step_check" CHECK("brand_purge"."step" between 0 and 3
-    and (("brand_purge"."step" = 3 and "brand_purge"."completed_at" is not null and "brand_purge"."issue" is null)
-      or ("brand_purge"."step" < 3 and "brand_purge"."completed_at" is null)))
+	CONSTRAINT "brand_purge_step_check" CHECK("brand_purge"."step" between 0 and 4
+    and (("brand_purge"."step" = 4 and "brand_purge"."completed_at" is not null and "brand_purge"."issue" is null)
+      or ("brand_purge"."step" < 4 and "brand_purge"."completed_at" is null)))
 );
 
 CREATE TABLE `brand_purged_cost` (

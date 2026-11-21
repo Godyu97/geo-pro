@@ -66,9 +66,9 @@ export const brandPurge = sqliteTable("brand_purge", {
   issue: text("issue"),
   completedAt: text("completed_at"),
 }, (table) => [
-  check("brand_purge_step_check", sql`${table.step} between 0 and 3
-    and ((${table.step} = 3 and ${table.completedAt} is not null and ${table.issue} is null)
-      or (${table.step} < 3 and ${table.completedAt} is null))`),
+  check("brand_purge_step_check", sql`${table.step} between 0 and 4
+    and ((${table.step} = 4 and ${table.completedAt} is not null and ${table.issue} is null)
+      or (${table.step} < 4 and ${table.completedAt} is null))`),
 ]);
 
 export const brandPurgedCost = sqliteTable("brand_purged_cost", {

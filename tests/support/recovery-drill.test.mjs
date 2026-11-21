@@ -184,7 +184,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const deletion = await readSupportCase(db, supporter, purgeBrand, memoryCache(), false, clock);
     assert.equal(containsSecret(deletion), false);
     assert.equal(deletion.data.matches[0].failure, "deletion-incomplete");
-    assert.deepEqual(deletion.data.matches[0].remaining, ["exports", "costs"]);
+    assert.deepEqual(deletion.data.matches[0].remaining, ["exports", "objects", "costs"]);
     assert.equal(deletion.data.matches[0].recovery, "brands.purge.retry");
 
     const reconciled = await reconcileMonitoringCost(db, owner, accepted.id, unknownAttempt.id, 6, clock);

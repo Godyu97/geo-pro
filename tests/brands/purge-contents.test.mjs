@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { initialBrandFields } from "../../src/features/brands/contracts.ts";
+import { brandPurgeSteps } from "../../src/features/brands/purge-steps.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { purgeDueBrands, retryBrandPurge } from "../../src/features/brands/purge.ts";
 import { prepareExport, readExportFile } from "../../src/features/data-exports/service.ts";
@@ -77,7 +78,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     ]) assert.equal(Number((await db.query(`SELECT count(*) AS n FROM ${table}`))[0].n), 0, table);
     assert.equal(await readExportFile(db, ownerId, exported.id, true), null);
     const receipt = await sql("SELECT step, issue FROM brand_purge WHERE brand_id = ?", [brandId]);
-    assert.equal(receipt[0].step, 3);
+    assert.equal(receipt[0].step, brandPurgeSteps.length);
     assert.equal(receipt[0].issue, null);
     assert.equal((await retryBrandPurge(db, { ownerId, brandId }, () => dueAt)).status, "cleared");
     assert.equal(Number((await db.query("SELECT count(*) AS n FROM brand_purged_cost"))[0].n), 0);
