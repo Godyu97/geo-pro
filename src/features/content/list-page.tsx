@@ -4,7 +4,7 @@ import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
 import { brandFixtureOrigin, brandIntakeOrigin } from "../brands/intake";
-import { ApplyMockContentButton } from "@/features/functional-mock/run-buttons";
+import { ApplyMockContentButton, ApplyMockPublicationButton } from "@/features/functional-mock/run-buttons";
 import { BrandDao } from "../brands/dao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,6 +79,13 @@ export default async function ContentListPage({
               pendingLabel={t("mockContentPending")}
               doneLabel={t("mockContentDone")}
               failedLabel={t("mockContentFailed")}
+            />
+            <ApplyMockPublicationButton
+              brandId={brandId}
+              label={t("applyMockPublication")}
+              pendingLabel={t("mockPublicationPending")}
+              doneLabel={t("mockPublicationDone")}
+              failedLabel={t("mockPublicationFailed")}
             />
           </div>
         )}
