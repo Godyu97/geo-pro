@@ -169,6 +169,13 @@
       "when": 1795198885184,
       "tag": "0023_foamy_sleepwalker",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795266045142,
+      "tag": "0024_cold_maria_hill",
+      "breakpoints": true
     }
   ]
 }
