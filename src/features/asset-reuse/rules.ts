@@ -1,8 +1,12 @@
 export type ImportPage = { page: number | null; text: string | null };
 
-const maxBytes = 10 * 1024 * 1024;
-const maxChars = 50_000;
-const maxFiles = 10;
+export const sourceImportLimits = {
+  maxBytes: 10 * 1024 * 1024,
+  maxChars: 50_000,
+  maxFiles: 10,
+} as const;
+
+const { maxBytes, maxChars, maxFiles } = sourceImportLimits;
 
 export function importBatch(files: readonly { name: string; bytes: number; chars: number; encrypted: boolean; pages: readonly ImportPage[] }[]) {
   return files.slice(0, maxFiles).map((file) => {

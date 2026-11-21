@@ -29,6 +29,7 @@ import {
   type ReadStoredObjectInput,
   type SaveStoredObjectInput,
 } from "./contracts.ts";
+import { sourceOriginalMayDownload } from "../asset-reuse/dao.ts";
 import {
   claimMutableObject,
   insertPendingObject,
@@ -172,6 +173,7 @@ async function openReadyObject(db: QueryConnection, actorId: string, objectId: s
   if (!row || row.status !== "ready" || !row.objectKey || !row.fileName) return failure("not-found");
   if (row.class === "owned-export" && !await ownedExportIsCurrent(db, actorId, row.id)) return failure("not-found");
   if (row.brandId !== null && !await brandIsOpen(db, actorId, row.brandId)) return failure("not-found");
+  if (row.class === "source-original" && !await sourceOriginalMayDownload(db, actorId, row.id)) return failure("not-found");
   return row;
 }
 

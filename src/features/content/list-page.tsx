@@ -70,6 +70,11 @@ export default async function ContentListPage({
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+        <p className="mt-3 text-sm">
+          <Link href={`/dashboard/content/sources?brandId=${brandId}`} prefetch={false} className="underline underline-offset-4">
+            {t("sourcesLink")}
+          </Link>
+        </p>
         {mockLane && (
           <div className="mt-4 space-y-2">
             <p className="text-sm text-muted-foreground">{t("mockContentNote")}</p>

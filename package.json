@@ -46,6 +46,7 @@
     "test:reports": "node --conditions=react-server --test tests/reports/*.test.mjs",
     "test:competitors": "node --conditions=react-server --test tests/competitors/*.test.mjs",
     "test:continued-operations": "node --conditions=react-server --test tests/continued-operations/*.test.mjs",
+    "test:asset-reuse": "node --conditions=react-server --test tests/asset-reuse/*.test.mjs",
     "test:query-plans": "node --conditions=react-server --test tests/db/*.test.mjs",
     "verify:dual-db": "node --conditions=react-server scripts/verify-dual-databases.mjs",
     "env:check": "node --conditions=react-server scripts/check-dev-env.mjs"
