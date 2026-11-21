@@ -41,6 +41,7 @@
     "check:i18n": "node scripts/check-i18n.mjs",
     "test:i18n": "node --test tests/i18n/*.test.mjs",
     "test:ai": "node --conditions=react-server --test tests/ai/*.test.mjs tests/auth/*.test.mjs",
+    "test:storage": "node --conditions=react-server --test tests/storage/*.test.mjs",
     "test:e2e": "playwright test",
     "test:reports": "node --conditions=react-server --test tests/reports/*.test.mjs",
     "test:competitors": "node --conditions=react-server --test tests/competitors/*.test.mjs",
@@ -50,6 +51,8 @@
     "env:check": "node --conditions=react-server scripts/check-dev-env.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1175.0",
+    "@aws-sdk/s3-request-presigner": "3.1175.0",
     "@better-auth/drizzle-adapter": "1.7.25",
     "@hookform/resolvers": "^7.0.6",
     "@next/env": "16.4.6",
