@@ -55,3 +55,10 @@ export function brandIntakeOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv 
   if (!app || !hostMatches(headers, app)) return null;
   return { mode: "real", origin: app.origin };
 }
+
+/** Fixture and functional-mock material editors. Real intake stays on its own gate. */
+export function brandMaterialOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv = process.env) {
+  const intake = brandIntakeOrigin(headers, env);
+  if (intake?.mode === "fixture" || intake?.mode === "mock") return intake.origin;
+  return null;
+}

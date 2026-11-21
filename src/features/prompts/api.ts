@@ -4,7 +4,7 @@ import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { brandIdSchema } from "@/features/brands/contracts";
-import { brandFixtureOrigin } from "@/features/brands/intake";
+import { brandMaterialOrigin } from "@/features/brands/intake";
 import { executePromptCommand, promptUnavailable, readPromptWorkspace } from "./service";
 import { workspaceParams } from "./params";
 
@@ -18,7 +18,7 @@ async function access(request: Request, context: Context) {
   const session = await getSessionState();
   if (session.status === "anonymous") return json({ error: "signIn" }, 401);
   if (session.status !== "authenticated") return json(promptUnavailable(), 503);
-  const origin = brandFixtureOrigin(request.headers);
+  const origin = brandMaterialOrigin(request.headers);
   if (!origin) return json({ error: "closed" }, 403);
   if (request.method === "POST" && origin !== request.headers.get("origin")) return json({ error: "forbidden" }, 403);
   const id = brandIdSchema.safeParse((await context.params).id);
