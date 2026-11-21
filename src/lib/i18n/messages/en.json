@@ -1251,7 +1251,12 @@
     "INVALID_INPUT": "Invalid input. Check and retry.",
     "WINDOW_NOT_DUE": "The observation window is not due yet; only progress is available.",
     "LOOP_NOT_READY": "A verified effective time is required before creating a business-loop D+7 todo.",
-    "CONFLICT": "Conflict. Refresh and retry."
+    "CONFLICT": "Conflict. Refresh and retry.",
+    "mockRetestNote": "Functional mock compares two windows of three same-scope synthetic samples and stores an immutable snapshot. The numbers are not monitoring and do not complete a business loop.",
+    "applyMockRetest": "Create a mock same-scope retest",
+    "mockRetestPending": "Writing the synthetic windows…",
+    "mockRetestDone": "A labeled synthetic snapshot was stored. This is not a real before/after sample.",
+    "mockRetestFailed": "The mock retest did not finish."
   },
   "competitorAnalysis": {
     "title": "Competitors and sources",

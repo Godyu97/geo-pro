@@ -1251,7 +1251,12 @@
     "INVALID_INPUT": "输入无效，请检查后重试。",
     "WINDOW_NOT_DUE": "观察窗口尚未到期，当前仅显示进度。",
     "LOOP_NOT_READY": "缺少核验生效点，无法创建经营闭环 D+7 待办。",
-    "CONFLICT": "操作冲突，请刷新后重试。"
+    "CONFLICT": "操作冲突，请刷新后重试。",
+    "mockRetestNote": "功能性 mock 用三道相同口径的合成样本比较前后窗口，并保存不可变快照。数字不是真实监测，也不完成经营闭环。",
+    "applyMockRetest": "生成 mock 同口径复测",
+    "mockRetestPending": "正在写入合成窗口…",
+    "mockRetestDone": "已保存标明的合成快照。这不是真实前后采样。",
+    "mockRetestFailed": "mock 复测没有完成。"
   },
   "competitorAnalysis": {
     "title": "竞品与来源",

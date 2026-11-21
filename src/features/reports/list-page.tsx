@@ -1,10 +1,13 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "@/features/brands/dao";
+import { brandIntakeOrigin } from "@/features/brands/intake";
+import { ApplyMockRetestButton } from "@/features/functional-mock/run-buttons";
 import { listReports } from "./commands";
 import type { ReportError } from "./contracts";
 
@@ -44,6 +47,7 @@ export default async function ReportsListPage({
   }
 
   const result = await listReports(getConnection(), session.user.id, brandId);
+  const mockLane = brandIntakeOrigin(await headers())?.mode === "mock";
   if ("error" in result) {
     const code = result.error as ReportError;
     return (
@@ -59,6 +63,18 @@ export default async function ReportsListPage({
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold">{t("title")}</h1>
         <p className="text-sm text-muted-foreground">{t("description")}</p>
+        {mockLane && (
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">{t("mockRetestNote")}</p>
+            <ApplyMockRetestButton
+              brandId={brandId}
+              label={t("applyMockRetest")}
+              pendingLabel={t("mockRetestPending")}
+              doneLabel={t("mockRetestDone")}
+              failedLabel={t("mockRetestFailed")}
+            />
+          </div>
+        )}
       </header>
 
       <section className="space-y-3" aria-labelledby="retests-heading">
