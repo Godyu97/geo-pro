@@ -12,6 +12,8 @@
 
 SQLite3/PostgreSQL 已覆盖账号、维护授权、品牌建档及本人数据导出。其余业务 DAO 与全部缓存仍待按任务实施，完整 M0 保持未完成。 [数据库部署说明](architecture/database-deployment.md) · [B08 维护授权](tasks/B08-maintenance-access.md) · [B04 品牌建档](tasks/B04-brand-onboarding.md) · [B05 本人数据导出](tasks/B05-owned-data-export.md)
 
+用户业务文件的存放合同见 [对象存储 PRD](oss/01-对象存储需求-PRD.md) 与 [对象存储 SPEC](oss/02-对象存储功能规格-SPEC.md)。本地 SeaweedFS 与阿里云 OSS 共用 S3 API；Next.js 服务端统一使用 `@aws-sdk/client-s3`。该合同不增加 26 项功能计数，代码尚未接入。
+
 首期界面支持 `zh-CN` / `en`，默认 `zh-CN`；[公共多语言合同 ui-i18n-v1](04-产品功能规格-SPEC.md#interface-locales) 是 M0 起所有界面任务的共同输入，[Web 多语言规范](architecture/i18n.md) 与 [双语言兼容矩阵](08-验收场景与样例.md#i18n-checks) 定义设计和验收。它独立于采样语言、币种与统计时区，不增加 26 项功能的计数；现有官网、账号与工作台壳层已接入，后续业务页面随各任务交付。
 
 产品内 AI 的权限以 PRD/SPEC 为准，不能自行批准事实、内容或外部动作；执行开发任务的 Coding Agent 从根目录 `AGENTS.md` 按任务加载治理、工作流与项目事实，两种角色分别遵守各自边界。

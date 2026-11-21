@@ -16,6 +16,7 @@ GeoPro 面向中国大陆品牌经营者，将 AI 中的品牌观察连接到真
 | M1 / M2 | [M1 的 8 项任务](../tasks/M1.md)：持续经营与团队；[M2 的 6 项任务](../tasks/M2.md)：代理交付、授权连接与受控助理 | 全部待实施，先满足前级门禁和场景条件 |
 | 数据工程要求 | [数据访问与缓存](data-access.md)：SQLite3 / pg DAO；memory / Redis（默认）；批量 SQL；精简表结构与索引 | 已交付业务 DAO 按任务适配双库。证据概览和支持定位使用统一缓存，默认 Redis。只有 `GEO_CACHE_DRIVER=memory` 才使用进程内缓存；Redis 未配置或不可达时回源数据库 |
 | 数据库部署材料 | [全量 DDL 与部署](database-deployment.md)：随 Schema/migration 更新完整表、约束和索引 | PostgreSQL / SQLite 均有独立迁移、全量 DDL 与检查 |
+| 对象存储 | [对象存储 PRD](../oss/01-对象存储需求-PRD.md) 与 [对象存储 SPEC](../oss/02-对象存储功能规格-SPEC.md)：S3 API，兼容本地 SeaweedFS 与阿里云 OSS；Next.js 服务端统一 `@aws-sdk/client-s3` | 合同已编写。业务字节仍在数据库内联字段中，客户端尚未接入 |
 
 产品对象是业务语义，不直接决定表数量。工程要求、当前事实与实际验收分别记录；详细需求追溯仍由 [追溯矩阵](../06-需求追溯矩阵.md) 和 `product-map.json` 维护。
 
