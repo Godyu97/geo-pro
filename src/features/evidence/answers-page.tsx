@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
+import { brandIntakeOrigin } from "@/features/brands/intake";
+import { ApplyMockEvidenceButton } from "@/features/functional-mock/run-buttons";
 import { BrandDao } from "../brands/dao";
 import { Button } from "@/components/ui/button";
 import { readEvidenceOverview } from "./overview-commands";
@@ -24,6 +27,7 @@ export default async function EvidenceAnswersPage({
   const connection = getConnection();
   const brands = new BrandDao(connection);
   const active = await brands.active(session.user.id);
+  const mockLane = brandIntakeOrigin(await headers())?.mode === "mock";
 
   const brandId = typeof params.brandId === "string" ? params.brandId : active?.id;
   const sourceMode = typeof params.sourceMode === "string" ? params.sourceMode : "model_api";
@@ -66,6 +70,18 @@ export default async function EvidenceAnswersPage({
           </Button>
         </div>
       </div>
+      {mockLane && (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">{te("mockEvidenceNote")}</p>
+          <ApplyMockEvidenceButton
+            brandId={brandId}
+            label={te("applyMockEvidence")}
+            pendingLabel={te("mockEvidencePending")}
+            doneLabel={te("mockEvidenceDone")}
+            failedLabel={te("mockEvidenceFailed")}
+          />
+        </div>
+      )}
 
       {overview.answers.length === 0 ? (
         <p className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">

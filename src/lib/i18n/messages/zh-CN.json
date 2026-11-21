@@ -958,6 +958,11 @@
   "evidence": {
     "title": "回答证据",
     "description": "查看不可变原文、引用完整性与独立判定，并可纠正误判。",
+    "mockEvidenceNote": "功能性 mock 会把带 [FUNCTIONAL-MOCK] 的合成回答和一条合成消费者存证写入现有证据合同。这不是真实供应商原文，也不是真实走查。",
+    "applyMockEvidence": "写入 mock 回答证据",
+    "mockEvidencePending": "正在写入标明的 mock 证据…",
+    "mockEvidenceDone": "mock 证据已写入。这不是真实监测或真实走查。",
+    "mockEvidenceFailed": "mock 证据没有写入。请先执行 mock 采样，或确认品牌仍可写。",
     "openEvidence": "查看证据",
     "ingest": "保存为证据",
     "ingesting": "正在保存…",

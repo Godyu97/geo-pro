@@ -10,7 +10,7 @@ import { CapabilityRetryButton } from "../capabilities/retry-button";
 import { IngestEvidenceButton } from "../evidence/ingest-button";
 import { EvidenceDao } from "../evidence/dao";
 import { brandIntakeOrigin } from "@/features/brands/intake";
-import { ExecuteMockRunButton } from "@/features/functional-mock/run-buttons";
+import { ApplyMockEvidenceButton, ExecuteMockRunButton } from "@/features/functional-mock/run-buttons";
 import { formatMinorUnits } from "./format";
 import { RunControls } from "./run-controls";
 import { readOwnedRun } from "./service";
@@ -101,6 +101,13 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
             pendingLabel={t("executeMockPending")}
             doneLabel={t("executeMockDone")}
             failedLabel={t("executeMockFailed")}
+          />
+          <ApplyMockEvidenceButton
+            brandId={result.brandId}
+            label={te("applyMockEvidence")}
+            pendingLabel={te("mockEvidencePending")}
+            doneLabel={te("mockEvidenceDone")}
+            failedLabel={te("mockEvidenceFailed")}
           />
         </div>
       )}

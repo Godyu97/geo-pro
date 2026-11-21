@@ -958,6 +958,11 @@
   "evidence": {
     "title": "Answer evidence",
     "description": "Inspect immutable answer text, citation completeness, and independent labels, and correct misjudgments.",
+    "mockEvidenceNote": "Functional mock writes synthetic answers marked [FUNCTIONAL-MOCK] and one synthetic consumer record into the existing evidence contract. This is not provider text and not a real walkthrough.",
+    "applyMockEvidence": "Write mock answer evidence",
+    "mockEvidencePending": "Writing labeled mock evidence…",
+    "mockEvidenceDone": "Mock evidence was saved. This is not real monitoring or a real walkthrough.",
+    "mockEvidenceFailed": "Mock evidence was not saved. Run mock sampling first, or confirm the brand is still writable.",
     "openEvidence": "View evidence",
     "ingest": "Save as evidence",
     "ingesting": "Saving…",

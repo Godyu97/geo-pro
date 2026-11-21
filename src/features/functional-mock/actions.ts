@@ -7,6 +7,7 @@ import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { applyMockChannels } from "./apply-channels";
 import { applyMockMaterials } from "./apply-materials";
+import { applyMockEvidence } from "./apply-evidence";
 import { applyMockSamplingQuota } from "./apply-run";
 
 export async function applyMockMaterialsAction(brandId: string) {
@@ -41,6 +42,19 @@ export async function applyMockSamplingQuotaAction(brandId: string) {
   const { user } = await requireSession();
   try {
     return await applyMockSamplingQuota(getConnection(), user.id, id.data);
+  } catch {
+    return { ok: false as const, error: "unavailable" };
+  }
+}
+
+export async function applyMockEvidenceAction(brandId: string) {
+  const intake = brandIntakeOrigin(await headers());
+  if (intake?.mode !== "mock") return { ok: false as const, error: "closed" };
+  const id = brandIdSchema.safeParse(brandId);
+  if (!id.success) return { ok: false as const, error: "invalid" };
+  const { user } = await requireSession();
+  try {
+    return await applyMockEvidence(getConnection(), user.id, id.data);
   } catch {
     return { ok: false as const, error: "unavailable" };
   }
