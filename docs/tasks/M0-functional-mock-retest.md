@@ -2,6 +2,8 @@
 
 [T-M0-12](M0.md#t-m0-12) 保持未勾选。
 
+提交：`0970f37bc75c008857c17201eae5784b621b1319`
+
 ## 做了什么
 
 - mock 模式调用现有 `requestRetest` 与 `generateReport`。

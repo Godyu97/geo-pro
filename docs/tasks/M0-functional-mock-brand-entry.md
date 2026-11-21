@@ -2,6 +2,8 @@
 
 [T-M0-01](M0.md#t-m0-01) 保持未勾选。本文只记录标明的 mock 路径，不是 AC-M0-01 的真实验收。
 
+提交：`0d23fc67eafc94ef4b878fe2cbd4df5319077d3e`
+
 ## 做了什么
 
 - `GEO_FUNCTIONAL_MOCK=1` 且请求主机与 `BETTER_AUTH_URL` 一致时，品牌读写进入 `mock` 模式。回环上的 `GEO_BRANDS_FIXTURE=1` 仍然优先，正式五项记录仍然单独判断。

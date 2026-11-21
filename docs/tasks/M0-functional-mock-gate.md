@@ -2,6 +2,8 @@
 
 [T-M0-GATE](M0.md#t-m0-gate) 保持未勾选。
 
+提交：`862b9c1b6d834967b069aedee381a6858f4cea86`
+
 ## 做了什么
 
 - mock 模式的报告页调用现有 `m0StageGate`。

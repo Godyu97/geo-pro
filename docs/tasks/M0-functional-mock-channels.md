@@ -2,6 +2,8 @@
 
 [T-M0-04](M0.md#t-m0-04) 保持未勾选。
 
+提交：`1e906a2e7344644e989c794c14535772c7428ed4`
+
 ## 做了什么
 
 - mock 模式下，工作台可以写入两条通道：`model_api` 与 `consumer_ui`，`vendorId` 为 `functional-mock`。
