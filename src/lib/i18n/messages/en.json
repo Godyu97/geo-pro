@@ -1256,7 +1256,17 @@
     "applyMockRetest": "Create a mock same-scope retest",
     "mockRetestPending": "Writing the synthetic windows…",
     "mockRetestDone": "A labeled synthetic snapshot was stored. This is not a real before/after sample.",
-    "mockRetestFailed": "The mock retest did not finish."
+    "mockRetestFailed": "The mock retest did not finish.",
+    "mockGateTitle": "Stage-gate trial",
+    "mockGateNote": "This calls the existing gate function. The inputs are labeled zeros, not pilot counts, and the result is not acceptance.",
+    "mockGateInputs": "Real brand: no. Official answers: 0. Consumer answers: 0. Independent completions: 0.",
+    "mockGatePassed": "The function returned pass. That is still not stage acceptance.",
+    "mockGateRefused": "The function returned not passed.",
+    "mockGateMissRealBrand": "No real brand",
+    "mockGateMissOfficial": "Fewer than 20 official answers",
+    "mockGateMissConsumer": "Fewer than 6 consumer answers",
+    "mockGateMissWalkthrough": "Fewer than 4 independent completions",
+    "mockGateContract": "The function thresholds are unchanged. The product contract still requires five real walkthrough users. T-M0-GATE stays unchecked."
   },
   "competitorAnalysis": {
     "title": "Competitors and sources",

@@ -1256,7 +1256,17 @@
     "applyMockRetest": "生成 mock 同口径复测",
     "mockRetestPending": "正在写入合成窗口…",
     "mockRetestDone": "已保存标明的合成快照。这不是真实前后采样。",
-    "mockRetestFailed": "mock 复测没有完成。"
+    "mockRetestFailed": "mock 复测没有完成。",
+    "mockGateTitle": "阶段门禁试算",
+    "mockGateNote": "这里调用现有门禁函数。输入是标明的 0，不是试点计数，结果也不能当作验收。",
+    "mockGateInputs": "真实品牌：否。官方回答：0。消费者回答：0。独立完成：0。",
+    "mockGatePassed": "函数返回通过。这仍不是阶段验收。",
+    "mockGateRefused": "函数返回未通过。",
+    "mockGateMissRealBrand": "缺少真实品牌",
+    "mockGateMissOfficial": "官方回答少于 20",
+    "mockGateMissConsumer": "消费者回答少于 6",
+    "mockGateMissWalkthrough": "独立完成数少于 4",
+    "mockGateContract": "函数阈值保持不变。产品合同仍要求 5 名真实用户走查。本次不勾选 T-M0-GATE。"
   },
   "competitorAnalysis": {
     "title": "竞品与来源",

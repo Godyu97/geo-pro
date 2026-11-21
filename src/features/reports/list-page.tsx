@@ -9,6 +9,7 @@ import { BrandDao } from "@/features/brands/dao";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockRetestButton } from "@/features/functional-mock/run-buttons";
 import { listReports } from "./commands";
+import { m0StageGate } from "./m0-stage-gate";
 import type { ReportError } from "./contracts";
 
 export async function generateMetadata() {
@@ -48,6 +49,18 @@ export default async function ReportsListPage({
 
   const result = await listReports(getConnection(), session.user.id, brandId);
   const mockLane = brandIntakeOrigin(await headers())?.mode === "mock";
+  const mockGate = m0StageGate({
+    realBrand: false,
+    officialAnswers: 0,
+    consumerAnswers: 0,
+    independentCompletions: 0,
+  });
+  const mockGateLabels: Record<string, string> = {
+    real_brand: t("mockGateMissRealBrand"),
+    official_api: t("mockGateMissOfficial"),
+    consumer_manual: t("mockGateMissConsumer"),
+    walkthrough: t("mockGateMissWalkthrough"),
+  };
   if ("error" in result) {
     const code = result.error as ReportError;
     return (
@@ -132,6 +145,18 @@ export default async function ReportsListPage({
           </ul>
         )}
       </section>
+      {mockLane && (
+        <section className="space-y-3" aria-labelledby="mock-gate-heading">
+          <h2 id="mock-gate-heading" className="text-lg font-medium">{t("mockGateTitle")}</h2>
+          <p className="text-sm text-muted-foreground">{t("mockGateNote")}</p>
+          <p className="text-sm">{t("mockGateInputs")}</p>
+          <p className="text-sm font-medium">{mockGate.passed ? t("mockGatePassed") : t("mockGateRefused")}</p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            {mockGate.missing.map((code) => <li key={code}>{mockGateLabels[code] ?? code}</li>)}
+          </ul>
+          <p className="text-sm text-muted-foreground">{t("mockGateContract")}</p>
+        </section>
+      )}
     </main>
   );
 }
