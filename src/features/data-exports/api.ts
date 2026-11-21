@@ -61,6 +61,7 @@ export async function downloadExportResponse(request: Request, id: string) {
   try {
     const file = await readExportFile(getConnection(), session.session.user.id, parsed.data, Boolean(brandFixtureOrigin(request.headers)));
     if (!file) return failure("NOT_FOUND");
+    if ("error" in file) return failure(file.error);
 
     const { summary, body } = file;
     return new Response(body, {

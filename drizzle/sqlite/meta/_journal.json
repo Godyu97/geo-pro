@@ -183,6 +183,13 @@
       "when": 1795268868062,
       "tag": "0025_violet_adam_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1795270772671,
+      "tag": "0026_numerous_rictor",
+      "breakpoints": true
     }
   ]
 }

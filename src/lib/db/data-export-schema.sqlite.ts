@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { check, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { user } from "./auth-schema.sqlite";
 
 export const userDataExport = sqliteTable("user_data_export", {
@@ -10,8 +10,16 @@ export const userDataExport = sqliteTable("user_data_export", {
   included: integer("included").notNull(),
   fingerprint: text("fingerprint"),
   createdAt: text("created_at").notNull(),
+  // Null keeps a historical export readable from the database. New files point at one immutable object.
+  objectId: text("object_id"),
 }, (table) => [
+  uniqueIndex("user_data_export_object_uidx").on(table.objectId).where(sql`${table.objectId} is not null`),
   check("user_data_export_locale_check", sql`${table.locale} in ('zh-CN', 'en')`),
   check("user_data_export_scope_check", sql`${table.requested} between 1 and 127 and ${table.included} between 0 and 127 and (${table.included} & ${table.requested}) = ${table.included}`),
-  check("user_data_export_fingerprint_check", sql`(${table.included} = 0 and ${table.fingerprint} is null) or (${table.included} <> 0 and ${table.fingerprint} is not null and length(${table.fingerprint}) = 64)`),
+  check("user_data_export_fingerprint_check", sql`(
+      ${table.included} = 0 and ${table.fingerprint} is null and ${table.objectId} is null
+    ) or (
+      ${table.included} <> 0 and ${table.fingerprint} is not null and length(${table.fingerprint}) = 64
+      and (${table.objectId} is null or length(${table.objectId}) = 36)
+    )`),
 ]);

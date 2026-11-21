@@ -92,6 +92,15 @@ function brandScope(brandId: string | null) {
     : { sql: "brand_id = ?", values: [brandId] };
 }
 
+export async function ownedExportIsCurrent(db: QueryConnection, ownerId: string, objectId: string) {
+  const rows = await queryWithParameters(
+    db,
+    "SELECT id FROM user_data_export WHERE owner_id = ? AND object_id = ?",
+    [ownerId, objectId],
+  );
+  return rows.length === 1;
+}
+
 export async function loadOwnedObject(db: QueryConnection, ownerId: string, id: string) {
   const [row] = await queryWithParameters(
     db,

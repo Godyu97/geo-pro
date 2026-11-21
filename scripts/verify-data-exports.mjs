@@ -2,12 +2,44 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import { resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { initialBrandFields } from "../src/features/brands/contracts.ts";
 import { exportFileName } from "../src/features/data-exports/contracts.ts";
 import { queryWithParameters } from "../src/lib/db/connection.ts";
 import { testDatabase } from "../tests/maintenance/helpers.mjs";
+
+function createExportBucket() {
+  const objects = new Map();
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (req.method === "PUT") {
+      objects.set(url.pathname, Buffer.concat(chunks));
+      res.writeHead(200, { etag: '"stored"' });
+      res.end();
+      return;
+    }
+    if (req.method === "DELETE") {
+      objects.delete(url.pathname);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    const stored = objects.get(url.pathname);
+    if (!stored || req.method !== "GET") {
+      res.writeHead(404, { "content-type": "application/xml" });
+      res.end("<?xml version=\"1.0\"?><Error><Code>NoSuchKey</Code></Error>");
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json", "content-length": String(stored.length) });
+    res.end(stored);
+  });
+  return server;
+}
 
 const baseURL = "http://localhost:3106";
 const exportsPath = "/api/data-exports";
@@ -76,6 +108,7 @@ async function readFile(owner, result) {
   assert.equal(filename, exportFileName(result));
   if (result.locale === "zh-CN") assert.match(filename, /个人数据/);
   const text = new TextDecoder("utf-8", { fatal: true }).decode(await response.arrayBuffer());
+  assert.equal(text.includes("X-Amz-"), false);
   const { schemaVersion, unavailable, data, ...summary } = JSON.parse(text);
   assert.equal(schemaVersion, 1);
   assert.deepEqual(summary, result);
@@ -102,6 +135,8 @@ async function verifyEnabled(db, owner) {
   const data = await readFile(owner, ready);
   assert.deepEqual(data.profile, { name, email: owner.email });
   assert.deepEqual(data.brands.versions.map(({ fields }) => fields), [fields]);
+  const [stored] = await queryWithParameters(db, `SELECT object_id AS "objectId" FROM user_data_export WHERE owner_id = ?`, [owner.id]);
+  assert.match(stored.objectId, /^[0-9a-f-]{36}$/);
   await assertError(await request(exportsPath, { actor: owner, data: firstInput }), 409, "CONFLICT");
   await assertError(await download(ready.id), 401, "SESSION_REQUIRED");
   await assertError(await download(ready.id, { cookie: "better-auth.session_token=invalid-fixture" }), 401, "SESSION_REQUIRED");
@@ -118,13 +153,23 @@ async function verifyEnabled(db, owner) {
 
   phase = `${db.kind}: loss of ownership, deletion and partial failure`;
   await queryWithParameters(db, "UPDATE brand SET owner_id = ? WHERE id = ?", [other.id, brand.id]);
-  await assertError(await download(ready.id, { actor: owner }), 404, "NOT_FOUND");
+  const drifted = await assertError(await download(ready.id, { actor: owner }), 404, "NOT_FOUND");
+  const driftedObject = await assertError(await download(stored.objectId, { actor: owner }), 404, "NOT_FOUND");
+  const unknown = await assertError(await download(randomUUID(), { actor: owner }), 404, "NOT_FOUND");
+  assert.deepEqual(drifted, driftedObject);
+  assert.deepEqual(drifted, unknown);
+  assert.equal(JSON.stringify(drifted).includes(name), false);
   await assertError(await download(ready.id, { actor: other }), 404, "NOT_FOUND");
   const otherExport = await prepare(other, ["brands"], null, "en");
   assert.equal((await readFile(other, otherExport)).brands.versions.length, 1);
   await queryWithParameters(db, "DELETE FROM brand WHERE id = ?", [brand.id]);
   await assertError(await download(otherExport.id, { actor: other }), 404, "NOT_FOUND");
   const empty = await prepare(owner, ["brands"], ready.id);
+  const [replaced] = await queryWithParameters(db, `SELECT object_id AS "objectId" FROM user_data_export WHERE owner_id = ?`, [owner.id]);
+  assert.notEqual(replaced.objectId, stored.objectId);
+  const staleObject = await assertError(await download(stored.objectId, { actor: owner }), 404, "NOT_FOUND");
+  assert.deepEqual(staleObject, await assertError(await download(ready.id, { actor: owner }), 404, "NOT_FOUND"));
+  assert.equal(JSON.stringify(staleObject).includes(name), false);
   assert.deepEqual(await readFile(owner, empty), { brands: { versions: [], drafts: [] } });
 
   await db.query("ALTER TABLE brand_version RENAME TO brand_test_unavailable");
@@ -146,13 +191,20 @@ async function verifyEnabled(db, owner) {
   await assertError(await download(revocable.id, { actor: other }), 401, "SESSION_REQUIRED");
 }
 
-async function verify(kind, enabled) {
+async function verify(kind, enabled, storage) {
   const fixture = await testDatabase(kind);
   const child = spawn(process.execPath, [resolve("node_modules/next/dist/bin/next"), "start", "--hostname", "localhost", "--port", "3106"], {
     env: {
       ...process.env, ...fixture.env, BETTER_AUTH_URL: baseURL,
       BETTER_AUTH_SECRET: randomBytes(48).toString("base64url"), GEO_BRANDS_FIXTURE: enabled ? "1" : "",
       GEO_FUNCTIONAL_MOCK: "", GEO_BRAND_REAL_INTAKE: "",
+      S3_ENDPOINT: storage.endpoint,
+      S3_ENDPOINT_BROWSER: "",
+      S3_REGION: "us-east-1",
+      S3_BUCKET: "app-files",
+      S3_ACCESS_KEY_ID: "local-app",
+      S3_SECRET_ACCESS_KEY: "s3-secret-not-for-logs",
+      S3_FORCE_PATH_STYLE: "true",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -194,11 +246,17 @@ async function verify(kind, enabled) {
   }
 }
 
+const bucket = createExportBucket();
+bucket.listen(0, "127.0.0.1");
+await once(bucket, "listening");
+const bucketPort = bucket.address().port;
 try {
   await access(".next/BUILD_ID");
-  await verify("sqlite", false);
-  for (const kind of ["sqlite", "postgresql"]) await verify(kind, true);
+  await verify("sqlite", false, { endpoint: `http://127.0.0.1:${bucketPort}` });
+  for (const kind of ["sqlite", "postgresql"]) await verify(kind, true, { endpoint: `http://127.0.0.1:${bucketPort}` });
 } catch (error) {
   console.error(`FAIL: ${phase}. ${error?.code === "ERR_ASSERTION" ? error.message : "Private error details are withheld."}`);
   process.exitCode = 1;
+} finally {
+  bucket.close();
 }

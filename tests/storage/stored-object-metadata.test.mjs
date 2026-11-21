@@ -442,11 +442,24 @@ for (const kind of ["sqlite", "postgresql"]) {
     }, options);
     assert.equal(exported.ok, true);
     if (!exported.ok) return;
+    const getsBeforeBinding = mock.requests.filter((request) => request.method === "GET").length;
+    const unboundExport = await readStoredObject(db, { actorId: ownerId, objectId: exported.id }, options);
+    assert.deepEqual(unboundExport, { ok: false, code: "not-found" });
+    assert.equal(mock.requests.filter((request) => request.method === "GET").length, getsBeforeBinding);
     const otherExport = await readStoredObject(db, { actorId: otherId, objectId: exported.id }, options);
     assert.deepEqual(otherExport, { ok: false, code: "not-found" });
     assert.equal(JSON.stringify(otherExport).includes("sections"), false);
+    await queryWithParameters(
+      db,
+      `INSERT INTO user_data_export (owner_id, id, locale, requested, included, fingerprint, object_id, created_at)
+       VALUES (?, ?, 'en', 1, 1, ?, ?, ?)`,
+      [ownerId, randomUUID(), "ab".repeat(32), exported.id, now.toISOString()],
+    );
     const ownExport = await readStoredObject(db, { actorId: ownerId, objectId: exported.id }, options);
     assert.equal(ownExport.ok, true);
+    const exportSign = await presignStoredObject(db, { actorId: ownerId, objectId: exported.id }, options);
+    assert.deepEqual(exportSign, { ok: false, code: "not-found" });
+    assert.equal(JSON.stringify(exportSign).includes("http"), false);
 
     const digest = "ab".repeat(32);
     const stamp = now.toISOString();

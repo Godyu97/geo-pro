@@ -37,6 +37,7 @@ import {
   loadOwnedObject,
   markObjectFailed,
   markObjectReady,
+  ownedExportIsCurrent,
   type ListedStoredObject,
   type PendingObjectInsert,
   type StoredObjectRow,
@@ -169,6 +170,7 @@ function readyResult(row: { id: string; class: ObjectClass; visibility: "interna
 async function openReadyObject(db: QueryConnection, actorId: string, objectId: string): Promise<StoredObjectRow | StoredObjectFailure> {
   const row = await loadOwnedObject(db, actorId, objectId);
   if (!row || row.status !== "ready" || !row.objectKey || !row.fileName) return failure("not-found");
+  if (row.class === "owned-export" && !await ownedExportIsCurrent(db, actorId, row.id)) return failure("not-found");
   if (row.brandId !== null && !await brandIsOpen(db, actorId, row.brandId)) return failure("not-found");
   return row;
 }
@@ -326,6 +328,8 @@ export async function presignStoredObject(
   if (isFailure(opened) || opened.status !== "ready" || !opened.objectKey || !opened.fileName) {
     return isFailure(opened) ? opened : failure("not-found");
   }
+  // Owned exports are downloaded through the authenticated export record, never by an anonymous URL.
+  if (opened.class === "owned-export") return failure("not-found");
   const config = environment(options);
   if (!config.success || !config.data.browserEndpoint || config.data.browserEndpointInvalid) return failure("failed");
   const storage = storageFor(options);

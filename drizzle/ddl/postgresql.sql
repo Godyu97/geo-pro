@@ -153,9 +153,15 @@ CREATE TABLE "user_data_export" (
 	"included" integer NOT NULL,
 	"fingerprint" text,
 	"created_at" text NOT NULL,
+	"object_id" text,
 	CONSTRAINT "user_data_export_locale_check" CHECK ("user_data_export"."locale" in ('zh-CN', 'en')),
 	CONSTRAINT "user_data_export_scope_check" CHECK ("user_data_export"."requested" between 1 and 127 and "user_data_export"."included" between 0 and 127 and ("user_data_export"."included" & "user_data_export"."requested") = "user_data_export"."included"),
-	CONSTRAINT "user_data_export_fingerprint_check" CHECK (("user_data_export"."included" = 0 and "user_data_export"."fingerprint" is null) or ("user_data_export"."included" <> 0 and "user_data_export"."fingerprint" is not null and length("user_data_export"."fingerprint") = 64))
+	CONSTRAINT "user_data_export_fingerprint_check" CHECK ((
+      "user_data_export"."included" = 0 and "user_data_export"."fingerprint" is null and "user_data_export"."object_id" is null
+    ) or (
+      "user_data_export"."included" <> 0 and "user_data_export"."fingerprint" is not null and length("user_data_export"."fingerprint") = 64
+      and ("user_data_export"."object_id" is null or length("user_data_export"."object_id") = 36)
+    ))
 );
 
 CREATE TABLE "quota_attempt" (
@@ -1176,6 +1182,7 @@ CREATE UNIQUE INDEX "brand_active_owner_uidx" ON "brand" USING btree ("owner_id"
 CREATE INDEX "brand_due_purge_idx" ON "brand" USING btree ("restore_until","id") WHERE "brand"."restore_until" is not null;
 CREATE INDEX "brand_owner_frozen_idx" ON "brand" USING btree ("owner_id","frozen_at","id") WHERE "brand"."frozen_at" is not null;
 CREATE INDEX "brand_owner_status_created_idx" ON "brand" USING btree ("owner_id","status","created_at","id");
+CREATE UNIQUE INDEX "user_data_export_object_uidx" ON "user_data_export" USING btree ("object_id") WHERE "user_data_export"."object_id" is not null;
 CREATE INDEX "quota_reservation_brand_recent_idx" ON "quota_reservation" USING btree ("brand_id","created_at","id");
 CREATE INDEX "auth_mail_rate_expiry_idx" ON "auth_mail_rate" USING btree ("expires_at");
 CREATE UNIQUE INDEX "fact_paste_previous_uidx" ON "brand_fact_paste" USING btree ("brand_id","previous_id");

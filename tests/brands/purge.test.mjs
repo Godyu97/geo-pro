@@ -33,7 +33,7 @@ const invokeCli = (env, ...args) => JSON.parse(execFileSync("pnpm", ["--silent",
 // Back up all application rows present in the synthetic pre-freeze fixture.
 // Build the destination through migrations first to exercise offline replay on
 // the same schema that a restored installation uses.
-const backupTables = ["user", "brand", "brand_version", "brand_draft", "brand_operation", "user_data_export"];
+const backupTables = ["user", "brand", "brand_version", "brand_draft", "brand_operation", "user_data_export", "stored_object"];
 async function backupFixture(db) {
   return db.transaction(async (tx) => {
     const saved = [];
