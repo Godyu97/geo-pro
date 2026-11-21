@@ -152,6 +152,7 @@ async function verify(kind, enabled) {
     env: {
       ...process.env, ...fixture.env, BETTER_AUTH_URL: baseURL,
       BETTER_AUTH_SECRET: randomBytes(48).toString("base64url"), GEO_BRANDS_FIXTURE: enabled ? "1" : "",
+      GEO_FUNCTIONAL_MOCK: "", GEO_BRAND_REAL_INTAKE: "",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

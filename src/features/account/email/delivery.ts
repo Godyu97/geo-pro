@@ -3,9 +3,12 @@ import "server-only";
 import { isIP } from "node:net";
 import { z } from "zod";
 import { getAuthEnvironment } from "@/lib/auth/env";
+import { isMailMockEnabled } from "@/lib/auth/verified-email";
 import { getMessages } from "@/lib/i18n/server";
 import type { Locale } from "@/lib/i18n/locale";
 import { accountAccessPath, mailLocale, type MailKind } from "./contracts";
+
+export { isMailMockEnabled };
 
 const loopback = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const mailEnvironmentSchema = z.object({
@@ -13,11 +16,6 @@ const mailEnvironmentSchema = z.object({
   GEO_AUTH_MAIL_SECRET: z.string().min(32).max(1024).regex(/^[!-~]+$/),
   GEO_AUTH_MAIL_IP_HEADER: z.string().regex(/^x-[a-z0-9-]{1,60}$/),
 });
-
-export function isMailMockEnabled(env: Record<string, string | undefined> = process.env) {
-  const value = env.GEO_AUTH_MAIL_MOCK?.trim().toLowerCase();
-  return value === "true" || value === "1";
-}
 
 export function getMailConfiguration(appOrigin: string) {
   const result = mailEnvironmentSchema.safeParse(process.env);

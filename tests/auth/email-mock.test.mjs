@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { MonitoringDao } from "../../src/features/monitoring/dao.ts";
-import { hasVerifiedEmail, isEmailVerificationMocked } from "../../src/lib/auth/verified-email.ts";
+import { hasVerifiedEmail, isEmailVerificationMocked, isMailMockEnabled } from "../../src/lib/auth/verified-email.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { testDatabase } from "../maintenance/helpers.mjs";
 
@@ -49,5 +49,25 @@ test("MonitoringDao.emailVerified honors GEO_AUTH_EMAIL_VERIFIED_MOCK for existi
   } finally {
     if (previous === undefined) delete process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK;
     else process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK = previous;
+  }
+});
+
+test("isMailMockEnabled honors GEO_AUTH_MAIL_MOCK and stays strict when disabled", () => {
+  assert.equal(isMailMockEnabled({ GEO_AUTH_MAIL_MOCK: "true" }), true);
+  assert.equal(isMailMockEnabled({ GEO_AUTH_MAIL_MOCK: " TRUE " }), true);
+  assert.equal(isMailMockEnabled({ GEO_AUTH_MAIL_MOCK: "1" }), true);
+  assert.equal(isMailMockEnabled({ GEO_AUTH_MAIL_MOCK: "false" }), false);
+  assert.equal(isMailMockEnabled({ GEO_AUTH_MAIL_MOCK: "0" }), false);
+  assert.equal(isMailMockEnabled({}), false);
+
+  const previous = process.env.GEO_AUTH_MAIL_MOCK;
+  try {
+    process.env.GEO_AUTH_MAIL_MOCK = "true";
+    assert.equal(isMailMockEnabled(), true);
+    process.env.GEO_AUTH_MAIL_MOCK = "false";
+    assert.equal(isMailMockEnabled(), false);
+  } finally {
+    if (previous === undefined) delete process.env.GEO_AUTH_MAIL_MOCK;
+    else process.env.GEO_AUTH_MAIL_MOCK = previous;
   }
 });

@@ -2,7 +2,7 @@
 
 本文件记录 `scripts/run-issue-loop.py` 这轮人工循环里已经推送到 `origin/main` 的提交。任务是否勾选仍以 [M0](M0.md)、[M1](M1.md)、[M2](M2.md) 为准。勾选对照见 [需求进度记录](delivery-progress.md)。这里写过的 Issue 只表示该增量已经落地，不表示 Issue 已关闭，也不表示阶段验收通过。
 
-选下一轮前先读本文件，再用 `gh issue view` 看最新状态和评论。已有提交的 Issue 不重复做同一增量。GitHub 列表仍显示 open、但本文件已有记录的，跳过。实际已关闭的也不做。
+选下一轮前先读本文件，再用 `gh issue view` 看最新状态和评论。循环提示词见 `scripts/run-issue-loop.py` 的 `DEV_PROMPT` / `BACKLOG_REPLENISH_PROMPT`（无可用 Open Issue 时可补货 30 单）。已有提交的 Issue 不重复做同一增量。实际已关闭的也不做。
 
 检查在 Node v22.23.4 上执行（仓库要求 Node 24，本环境没有 Node 24）。下表「检查」只列实际跑过且退出码为 0 的命令。没有跑过的不写成通过。
 
@@ -47,6 +47,7 @@
 
 这些 Issue 在 2026-11-20 用 `gh issue list --state all` 核对时仍是 open，评论只说明阻塞已解除、真实验收不要勾选。本表已有记录，后续轮次不重复。
 
-## 本轮不选
+## 开放 Issue（2026-11-21 状态同步后）
 
-- #21：仍 open。关闭条件的服务端记录已在 [M0-21](M0-21-pilot-admission.md)，本循环不再改同一入口。真实投递和获准试点不能写成已完成。
+- Open：`#21`、`#31`、`#32`（`status:ready`）。本地 `.env.local` 的 LLM 测试通道与邮件/邮箱验证 mock 不构成选任务阻塞；生产或 `AC-*` 真实验收仍须分开标注、不得勾选。
+- `#41`–`#70` 已标 `status:done` 并关闭，表示循环增量已落地，不代表 M1/M2 任务勾选。

@@ -37,9 +37,15 @@ export async function accountEmailResponse(request: Request) {
     if (!mail.success) return respond("invalidInput", 400);
 
     const mockMail = isMailMockEnabled();
+    if (mockMail) {
+      const traceId = randomUUID();
+      const locale = await getLocale();
+      console.info("account-mail-mocked", { kind: mail.data.kind, traceId, locale });
+      return respond("accepted", 202, traceId);
+    }
+
     const config = getMailConfiguration(origin);
-    const headerIp = config ? sourceIP(request.headers.get(config.ipHeader)) : null;
-    const ip = headerIp ?? (mockMail ? (sourceIP(request.headers.get("x-forwarded-for")?.split(",")[0] ?? null) ?? "127.0.0.1") : null);
+    const ip = config ? sourceIP(request.headers.get(config.ipHeader)) : null;
     if (!ip) return respond("unavailable", 503);
 
     const { kind, email } = mail.data;

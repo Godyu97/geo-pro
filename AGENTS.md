@@ -20,10 +20,11 @@ GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、P
 - 遵循 **统一入口 → 按需发现 → 最小实现 → 质量验证 → 核验交付** 闭环（详见 [.agents/workflows/task-lifecycle.md](.agents/workflows/task-lifecycle.md)）。
 - 一个任务 / Issue 对应清晰可审核的最小改动范围；技术约束以仓库真实状态为准：仅用 `pnpm`（`pnpm-lock.yaml`）与 Node 24 LTS；`src/app/` 保持薄层，业务按 `src/features/<domain>/` 组织；默认 Server Components，服务端密钥/DB/Auth 模块保留 `server-only`，鉴权使用服务端 `auth.api.getSession`。
 
-## 开发阶段约定（临时本地配置）
+## 开发阶段约定（长期与本地配置）
 
-- **AI 接入规范**：所有 AI 模型接入均须支持 OpenAI **Responses API** 标准（`POST ${OPENAI_BASE_URL}/responses`），统一使用服务端模块 [src/lib/ai/responses.ts](src/lib/ai/responses.ts)；本地开发连接参数与模型名在 gitignored 的 `.env.local` 中通过 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL` 配置，严禁将真实密钥写入源码、`.env.example`、文档或 `NEXT_PUBLIC_*`。
-- **邮件发送与邮箱校验 Mock**：开发阶段暂通过 `.env.local` 中的 `GEO_AUTH_MAIL_MOCK=true`（跳过外发邮件网关并记录安全 mock 日志）与 `GEO_AUTH_EMAIL_VERIFIED_MOCK=true`（已登录/存在的账号邮箱校验按已验证放行）解阻本地联调；未显式开启或设为 `false` 时保持严格网关投递与数据库 `email_verified` 校验，隔离验收脚本（如 `verify:account-email`、`verify:brands`、`test:monitoring`、`test:brands`）须继续验证真实严格路径。
+- **AI 接入规范（已就绪）**：所有 AI 模型接入均须支持 OpenAI **Responses API** 标准（`POST ${OPENAI_BASE_URL}/responses`），统一使用服务端模块 [src/lib/ai/responses.ts](src/lib/ai/responses.ts)；本地开发连接参数与模型名在 gitignored 的 `.env.local` 中通过 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`（及官方采样联调配置 `GEO_OFFICIAL_SAMPLING_*`）提供，可直接推进 AI 相关功能开发；严禁将真实密钥写入源码、`.env.example`、文档或 `NEXT_PUBLIC_*`，自动化单测须使用回环 mock。
+- **邮件功能长期 Mock（永远成功，暂不接入）**：项目已约定所有邮件发送与邮箱验证功能长期采用 Mock 永远成功策略，暂不接入真实邮件网关，**任何需求开发与 Issue 推进不得因缺少邮件网关或真实发信而阻塞**。本地与开发联调保持 `.env.local` 中 `GEO_AUTH_MAIL_MOCK=true`（跳过外发邮件网关与限流，直接 202 `accepted` 并记录安全 mock 日志）与 `GEO_AUTH_EMAIL_VERIFIED_MOCK=true`（已登录/存在的账号邮箱校验按已验证放行）；隔离安全测试脚本（如 `verify:account-email`、`verify:brands`、`test:monitoring`、`test:brands`）在显式设为 `false` 时继续验证严格契约。
+- **软件开发与外部试点门禁解耦**：真实试点走查、外部商业授权与阶段门禁（`T-M0-GATE` / `T-M1-GATE` / `T-M2-GATE`）只控制 `docs/tasks/M*.md` 中真实验收的勾选与生产对外开放，**不阻塞** M0/M1/M2 的软件层增量开发（双库表、迁移、DAO、API、双语页面、AI 能力、自动化测试）。运行 `pnpm env:check` 可一键核对本地开发条件。
 
 ## 治理与上下文路由（渐进式披露）
 

@@ -1,5 +1,10 @@
 import "server-only";
 
+export function isMailMockEnabled(env: Record<string, string | undefined> = process.env) {
+  const value = env.GEO_AUTH_MAIL_MOCK?.trim().toLowerCase();
+  return value === "true" || value === "1";
+}
+
 export function isEmailVerificationMocked(env: Record<string, string | undefined> = process.env) {
   const value = env.GEO_AUTH_EMAIL_VERIFIED_MOCK?.trim().toLowerCase();
   return value === "true" || value === "1";
