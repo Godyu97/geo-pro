@@ -3,7 +3,8 @@ import { headers } from "next/headers";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
-import { brandFixtureOrigin } from "../brands/intake";
+import { brandFixtureOrigin, brandIntakeOrigin } from "../brands/intake";
+import { ApplyMockContentButton } from "@/features/functional-mock/run-buttons";
 import { BrandDao } from "../brands/dao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,12 +63,25 @@ export default async function ContentListPage({
     .filter((item) => item.brief.status === "confirmed")
     .map((item) => item.brief.id);
   const fixtureSampling = Boolean(brandFixtureOrigin(await headers()));
+  const mockLane = brandIntakeOrigin(await headers())?.mode === "mock";
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+        {mockLane && (
+          <div className="mt-4 space-y-2">
+            <p className="text-sm text-muted-foreground">{t("mockContentNote")}</p>
+            <ApplyMockContentButton
+              brandId={brandId}
+              label={t("applyMockContent")}
+              pendingLabel={t("mockContentPending")}
+              doneLabel={t("mockContentDone")}
+              failedLabel={t("mockContentFailed")}
+            />
+          </div>
+        )}
       </div>
 
       <section className="space-y-3">
