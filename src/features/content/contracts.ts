@@ -117,6 +117,9 @@ export const contentErrors = {
   SUBSET_INVALID: 422,
   APPROVAL_INVALID: 422,
   PUBLICATION_CONFLICT: 409,
+  ASSET_TYPE_REJECTED: 415,
+  ASSET_TOO_LARGE: 413,
+  ASSET_UNREVIEWED: 422,
   SERVICE_UNAVAILABLE: 503,
 } as const;
 export type ContentError = keyof typeof contentErrors;

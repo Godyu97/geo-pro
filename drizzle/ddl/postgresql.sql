@@ -649,6 +649,7 @@ CREATE TABLE "content_asset" (
 	"content_ref" text NOT NULL,
 	"fingerprint" text NOT NULL,
 	"created_at" text NOT NULL,
+	"stored_object_id" text,
 	CONSTRAINT "content_asset_state_check" CHECK ("content_asset"."kind" in ('cover', 'inline', 'other')
     and "content_asset"."visibility" in ('public', 'internal')
     and "content_asset"."review_status" in ('pending', 'approved', 'rejected')
@@ -1213,6 +1214,7 @@ CREATE INDEX "content_approval_version_idx" ON "content_approval" USING btree ("
 CREATE INDEX "content_approval_brand_idx" ON "content_approval" USING btree ("brand_id","created_at","id");
 CREATE INDEX "content_asset_brand_idx" ON "content_asset" USING btree ("brand_id","created_at","id");
 CREATE INDEX "content_asset_owner_idx" ON "content_asset" USING btree ("owner_id","created_at","id");
+CREATE UNIQUE INDEX "content_asset_object_uidx" ON "content_asset" USING btree ("stored_object_id") WHERE "content_asset"."stored_object_id" is not null;
 CREATE UNIQUE INDEX "content_batch_operation_uidx" ON "content_batch" USING btree ("brand_id","operation_id");
 CREATE INDEX "content_batch_brand_idx" ON "content_batch" USING btree ("brand_id","updated_at","id");
 CREATE INDEX "content_batch_owner_idx" ON "content_batch" USING btree ("owner_id","updated_at","id");

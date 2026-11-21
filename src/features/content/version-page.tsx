@@ -20,6 +20,13 @@ export async function generateMetadata() {
   return { title: t("versionDetail"), robots: { index: false, follow: false } };
 }
 
+const assetErrorCodes = ["ASSET_TYPE_REJECTED", "ASSET_TOO_LARGE", "ASSET_UNREVIEWED", "INVALID_INPUT", "NOT_FOUND", "SERVICE_UNAVAILABLE"] as const;
+
+function assetErrorCode(value: string | string[] | undefined) {
+  const code = Array.isArray(value) ? value[0] : value;
+  return assetErrorCodes.find((item) => item === code);
+}
+
 const inputClass = "h-10 w-full rounded-md border bg-background px-3";
 const areaClass = "w-full rounded-md border bg-background px-3 py-2";
 
@@ -45,6 +52,7 @@ export default async function ContentVersionPage({
     : null;
   const job = exported && !("error" in exported) ? exported : null;
   const canEdit = !readOnly;
+  const assetError = assetErrorCode(query.assetError);
 
   return (
     <div className="space-y-8">
@@ -143,10 +151,14 @@ export default async function ContentVersionPage({
                 <Badge variant="outline">{asset.kind}</Badge>
                 <Badge variant="outline">{asset.visibility === "public" ? t("assetPublic") : t("assetInternal")}</Badge>
                 <Badge variant="outline">{asset.reviewStatus}</Badge>
+                {asset.visibility === "public" && asset.reviewStatus !== "approved" ? (
+                  <span className="text-muted-foreground">{t("ASSET_UNREVIEWED")}</span>
+                ) : null}
               </li>
             ))}
           </ul>
         ) : null}
+        {assetError ? <p role="alert" className="text-sm text-destructive">{t(assetError)}</p> : null}
         {canEdit ? (
           <form action={registerAssetAction} className="grid gap-3 sm:grid-cols-2">
             <input type="hidden" name="brandId" value={version.brandId} />
@@ -185,6 +197,11 @@ export default async function ContentVersionPage({
             <label className="block text-sm">
               <span className="mb-1 block text-muted-foreground">{t("assetRef")}</span>
               <input name="contentRef" required className={inputClass} />
+            </label>
+            <label className="block text-sm sm:col-span-2">
+              <span className="mb-1 block text-muted-foreground">{t("assetFile")}</span>
+              <input name="file" type="file" accept="image/jpeg,image/png,image/webp" className={inputClass} />
+              <span className="mt-1 block text-xs text-muted-foreground">{t("assetFileHint")}</span>
             </label>
             <div className="sm:col-span-2">
               <Button type="submit" variant="outline">{t("registerAsset")}</Button>

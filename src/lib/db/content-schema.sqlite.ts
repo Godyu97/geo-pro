@@ -178,9 +178,13 @@ export const contentAsset = sqliteTable("content_asset", {
   contentRef: text("content_ref").notNull(),
   fingerprint: text("fingerprint").notNull(),
   createdAt: text("created_at").notNull(),
+  // Null keeps historical content_ref rows readable. Appended so ALTER matches a fresh table.
+  // No foreign key: object tombstones and brand purge delete the asset and the bytes separately.
+  storedObjectId: text("stored_object_id"),
 }, (table) => [
   index("content_asset_brand_idx").on(table.brandId, table.createdAt, table.id),
   index("content_asset_owner_idx").on(table.ownerId, table.createdAt, table.id),
+  uniqueIndex("content_asset_object_uidx").on(table.storedObjectId).where(sql`${table.storedObjectId} is not null`),
   check("content_asset_state_check", sql`${table.kind} in ('cover', 'inline', 'other')
     and ${table.visibility} in ('public', 'internal')
     and ${table.reviewStatus} in ('pending', 'approved', 'rejected')

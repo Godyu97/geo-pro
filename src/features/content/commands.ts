@@ -38,7 +38,7 @@ import {
   type UpdateVariantInput,
   type VerifyPublicationInput,
 } from "./contracts.ts";
-import { ContentDao, type BriefVersionRow, type ContentVersionRow, type PackageRow, type UnitRow } from "./dao.ts";
+import { ContentDao, type AssetRow, type BriefVersionRow, type ContentVersionRow, type PackageRow, type UnitRow } from "./dao.ts";
 import {
   buildPackageFiles,
   computeApprovalFingerprint,
@@ -46,7 +46,12 @@ import {
   resolveExportKind,
   validateExportSubset,
   type PackageFact,
+  type PackageStoredMedia,
 } from "./package.ts";
+import { createObjectStorage } from "../../lib/storage/index.ts";
+import { saveStoredObject, type ObjectStorageClient } from "../stored-objects/commands.ts";
+import { CONTENT_TYPES, MAX_STORED_OBJECT_BYTES, sanitizeObjectFileName } from "../stored-objects/contracts.ts";
+import { loadBrandObjectsByIds, type StoredObjectRow } from "../stored-objects/dao.ts";
 import {
   canCancel,
   canPause,
@@ -1132,31 +1137,91 @@ export async function updateVariant(
   });
 }
 
+const deliverableImageTypes = new Set(CONTENT_TYPES["authorized-media"]);
+
+export type AssetObjectFile = {
+  fileName: string;
+  contentType: string;
+  body: Uint8Array;
+};
+
+export type RegisterAssetOptions = {
+  file?: AssetObjectFile;
+  env?: Record<string, string | undefined>;
+  storage?: ObjectStorageClient;
+  now?: Date;
+};
+
+function assetFingerprint(input: RegisterAssetInput, storedObjectId: string | null) {
+  const material = storedObjectId
+    ? [input.kind, input.source, input.rightsStatement, input.visibility, input.contentRef, storedObjectId]
+    : [input.kind, input.source, input.rightsStatement, input.visibility, input.contentRef];
+  return createHash("sha256").update(JSON.stringify(material), "utf8").digest("hex");
+}
+
 export async function registerAsset(
   db: DatabaseConnection,
   ownerId: string,
   input: RegisterAssetInput,
   clock: Clock = () => new Date().toISOString(),
+  options: RegisterAssetOptions = {},
 ) {
   if (!await activeBrand(db, ownerId, input.brandId)) return denied("NOT_FOUND");
-  const fingerprint = createHash("sha256")
-    .update(JSON.stringify([input.kind, input.source, input.rightsStatement, input.visibility, input.contentRef]), "utf8")
-    .digest("hex");
-  const asset = {
+  const file = options.file;
+  const internal = input.visibility === "internal";
+  let storedObjectId: string | null = null;
+  if (file) {
+    if (!input.source.trim() || !input.rightsStatement.trim() || !input.kind.trim()) return denied("INVALID_INPUT");
+    if (!sanitizeObjectFileName(file.fileName)) return denied("INVALID_INPUT");
+    if (!(file.body instanceof Uint8Array) || file.body.byteLength < 1) return denied("INVALID_INPUT");
+    if (file.body.byteLength > MAX_STORED_OBJECT_BYTES) return denied("ASSET_TOO_LARGE");
+    if (!deliverableImageTypes.has(file.contentType)) return denied("ASSET_TYPE_REJECTED");
+    const saved = await saveStoredObject(db, {
+      actorId: ownerId,
+      brandId: input.brandId,
+      class: internal ? "internal-material" : "authorized-media",
+      visibility: internal ? "internal" : "public",
+      fileName: file.fileName,
+      contentType: file.contentType,
+      body: file.body,
+    }, {
+      ...(options.env ? { env: options.env } : {}),
+      ...(options.storage ? { storage: options.storage } : {}),
+      now: options.now ?? new Date(clock()),
+    });
+    if (!saved.ok) return denied(saved.code === "failed" ? "SERVICE_UNAVAILABLE" : "INVALID_INPUT");
+    storedObjectId = saved.id;
+  }
+  const asset: AssetRow = {
     id: randomUUID(),
     brandId: input.brandId,
     ownerId,
     kind: input.kind,
     source: input.source,
     rightsStatement: input.rightsStatement,
-    visibility: input.visibility,
+    visibility: internal ? "internal" : input.visibility,
     reviewStatus: input.reviewStatus,
     contentRef: input.contentRef,
-    fingerprint,
+    storedObjectId,
+    fingerprint: assetFingerprint(input, storedObjectId),
     createdAt: clock(),
   };
   await new ContentDao(db).insertAsset(asset);
   return { asset };
+}
+
+function packageStoredMedia(row: StoredObjectRow | undefined): PackageStoredMedia | null {
+  if (!row || !row.fileName) return null;
+  return {
+    id: row.id,
+    class: row.class,
+    visibility: row.visibility,
+    status: row.status,
+    contentType: row.contentType,
+    byteSize: row.byteSize,
+    sha256: row.sha256,
+    fileName: row.fileName,
+  };
 }
 
 type PreflightItem = {
@@ -1341,7 +1406,22 @@ async function assemblePackage(
   const assetIds = parseIds(version.imageAssetIdsJson);
   const assetRows = await dao.getAssetsByIds(ownerId, brandId, assetIds);
   const assetById = new Map(assetRows.map((asset) => [asset.id, asset]));
-  const assets = assetIds.flatMap((id) => (assetById.has(id) ? [assetById.get(id)!] : []));
+  const ordered = assetIds.flatMap((id) => (assetById.has(id) ? [assetById.get(id)!] : []));
+  const objectIds = [...new Set(ordered.flatMap((asset) => asset.storedObjectId ? [asset.storedObjectId] : []))];
+  const storedRows = await loadBrandObjectsByIds(db, ownerId, brandId, objectIds);
+  const storedById = new Map(storedRows.map((row) => [row.id, row]));
+  const assets = ordered.map((asset) => ({
+    id: asset.id,
+    kind: asset.kind,
+    source: asset.source,
+    rightsStatement: asset.rightsStatement,
+    visibility: asset.visibility,
+    reviewStatus: asset.reviewStatus,
+    contentRef: asset.contentRef,
+    fingerprint: asset.fingerprint,
+    linkedObject: asset.storedObjectId !== null,
+    stored: packageStoredMedia(asset.storedObjectId ? storedById.get(asset.storedObjectId) : undefined),
+  }));
 
   const built = buildPackageFiles({
     kind,
@@ -1473,6 +1553,40 @@ export async function exportConfirm(
     status: "ready" as const,
     packages: created.map(summarizePackage),
     replayed: false,
+  };
+}
+
+export async function readContentAssetBytes(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: { brandId: string; objectId: string },
+  options: RegisterAssetOptions = {},
+) {
+  if (!await activeBrand(db, ownerId, input.brandId)) return denied("NOT_FOUND");
+  const [object] = await loadBrandObjectsByIds(db, ownerId, input.brandId, [input.objectId]);
+  if (!object || object.status !== "ready" || !object.objectKey || !object.fileName) return denied("NOT_FOUND");
+  const asset = await new ContentDao(db).findAssetByObject(ownerId, input.brandId, object.id);
+  if (!asset || asset.storedObjectId !== object.id) return denied("NOT_FOUND");
+  if (object.class === "authorized-media" && asset.reviewStatus !== "approved") return denied("ASSET_UNREVIEWED");
+  if (object.class === "authorized-media" && (object.visibility !== "public" || asset.visibility !== "public")) {
+    return denied("NOT_FOUND");
+  }
+  if (object.class !== "authorized-media" && object.class !== "internal-material") return denied("NOT_FOUND");
+  const storage = options.storage ?? createObjectStorage(options.env ? { env: options.env } : {});
+  let loaded: Awaited<ReturnType<ObjectStorageClient["getObject"]>>;
+  try {
+    loaded = await storage.getObject({ key: object.objectKey });
+  } catch {
+    return denied("SERVICE_UNAVAILABLE");
+  }
+  if (!loaded.ok || loaded.sha256 !== object.sha256 || loaded.byteSize !== object.byteSize) return denied("SERVICE_UNAVAILABLE");
+  return {
+    id: object.id,
+    contentType: object.contentType,
+    byteSize: loaded.byteSize,
+    sha256: loaded.sha256,
+    fileName: object.fileName,
+    body: loaded.body,
   };
 }
 

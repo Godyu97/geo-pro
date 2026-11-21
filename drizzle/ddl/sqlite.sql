@@ -740,6 +740,7 @@ CREATE TABLE `content_asset` (
 	`content_ref` text NOT NULL,
 	`fingerprint` text NOT NULL,
 	`created_at` text NOT NULL,
+	`stored_object_id` text,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "content_asset_state_check" CHECK("content_asset"."kind" in ('cover', 'inline', 'other')
     and "content_asset"."visibility" in ('public', 'internal')
@@ -750,6 +751,7 @@ CREATE TABLE `content_asset` (
 
 CREATE INDEX `content_asset_brand_idx` ON `content_asset` (`brand_id`,`created_at`,`id`);
 CREATE INDEX `content_asset_owner_idx` ON `content_asset` (`owner_id`,`created_at`,`id`);
+CREATE UNIQUE INDEX `content_asset_object_uidx` ON `content_asset` (`stored_object_id`) WHERE "content_asset"."stored_object_id" is not null;
 CREATE TABLE `content_batch` (
 	`id` text PRIMARY KEY NOT NULL,
 	`brand_id` text NOT NULL,

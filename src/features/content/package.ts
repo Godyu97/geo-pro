@@ -173,6 +173,19 @@ export function markdownToHtml(markdown: string) {
 // Package assembly
 // ---------------------------------------------------------------------------
 
+const deliverableImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+export type PackageStoredMedia = {
+  id: string;
+  class: string;
+  visibility: "public" | "internal";
+  status: string;
+  contentType: string;
+  byteSize: number;
+  sha256: string;
+  fileName: string;
+};
+
 export type PackageAsset = {
   id: string;
   kind: string;
@@ -182,6 +195,9 @@ export type PackageAsset = {
   reviewStatus: "pending" | "approved" | "rejected";
   contentRef: string;
   fingerprint: string;
+  /** True when the asset row points at a stored object, even if that object is ineligible. */
+  linkedObject?: boolean;
+  stored?: PackageStoredMedia | null;
 };
 
 export type PackageFact = {
@@ -216,9 +232,28 @@ export type PackageInput = {
 
 const reviewBanner = "NON-PUBLISHABLE REVIEW DRAFT — not for publication / 非发布用审阅稿";
 
-/** Only public and approved assets may leave the workspace. */
+function rightsAreValid(asset: PackageAsset) {
+  return asset.rightsStatement.trim().length > 0 && asset.source.trim().length > 0 && asset.kind.trim().length > 0;
+}
+
+function storedMediaIsPublic(asset: PackageAsset) {
+  const stored = asset.stored;
+  if (!stored) return false;
+  return stored.class === "authorized-media"
+    && stored.visibility === "public"
+    && stored.status === "ready"
+    && deliverableImageTypes.has(stored.contentType)
+    && stored.fileName.length > 0
+    && stored.sha256.length === 64;
+}
+
+/** Public, approved, rights-valid assets. Linked objects must be ready authorized-media. */
 export function publicAssets(assets: PackageAsset[]) {
-  return assets.filter((asset) => asset.visibility === "public" && asset.reviewStatus === "approved");
+  return assets.filter((asset) => {
+    if (asset.visibility !== "public" || asset.reviewStatus !== "approved" || !rightsAreValid(asset)) return false;
+    if (asset.linkedObject) return storedMediaIsPublic(asset);
+    return true;
+  });
 }
 
 export function buildPackageFiles(input: PackageInput) {
@@ -273,6 +308,13 @@ export function buildPackageFiles(input: PackageInput) {
         rightsStatement: image.rightsStatement,
         contentRef: image.contentRef,
         fingerprint: image.fingerprint,
+        ...(image.stored ? {
+          objectId: image.stored.id,
+          fileName: image.stored.fileName,
+          contentType: image.stored.contentType,
+          byteSize: image.stored.byteSize,
+          sha256: image.stored.sha256,
+        } : {}),
       })),
     }, null, 2)}\n`;
   }

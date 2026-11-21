@@ -1,6 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import { MAX_STORED_OBJECT_BYTES } from "../stored-objects/contracts.ts";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
@@ -202,8 +203,27 @@ export async function registerAssetAction(formData: FormData): Promise<void> {
     reviewStatus: String(formData.get("reviewStatus") ?? "pending"),
     contentRef: String(formData.get("contentRef") ?? ""),
   });
-  if (!parsed.success) return;
-  await registerAsset(getConnection(), session.user.id, parsed.data);
+  if (!parsed.success) {
+    if (versionId) redirect(`${versionPath(versionId)}?assetError=INVALID_INPUT`);
+    return;
+  }
+  const uploaded = formData.get("file");
+  if (uploaded instanceof File && uploaded.size > MAX_STORED_OBJECT_BYTES) {
+    if (versionId) redirect(`${versionPath(versionId)}?assetError=ASSET_TOO_LARGE`);
+    return;
+  }
+  const file = uploaded instanceof File && uploaded.size > 0
+    ? {
+      fileName: uploaded.name,
+      contentType: uploaded.type,
+      body: new Uint8Array(await uploaded.arrayBuffer()),
+    }
+    : undefined;
+  const result = await registerAsset(getConnection(), session.user.id, parsed.data, undefined, file ? { file } : {});
+  if ("error" in result) {
+    if (versionId) redirect(`${versionPath(versionId)}?assetError=${result.error}`);
+    return;
+  }
   if (versionId) revalidatePath(versionPath(versionId));
 }
 

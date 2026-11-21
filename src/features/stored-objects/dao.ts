@@ -101,6 +101,17 @@ export async function loadOwnedObject(db: QueryConnection, ownerId: string, id: 
   return row ? storedObjectRowSchema.parse(row) : null;
 }
 
+export async function loadBrandObjectsByIds(db: QueryConnection, ownerId: string, brandId: string, ids: string[]) {
+  if (ids.length === 0) return [];
+  const rows = await queryWithParameters(
+    db,
+    `SELECT ${rowColumns} FROM stored_object
+     WHERE owner_id = ? AND brand_id = ? AND id IN (${ids.map(() => "?").join(", ")})`,
+    [ownerId, brandId, ...ids],
+  );
+  return z.array(storedObjectRowSchema).parse(rows);
+}
+
 export async function insertPendingObject(db: QueryConnection, row: PendingObjectInsert) {
   await queryWithParameters(
     db,

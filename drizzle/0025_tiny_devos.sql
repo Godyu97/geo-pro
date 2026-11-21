@@ -1,0 +1,2 @@
+ALTER TABLE "content_asset" ADD COLUMN "stored_object_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "content_asset_object_uidx" ON "content_asset" USING btree ("stored_object_id") WHERE "content_asset"."stored_object_id" is not null;

@@ -134,6 +134,7 @@ const assetRow = z.object({
   visibility: assetVisibilitySchema,
   reviewStatus: assetReviewStatusSchema,
   contentRef: z.string().min(1),
+  storedObjectId: z.string().min(1).nullable(),
   fingerprint: z.string().min(1),
   createdAt: z.iso.datetime({ precision: 3 }),
 });
@@ -268,7 +269,7 @@ const approvalColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", conte
 
 const assetColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", kind, source,
   rights_statement AS "rightsStatement", visibility, review_status AS "reviewStatus",
-  content_ref AS "contentRef", fingerprint, created_at AS "createdAt"`;
+  content_ref AS "contentRef", stored_object_id AS "storedObjectId", fingerprint, created_at AS "createdAt"`;
 
 const packageColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", content_version_id AS "contentVersionId",
   approval_id AS "approvalId", target_channel AS "targetChannel", kind,
@@ -620,11 +621,11 @@ export class ContentDao {
     await this.query(
       `INSERT INTO content_asset (
         id, brand_id, owner_id, kind, source, rights_statement, visibility,
-        review_status, content_ref, fingerprint, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        review_status, content_ref, stored_object_id, fingerprint, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.id, row.brandId, row.ownerId, row.kind, row.source, row.rightsStatement,
-        row.visibility, row.reviewStatus, row.contentRef, row.fingerprint, row.createdAt,
+        row.visibility, row.reviewStatus, row.contentRef, row.storedObjectId, row.fingerprint, row.createdAt,
       ],
     );
   }
@@ -647,6 +648,16 @@ export class ContentDao {
       [ownerId, brandId, limit],
     );
     return rows.map((row) => assetRow.parse(row));
+  }
+
+  async findAssetByObject(ownerId: string, brandId: string, objectId: string) {
+    const rows = await this.query(
+      `SELECT ${assetColumns} FROM content_asset
+       WHERE stored_object_id = ? AND owner_id = ? AND brand_id = ?
+       LIMIT 1`,
+      [objectId, ownerId, brandId],
+    );
+    return rows[0] ? assetRow.parse(rows[0]) : null;
   }
 
   async insertPackage(row: PackageRow) {

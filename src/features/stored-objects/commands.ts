@@ -44,7 +44,7 @@ import {
 
 const CLEANUP_BATCH = 20;
 
-type ObjectStorageClient = {
+export type ObjectStorageClient = {
   putAndReadBack(input: WriteObjectInput): Promise<WrittenObject | WriteFailure>;
   getObject(input: { key: string }): Promise<{ ok: true; body: Uint8Array; byteSize: number; sha256: string } | StorageFailure>;
   deleteObject(input: { key: string }): Promise<{ ok: true } | StorageFailure>;
