@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { requireSession } from "@/lib/auth/session";
 import { hasVerifiedEmail } from "@/lib/auth/verified-email";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
+import { brandIntakeOrigin } from "@/features/brands/intake";
+import { ApplyMockQuotaButton } from "@/features/functional-mock/run-buttons";
 import { CapabilityRetryButton } from "../capabilities/retry-button";
 import { RegistrationForm } from "./registration-form";
 import { readRegistration } from "./service";
@@ -11,6 +14,7 @@ export async function MonitoringRegistration() {
   const locale = await getLocale();
   const t = await getTranslator("monitoring");
   const messages = getMessages(locale).monitoring;
+  const intake = brandIntakeOrigin(await headers());
   const result = await readRegistration(session.user.id);
   if ("traceId" in result && !("brand" in result)) {
     return (
@@ -28,6 +32,18 @@ export async function MonitoringRegistration() {
         <h2 id="monitoring-registration" className="font-medium">{t("title")}</h2>
         <p className="mt-2 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
       </div>
+      {intake?.mode === "mock" && result.brand && (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">{t("mockQuotaNote")}</p>
+          <ApplyMockQuotaButton
+            brandId={result.brand.id}
+            label={t("applyMockQuota")}
+            pendingLabel={t("mockQuotaPending")}
+            doneLabel={t("mockQuotaDone")}
+            failedLabel={t("mockQuotaFailed")}
+          />
+        </div>
+      )}
       {!result.brand && (
         <p className="text-sm">
           {t("noBrand")} <Link className="underline underline-offset-4" href="/dashboard/brands/new" prefetch={false}>{t("openBrand")}</Link>

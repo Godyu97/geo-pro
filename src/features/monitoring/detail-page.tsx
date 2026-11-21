@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
@@ -8,6 +9,8 @@ import { BrandDao } from "../brands/dao";
 import { CapabilityRetryButton } from "../capabilities/retry-button";
 import { IngestEvidenceButton } from "../evidence/ingest-button";
 import { EvidenceDao } from "../evidence/dao";
+import { brandIntakeOrigin } from "@/features/brands/intake";
+import { ExecuteMockRunButton } from "@/features/functional-mock/run-buttons";
 import { formatMinorUnits } from "./format";
 import { RunControls } from "./run-controls";
 import { readOwnedRun } from "./service";
@@ -50,6 +53,7 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
     attemptsBySlot.set(attempt.slotId, list);
   }
   const connection = getConnection();
+  const mockRun = brandIntakeOrigin(await headers())?.mode === "mock";
   const brand = await new BrandDao(connection).active(session.user.id);
   const evidenceDao = new EvidenceDao(connection);
   const evidenceBySlot = new Map<string, string>();
@@ -88,6 +92,18 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
       })}</p>
       <p className="text-sm text-muted-foreground">{t("realChannelClosed")}</p>
       <p className="text-sm text-muted-foreground">{t("isolatedNote")}</p>
+      {mockRun && (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">{t("executeMockNote")}</p>
+          <ExecuteMockRunButton
+            runId={result.id}
+            label={t("executeMock")}
+            pendingLabel={t("executeMockPending")}
+            doneLabel={t("executeMockDone")}
+            failedLabel={t("executeMockFailed")}
+          />
+        </div>
+      )}
       <p className="text-sm">{t("previewSummary", {
         questions: formatNumber(locale, result.questionCount),
         natural: formatNumber(locale, result.naturalCount),
