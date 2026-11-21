@@ -30,6 +30,7 @@ import {
   verifyPublication,
   type ExportBlocker,
 } from "./commands";
+import { PACKAGE_FILE_NAMES } from "./package";
 import {
   contentErrors,
   contentWriteSchema,
@@ -108,10 +109,7 @@ export async function contentVersionResponse(request: Request, versionId: string
   return Response.json(result, { headers });
 }
 
-const packageFiles = new Set([
-  "content.md", "content.html", "manifest.json", "public-sources.json",
-  "publish-checklist.md", "public-images.json",
-]);
+const packageFiles = new Set<string>(PACKAGE_FILE_NAMES);
 
 export async function contentPublicationResponse(request: Request, publicationId: string) {
   if (!sameOrigin(request)) return errorResponse("FORBIDDEN");

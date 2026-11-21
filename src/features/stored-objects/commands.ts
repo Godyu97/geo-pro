@@ -80,7 +80,21 @@ type CommandOptions = {
   env?: Record<string, string | undefined>;
   storage?: ObjectStorageClient;
   now?: Date;
+  /** Reuse an open transaction instead of starting one. Avoids nested BEGIN on SQLite. */
+  connection?: QueryConnection;
 };
+
+function metadataDb(db: DatabaseConnection, options: CommandOptions): QueryConnection {
+  return options.connection ?? db;
+}
+
+function metadataWrite<T>(
+  db: DatabaseConnection,
+  options: CommandOptions,
+  work: (connection: QueryConnection) => Promise<T>,
+) {
+  return options.connection ? work(options.connection) : db.transaction(work);
+}
 
 function failure(code: StoredObjectFailureCode): StoredObjectFailure {
   return { ok: false, code };
@@ -173,7 +187,8 @@ export async function saveStoredObject(
   if (!visibilityAllowed(command.class, command.visibility)) return failure("rejected");
   if (!contentTypeAllowed(command.class, command.contentType)) return failure("rejected");
   if (body.byteLength < 1 || body.byteLength > objectByteLimit(command.class)) return failure("rejected");
-  const scope = await authorizeBrand(db, command.actorId, command.class, command.brandId);
+  const scopeDb = metadataDb(db, options);
+  const scope = await authorizeBrand(scopeDb, command.actorId, command.class, command.brandId);
   if (scope) return scope;
 
   const config = environment(options);
@@ -190,10 +205,10 @@ export async function saveStoredObject(
     fileName,
   });
   if (!objectKey) return failure("rejected");
-  await retryFailedCleanup(db, storage, command.actorId, command.brandId);
+  await retryFailedCleanup(scopeDb, storage, command.actorId, command.brandId);
 
   if (command.objectId) {
-    const current = await loadOwnedObject(db, command.actorId, command.objectId);
+    const current = await loadOwnedObject(scopeDb, command.actorId, command.objectId);
     if (!current || current.brandId !== command.brandId || current.class !== command.class || current.status === "tombstoned") {
       return failure("not-found");
     }
@@ -221,21 +236,21 @@ export async function saveStoredObject(
   };
 
   if (command.objectId) {
-    const claimed = await db.transaction((tx) => claimMutableObject(tx, pending));
+    const claimed = await metadataWrite(db, options, (tx) => claimMutableObject(tx, pending));
     if (!claimed) {
-      const current = await loadOwnedObject(db, command.actorId, objectId);
+      const current = await loadOwnedObject(scopeDb, command.actorId, objectId);
       if (current?.status === "ready" && current.immutable === 1) return failure("immutable");
       return failure("not-found");
     }
   } else {
-    await db.transaction((tx) => insertPendingObject(tx, pending));
+    await metadataWrite(db, options, (tx) => insertPendingObject(tx, pending));
   }
 
   let written: WrittenObject | WriteFailure;
   try {
     written = await storage.putAndReadBack({ key: objectKey, body, contentType: command.contentType });
   } catch {
-    await db.transaction((tx) => markObjectFailed(tx, objectId, command.actorId, "pending"));
+    await metadataWrite(db, options, (tx) => markObjectFailed(tx, objectId, command.actorId, "pending"));
     return failure("failed");
   }
 
@@ -245,11 +260,11 @@ export async function saveStoredObject(
     || written.key !== objectKey
     || written.bucket !== config.data.bucket) {
     if (written.ok) await storage.deleteObject({ key: objectKey });
-    await db.transaction((tx) => markObjectFailed(tx, objectId, command.actorId, "pending"));
+    await metadataWrite(db, options, (tx) => markObjectFailed(tx, objectId, command.actorId, "pending"));
     return failure("failed");
   }
 
-  const ready = await db.transaction((tx) => markObjectReady(tx, {
+  const ready = await metadataWrite(db, options, (tx) => markObjectReady(tx, {
     id: objectId,
     ownerId: command.actorId,
     byteSize: written.byteSize,
@@ -258,7 +273,7 @@ export async function saveStoredObject(
   }));
   if (!ready) {
     await storage.deleteObject({ key: objectKey });
-    await db.transaction((tx) => markObjectFailed(tx, objectId, command.actorId, "pending"));
+    await metadataWrite(db, options, (tx) => markObjectFailed(tx, objectId, command.actorId, "pending"));
     return failure("failed");
   }
 

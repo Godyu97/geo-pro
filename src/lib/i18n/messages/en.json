@@ -1125,7 +1125,7 @@
     "INVALID_INPUT": "Invalid input.",
     "EVIDENCE_REQUIRED": "Evidence gaps remain (source, boundary, or related fields).",
     "OPERATION_CONFLICT": "Operation conflict.",
-    "SERVICE_UNAVAILABLE": "Service temporarily unavailable.",
+    "SERVICE_UNAVAILABLE": "The file could not be saved or read. Try again shortly.",
     "versions": "Content versions",
     "versionDetail": "Version detail",
     "versionsEmpty": "No content versions yet. Confirm a brief and generate drafts first.",

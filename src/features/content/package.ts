@@ -7,7 +7,15 @@ import type {
   VersionStatus,
 } from "./contracts.ts";
 
-const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+export function packageUtf8(value: string) {
+  return new TextEncoder().encode(value);
+}
+
+export function packageSha256(body: Uint8Array) {
+  return createHash("sha256").update(body).digest("hex");
+}
+
+const sha256 = (value: string) => packageSha256(packageUtf8(value));
 
 export type ApprovalFingerprintInput = {
   title: string;
@@ -341,6 +349,110 @@ export function buildPackageFiles(input: PackageInput) {
     Object.entries(files).sort(([a], [b]) => (a < b ? -1 : 1)),
   ));
   return { files, packageFingerprint, manifest };
+}
+
+export const PACKAGE_FILE_NAMES = [
+  "content.md",
+  "content.html",
+  "manifest.json",
+  "public-sources.json",
+  "publish-checklist.md",
+  "public-images.json",
+] as const;
+
+const packageContentTypes = {
+  "content.md": "text/markdown",
+  "content.html": "text/html",
+  "manifest.json": "application/json",
+  "public-sources.json": "application/json",
+  "publish-checklist.md": "text/markdown",
+  "public-images.json": "application/json",
+} as const;
+
+export type PackageContentType = (typeof packageContentTypes)[keyof typeof packageContentTypes];
+export type PackageFileName = (typeof PACKAGE_FILE_NAMES)[number];
+
+export type PackageFileDescriptor = {
+  objectId: string;
+  name: PackageFileName;
+  contentType: PackageContentType;
+  byteSize: number;
+  sha256: string;
+};
+
+export type StoredPackageIndex = {
+  version: 1;
+  files: PackageFileDescriptor[];
+};
+
+const packageFileNames = new Set<string>(PACKAGE_FILE_NAMES);
+
+export function packageContentType(name: string): PackageContentType | undefined {
+  if (!packageFileNames.has(name)) return undefined;
+  return packageContentTypes[name as PackageFileName];
+}
+
+/** Historical packages keep file bytes in `files_json`. Those reads must not touch the bucket. */
+export function inlinePackageFiles(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if ("version" in record || "files" in record) return undefined;
+  const entries = Object.entries(record);
+  if (!entries.length) return undefined;
+  if (!entries.every(([name, content]) => packageFileNames.has(name) && typeof content === "string")) return undefined;
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+
+export function storedPackageIndex(value: unknown): StoredPackageIndex | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as { version?: unknown; files?: unknown };
+  if (record.version !== 1 || !Array.isArray(record.files) || record.files.length === 0) return undefined;
+  const files: PackageFileDescriptor[] = [];
+  for (const item of record.files) {
+    if (!item || typeof item !== "object") return undefined;
+    const file = item as Partial<PackageFileDescriptor>;
+    if (typeof file.name !== "string" || typeof file.objectId !== "string" || file.objectId.length < 1) return undefined;
+    const contentType = packageContentType(file.name);
+    if (!contentType || file.contentType !== contentType) return undefined;
+    if (typeof file.byteSize !== "number" || !Number.isInteger(file.byteSize) || file.byteSize < 1) return undefined;
+    if (typeof file.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(file.sha256)) return undefined;
+    files.push({
+      objectId: file.objectId,
+      name: file.name as PackageFileName,
+      contentType,
+      byteSize: file.byteSize,
+      sha256: file.sha256,
+    });
+  }
+  if (new Set(files.map((file) => file.name)).size !== files.length) return undefined;
+  if (new Set(files.map((file) => file.objectId)).size !== files.length) return undefined;
+  return { version: 1, files };
+}
+
+/** Replace manifest file list with object fingerprints, then recompute the package fingerprint. */
+export function resealPackageManifest(
+  built: ReturnType<typeof buildPackageFiles>,
+  stored: PackageFileDescriptor[],
+) {
+  const expected = built.manifest.files;
+  if (stored.length !== expected.length) return undefined;
+  const byName = new Map(stored.map((file) => [file.name, file]));
+  if (byName.size !== stored.length) return undefined;
+  const files = expected.map((file) => {
+    const found = byName.get(file.name as PackageFileName);
+    const content = built.files[file.name];
+    if (!found || content === undefined || found.sha256 !== file.sha256) return undefined;
+    if (found.byteSize !== packageUtf8(content).byteLength || found.sha256 !== sha256(content)) return undefined;
+    return found;
+  });
+  if (files.some((file) => !file)) return undefined;
+  const manifest = { ...built.manifest, files: files as PackageFileDescriptor[] };
+  const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+  const nextFiles = { ...built.files, "manifest.json": manifestText };
+  const packageFingerprint = sha256(JSON.stringify(
+    Object.entries(nextFiles).sort(([a], [b]) => (a < b ? -1 : 1)),
+  ));
+  return { files: nextFiles, manifest, packageFingerprint };
 }
 
 // ---------------------------------------------------------------------------

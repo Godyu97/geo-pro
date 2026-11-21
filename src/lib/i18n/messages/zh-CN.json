@@ -1125,7 +1125,7 @@
     "INVALID_INPUT": "输入无效。",
     "EVIDENCE_REQUIRED": "缺少来源或适用边界等补证项。",
     "OPERATION_CONFLICT": "操作冲突。",
-    "SERVICE_UNAVAILABLE": "服务暂不可用。",
+    "SERVICE_UNAVAILABLE": "文件暂时无法保存或读取。请稍后重试。",
     "versions": "稿件版本",
     "versionDetail": "稿件详情",
     "versionsEmpty": "暂无稿件版本。先确认 Brief 并生成草稿。",

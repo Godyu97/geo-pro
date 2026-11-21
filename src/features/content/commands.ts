@@ -42,16 +42,25 @@ import { ContentDao, type AssetRow, type BriefVersionRow, type ContentVersionRow
 import {
   buildPackageFiles,
   computeApprovalFingerprint,
+  inlinePackageFiles,
+  packageContentType,
+  packageSha256,
+  packageUtf8,
   preflightBlockers,
+  resealPackageManifest,
   resolveExportKind,
+  storedPackageIndex,
   validateExportSubset,
   type PackageFact,
+  type PackageFileDescriptor,
+  type PackageFileName,
   type PackageStoredMedia,
+  type StoredPackageIndex,
 } from "./package.ts";
 import { createObjectStorage } from "../../lib/storage/index.ts";
 import { saveStoredObject, type ObjectStorageClient } from "../stored-objects/commands.ts";
 import { CONTENT_TYPES, MAX_STORED_OBJECT_BYTES, sanitizeObjectFileName } from "../stored-objects/contracts.ts";
-import { loadBrandObjectsByIds, type StoredObjectRow } from "../stored-objects/dao.ts";
+import { loadBrandObjectsByIds, markObjectFailed, type StoredObjectRow } from "../stored-objects/dao.ts";
 import {
   canCancel,
   canPause,
@@ -901,12 +910,20 @@ export async function readDeliveryPackage(
   db: DatabaseConnection,
   ownerId: string,
   packageId: string,
+  options: ObjectCommandOptions = {},
 ) {
   const dao = new ContentDao(db);
   const row = await dao.getPackage(ownerId, packageId);
   if (!row) return denied("NOT_FOUND");
   if (!await new BrandDao(db).owned(ownerId, row.brandId)) return denied("NOT_FOUND");
-  return { package: summarizePackage(row), files: JSON.parse(row.filesJson) as Record<string, string> };
+  const parsed: unknown = JSON.parse(row.filesJson);
+  const inline = inlinePackageFiles(parsed);
+  if (inline) return { package: summarizePackage(row), files: inline };
+  const index = storedPackageIndex(parsed);
+  if (!index) return denied("NOT_FOUND");
+  const loaded = await readStoredPackageFiles(db, ownerId, row.brandId, index, options);
+  if (!loaded.ok) return denied(loaded.error);
+  return { package: summarizePackage(row), files: loaded.files };
 }
 
 export async function readBriefDetail(
@@ -1145,11 +1162,15 @@ export type AssetObjectFile = {
   body: Uint8Array;
 };
 
-export type RegisterAssetOptions = {
-  file?: AssetObjectFile;
+export type ObjectCommandOptions = {
   env?: Record<string, string | undefined>;
   storage?: ObjectStorageClient;
   now?: Date;
+  connection?: QueryConnection;
+};
+
+export type RegisterAssetOptions = ObjectCommandOptions & {
+  file?: AssetObjectFile;
 };
 
 function assetFingerprint(input: RegisterAssetInput, storedObjectId: string | null) {
@@ -1365,13 +1386,103 @@ export async function exportPreflight(
 
 type AssembleResult = { ok: true; row: PackageRow } | { ok: false; error: ContentError };
 
+function storageCommandOptions(options: ObjectCommandOptions) {
+  return {
+    ...(options.env ? { env: options.env } : {}),
+    ...(options.storage ? { storage: options.storage } : {}),
+    ...(options.now ? { now: options.now } : {}),
+    ...(options.connection ? { connection: options.connection } : {}),
+  };
+}
+
+async function storeDeliveryFile(
+  db: DatabaseConnection,
+  ownerId: string,
+  brandId: string,
+  name: string,
+  content: string,
+  options: ObjectCommandOptions,
+): Promise<{ ok: true; descriptor: PackageFileDescriptor } | { ok: false; error: ContentError }> {
+  const contentType = packageContentType(name);
+  const body = packageUtf8(content);
+  if (!contentType || body.byteLength < 1 || body.byteLength > MAX_STORED_OBJECT_BYTES) {
+    return { ok: false, error: "INVALID_INPUT" };
+  }
+  const fileName = name as PackageFileName;
+  const saved = await saveStoredObject(db, {
+    actorId: ownerId,
+    brandId,
+    class: "delivery-package",
+    visibility: "internal",
+    fileName,
+    contentType,
+    body,
+  }, storageCommandOptions(options));
+  if (!saved.ok) return { ok: false, error: saved.code === "failed" ? "SERVICE_UNAVAILABLE" : "INVALID_INPUT" };
+  if (saved.class !== "delivery-package"
+    || saved.visibility !== "internal"
+    || saved.fileName !== fileName
+    || saved.contentType !== contentType
+    || saved.byteSize !== body.byteLength
+    || saved.sha256 !== packageSha256(body)) {
+    return { ok: false, error: "SERVICE_UNAVAILABLE" };
+  }
+  return {
+    ok: true,
+    descriptor: {
+      objectId: saved.id,
+      name: fileName,
+      contentType,
+      byteSize: saved.byteSize,
+      sha256: saved.sha256,
+    },
+  };
+}
+
+async function readStoredPackageFiles(
+  db: DatabaseConnection,
+  ownerId: string,
+  brandId: string,
+  index: StoredPackageIndex,
+  options: ObjectCommandOptions,
+): Promise<{ ok: true; files: Record<string, string> } | { ok: false; error: ContentError }> {
+  const rows = await loadBrandObjectsByIds(db, ownerId, brandId, index.files.map((file) => file.objectId));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const storage = options.storage ?? createObjectStorage(options.env ? { env: options.env } : {});
+  const files: Record<string, string> = {};
+  for (const file of index.files) {
+    const row = byId.get(file.objectId);
+    if (!row || row.status !== "ready" || row.class !== "delivery-package" || row.visibility !== "internal"
+      || row.fileName !== file.name || row.contentType !== file.contentType
+      || row.byteSize !== file.byteSize || row.sha256 !== file.sha256 || !row.objectKey) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+    let loaded: Awaited<ReturnType<ObjectStorageClient["getObject"]>>;
+    try {
+      loaded = await storage.getObject({ key: row.objectKey });
+    } catch {
+      return { ok: false, error: "SERVICE_UNAVAILABLE" };
+    }
+    if (!loaded.ok) return { ok: false, error: "SERVICE_UNAVAILABLE" };
+    if (loaded.sha256 !== file.sha256 || loaded.byteSize !== file.byteSize) {
+      await storage.deleteObject({ key: row.objectKey });
+      await db.transaction((tx) => markObjectFailed(tx, row.id, ownerId, "ready"));
+      return { ok: false, error: "SERVICE_UNAVAILABLE" };
+    }
+    files[file.name] = new TextDecoder().decode(loaded.body);
+  }
+  return { ok: true, files };
+}
+
 async function assemblePackage(
   db: QueryConnection,
+  objectDb: DatabaseConnection,
   ownerId: string,
   brandId: string,
   versionId: string,
   kind: PackageKind,
   now: string,
+  options: ObjectCommandOptions,
 ): Promise<AssembleResult> {
   const dao = new ContentDao(db);
   const version = await ownedVersion(dao, ownerId, brandId, versionId);
@@ -1439,6 +1550,19 @@ async function assemblePackage(
     facts,
     assets,
   });
+  const storedOptions = { ...options, now: options.now ?? new Date(now) };
+  const descriptors: PackageFileDescriptor[] = [];
+  for (const file of built.manifest.files) {
+    const stored = await storeDeliveryFile(objectDb, ownerId, brandId, file.name, built.files[file.name], storedOptions);
+    if (!stored.ok) return stored;
+    descriptors.push(stored.descriptor);
+  }
+  const sealed = resealPackageManifest(built, descriptors);
+  if (!sealed) return { ok: false, error: "SERVICE_UNAVAILABLE" };
+  const manifestFile = await storeDeliveryFile(
+    objectDb, ownerId, brandId, "manifest.json", sealed.files["manifest.json"], storedOptions,
+  );
+  if (!manifestFile.ok) return manifestFile;
   const row: PackageRow = {
     id: randomUUID(),
     brandId,
@@ -1452,9 +1576,9 @@ async function assemblePackage(
     labelingProfileVersion: version.labelingProfileVersion,
     doNotReuse: 0,
     nonPublishable: kind === "review" ? 1 : 0,
-    manifestJson: JSON.stringify(built.manifest),
-    filesJson: JSON.stringify(built.files),
-    packageFingerprint: built.packageFingerprint,
+    manifestJson: JSON.stringify(sealed.manifest),
+    filesJson: JSON.stringify({ version: 1, files: [...descriptors, manifestFile.descriptor] }),
+    packageFingerprint: sealed.packageFingerprint,
     createdAt: now,
   };
   await dao.insertPackage(row);
@@ -1466,6 +1590,7 @@ export async function exportConfirm(
   ownerId: string,
   input: ExportConfirmInput,
   clock: Clock = () => new Date().toISOString(),
+  options: ObjectCommandOptions = {},
 ) {
   if (!await activeBrand(db, ownerId, input.brandId)) return denied("NOT_FOUND");
   const dao = new ContentDao(db);
@@ -1520,14 +1645,16 @@ export async function exportConfirm(
         db,
         { ownerId, brandId: input.brandId },
         { factVersionIds: parseIds(version.factVersionIdsJson), contentVersionId: version.id, stage: "delivery" },
-        (transaction) => assemblePackage(transaction, ownerId, input.brandId, version.id, "formal", now),
+        (transaction) => assemblePackage(
+          transaction, db, ownerId, input.brandId, version.id, "formal", now, { ...options, connection: transaction },
+        ),
         () => new Date(now),
       );
       result = "error" in gate
         ? { ok: false, error: factFailure(gate).error }
         : gate.data;
     } else {
-      result = await assemblePackage(db, ownerId, input.brandId, item.versionId, "review", now);
+      result = await assemblePackage(db, db, ownerId, input.brandId, item.versionId, "review", now, options);
     }
     if (!result.ok) {
       failure = result.error;

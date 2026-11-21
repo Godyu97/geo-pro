@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { PurgeDao } from "../../src/features/brands/purge-dao.ts";
@@ -29,6 +29,38 @@ import {
 } from "../../src/features/content/package.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
+
+const storageEnv = {
+  S3_ENDPOINT: "http://127.0.0.1:9",
+  S3_REGION: "us-east-1",
+  S3_BUCKET: "app-files",
+  S3_ACCESS_KEY_ID: "local-app",
+  S3_SECRET_ACCESS_KEY: "s3-secret-not-for-logs",
+  S3_FORCE_PATH_STYLE: "true",
+};
+
+function memoryStorage() {
+  const objects = new Map();
+  return {
+    objects,
+    async putAndReadBack({ key, body, contentType }) {
+      const sha256 = createHash("sha256").update(body).digest("hex");
+      objects.set(key, body);
+      return { ok: true, status: "ready", bucket: "app-files", key, byteSize: body.byteLength, sha256, contentType };
+    },
+    async getObject({ key }) {
+      const body = objects.get(key);
+      if (!body) return { ok: false, status: "failed", code: "unavailable" };
+      return { ok: true, body, byteSize: body.byteLength, sha256: createHash("sha256").update(body).digest("hex") };
+    },
+    async deleteObject() {
+      return { ok: true };
+    },
+    async presignGet() {
+      return { ok: false, status: "failed", code: "unavailable" };
+    },
+  };
+}
 
 const time = "2026-11-20T11:00:00.000Z";
 const clock = () => time;
@@ -124,6 +156,8 @@ async function setup(t, kind) {
     return id;
   };
   const brand = await newBrand();
+  const storage = memoryStorage();
+  const packageOptions = { env: storageEnv, storage, now: new Date(time) };
 
   /** Generates one draft ContentVersion per claim in a single batch. */
   async function drafts(claims) {
@@ -182,7 +216,8 @@ async function setup(t, kind) {
     preflight: (versionIds, operationId = randomUUID(), mode = "auto", who = owner) =>
       exportPreflight(db, who, { action: "export-preflight", brandId: brand, operationId, versionIds, mode }, clock),
     confirm: (operationId, chosenVersionIds, who = owner) =>
-      exportConfirm(db, who, { action: "export-confirm", brandId: brand, operationId, chosenVersionIds }, clock),
+      exportConfirm(db, who, { action: "export-confirm", brandId: brand, operationId, chosenVersionIds }, clock, packageOptions),
+    readPackage: (packageId, who = owner) => readDeliveryPackage(db, who, packageId, packageOptions),
     verify: (versionId) =>
       updateVariant(db, owner, base({
         action: "update-variant",
@@ -346,7 +381,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(after.approvalCurrent, false);
     assert.equal(after.packages.length, 1, "old package stays readable");
     assert.equal(after.packages[0].doNotReuse, true);
-    const oldPackage = await readDeliveryPackage(db, owner, first.packages[0].id);
+    const oldPackage = await act.readPackage(first.packages[0].id);
     assert.equal(oldPackage.error, undefined);
     assert.ok(oldPackage.files["content.md"].includes(approved.version.title));
 
@@ -393,7 +428,7 @@ for (const kind of ["sqlite", "postgresql"]) {
   });
 
   run("AC-M0-10-2 formal package excludes internal assets and executable HTML", async (t, ctx) => {
-    const { db, owner, act } = ctx;
+    const { act } = ctx;
     const { versionIds: [versionId] } = await ctx.drafts(["Synthetic 100 CNY"]);
     const publicAsset = (await act.asset({ kind: "cover", source: "Public studio", contentRef: "ref://public-cover" })).asset;
     const internalAsset = (await act.asset({
@@ -420,7 +455,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(summary.kind, "formal");
     assert.equal(summary.nonPublishable, false);
 
-    const read = await readDeliveryPackage(db, owner, summary.id);
+    const read = await act.readPackage(summary.id);
     const blob = Object.values(read.files).join("\n");
     assert.doesNotMatch(blob, /INTERNAL-|ref:\/\/INTERNAL/i);
     assert.doesNotMatch(read.files["content.html"], /<script|onerror/i);
@@ -525,7 +560,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const [summary] = done.packages;
     assert.equal(summary.kind, "review");
     assert.equal(summary.nonPublishable, true);
-    const read = await readDeliveryPackage(db, owner, summary.id);
+    const read = await act.readPackage(summary.id);
     assert.match(read.files["content.md"], /NON-PUBLISHABLE/);
     assert.match(read.files["content.html"], /NON-PUBLISHABLE/);
     assert.equal(JSON.parse(read.files["manifest.json"]).nonPublishable, true);
@@ -543,7 +578,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const packageId = exported.packages[0].id;
 
     assert.equal((await readContentVersion(db, outsider, versionId)).error, "NOT_FOUND");
-    assert.equal((await readDeliveryPackage(db, outsider, packageId)).error, "NOT_FOUND");
+    assert.equal((await act.readPackage(packageId, outsider)).error, "NOT_FOUND");
     assert.equal((await act.submit(versionId, outsider)).error, "NOT_FOUND");
     assert.equal((await act.approve(versionId, outsider)).error, "NOT_FOUND");
     assert.equal((await act.reject(versionId, outsider)).error, "NOT_FOUND");
@@ -561,7 +596,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     // Frozen brands deny reads and downloads.
     await queryWithParameters(db, "UPDATE brand SET frozen_at = ?, restore_until = ? WHERE id = ?", [time, time, brand]);
     assert.equal((await readContentVersion(db, owner, versionId)).error, "NOT_FOUND");
-    assert.equal((await readDeliveryPackage(db, owner, packageId)).error, "NOT_FOUND");
+    assert.equal((await act.readPackage(packageId)).error, "NOT_FOUND");
   });
 }
 

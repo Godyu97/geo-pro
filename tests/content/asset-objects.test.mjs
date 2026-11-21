@@ -414,13 +414,13 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.deepEqual(preflight.eligibleVersionIds, [versionId]);
     const exported = await exportConfirm(traced.connection, owner, {
       action: "export-confirm", brandId: brand, operationId, chosenVersionIds: [versionId],
-    }, clock);
+    }, clock, options);
     assert.equal(exported.error, undefined);
     const objectSelects = traced.queries.filter((sql) => sql.includes("FROM stored_object") && sql.includes(" IN "));
     assert.equal(objectSelects.length, 1);
     assert.equal(storage.calls.get, 0);
 
-    const read = await readDeliveryPackage(db, owner, exported.packages[0].id);
+    const read = await readDeliveryPackage(db, owner, exported.packages[0].id, options);
     const blob = Object.values(read.files).join("\n");
     assert.equal(blob.includes(internalObject.objectKey), false);
     assert.equal(blob.includes(internalAsset.asset.storedObjectId), false);
@@ -435,6 +435,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(manifest.imageCount, 1);
     assert.equal(manifest.excludedAssetCount, 2);
     assert.equal(manifest.packageKind, "formal");
+    const packageReads = storage.calls.get;
 
     const knownId = internalAsset.asset.storedObjectId;
     for (const [actor, scope] of [[outsider, outsiderBrand], [outsider, brand]]) {
@@ -442,13 +443,13 @@ for (const kind of ["sqlite", "postgresql"]) {
       assert.equal(denied.error, "NOT_FOUND");
       assert.equal("body" in denied, false);
     }
-    assert.equal(storage.calls.get, 0);
+    assert.equal(storage.calls.get, packageReads);
     const unreviewed = await readContentAssetBytes(
       db, owner, { brandId: brand, objectId: pendingAsset.asset.storedObjectId }, options,
     );
     assert.equal(unreviewed.error, "ASSET_UNREVIEWED");
     assert.equal("body" in unreviewed, false);
-    assert.equal(storage.calls.get, 0);
+    assert.equal(storage.calls.get, packageReads);
     const opened = await readContentAssetBytes(
       db, owner, { brandId: brand, objectId: publicAsset.asset.storedObjectId }, options,
     );
