@@ -1,14 +1,22 @@
 import "server-only";
 
 import Link from "next/link";
+import { headers } from "next/headers";
 import { formatDateTime } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
 import { getTranslator } from "@/lib/i18n/server";
+import { brandIntakeOrigin } from "@/features/brands/intake";
+import { ApplyMockChannelsButton } from "@/features/functional-mock/channel-button";
+import { mockVendorId } from "@/features/functional-mock/channels";
 import { CapabilityRetryButton } from "./retry-button";
 import { readUserCapabilities } from "./service";
 
 export async function MonitoringCapabilityPanel({ locale }: { locale: Locale }) {
-  const [t, result] = await Promise.all([getTranslator("capabilities"), readUserCapabilities()]);
+  const [t, result, intake] = await Promise.all([
+    getTranslator("capabilities"),
+    readUserCapabilities(),
+    headers().then((value) => brandIntakeOrigin(value)),
+  ]);
   if (!result.items) {
     return (
       <div role="alert" className="space-y-2 text-sm">
@@ -20,9 +28,19 @@ export async function MonitoringCapabilityPanel({ locale }: { locale: Locale }) 
   }
 
   const formal = result.items.filter((item) => item.eligibility === "eligible");
+  const realFormal = formal.filter((item) => item.vendorId !== mockVendorId);
+  const mockFormal = formal.filter((item) => item.vendorId === mockVendorId);
   return (
     <div className="space-y-3 text-sm">
-      <p className="text-muted-foreground">{t(formal.length ? "formalAvailable" : "noneFormal")}</p>
+      <p className="text-muted-foreground">{t(realFormal.length ? "formalAvailable" : mockFormal.length ? "mockChannels" : "noneFormal")}</p>
+      {intake?.mode === "mock" && (
+        <ApplyMockChannelsButton
+          label={t("applyMockChannels")}
+          pendingLabel={t("mockChannelsPending")}
+          doneLabel={t("mockChannelsDone")}
+          failedLabel={t("mockChannelsFailed")}
+        />
+      )}
       {result.items.length === 0 && <p className="text-muted-foreground">{t("empty")}</p>}
       <div className="grid min-w-0 gap-3">
         {result.items.map((item) => (

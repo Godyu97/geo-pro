@@ -5,6 +5,7 @@ import { brandIdSchema } from "@/features/brands/contracts";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { applyMockChannels } from "./apply-channels";
 import { applyMockMaterials } from "./apply-materials";
 
 export async function applyMockMaterialsAction(brandId: string) {
@@ -15,6 +16,17 @@ export async function applyMockMaterialsAction(brandId: string) {
   const { user } = await requireSession();
   try {
     return await applyMockMaterials(getConnection(), { ownerId: user.id, brandId: id.data });
+  } catch {
+    return { ok: false as const, error: "unavailable" };
+  }
+}
+
+export async function applyMockChannelsAction() {
+  const intake = brandIntakeOrigin(await headers());
+  if (intake?.mode !== "mock") return { ok: false as const, error: "closed" };
+  const { user } = await requireSession();
+  try {
+    return await applyMockChannels(getConnection(), user.id);
   } catch {
     return { ok: false as const, error: "unavailable" };
   }
