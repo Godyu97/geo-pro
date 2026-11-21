@@ -80,6 +80,9 @@ export const reportSnapshot = sqliteTable("report_snapshot", {
   htmlSha256: text("html_sha256").notNull(),
   operationId: text("operation_id").notNull(),
   createdAt: text("created_at").notNull(),
+  // Null keeps historical inline html_bytes / json_bytes readable. New rows point at two immutable objects.
+  htmlObjectId: text("html_object_id"),
+  jsonObjectId: text("json_object_id"),
 }, (table) => [
   foreignKey({
     name: "report_snapshot_retest_fk",
@@ -90,14 +93,21 @@ export const reportSnapshot = sqliteTable("report_snapshot", {
   index("report_snapshot_brand_idx").on(table.brandId, table.createdAt, table.id),
   index("report_snapshot_owner_idx").on(table.ownerId, table.createdAt, table.id),
   index("report_snapshot_predecessor_idx").on(table.predecessorId),
+  uniqueIndex("report_snapshot_html_object_uidx").on(table.htmlObjectId).where(sql`${table.htmlObjectId} is not null`),
+  uniqueIndex("report_snapshot_json_object_uidx").on(table.jsonObjectId).where(sql`${table.jsonObjectId} is not null`),
   check("report_snapshot_state_check", sql`${table.status} in ('created', 'superseded')
     and ${table.grade} in ('exploratory', 'incomparable')
     and ${table.intent} in ('business_loop', 'diagnostic')
     and ${table.loopCompleted} in (0, 1)
     and ${table.sourceMissing} in (0, 1)
     and ${table.entityVersion} > 0
-    and length(${table.jsonBytes}) > 1
-    and length(${table.htmlBytes}) > 1
     and length(${table.jsonSha256}) = 64
-    and length(${table.htmlSha256}) = 64`),
+    and length(${table.htmlSha256}) = 64
+    and (
+      (${table.htmlObjectId} is null and ${table.jsonObjectId} is null
+        and length(${table.htmlBytes}) > 1 and length(${table.jsonBytes}) > 1)
+      or (${table.htmlObjectId} is not null and ${table.jsonObjectId} is not null
+        and ${table.htmlObjectId} <> ${table.jsonObjectId}
+        and length(${table.htmlBytes}) = 0 and length(${table.jsonBytes}) = 0)
+    )`),
 ]);

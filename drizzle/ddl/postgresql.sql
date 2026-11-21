@@ -921,16 +921,23 @@ CREATE TABLE "report_snapshot" (
 	"html_sha256" text NOT NULL,
 	"operation_id" text NOT NULL,
 	"created_at" text NOT NULL,
+	"html_object_id" text,
+	"json_object_id" text,
 	CONSTRAINT "report_snapshot_state_check" CHECK ("report_snapshot"."status" in ('created', 'superseded')
     and "report_snapshot"."grade" in ('exploratory', 'incomparable')
     and "report_snapshot"."intent" in ('business_loop', 'diagnostic')
     and "report_snapshot"."loop_completed" in (0, 1)
     and "report_snapshot"."source_missing" in (0, 1)
     and "report_snapshot"."entity_version" > 0
-    and length("report_snapshot"."json_bytes") > 1
-    and length("report_snapshot"."html_bytes") > 1
     and length("report_snapshot"."json_sha256") = 64
-    and length("report_snapshot"."html_sha256") = 64)
+    and length("report_snapshot"."html_sha256") = 64
+    and (
+      ("report_snapshot"."html_object_id" is null and "report_snapshot"."json_object_id" is null
+        and length("report_snapshot"."html_bytes") > 1 and length("report_snapshot"."json_bytes") > 1)
+      or ("report_snapshot"."html_object_id" is not null and "report_snapshot"."json_object_id" is not null
+        and "report_snapshot"."html_object_id" <> "report_snapshot"."json_object_id"
+        and length("report_snapshot"."html_bytes") = 0 and length("report_snapshot"."json_bytes") = 0)
+    ))
 );
 
 CREATE TABLE "report_todo" (
@@ -1249,6 +1256,8 @@ CREATE UNIQUE INDEX "report_snapshot_operation_uidx" ON "report_snapshot" USING 
 CREATE INDEX "report_snapshot_brand_idx" ON "report_snapshot" USING btree ("brand_id","created_at","id");
 CREATE INDEX "report_snapshot_owner_idx" ON "report_snapshot" USING btree ("owner_id","created_at","id");
 CREATE INDEX "report_snapshot_predecessor_idx" ON "report_snapshot" USING btree ("predecessor_id");
+CREATE UNIQUE INDEX "report_snapshot_html_object_uidx" ON "report_snapshot" USING btree ("html_object_id") WHERE "report_snapshot"."html_object_id" is not null;
+CREATE UNIQUE INDEX "report_snapshot_json_object_uidx" ON "report_snapshot" USING btree ("json_object_id") WHERE "report_snapshot"."json_object_id" is not null;
 CREATE INDEX "report_todo_brand_idx" ON "report_todo" USING btree ("brand_id","due_at","id");
 CREATE INDEX "report_todo_owner_idx" ON "report_todo" USING btree ("owner_id","due_at","id");
 CREATE UNIQUE INDEX "competitor_mention_once_uidx" ON "competitor_mention" USING btree ("set_id","observation_id","competitor_label");

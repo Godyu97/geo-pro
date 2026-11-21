@@ -30,6 +30,7 @@ export const reportErrors = {
   WINDOW_NOT_DUE: 409,
   LOOP_NOT_READY: 409,
   CONFLICT: 409,
+  SERVICE_UNAVAILABLE: 503,
 } as const;
 export type ReportError = keyof typeof reportErrors;
 

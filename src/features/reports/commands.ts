@@ -1,15 +1,19 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { QueryConnection } from "../../lib/db/connection.ts";
+import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
+import { createObjectStorage } from "../../lib/storage/index.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { saveStoredObject, type ObjectStorageClient } from "../stored-objects/commands.ts";
+import { MAX_STORED_OBJECT_BYTES } from "../stored-objects/contracts.ts";
+import { loadBrandObjectsByIds, markObjectFailed } from "../stored-objects/dao.ts";
 import type {
   GenerateReportInput,
   ReportError,
   RequestRetestInput,
   ReviseReportInput,
 } from "./contracts.ts";
-import { ReportDao } from "./dao.ts";
+import { ReportDao, type ReportSnapshotRow } from "./dao.ts";
 import { compareWindows, computeD7DueAt, resolveLoopGate } from "./rules.ts";
 import { buildSnapshotDocument, fingerprintBytes, renderSnapshotHtml } from "./snapshot.ts";
 
@@ -20,6 +24,125 @@ async function requireOwnedBrand(db: QueryConnection, ownerId: string, brandId: 
   const brand = await new BrandDao(db).owned(ownerId, brandId);
   if (!brand) return null;
   return brand;
+}
+
+const reportHtmlName = "report.html";
+const reportJsonName = "report.json";
+
+export type SnapshotStorageOptions = {
+  env?: Record<string, string | undefined>;
+  storage?: ObjectStorageClient;
+  now?: Date;
+  connection?: QueryConnection;
+};
+
+function storageOptions(options: SnapshotStorageOptions) {
+  return {
+    ...(options.env ? { env: options.env } : {}),
+    ...(options.storage ? { storage: options.storage } : {}),
+    ...(options.now ? { now: options.now } : {}),
+    ...(options.connection ? { connection: options.connection } : {}),
+  };
+}
+
+type StoredReportFile = { ok: true; id: string; sha256: string } | { ok: false; error: ReportError };
+
+async function storeReportFile(
+  db: DatabaseConnection,
+  ownerId: string,
+  brandId: string,
+  fileName: typeof reportHtmlName | typeof reportJsonName,
+  contentType: "text/html" | "application/json",
+  text: string,
+  options: SnapshotStorageOptions,
+): Promise<StoredReportFile> {
+  const body = new TextEncoder().encode(text);
+  if (body.byteLength < 1 || body.byteLength > MAX_STORED_OBJECT_BYTES) return { ok: false, error: "INVALID_INPUT" };
+  const saved = await saveStoredObject(db, {
+    actorId: ownerId,
+    brandId,
+    class: "report-snapshot",
+    visibility: "internal",
+    fileName,
+    contentType,
+    body,
+  }, storageOptions(options));
+  const sha256 = fingerprintBytes(text);
+  if (!saved.ok) return { ok: false, error: saved.code === "failed" ? "SERVICE_UNAVAILABLE" : "INVALID_INPUT" };
+  if (saved.class !== "report-snapshot" || saved.visibility !== "internal" || saved.fileName !== fileName
+    || saved.contentType !== contentType || saved.byteSize !== body.byteLength || saved.sha256 !== sha256) {
+    return { ok: false, error: "SERVICE_UNAVAILABLE" };
+  }
+  return { ok: true, id: saved.id, sha256 };
+}
+
+async function storeSnapshotPair(
+  db: DatabaseConnection,
+  ownerId: string,
+  brandId: string,
+  jsonText: string,
+  htmlText: string,
+  now: string,
+  options: SnapshotStorageOptions,
+) {
+  const storedOptions = { ...options, now: options.now ?? new Date(now) };
+  const html = await storeReportFile(db, ownerId, brandId, reportHtmlName, "text/html", htmlText, storedOptions);
+  if (!html.ok) return html;
+  const json = await storeReportFile(db, ownerId, brandId, reportJsonName, "application/json", jsonText, storedOptions);
+  if (!json.ok) return json;
+  if (html.id === json.id) return { ok: false as const, error: "SERVICE_UNAVAILABLE" as ReportError };
+  return { ok: true as const, html, json };
+}
+
+function inlineSnapshot(row: ReportSnapshotRow) {
+  return row.htmlObjectId === null && row.jsonObjectId === null;
+}
+
+type StoredSnapshotBody = { ok: true; html: string; json: string } | { ok: false; error: ReportError };
+
+async function readStoredSnapshot(
+  db: DatabaseConnection,
+  ownerId: string,
+  snapshot: ReportSnapshotRow,
+  options: SnapshotStorageOptions,
+): Promise<StoredSnapshotBody> {
+  if (!snapshot.htmlObjectId || !snapshot.jsonObjectId || snapshot.htmlObjectId === snapshot.jsonObjectId) {
+    return { ok: false, error: "NOT_FOUND" };
+  }
+  const rows = await loadBrandObjectsByIds(db, ownerId, snapshot.brandId, [snapshot.htmlObjectId, snapshot.jsonObjectId]);
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const expected = [
+    { id: snapshot.htmlObjectId, name: reportHtmlName, contentType: "text/html", sha256: snapshot.htmlSha256 },
+    { id: snapshot.jsonObjectId, name: reportJsonName, contentType: "application/json", sha256: snapshot.jsonSha256 },
+  ] as const;
+  const storage = options.storage ?? createObjectStorage(options.env ? { env: options.env } : {});
+  const files: Partial<Record<"report.html" | "report.json", string>> = {};
+  for (const file of expected) {
+    const row = byId.get(file.id);
+    if (!row || row.status !== "ready" || row.class !== "report-snapshot" || row.visibility !== "internal"
+      || row.immutable !== 1 || row.fileName !== file.name || row.contentType !== file.contentType
+      || row.sha256 !== file.sha256 || !row.objectKey) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+    let loaded: Awaited<ReturnType<ObjectStorageClient["getObject"]>>;
+    try {
+      loaded = await storage.getObject({ key: row.objectKey });
+    } catch {
+      return { ok: false, error: "SERVICE_UNAVAILABLE" };
+    }
+    if (!loaded.ok) return { ok: false, error: "SERVICE_UNAVAILABLE" };
+    const text = new TextDecoder().decode(loaded.body);
+    if (loaded.sha256 !== file.sha256 || loaded.byteSize !== row.byteSize || fingerprintBytes(text) !== file.sha256) {
+      await storage.deleteObject({ key: row.objectKey });
+      await db.transaction((tx) => markObjectFailed(tx, row.id, ownerId, "ready"));
+      return { ok: false, error: "SERVICE_UNAVAILABLE" };
+    }
+    files[file.name] = text;
+  }
+  const html = files[reportHtmlName];
+  const json = files[reportJsonName];
+  if (html === undefined || json === undefined) return { ok: false, error: "NOT_FOUND" };
+  return { ok: true, html, json };
 }
 
 export async function requestRetest(
@@ -131,10 +254,11 @@ export async function requestRetest(
 }
 
 export async function generateReport(
-  db: QueryConnection,
+  db: DatabaseConnection,
   ownerId: string,
   input: GenerateReportInput,
   clock: Clock = defaultClock,
+  options: SnapshotStorageOptions = {},
 ) {
   const brand = await requireOwnedBrand(db, ownerId, input.brandId);
   if (!brand) return { error: "NOT_FOUND" as ReportError };
@@ -178,8 +302,10 @@ export async function generateReport(
       : null,
     createdAt: now,
   });
-  const jsonBytes = JSON.stringify(document);
-  const htmlBytes = renderSnapshotHtml(document);
+  const jsonText = JSON.stringify(document);
+  const htmlText = renderSnapshotHtml(document);
+  const stored = await storeSnapshotPair(db, ownerId, input.brandId, jsonText, htmlText, now, options);
+  if (!stored.ok) return { error: stored.error };
   await dao.insertSnapshot({
     id: snapshotId,
     brandId: input.brandId,
@@ -194,12 +320,14 @@ export async function generateReport(
     timezone: retest.timezone,
     locale: input.locale,
     sourceMissing: comparison.sourceMissing ? 1 : 0,
-    jsonBytes,
-    htmlBytes,
-    jsonSha256: fingerprintBytes(jsonBytes),
-    htmlSha256: fingerprintBytes(htmlBytes),
+    jsonBytes: "",
+    htmlBytes: "",
+    jsonSha256: stored.json.sha256,
+    htmlSha256: stored.html.sha256,
     operationId: input.operationId,
     createdAt: now,
+    htmlObjectId: stored.html.id,
+    jsonObjectId: stored.json.id,
   });
   await dao.updateRetest({
     id: retest.id,
@@ -222,10 +350,11 @@ export async function generateReport(
 }
 
 export async function reviseReport(
-  db: QueryConnection,
+  db: DatabaseConnection,
   ownerId: string,
   input: ReviseReportInput,
   clock: Clock = defaultClock,
+  options: SnapshotStorageOptions = {},
 ) {
   const brand = await requireOwnedBrand(db, ownerId, input.brandId);
   if (!brand) return { error: "NOT_FOUND" as ReportError };
@@ -261,8 +390,10 @@ export async function reviseReport(
     predecessorId: previous.id,
     limitations: input.note ? [input.note] : undefined,
   });
-  const jsonBytes = JSON.stringify(document);
-  const htmlBytes = renderSnapshotHtml(document);
+  const jsonText = JSON.stringify(document);
+  const htmlText = renderSnapshotHtml(document);
+  const stored = await storeSnapshotPair(db, ownerId, input.brandId, jsonText, htmlText, now, options);
+  if (!stored.ok) return { error: stored.error };
   await dao.supersedeSnapshot(ownerId, previous.id);
   await dao.insertSnapshot({
     id: snapshotId,
@@ -278,12 +409,14 @@ export async function reviseReport(
     timezone: previous.timezone,
     locale: input.locale,
     sourceMissing: comparison.sourceMissing ? 1 : 0,
-    jsonBytes,
-    htmlBytes,
-    jsonSha256: fingerprintBytes(jsonBytes),
-    htmlSha256: fingerprintBytes(htmlBytes),
+    jsonBytes: "",
+    htmlBytes: "",
+    jsonSha256: stored.json.sha256,
+    htmlSha256: stored.html.sha256,
     operationId: input.operationId,
     createdAt: now,
+    htmlObjectId: stored.html.id,
+    jsonObjectId: stored.json.id,
   });
 
   return {
@@ -293,10 +426,21 @@ export async function reviseReport(
   };
 }
 
-export async function readSnapshot(db: QueryConnection, ownerId: string, snapshotId: string) {
+export async function readSnapshot(
+  db: DatabaseConnection,
+  ownerId: string,
+  snapshotId: string,
+  options: SnapshotStorageOptions = {},
+): Promise<{ error: ReportError } | { snapshot: ReportSnapshotRow; html: string; json: string }> {
   const snapshot = await new ReportDao(db).findSnapshot(ownerId, snapshotId);
-  if (!snapshot) return { error: "NOT_FOUND" as ReportError };
-  return { snapshot };
+  if (!snapshot) return { error: "NOT_FOUND" };
+  // Download re-checks the current owner and rejects a frozen brand before any object read.
+  const brand = await requireOwnedBrand(db, ownerId, snapshot.brandId);
+  if (!brand) return { error: "NOT_FOUND" };
+  if (inlineSnapshot(snapshot)) return { snapshot, html: snapshot.htmlBytes, json: snapshot.jsonBytes };
+  const stored = await readStoredSnapshot(db, ownerId, snapshot, options);
+  if (!stored.ok) return { error: stored.error };
+  return { snapshot, html: stored.html, json: stored.json };
 }
 
 export async function listReports(db: QueryConnection, ownerId: string, brandId: string, limit = 20) {

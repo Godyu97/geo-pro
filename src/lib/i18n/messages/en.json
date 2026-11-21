@@ -1257,6 +1257,7 @@
     "WINDOW_NOT_DUE": "The observation window is not due yet; only progress is available.",
     "LOOP_NOT_READY": "A verified effective time is required before creating a business-loop D+7 todo.",
     "CONFLICT": "Conflict. Refresh and retry.",
+    "SERVICE_UNAVAILABLE": "The report file could not be saved or read. Try again shortly.",
     "mockRetestNote": "Functional mock compares two windows of three same-scope synthetic samples and stores an immutable snapshot. The numbers are not monitoring and do not complete a business loop.",
     "applyMockRetest": "Create a mock same-scope retest",
     "mockRetestPending": "Writing the synthetic windows…",

@@ -110,7 +110,9 @@ const sections: Record<Exclude<ExportScope, "profile" | "brands">, Slice[]> = {
     byId("todos", "report_todo", `src.retest_id AS "retestId", src.kind AS "kind", src.status AS "status", src.due_at AS "dueAt",
       src.progress_json AS "progressJson"`),
     byId("snapshots", "report_snapshot", `src.retest_id AS "retestId", src.status AS "status", src.grade AS "grade",
-      src.timezone AS "timezone", src.locale AS "locale", src.json_bytes AS "jsonBytes", src.created_at AS "createdAt"`),
+      src.timezone AS "timezone", src.locale AS "locale", src.json_sha256 AS "jsonSha256", src.html_sha256 AS "htmlSha256",
+      src.html_object_id AS "htmlObjectId", src.json_object_id AS "jsonObjectId",
+      src.json_bytes AS "jsonBytes", src.created_at AS "createdAt"`),
   ],
   usageAndCosts: [
     {

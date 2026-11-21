@@ -183,6 +183,13 @@
       "when": 1795267331025,
       "tag": "0025_tiny_devos",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795268866994,
+      "tag": "0026_brainy_black_bolt",
+      "breakpoints": true
     }
   ]
 }

@@ -67,6 +67,8 @@ const snapshotRow = z.object({
   htmlSha256: z.string(),
   operationId: z.string(),
   createdAt: z.string(),
+  htmlObjectId: z.string().min(1).nullable(),
+  jsonObjectId: z.string().min(1).nullable(),
 });
 export type ReportSnapshotRow = z.infer<typeof snapshotRow>;
 
@@ -82,7 +84,8 @@ const todoColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", retest_id
 const snapshotColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", retest_id AS "retestId", status, grade, intent,
   loop_completed AS "loopCompleted", predecessor_id AS "predecessorId", entity_version AS "entityVersion",
   timezone, locale, source_missing AS "sourceMissing", json_bytes AS "jsonBytes", html_bytes AS "htmlBytes",
-  json_sha256 AS "jsonSha256", html_sha256 AS "htmlSha256", operation_id AS "operationId", created_at AS "createdAt"`;
+  json_sha256 AS "jsonSha256", html_sha256 AS "htmlSha256", operation_id AS "operationId", created_at AS "createdAt",
+  html_object_id AS "htmlObjectId", json_object_id AS "jsonObjectId"`;
 
 export class ReportDao {
   private readonly db: QueryConnection;
@@ -180,12 +183,13 @@ export class ReportDao {
       `INSERT INTO report_snapshot (
         id, brand_id, owner_id, retest_id, status, grade, intent, loop_completed, predecessor_id,
         entity_version, timezone, locale, source_missing, json_bytes, html_bytes, json_sha256, html_sha256,
-        operation_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        operation_id, created_at, html_object_id, json_object_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.id, row.brandId, row.ownerId, row.retestId, row.status, row.grade, row.intent, row.loopCompleted,
         row.predecessorId, row.entityVersion, row.timezone, row.locale, row.sourceMissing, row.jsonBytes,
         row.htmlBytes, row.jsonSha256, row.htmlSha256, row.operationId, row.createdAt,
+        row.htmlObjectId, row.jsonObjectId,
       ],
     );
   }

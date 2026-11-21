@@ -10,6 +10,7 @@ import {
   requestRetest,
   reviseReport,
 } from "./commands";
+import { reportSnapshotFileResponse } from "./download";
 import {
   listReportsQuerySchema,
   reportErrors,
@@ -86,24 +87,11 @@ export async function reportSnapshotResponse(request: Request, snapshotId: strin
   if (!session) return errorResponse("SESSION_REQUIRED");
 
   const result = await readSnapshot(getConnection(), session.user.id, snapshotId);
-  if ("error" in result) return errorResponse(result.error as ReportError);
-  const { snapshot } = result;
-  if (format === "html") {
-    return new Response(snapshot.htmlBytes, {
-      status: 200,
-      headers: {
-        ...headers,
-        "Content-Type": "text/html; charset=utf-8",
-        "Content-Disposition": `attachment; filename="report-${snapshot.id}.html"`,
-      },
-    });
-  }
-  return new Response(snapshot.jsonBytes, {
-    status: 200,
-    headers: {
-      ...headers,
-      "Content-Type": "application/json; charset=utf-8",
-      "Content-Disposition": `attachment; filename="report-${snapshot.id}.json"`,
-    },
+  if ("error" in result) return reportSnapshotFileResponse(null, reportErrors[result.error]);
+  const filename = format === "html" ? `report-${result.snapshot.id}.html` : `report-${result.snapshot.id}.json`;
+  return reportSnapshotFileResponse(format === "html" ? result.html : result.json, 200, {
+    "Content-Type": format === "html" ? "text/html; charset=utf-8" : "application/json; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "X-Content-Type-Options": "nosniff",
   });
 }

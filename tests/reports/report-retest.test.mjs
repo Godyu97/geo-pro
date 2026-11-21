@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { PurgeDao } from "../../src/features/brands/purge-dao.ts";
@@ -18,6 +18,45 @@ import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
 
 const time = "2026-11-20T12:00:00.000Z";
 const clock = () => time;
+const storageEnv = {
+  S3_ENDPOINT: "http://127.0.0.1:9",
+  S3_REGION: "us-east-1",
+  S3_BUCKET: "app-files",
+  S3_ACCESS_KEY_ID: "local-app",
+  S3_SECRET_ACCESS_KEY: "s3-secret-not-for-logs",
+  S3_FORCE_PATH_STYLE: "true",
+};
+
+function memoryStorage() {
+  const objects = new Map();
+  return {
+    objects,
+    async putAndReadBack({ key, body, contentType }) {
+      const copy = Uint8Array.from(body);
+      objects.set(key, copy);
+      return {
+        ok: true,
+        status: "ready",
+        bucket: "app-files",
+        key,
+        byteSize: copy.byteLength,
+        sha256: createHash("sha256").update(copy).digest("hex"),
+        contentType,
+      };
+    },
+    async getObject({ key }) {
+      const body = objects.get(key);
+      if (!body) return { ok: false, status: "failed", code: "unavailable" };
+      return { ok: true, body, byteSize: body.byteLength, sha256: createHash("sha256").update(body).digest("hex") };
+    },
+    async deleteObject() {
+      return { ok: true };
+    },
+    async presignGet() {
+      return { ok: false, status: "failed", code: "unavailable" };
+    },
+  };
+}
 
 function previousTag(kind) {
   const journal = JSON.parse(readFileSync(
@@ -135,6 +174,8 @@ test("pure rules: D+7 progress before due", () => {
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: AC-M0-12-1/2/3 + ownership + purge`, async (t) => {
     const { db, owner, outsider, brandId } = await setup(t, kind);
+    const storage = memoryStorage();
+    const options = { env: storageEnv, storage, now: new Date(time) };
     const shared = windows(
       [
         sample({ queryId: "q1", queryVersion: "q1-v1", numerator: 0 }),
@@ -180,15 +221,17 @@ for (const kind of ["sqlite", "postgresql"]) {
       locale: "zh-CN",
       metric: "recommendation_rate",
       brandName: "己品牌",
-    }, clock);
+    }, clock, options);
     assert.equal(report.error, undefined);
     assert.equal(report.loopCompleted, false);
     assert.equal(report.snapshot.intent, "diagnostic");
     assert.equal(report.snapshot.loopCompleted, 0);
     assert.equal(report.comparison.grade, "exploratory");
 
-    const originalJson = report.snapshot.jsonBytes;
-    const originalHtml = report.snapshot.htmlBytes;
+    const opened = await readSnapshot(db, owner, report.snapshot.id, options);
+    assert.equal(opened.error, undefined);
+    const originalJson = opened.json;
+    const originalHtml = opened.html;
     const originalSha = report.snapshot.jsonSha256;
 
     // AC-M0-12-3: revise creates successor; previous bytes unchanged
@@ -209,17 +252,21 @@ for (const kind of ["sqlite", "postgresql"]) {
       metric: "recommendation_rate",
       brandName: "己品牌",
       note: "label correction",
-    }, clock);
+    }, clock, options);
     assert.equal(revised.error, undefined);
     assert.equal(revised.snapshot.predecessorId, report.snapshot.id);
     assert.equal(revised.previous.status, "superseded");
-    assert.equal(revised.previous.jsonBytes, originalJson);
-    assert.equal(revised.previous.htmlBytes, originalHtml);
+    const previousFiles = await readSnapshot(db, owner, report.snapshot.id, options);
+    assert.equal(previousFiles.json, originalJson);
+    assert.equal(previousFiles.html, originalHtml);
     assert.equal(revised.previous.jsonSha256, originalSha);
-    assert.notEqual(revised.snapshot.jsonBytes, originalJson);
+    assert.equal(revised.previous.jsonBytes, "");
+    assert.equal(revised.previous.htmlBytes, "");
+    const nextFiles = await readSnapshot(db, owner, revised.snapshot.id, options);
+    assert.notEqual(nextFiles.json, originalJson);
 
     // Ownership: outsider cannot read
-    const denied = await readSnapshot(db, outsider, report.snapshot.id);
+    const denied = await readSnapshot(db, outsider, report.snapshot.id, options);
     assert.equal(denied.error, "NOT_FOUND");
     const listed = await listReports(db, outsider, brandId);
     assert.equal(listed.error, "NOT_FOUND");
