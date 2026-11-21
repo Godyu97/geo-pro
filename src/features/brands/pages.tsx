@@ -17,6 +17,7 @@ import { brandRecoveryError } from "./commands";
 import { archiveCursorSchema, brandIdSchema, brandVersionParam } from "./contracts";
 import { BrandDeletionButtons } from "./deletion-buttons";
 import { brandErrorMessage } from "./error-messages";
+import { mockBrandFields } from "@/features/functional-mock/brand-profile";
 import { brandIntakeOrigin, type BrandIntakeMode } from "./intake";
 import { readPilotAdmission, type PilotAdmissionItem } from "./pilot-admission";
 import { readBrandData } from "./service";
@@ -47,12 +48,18 @@ const admissionLabel = {
   pilotAuthorization: "admissionPilotAuthorization",
 } as const;
 
+function intakeCopy(mode: BrandIntakeMode) {
+  if (mode === "real") return { label: "realLabel", description: "realDescription" } as const;
+  if (mode === "mock") return { label: "mockLabel", description: "mockDescription" } as const;
+  return { label: "fixtureLabel", description: "fixtureDescription" } as const;
+}
+
 function IntakeNotice({ t, mode }: { t: Translate; mode: BrandIntakeMode }) {
-  const real = mode === "real";
+  const copy = intakeCopy(mode);
   return (
     <aside className="max-w-3xl space-y-2 rounded-xl border bg-muted/50 p-4">
-      <p className="text-sm font-semibold">{t(real ? "realLabel" : "fixtureLabel")}</p>
-      <p className="text-sm leading-6 text-muted-foreground">{t(real ? "realDescription" : "fixtureDescription")}</p>
+      <p className="text-sm font-semibold">{t(copy.label)}</p>
+      <p className="text-sm leading-6 text-muted-foreground">{t(copy.description)}</p>
     </aside>
   );
 }
@@ -190,7 +197,7 @@ export async function NewBrandPage() {
           <p role="status" className="text-sm leading-6">{t("limitReached")} {t("archiveFirst")}</p>
           <Button asChild><Link href={"/dashboard/brands/" + result.data.active.id} prefetch={false}>{t("viewBrand")}</Link></Button>
         </div>
-      ) : <BrandForm key={user.id} actorId={user.id} draft={result.data.draft} target={null} messages={getMessages(locale).brands} />}
+      ) : <BrandForm key={user.id} actorId={user.id} draft={result.data.draft} target={null} messages={getMessages(locale).brands} mockProfile={intake.mode === "mock" ? mockBrandFields : undefined} />}
     </BrandFrame>
   );
 }
@@ -224,7 +231,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
     <BrandFrame title={t("editTitle")} back={href} backLabel={t("viewBrand")}>
       <IntakeNotice t={t} mode={intake.mode} />
       <BrandForm key={user.id + id} actorId={user.id} target={{ brandId: id, expectedBrandRevision: brand.revision }}
-        current={brand.fields} draft={draft} messages={messages} />
+        current={brand.fields} draft={draft} messages={messages} mockProfile={intake.mode === "mock" ? mockBrandFields : undefined} />
     </BrandFrame>
   );
   const snapshot = query.version !== undefined;

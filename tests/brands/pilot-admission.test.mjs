@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { brandFieldsSchema } from "../../src/features/brands/contracts.ts";
 import { brandIntakeOrigin } from "../../src/features/brands/intake.ts";
 import { readPilotAdmission } from "../../src/features/brands/pilot-admission.ts";
+import { mockBrandFields } from "../../src/features/functional-mock/brand-profile.ts";
 
 const attested = {
   GEO_AUTH_MAIL_URL: "https://mail.example.invalid/send",
@@ -62,4 +64,35 @@ test("brand writes follow the server gate and keep the loopback fixture separate
     mode: "fixture",
     origin: "http://127.0.0.1:3105",
   });
+});
+
+test("functional mock opens labeled brand writes without pilot admission", () => {
+  const env = { GEO_FUNCTIONAL_MOCK: "1", BETTER_AUTH_URL: "http://localhost:3000" };
+  assert.equal(readPilotAdmission(env).realIntakeOpen, false);
+  assert.equal(brandIntakeOrigin(headers, env), null);
+  assert.deepEqual(brandIntakeOrigin({
+    get(name) {
+      if (name === "host") return "localhost:3000";
+      return null;
+    },
+  }, env), { mode: "mock", origin: "http://localhost:3000" });
+  assert.equal(brandIntakeOrigin({
+    get(name) {
+      if (name === "host") return "localhost:3000";
+      if (name === "x-forwarded-host") return "evil.example";
+      return null;
+    },
+  }, env), null);
+  const fixtureEnv = {
+    GEO_FUNCTIONAL_MOCK: "1",
+    GEO_BRANDS_FIXTURE: "1",
+    BETTER_AUTH_URL: "http://127.0.0.1:3105",
+    DATABASE_PROVIDER: "sqlite",
+    SQLITE_PATH: "/tmp/geo-pro-pilot-admission.sqlite",
+  };
+  const loopback = { get: (name) => (name === "host" || name === "x-forwarded-host" ? "127.0.0.1:3105" : null) };
+  assert.equal(brandIntakeOrigin(loopback, fixtureEnv).mode, "fixture");
+  const parsed = brandFieldsSchema.safeParse(mockBrandFields);
+  assert.equal(parsed.success, true);
+  assert.match(mockBrandFields.name, /FUNCTIONAL-MOCK/);
 });

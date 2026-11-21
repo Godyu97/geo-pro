@@ -109,7 +109,7 @@ export function AppSidebar({ messages, modules, brandIntake }: { messages: Messa
           <CircleHelp className="mb-2 size-4 text-primary" aria-hidden="true" />
           <p className="text-xs font-medium">{t("startingPoint")}</p>
           <p className="mt-1.5 text-xs leading-6 text-muted-foreground">
-            {t(brandIntake === "fixture" ? "sidebarFixture" : brandIntake === "real" ? "sidebarReal" : "sidebarEmpty")}
+            {t(brandIntake === "fixture" ? "sidebarFixture" : brandIntake === "real" ? "sidebarReal" : brandIntake === "mock" ? "sidebarMock" : "sidebarEmpty")}
           </p>
         </div>
         <Link

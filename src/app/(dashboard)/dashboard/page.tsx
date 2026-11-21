@@ -20,6 +20,7 @@ export default async function DashboardPage() {
   const intake = brandIntakeOrigin(await headers());
   const brandFixture = intake?.mode === "fixture";
   const brandReal = intake?.mode === "real";
+  const brandMock = intake?.mode === "mock";
   const moduleLinks = getModuleLinks(getMessages(locale).modules);
 
   return (
@@ -93,12 +94,12 @@ export default async function DashboardPage() {
                       <Icon className="size-5" aria-hidden="true" />
                     </span>
                     <Badge variant="outline" className="font-normal text-muted-foreground">
-                      {brandFixture ? brands("fixtureStatus") : brandReal ? brands("realStatus") : t("unavailable")}
+                      {brandFixture ? brands("fixtureStatus") : brandReal ? brands("realStatus") : brandMock ? brands("mockStatus") : t("unavailable")}
                     </Badge>
                   </div>
                   <h3 className="font-medium">{title}</h3>
                   <p className="mt-2 min-h-14 text-sm leading-7 text-muted-foreground">
-                    {brandFixture ? brands("pageDescription") : brandReal ? brands("realDescription") : description}
+                    {brandFixture ? brands("pageDescription") : brandReal ? brands("realDescription") : brandMock ? brands("mockDescription") : description}
                   </p>
                   {!brandEntry && <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">{empty}</p>}
                 </CardContent>

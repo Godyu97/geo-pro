@@ -8,7 +8,7 @@ export const pilotAdmissionIds = [
 
 export type PilotAdmissionId = (typeof pilotAdmissionIds)[number];
 
-export type BrandIntakeMode = "fixture" | "real";
+export type BrandIntakeMode = "fixture" | "real" | "mock";
 
 export type PilotAdmissionItem = {
   id: PilotAdmissionId;

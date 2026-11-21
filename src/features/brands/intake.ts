@@ -1,6 +1,7 @@
 import "server-only";
 
 import { parseDatabaseConfig } from "../../lib/db/config.ts";
+import { functionalMockRequested } from "../functional-mock/mode.ts";
 import { readPilotAdmission, type BrandIntakeMode } from "./pilot-admission.ts";
 
 export type { BrandIntakeMode };
@@ -35,10 +36,20 @@ export function brandFixtureOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv
 
 export type BrandIntake = { mode: BrandIntakeMode; origin: string };
 
+/** Labeled stand-in writes. Host must match BETTER_AUTH_URL. This does not record pilot admission. */
+export function functionalMockOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv = process.env) {
+  if (!functionalMockRequested(env)) return null;
+  const app = configuredOrigin(env);
+  if (!app || !hostMatches(headers, app)) return null;
+  return app.origin;
+}
+
 /** Isolated loopback testing stays fixture. Real writes open only after every server attestation. */
 export function brandIntakeOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv = process.env): BrandIntake | null {
   const fixture = brandFixtureOrigin(headers, env);
   if (fixture) return { mode: "fixture", origin: fixture };
+  const mock = functionalMockOrigin(headers, env);
+  if (mock) return { mode: "mock", origin: mock };
   if (!readPilotAdmission(env).realIntakeOpen) return null;
   const app = configuredOrigin(env);
   if (!app || !hostMatches(headers, app)) return null;

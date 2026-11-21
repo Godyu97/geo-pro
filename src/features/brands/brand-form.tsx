@@ -50,12 +50,13 @@ function stepFor(field: BrandFieldName): BrandStep {
   return steps[1].fields.some((name) => name === field) ? 1 : 2;
 }
 
-export function BrandForm({ actorId, draft, target, current, messages }: {
+export function BrandForm({ actorId, draft, target, current, messages, mockProfile }: {
   actorId: string;
   draft: BrandDraft | null;
   target: BrandTarget | null;
   current?: BrandFields;
   messages: Messages["brands"];
+  mockProfile?: BrandFields;
 }) {
   const { locale } = useLocale();
   const router = useRouter();
@@ -66,6 +67,7 @@ export function BrandForm({ actorId, draft, target, current, messages }: {
   const [expectedDraft, setExpectedDraft] = useState(draft?.version ?? null);
   const [invalid, setInvalid] = useState<BrandFieldName[]>([]);
   const [saved, setSaved] = useState(Boolean(draft));
+  const [mockFilled, setMockFilled] = useState(false);
   const focus = useRef<BrandFieldName | "heading" | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const composing = useRef(false);
@@ -148,6 +150,7 @@ export function BrandForm({ actorId, draft, target, current, messages }: {
           <h2 ref={heading} tabIndex={-1} className="text-xl font-semibold">{t(steps[step].label)}</h2>
           <p className="text-sm leading-6 text-muted-foreground">{t("draftHelp")}</p>
           {saved && <p role="status" className="text-sm font-medium">{t("draftSaved")}</p>}
+          {mockFilled && <p role="status" className="text-sm font-medium">{t("mockProfileFilled")}</p>}
         </div>
         {staleDraft && <p role="alert" className="text-sm text-destructive">{t("staleDraft")}</p>}
         {error && (
@@ -202,6 +205,16 @@ export function BrandForm({ actorId, draft, target, current, messages }: {
               );
             })}
             <div className="flex flex-wrap gap-2 pt-2">
+              {mockProfile && (
+                <Button type="button" variant="outline" onClick={() => {
+                  setValues(formFields(mockProfile));
+                  setInvalid([]);
+                  setSaved(false);
+                  setMockFilled(true);
+                  focus.current = "heading";
+                  setStep(0);
+                }}>{t("applyMockProfile")}</Button>
+              )}
               <Button type="submit">{t(step === 2 ? target ? "saveChanges" : "createBrand" : "next")}</Button>
               {step > 0 && <Button type="button" variant="outline" onClick={() => move(previousStep)}>{t("back")}</Button>}
               <Button type="button" variant="outline" onClick={() => void save("draft")}>{t("saveDraft")}</Button>
