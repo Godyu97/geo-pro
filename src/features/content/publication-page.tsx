@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { submitManualEvidenceAction, verifyPublicationAction } from "./actions";
 import { readPublication } from "./commands";
+import { manualScreenshotSummary } from "./verify";
 
 export async function generateMetadata() {
   const t = await getTranslator("content");
@@ -16,14 +17,34 @@ export async function generateMetadata() {
 
 const inputClass = "h-10 w-full rounded-md border bg-background px-3";
 const areaClass = "w-full rounded-md border bg-background px-3 py-2";
+const evidenceErrorCodes = [
+  "EVIDENCE_TYPE_REJECTED",
+  "EVIDENCE_TOO_LARGE",
+  "SCREENSHOT_REQUIRED",
+  "EVIDENCE_REQUIRED",
+  "INVALID_INPUT",
+  "NOT_FOUND",
+  "SERVICE_UNAVAILABLE",
+  "PUBLICATION_CONFLICT",
+  "APPROVAL_REQUIRED",
+  "APPROVAL_INVALID",
+] as const;
+
+function evidenceErrorCode(value: string | string[] | undefined) {
+  const code = Array.isArray(value) ? value[0] : value;
+  return evidenceErrorCodes.find((item) => item === code);
+}
 
 export default async function ContentPublicationPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ publicationId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await requireSession();
   const { publicationId } = await params;
+  const evidenceError = evidenceErrorCode((await searchParams).evidenceError);
   const t = await getTranslator("content");
   const liveFetchEnabled = isPublicPageFetchEnabled();
   const detail = await readPublication(getConnection(), session.user.id, publicationId);
@@ -65,12 +86,26 @@ export default async function ContentPublicationPage({
         <h2 className="text-lg font-semibold">{t("checkHistory")}</h2>
         {checks.length === 0 ? <p className="text-sm text-muted-foreground">{t("checksEmpty")}</p> : (
           <ul className="space-y-2 text-sm">
-            {checks.map((check) => (
-              <li key={check.id} className="rounded-md border px-3 py-2">
-                <p>{check.checkedAt} · {check.method} · {check.resultStatus}</p>
-                {check.notes ? <p className="text-muted-foreground">{check.notes}</p> : null}
-              </li>
-            ))}
+            {checks.map((check) => {
+              const screenshot = manualScreenshotSummary(check.evidenceJson);
+              return (
+                <li key={check.id} className="rounded-md border px-3 py-2">
+                  <p>{check.checkedAt} · {check.method} · {check.resultStatus}</p>
+                  {check.notes ? <p className="text-muted-foreground">{check.notes}</p> : null}
+                  {screenshot ? (
+                    <p className="mt-1">
+                      <a
+                        href={`/api/content/publications/${publication.id}?evidence=${screenshot.objectId}`}
+                        className="underline-offset-4 hover:underline"
+                      >
+                        {t("downloadScreenshot")}
+                      </a>
+                      <span className="text-muted-foreground"> · {t("manualScreenshotNote")}</span>
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
@@ -134,12 +169,20 @@ export default async function ContentPublicationPage({
           <section className="space-y-3 rounded-2xl border p-5">
             <h2 className="text-lg font-semibold">{t("manualEvidence")}</h2>
             <p className="text-sm text-muted-foreground">{t("manualEvidenceHint")}</p>
+            {evidenceError ? <p role="alert" className="text-sm text-destructive">{t(evidenceError)}</p> : null}
             <form action={submitManualEvidenceAction} className="grid gap-3 sm:grid-cols-2">
               <input type="hidden" name="brandId" value={publication.brandId} />
               <input type="hidden" name="publicationId" value={publication.id} />
               <label className="block text-sm sm:col-span-2">
-                <span className="mb-1 block text-muted-foreground">{t("screenshotRef")}</span>
-                <input name="screenshotRef" required className={inputClass} />
+                <span className="mb-1 block text-muted-foreground">{t("screenshotFile")}</span>
+                <input
+                  name="screenshot"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  required
+                  className={inputClass}
+                />
+                <span className="mt-1 block text-xs text-muted-foreground">{t("screenshotFileHint")}</span>
               </label>
               <label className="block text-sm">
                 <span className="mb-1 block text-muted-foreground">{t("pageMarker")}</span>

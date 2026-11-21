@@ -74,6 +74,7 @@ import {
 import {
   evaluateManualEvidence,
   evaluatePublicCheck,
+  manualScreenshotSummary,
   nextEffectiveAt,
   type FixturePage,
 } from "./verify.ts";
@@ -2008,11 +2009,18 @@ export async function verifyPublication(
   });
 }
 
+const evidenceImageTypes = new Set(CONTENT_TYPES["publication-evidence"]);
+
+export type ManualEvidenceOptions = ObjectCommandOptions & {
+  file?: AssetObjectFile;
+};
+
 export async function submitManualEvidence(
   db: DatabaseConnection,
   ownerId: string,
   input: SubmitManualEvidenceInput,
   clock: Clock = () => new Date().toISOString(),
+  options: ManualEvidenceOptions = {},
 ) {
   return locked(db, ownerId, async (transaction) => {
     if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
@@ -2028,10 +2036,19 @@ export async function submitManualEvidence(
     if (version.status !== "approved") return denied("APPROVAL_REQUIRED");
     if (versionFingerprint(version) !== publication.contentFingerprint) return denied("APPROVAL_INVALID");
 
+    const file = options.file;
+    const fileName = file ? sanitizeObjectFileName(file.fileName) : undefined;
+    if (file) {
+      if (!fileName) return denied("INVALID_INPUT");
+      if (!(file.body instanceof Uint8Array) || file.body.byteLength < 1) return denied("INVALID_INPUT");
+      if (file.body.byteLength > MAX_STORED_OBJECT_BYTES) return denied("EVIDENCE_TOO_LARGE");
+      if (!evidenceImageTypes.has(file.contentType)) return denied("EVIDENCE_TYPE_REJECTED");
+    }
+
     const now = clock();
     const result = evaluateManualEvidence({
       evidence: {
-        screenshotRef: input.screenshotRef,
+        screenshotRef: fileName ?? input.screenshotRef,
         pageMarker: input.pageMarker,
         observedAt: input.observedAt,
         bodyExcerpt: input.bodyExcerpt,
@@ -2042,6 +2059,47 @@ export async function submitManualEvidence(
     });
     if (result.reason === "incomplete_evidence") return denied("EVIDENCE_REQUIRED");
 
+    let screenshot: {
+      objectId: string;
+      fileName: string;
+      contentType: string;
+      byteSize: number;
+      sha256: string;
+    } | null = null;
+    if (file && fileName) {
+      const saved = await saveStoredObject(db, {
+        actorId: ownerId,
+        brandId: input.brandId,
+        class: "publication-evidence",
+        visibility: "internal",
+        fileName,
+        contentType: file.contentType,
+        body: file.body,
+      }, {
+        ...storageCommandOptions(options),
+        connection: transaction,
+      });
+      const digest = createHash("sha256").update(file.body).digest("hex");
+      if (!saved.ok) return denied(saved.code === "failed" ? "SERVICE_UNAVAILABLE" : "INVALID_INPUT");
+      if (saved.class !== "publication-evidence"
+        || saved.visibility !== "internal"
+        || saved.fileName !== fileName
+        || saved.contentType !== file.contentType
+        || saved.byteSize !== file.body.byteLength
+        || saved.sha256 !== digest) {
+        await markObjectFailed(transaction, saved.id, ownerId, "ready");
+        return denied("SERVICE_UNAVAILABLE");
+      }
+      screenshot = {
+        objectId: saved.id,
+        fileName: saved.fileName,
+        contentType: saved.contentType,
+        byteSize: saved.byteSize,
+        sha256: saved.sha256,
+      };
+    }
+
+    const screenshotRef = screenshot?.objectId ?? input.screenshotRef;
     const checkId = randomUUID();
     await dao.insertPublicationCheck({
       id: checkId,
@@ -2051,7 +2109,14 @@ export async function submitManualEvidence(
       method: "manual_evidence",
       resultStatus: result.status,
       evidenceJson: JSON.stringify({
-        screenshotRef: input.screenshotRef,
+        screenshotRef,
+        ...(screenshot ? {
+          screenshotObjectId: screenshot.objectId,
+          fileName: screenshot.fileName,
+          contentType: screenshot.contentType,
+          byteSize: screenshot.byteSize,
+          sha256: screenshot.sha256,
+        } : {}),
         pageMarker: input.pageMarker,
         observedAt: input.observedAt,
         bodyExcerpt: input.bodyExcerpt,
@@ -2059,6 +2124,7 @@ export async function submitManualEvidence(
         matches: result.matches,
         reason: result.reason,
         claimedPublishedAt: publication.claimedPublishedAt,
+        evidenceGrade: result.evidenceGrade,
       }),
       actorId: ownerId,
       checkedAt: now,
@@ -2095,8 +2161,58 @@ export async function submitManualEvidence(
       claimedPublishedAt: publication.claimedPublishedAt,
       matches: result.matches,
       replayed: false,
+      ...(screenshot ? { screenshot } : {}),
     };
   });
+}
+
+export async function readPublicationEvidence(
+  db: DatabaseConnection,
+  ownerId: string,
+  publicationId: string,
+  objectId: string,
+  options: ObjectCommandOptions = {},
+) {
+  const dao = new ContentDao(db);
+  const publication = await dao.getPublication(ownerId, publicationId);
+  if (!publication) return denied("NOT_FOUND");
+  if (!await activeBrand(db, ownerId, publication.brandId)) return denied("NOT_FOUND");
+  const checks = await dao.listPublicationChecks(ownerId, publication.id);
+  const linked = checks
+    .map((check) => manualScreenshotSummary(check.evidenceJson))
+    .find((item) => item?.objectId === objectId);
+  if (!linked) return denied("NOT_FOUND");
+  const [object] = await loadBrandObjectsByIds(db, ownerId, publication.brandId, [objectId]);
+  if (!object || object.status !== "ready" || !object.objectKey || !object.fileName) return denied("NOT_FOUND");
+  if (object.class !== "publication-evidence" || object.visibility !== "internal" || object.immutable !== 1) {
+    return denied("NOT_FOUND");
+  }
+  if (object.fileName !== linked.fileName || object.contentType !== linked.contentType
+    || object.byteSize !== linked.byteSize || object.sha256 !== linked.sha256) {
+    return denied("NOT_FOUND");
+  }
+  const storage = options.storage ?? createObjectStorage(options.env ? { env: options.env } : {});
+  let loaded: Awaited<ReturnType<ObjectStorageClient["getObject"]>>;
+  try {
+    loaded = await storage.getObject({ key: object.objectKey });
+  } catch {
+    return denied("SERVICE_UNAVAILABLE");
+  }
+  if (!loaded.ok) return denied("SERVICE_UNAVAILABLE");
+  if (loaded.sha256 !== object.sha256 || loaded.byteSize !== object.byteSize) {
+    await storage.deleteObject({ key: object.objectKey });
+    await db.transaction((tx) => markObjectFailed(tx, object.id, ownerId, "ready"));
+    return denied("SERVICE_UNAVAILABLE");
+  }
+  return {
+    objectId: object.id,
+    fileName: object.fileName,
+    contentType: object.contentType,
+    byteSize: loaded.byteSize,
+    sha256: loaded.sha256,
+    body: loaded.body,
+    evidenceGrade: "manual",
+  };
 }
 
 export async function markPublicationRemoved(

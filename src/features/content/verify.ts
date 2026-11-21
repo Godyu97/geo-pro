@@ -165,6 +165,35 @@ export function evaluateManualEvidence(input: {
   };
 }
 
+const screenshotObjectIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const screenshotTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+/** Object summary stored with a manual check. Storage keys and URLs are not part of this view. */
+export function manualScreenshotSummary(evidenceJson: string) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(evidenceJson);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const record = parsed as Record<string, unknown>;
+  const objectId = record.screenshotObjectId;
+  const fileName = record.fileName;
+  const contentType = record.contentType;
+  const byteSize = record.byteSize;
+  const sha256 = record.sha256;
+  if (typeof objectId !== "string" || !screenshotObjectIdPattern.test(objectId)) return null;
+  if (typeof fileName !== "string" || fileName.length < 1 || fileName.length > 120) return null;
+  if (fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) return null;
+  if (typeof contentType !== "string" || !screenshotTypes.has(contentType)) return null;
+  if (typeof byteSize !== "number" || !Number.isInteger(byteSize) || byteSize < 1 || byteSize > 10 * 1024 * 1024) {
+    return null;
+  }
+  if (typeof sha256 !== "string" || !/^[0-9a-f]{64}$/.test(sha256)) return null;
+  return { objectId, fileName, contentType, byteSize, sha256 };
+}
+
 /** First successful verification wins; later checks must not rewrite effective_at. */
 export function nextEffectiveAt(
   current: string | null,

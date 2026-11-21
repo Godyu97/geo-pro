@@ -328,8 +328,9 @@ export async function presignStoredObject(
   if (isFailure(opened) || opened.status !== "ready" || !opened.objectKey || !opened.fileName) {
     return isFailure(opened) ? opened : failure("not-found");
   }
-  // Owned exports are downloaded through the authenticated export record, never by an anonymous URL.
-  if (opened.class === "owned-export") return failure("not-found");
+  // Owned exports and publication screenshots are downloaded through the app after a fresh
+  // authorization check. A storage URL must not stand in for that check.
+  if (opened.class === "owned-export" || opened.class === "publication-evidence") return failure("not-found");
   const config = environment(options);
   if (!config.success || !config.data.browserEndpoint || config.data.browserEndpointInvalid) return failure("failed");
   const storage = storageFor(options);

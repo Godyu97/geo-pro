@@ -322,18 +322,29 @@ export async function verifyPublicationAction(formData: FormData): Promise<void>
 export async function submitManualEvidenceAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   const publicationId = String(formData.get("publicationId") ?? "");
+  const uploaded = formData.get("screenshot");
+  const evidencePath = (code: string) => `${publicationPath(publicationId)}?evidenceError=${code}`;
+  if (!(uploaded instanceof File) || uploaded.size < 1) redirect(evidencePath("SCREENSHOT_REQUIRED"));
+  if (uploaded.size > MAX_STORED_OBJECT_BYTES) redirect(evidencePath("EVIDENCE_TOO_LARGE"));
   const parsed = submitManualEvidenceSchema.safeParse({
     action: "submit-manual-evidence",
     brandId: String(formData.get("brandId") ?? ""),
     operationId: randomUUID(),
     publicationId,
-    screenshotRef: String(formData.get("screenshotRef") ?? ""),
+    screenshotRef: uploaded.name || "screenshot",
     pageMarker: String(formData.get("pageMarker") ?? ""),
     observedAt: String(formData.get("observedAt") ?? ""),
     bodyExcerpt: String(formData.get("bodyExcerpt") ?? ""),
     reviewerNote: String(formData.get("reviewerNote") ?? "") || undefined,
   });
-  if (!parsed.success) return;
-  await submitManualEvidence(getConnection(), session.user.id, parsed.data);
+  if (!parsed.success) redirect(evidencePath("INVALID_INPUT"));
+  const result = await submitManualEvidence(getConnection(), session.user.id, parsed.data, undefined, {
+    file: {
+      fileName: uploaded.name,
+      contentType: uploaded.type,
+      body: new Uint8Array(await uploaded.arrayBuffer()),
+    },
+  });
+  if ("error" in result) redirect(evidencePath(result.error));
   revalidatePath(publicationPath(publicationId));
 }

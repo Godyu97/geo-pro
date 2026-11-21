@@ -120,6 +120,9 @@ export const contentErrors = {
   ASSET_TYPE_REJECTED: 415,
   ASSET_TOO_LARGE: 413,
   ASSET_UNREVIEWED: 422,
+  EVIDENCE_TYPE_REJECTED: 415,
+  EVIDENCE_TOO_LARGE: 413,
+  SCREENSHOT_REQUIRED: 422,
   SERVICE_UNAVAILABLE: 503,
 } as const;
 export type ContentError = keyof typeof contentErrors;

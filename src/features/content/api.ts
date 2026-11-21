@@ -18,6 +18,7 @@ import {
   readContentVersion,
   readDeliveryPackage,
   readPublication,
+  readPublicationEvidence,
   registerAsset,
   rejectContent,
   resumeBatch,
@@ -115,6 +116,24 @@ export async function contentPublicationResponse(request: Request, publicationId
   if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
+  const evidenceId = new URL(request.url).searchParams.get("evidence");
+  if (evidenceId) {
+    const screenshot = await readPublicationEvidence(getConnection(), session.user.id, publicationId, evidenceId);
+    if ("error" in screenshot) return errorResponse(screenshot.error);
+    const fileName = screenshot.fileName.replace(/["\r\n\\]/g, "");
+    const bytes = new Uint8Array(screenshot.body.byteLength);
+    bytes.set(screenshot.body);
+    return new Response(bytes.buffer, {
+      headers: {
+        ...headers,
+        "Content-Type": screenshot.contentType,
+        "Content-Disposition": `attachment; filename="${fileName || "screenshot"}"`,
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "sandbox; default-src 'none'",
+      },
+    });
+  }
+
   const result = await readPublication(getConnection(), session.user.id, publicationId);
   if ("error" in result) return errorResponse(result.error);
   return Response.json(result, { headers });
