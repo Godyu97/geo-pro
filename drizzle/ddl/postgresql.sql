@@ -1705,6 +1705,61 @@ CREATE TABLE "content_template" (
     ))
 );
 
+CREATE TABLE "image_asset" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"version" integer NOT NULL,
+	"rights_status" text NOT NULL,
+	"file_name" text NOT NULL,
+	"byte_size" integer,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "image_asset_state_check" CHECK ("image_asset"."rights_status" in ('active', 'revoked', 'expired')
+    and "image_asset"."version" >= 1
+    and length("image_asset"."id") = 36
+    and length("image_asset"."brand_id") = 36
+    and length("image_asset"."owner_id") between 1 and 128
+    and length("image_asset"."file_name") between 1 and 120
+    and "image_asset"."file_name" not like '%/%'
+    and "image_asset"."file_name" not like '%..%'
+    and ("image_asset"."byte_size" is null or "image_asset"."byte_size" between 0 and 2147483647)
+    and length("image_asset"."created_at") between 20 and 40
+    and length("image_asset"."updated_at") between 20 and 40)
+);
+
+CREATE TABLE "image_asset_todo" (
+	"id" text PRIMARY KEY NOT NULL,
+	"use_id" text NOT NULL,
+	"asset_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"content_version_id" text NOT NULL,
+	"asset_version" integer NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "image_asset_todo_state_check" CHECK ("image_asset_todo"."asset_version" >= 1
+    and length("image_asset_todo"."id") = 36
+    and length("image_asset_todo"."use_id") = 36
+    and length("image_asset_todo"."asset_id") = 36
+    and length("image_asset_todo"."brand_id") = 36
+    and length("image_asset_todo"."content_version_id") = 36
+    and length("image_asset_todo"."created_at") between 20 and 40)
+);
+
+CREATE TABLE "image_asset_use" (
+	"id" text PRIMARY KEY NOT NULL,
+	"asset_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"content_version_id" text NOT NULL,
+	"asset_version" integer NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "image_asset_use_state_check" CHECK ("image_asset_use"."asset_version" >= 1
+    and length("image_asset_use"."id") = 36
+    and length("image_asset_use"."asset_id") = 36
+    and length("image_asset_use"."brand_id") = 36
+    and length("image_asset_use"."content_version_id") = 36
+    and length("image_asset_use"."created_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -1831,6 +1886,11 @@ ALTER TABLE "brand_approval_duty" ADD CONSTRAINT "brand_approval_duty_brand_id_b
 ALTER TABLE "brand_approval_duty" ADD CONSTRAINT "brand_approval_duty_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_template" ADD CONSTRAINT "content_template_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_template" ADD CONSTRAINT "content_template_source_fk" FOREIGN KEY ("source_template_id") REFERENCES "public"."content_template"("id") ON DELETE restrict ON UPDATE no action;
+ALTER TABLE "image_asset" ADD CONSTRAINT "image_asset_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "image_asset_todo" ADD CONSTRAINT "image_asset_todo_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "image_asset_todo" ADD CONSTRAINT "image_asset_todo_asset_fk" FOREIGN KEY ("asset_id") REFERENCES "public"."image_asset"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "image_asset_use" ADD CONSTRAINT "image_asset_use_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "image_asset_use" ADD CONSTRAINT "image_asset_use_asset_fk" FOREIGN KEY ("asset_id") REFERENCES "public"."image_asset"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -1986,3 +2046,8 @@ CREATE UNIQUE INDEX "brand_approval_duty_pair_uidx" ON "brand_approval_duty" USI
 CREATE INDEX "brand_approval_duty_user_idx" ON "brand_approval_duty" USING btree ("user_id","brand_id");
 CREATE INDEX "content_template_system_idx" ON "content_template" USING btree ("is_system","created_at","id");
 CREATE INDEX "content_template_owner_idx" ON "content_template" USING btree ("owner_id","brand_id","created_at","id");
+CREATE INDEX "image_asset_owner_idx" ON "image_asset" USING btree ("owner_id","brand_id","created_at","id");
+CREATE UNIQUE INDEX "image_asset_todo_use_uidx" ON "image_asset_todo" USING btree ("use_id");
+CREATE INDEX "image_asset_todo_asset_idx" ON "image_asset_todo" USING btree ("asset_id","created_at","id");
+CREATE UNIQUE INDEX "image_asset_use_pair_uidx" ON "image_asset_use" USING btree ("asset_id","content_version_id");
+CREATE INDEX "image_asset_use_asset_idx" ON "image_asset_use" USING btree ("asset_id","created_at","id");

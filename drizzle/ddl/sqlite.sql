@@ -1986,3 +1986,68 @@ CREATE TABLE `content_template` (
 
 CREATE INDEX `content_template_system_idx` ON `content_template` (`is_system`,`created_at`,`id`);
 CREATE INDEX `content_template_owner_idx` ON `content_template` (`owner_id`,`brand_id`,`created_at`,`id`);
+CREATE TABLE `image_asset` (
+	`id` text PRIMARY KEY NOT NULL,
+	`brand_id` text NOT NULL,
+	`owner_id` text NOT NULL,
+	`version` integer NOT NULL,
+	`rights_status` text NOT NULL,
+	`file_name` text NOT NULL,
+	`byte_size` integer,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "image_asset_state_check" CHECK("image_asset"."rights_status" in ('active', 'revoked', 'expired')
+    and "image_asset"."version" >= 1
+    and length("image_asset"."id") = 36
+    and length("image_asset"."brand_id") = 36
+    and length("image_asset"."owner_id") between 1 and 128
+    and length("image_asset"."file_name") between 1 and 120
+    and "image_asset"."file_name" not like '%/%'
+    and "image_asset"."file_name" not like '%..%'
+    and ("image_asset"."byte_size" is null or "image_asset"."byte_size" between 0 and 2147483647)
+    and length("image_asset"."created_at") between 20 and 40
+    and length("image_asset"."updated_at") between 20 and 40)
+);
+
+CREATE INDEX `image_asset_owner_idx` ON `image_asset` (`owner_id`,`brand_id`,`created_at`,`id`);
+CREATE TABLE `image_asset_todo` (
+	`id` text PRIMARY KEY NOT NULL,
+	`use_id` text NOT NULL,
+	`asset_id` text NOT NULL,
+	`brand_id` text NOT NULL,
+	`content_version_id` text NOT NULL,
+	`asset_version` integer NOT NULL,
+	`created_at` text NOT NULL,
+	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`asset_id`) REFERENCES `image_asset`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "image_asset_todo_state_check" CHECK("image_asset_todo"."asset_version" >= 1
+    and length("image_asset_todo"."id") = 36
+    and length("image_asset_todo"."use_id") = 36
+    and length("image_asset_todo"."asset_id") = 36
+    and length("image_asset_todo"."brand_id") = 36
+    and length("image_asset_todo"."content_version_id") = 36
+    and length("image_asset_todo"."created_at") between 20 and 40)
+);
+
+CREATE UNIQUE INDEX `image_asset_todo_use_uidx` ON `image_asset_todo` (`use_id`);
+CREATE INDEX `image_asset_todo_asset_idx` ON `image_asset_todo` (`asset_id`,`created_at`,`id`);
+CREATE TABLE `image_asset_use` (
+	`id` text PRIMARY KEY NOT NULL,
+	`asset_id` text NOT NULL,
+	`brand_id` text NOT NULL,
+	`content_version_id` text NOT NULL,
+	`asset_version` integer NOT NULL,
+	`created_at` text NOT NULL,
+	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`asset_id`) REFERENCES `image_asset`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "image_asset_use_state_check" CHECK("image_asset_use"."asset_version" >= 1
+    and length("image_asset_use"."id") = 36
+    and length("image_asset_use"."asset_id") = 36
+    and length("image_asset_use"."brand_id") = 36
+    and length("image_asset_use"."content_version_id") = 36
+    and length("image_asset_use"."created_at") between 20 and 40)
+);
+
+CREATE UNIQUE INDEX `image_asset_use_pair_uidx` ON `image_asset_use` (`asset_id`,`content_version_id`);
+CREATE INDEX `image_asset_use_asset_idx` ON `image_asset_use` (`asset_id`,`created_at`,`id`);

@@ -120,6 +120,9 @@ export class PurgeDao {
     await this.query("DELETE FROM content_approval WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_asset WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM source_original WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM image_asset_todo WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM image_asset_use WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM image_asset WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_version WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_batch_unit WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_batch WHERE brand_id = ?", [brandId]);

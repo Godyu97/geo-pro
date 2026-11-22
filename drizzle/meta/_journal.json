@@ -330,6 +330,13 @@
       "when": 1795357758268,
       "tag": "0046_content_template",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1795358661284,
+      "tag": "0047_image_asset",
+      "breakpoints": true
     }
   ]
 }
