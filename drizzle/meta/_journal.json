@@ -281,6 +281,13 @@
       "when": 1795349414870,
       "tag": "0039_absurd_retro_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1795350518593,
+      "tag": "0040_graceful_richard_fisk",
+      "breakpoints": true
     }
   ]
 }

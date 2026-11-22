@@ -1,11 +1,18 @@
 export type PlanItem = { id: string; factCurrent: boolean };
 
 /** Text inside collected material cannot change budget, grants, or the action list. */
+export function materialIgnored(material: string) {
+  const folded = material.toLowerCase();
+  return material.includes("忽略预算")
+    || material.includes("公开发文")
+    || folded.includes("ignore the budget");
+}
+
 export function draftPlan(input: { material: string; requestedItems: readonly string[] }) {
   const items = input.requestedItems.slice(0, 5);
   return {
     items,
-    ignoredInstruction: input.material.includes("忽略预算") || input.material.includes("公开发文"),
+    ignoredInstruction: materialIgnored(input.material),
     budgetChanged: false,
     grantsChanged: false,
   };

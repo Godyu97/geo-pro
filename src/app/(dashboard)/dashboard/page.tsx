@@ -71,6 +71,9 @@ export default async function DashboardPage() {
           <Button asChild variant="outline" className="bg-white/70">
             <Link href="/dashboard/monitoring/overview" prefetch={false}>{t("openOverview")}</Link>
           </Button>
+          <Button asChild variant="outline" className="bg-white/70">
+            <Link href="/dashboard/assistant" prefetch={false}>{t("openAssistant")}</Link>
+          </Button>
         </div>
       </section>
       <section id="modules" aria-labelledby="modules-title">

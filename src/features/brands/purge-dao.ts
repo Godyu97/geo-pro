@@ -123,6 +123,8 @@ export class PurgeDao {
     await this.query("DELETE FROM content_brief_version WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_brief WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_plan WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM assistant_plan_item WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM assistant_plan WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM brand_fact_use WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM brand_fact_version WHERE brand_id = ?", [brandId]);
     await this.query("UPDATE brand_fact_paste SET previous_id = NULL WHERE brand_id = ?", [brandId]);

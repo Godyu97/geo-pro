@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowUpRight, LayoutDashboard, CircleHelp, Settings, ShieldCheck } from "lucide-react";
+import { ArrowUpRight, ClipboardList, LayoutDashboard, CircleHelp, Settings, ShieldCheck } from "lucide-react";
 
 import { BrandMark } from "@/components/layout/brand-mark";
 import { getModuleLinks } from "@/components/layout/module-links";
@@ -52,6 +52,18 @@ export function AppSidebar({ messages, modules, brandIntake }: { messages: Messa
                     >
                       <LayoutDashboard aria-hidden="true" />
                       <span>{common("overview")}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname.startsWith("/dashboard/assistant")} className="h-auto min-h-10 py-2">
+                    <Link
+                      href="/dashboard/assistant"
+                      aria-current={pathname.startsWith("/dashboard/assistant") ? "page" : undefined}
+                      onClick={() => setOpenMobile(false)}
+                    >
+                      <ClipboardList aria-hidden="true" />
+                      <span className="whitespace-normal">{t("assistant")}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
