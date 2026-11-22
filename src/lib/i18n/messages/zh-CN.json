@@ -1522,5 +1522,32 @@
     "SESSION_REQUIRED": "请先登录。",
     "FORBIDDEN": "当前会话不能处理质量提醒。",
     "SERVICE_UNAVAILABLE": "暂时无法读取或保存质量提醒，请稍后重试。"
+  },
+  "entityReviews": {
+    "title": "抽样错误率",
+    "description": "事实错误率只按人工复核样本计算。这里显示确认错误数/复核数，以及复核覆盖了多少条总体样本。复核数为 0 时只显示样本不足。",
+    "back": "返回品牌",
+    "sample": "确认错误 {errorLabel}",
+    "coverage": "复核覆盖 {coverage}",
+    "method": "抽样方法 {method}",
+    "insufficient": "样本不足",
+    "formTitle": "追加复核",
+    "hint": "保存后会新增一条复核。更正也不会改写旧记录、回答原文或已有分析版本。过期事实和互相冲突的事实不能记成确认错误。",
+    "observationId": "观察 ID",
+    "analysisVersionId": "分析版本 ID",
+    "population": "总体条数",
+    "methodLabel": "抽样方法",
+    "fact": "事实状态",
+    "factActive": "有效",
+    "factExpired": "已过期",
+    "factConflict": "事实冲突",
+    "reviewed": "计入复核样本",
+    "confirmed": "确认错误",
+    "submit": "保存复核",
+    "NOT_FOUND": "找不到这个品牌，或它不属于当前账号。",
+    "INVALID_INPUT": "复核无效。确认错误数不能大于复核数，过期或冲突事实也不能写成确认错误。",
+    "SESSION_REQUIRED": "请先登录。",
+    "FORBIDDEN": "当前会话不能保存复核。",
+    "SERVICE_UNAVAILABLE": "暂时无法读取或保存复核，请稍后重试。"
   }
 }

@@ -1522,5 +1522,32 @@
     "SESSION_REQUIRED": "Sign in first.",
     "FORBIDDEN": "This session cannot change quality alerts.",
     "SERVICE_UNAVAILABLE": "Quality alerts cannot be read or saved right now. Try again later."
+  },
+  "entityReviews": {
+    "title": "Sampled error rate",
+    "description": "The factual error rate uses only manually reviewed samples. This page shows confirmed errors over reviewed samples, and how many of the full set those reviews cover. When nothing has been reviewed, it shows that the sample is insufficient.",
+    "back": "Back to brand",
+    "sample": "Confirmed errors {errorLabel}",
+    "coverage": "Review coverage {coverage}",
+    "method": "Sampling method {method}",
+    "insufficient": "Insufficient sample",
+    "formTitle": "Append a review",
+    "hint": "Saving adds a new review row. A correction does not rewrite the previous review, the answer text, or an existing analysis version. Expired facts and conflicting facts cannot be stored as confirmed errors.",
+    "observationId": "Observation ID",
+    "analysisVersionId": "Analysis version ID",
+    "population": "Population count",
+    "methodLabel": "Sampling method",
+    "fact": "Fact state",
+    "factActive": "Active",
+    "factExpired": "Expired",
+    "factConflict": "Conflicting facts",
+    "reviewed": "Count in the reviewed sample",
+    "confirmed": "Confirmed error",
+    "submit": "Save review",
+    "NOT_FOUND": "This brand was not found, or it belongs to another account.",
+    "INVALID_INPUT": "This review is invalid. Confirmed errors cannot exceed reviewed samples, and expired or conflicting facts cannot be stored as confirmed errors.",
+    "SESSION_REQUIRED": "Sign in first.",
+    "FORBIDDEN": "This session cannot save reviews.",
+    "SERVICE_UNAVAILABLE": "Reviews cannot be read or saved right now. Try again later."
   }
 }
