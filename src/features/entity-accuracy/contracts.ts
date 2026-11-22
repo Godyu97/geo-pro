@@ -60,3 +60,43 @@ export const entityReviewErrors = {
 
 export type EntityReviewError = keyof typeof entityReviewErrors;
 export type EntityReviewWriteInput = z.infer<typeof entityReviewWriteSchema>;
+
+const revisionFields = {
+  observationId: brandIdSchema,
+  priorAnalysisId: brandIdSchema,
+  sameSurfaceName: z.boolean(),
+  confirmedDifferentEntity: z.boolean(),
+};
+
+export const entityDisambiguationBodySchema = z.strictObject(revisionFields);
+export const entityDisambiguationWriteSchema = z.strictObject({
+  brandId: brandIdSchema,
+  ...revisionFields,
+});
+
+const correctionFields = {
+  observationId: brandIdSchema,
+  actionDone: z.boolean(),
+  retestStillWrong: z.boolean(),
+};
+
+export const entityCorrectionBodySchema = z.strictObject(correctionFields);
+export const entityCorrectionWriteSchema = z.strictObject({
+  brandId: brandIdSchema,
+  ...correctionFields,
+});
+
+export const entityCorrectionErrors = {
+  SESSION_REQUIRED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  INVALID_INPUT: 400,
+  SERVICE_UNAVAILABLE: 503,
+} as const;
+
+export const correctionActions = ["open", "actioned"] as const;
+export const correctionEffects = ["open", "pending_retest", "unresolved"] as const;
+
+export type EntityCorrectionError = keyof typeof entityCorrectionErrors;
+export type EntityDisambiguationWriteInput = z.infer<typeof entityDisambiguationWriteSchema>;
+export type EntityCorrectionWriteInput = z.infer<typeof entityCorrectionWriteSchema>;

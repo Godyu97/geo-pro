@@ -284,6 +284,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
           {!snapshot && <Button asChild variant="outline"><Link href={href + "/facts"} prefetch={false}>{getMessages(locale).brandFacts.title}</Link></Button>}
           {!snapshot && <Button asChild variant="outline"><Link href={href + "/questions"} prefetch={false}>{getMessages(locale).promptSets.title}</Link></Button>}
           {!snapshot && <Button asChild variant="outline"><Link href={href + "/entity-reviews"} prefetch={false}>{getMessages(locale).entityReviews.title}</Link></Button>}
+          {!snapshot && <Button asChild variant="outline"><Link href={href + "/entity-corrections"} prefetch={false}>{getMessages(locale).entityCorrections.title}</Link></Button>}
           {!snapshot && <Button asChild variant="outline"><Link href={href + "/delete"} prefetch={false}>{t("reviewDeletion")}</Link></Button>}
         </div>
       </div>

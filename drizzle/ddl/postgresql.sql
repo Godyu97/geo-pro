@@ -1296,6 +1296,39 @@ CREATE TABLE "entity_review" (
     and length("entity_review"."created_at") between 20 and 40)
 );
 
+CREATE TABLE "entity_correction" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"observation_id" text NOT NULL,
+	"action" text NOT NULL,
+	"effect" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "entity_correction_state_check" CHECK ((("entity_correction"."action" = 'open' and "entity_correction"."effect" in ('open', 'unresolved'))
+      or ("entity_correction"."action" = 'actioned' and "entity_correction"."effect" in ('pending_retest', 'unresolved')))
+    and length("entity_correction"."owner_id") between 1 and 128
+    and length("entity_correction"."observation_id") = 36
+    and length("entity_correction"."created_at") between 20 and 40)
+);
+
+CREATE TABLE "entity_disambiguation" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"observation_id" text NOT NULL,
+	"prior_analysis_id" text NOT NULL,
+	"next_analysis_id" text NOT NULL,
+	"count_as_target_mention" integer NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "entity_disambiguation_state_check" CHECK ("entity_disambiguation"."count_as_target_mention" = 0
+    and "entity_disambiguation"."prior_analysis_id" <> "entity_disambiguation"."next_analysis_id"
+    and length("entity_disambiguation"."owner_id") between 1 and 128
+    and length("entity_disambiguation"."observation_id") = 36
+    and length("entity_disambiguation"."prior_analysis_id") = 36
+    and length("entity_disambiguation"."next_analysis_id") = 36
+    and length("entity_disambiguation"."created_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -1384,6 +1417,12 @@ ALTER TABLE "quality_alert" ADD CONSTRAINT "quality_alert_brand_id_brand_id_fk" 
 ALTER TABLE "quality_alert_event" ADD CONSTRAINT "quality_alert_event_alert_id_quality_alert_id_fk" FOREIGN KEY ("alert_id") REFERENCES "public"."quality_alert"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "quality_alert_event" ADD CONSTRAINT "quality_alert_event_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "entity_review" ADD CONSTRAINT "entity_review_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "entity_correction" ADD CONSTRAINT "entity_correction_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "entity_correction" ADD CONSTRAINT "entity_correction_observation_fk" FOREIGN KEY ("observation_id") REFERENCES "public"."answer_observation"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "entity_disambiguation" ADD CONSTRAINT "entity_disambiguation_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "entity_disambiguation" ADD CONSTRAINT "entity_disambiguation_observation_fk" FOREIGN KEY ("observation_id") REFERENCES "public"."answer_observation"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "entity_disambiguation" ADD CONSTRAINT "entity_disambiguation_prior_fk" FOREIGN KEY ("prior_analysis_id") REFERENCES "public"."answer_analysis_version"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "entity_disambiguation" ADD CONSTRAINT "entity_disambiguation_next_fk" FOREIGN KEY ("next_analysis_id") REFERENCES "public"."answer_analysis_version"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -1501,3 +1540,8 @@ CREATE INDEX "quality_alert_owner_idx" ON "quality_alert" USING btree ("owner_id
 CREATE INDEX "quality_alert_event_alert_idx" ON "quality_alert_event" USING btree ("owner_id","alert_id","occurred_at","id");
 CREATE UNIQUE INDEX "entity_review_sample_uidx" ON "entity_review" USING btree ("observation_id","analysis_version_id","created_at");
 CREATE INDEX "entity_review_owner_idx" ON "entity_review" USING btree ("owner_id","brand_id","observation_id","analysis_version_id","created_at","id");
+CREATE UNIQUE INDEX "entity_correction_event_uidx" ON "entity_correction" USING btree ("observation_id","created_at");
+CREATE INDEX "entity_correction_owner_idx" ON "entity_correction" USING btree ("owner_id","brand_id","created_at","id");
+CREATE UNIQUE INDEX "entity_disambiguation_prior_uidx" ON "entity_disambiguation" USING btree ("prior_analysis_id");
+CREATE UNIQUE INDEX "entity_disambiguation_next_uidx" ON "entity_disambiguation" USING btree ("next_analysis_id");
+CREATE INDEX "entity_disambiguation_owner_idx" ON "entity_disambiguation" USING btree ("owner_id","brand_id","created_at","id");
