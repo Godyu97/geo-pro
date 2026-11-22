@@ -866,6 +866,47 @@ CREATE TABLE "content_export_job" (
     and length("content_export_job"."result_package_ids_json") > 1)
 );
 
+CREATE TABLE "content_maintenance_page" (
+	"id" text PRIMARY KEY NOT NULL,
+	"task_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"page_id" text NOT NULL,
+	"draft_id" text NOT NULL,
+	"page_url" text NOT NULL,
+	"channel" text NOT NULL,
+	"planned_on" text,
+	"verified_on" text,
+	"status" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "content_maintenance_page_state_check" CHECK ("content_maintenance_page"."status" in ('planned', 'verified', 'blocked')
+    and length("content_maintenance_page"."channel") between 1 and 64
+    and length("content_maintenance_page"."page_url") > 0
+    and length("content_maintenance_page"."page_id") > 0
+    and ("content_maintenance_page"."planned_on" is null or length("content_maintenance_page"."planned_on") = 10)
+    and ("content_maintenance_page"."verified_on" is null or length("content_maintenance_page"."verified_on") = 10)
+    and ("content_maintenance_page"."status" <> 'verified' or "content_maintenance_page"."verified_on" is not null)
+    and ("content_maintenance_page"."status" <> 'planned' or "content_maintenance_page"."verified_on" is null)
+    and length("content_maintenance_page"."created_at") between 20 and 40
+    and length("content_maintenance_page"."updated_at") between 20 and 40)
+);
+
+CREATE TABLE "content_maintenance_task" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"fact_version_id" text NOT NULL,
+	"status" text NOT NULL,
+	"reason" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "content_maintenance_task_state_check" CHECK ("content_maintenance_task"."status" in ('open', 'closed')
+    and "content_maintenance_task"."reason" in ('expired', 'revoked')
+    and length("content_maintenance_task"."created_at") between 20 and 40
+    and length("content_maintenance_task"."updated_at") between 20 and 40)
+);
+
 CREATE TABLE "content_plan" (
 	"id" text PRIMARY KEY NOT NULL,
 	"brand_id" text NOT NULL,
@@ -1413,6 +1454,11 @@ ALTER TABLE "content_delivery_package" ADD CONSTRAINT "content_delivery_package_
 ALTER TABLE "content_delivery_package" ADD CONSTRAINT "content_delivery_package_version_fk" FOREIGN KEY ("content_version_id") REFERENCES "public"."content_version"("id") ON DELETE restrict ON UPDATE no action;
 ALTER TABLE "content_delivery_package" ADD CONSTRAINT "content_delivery_package_approval_fk" FOREIGN KEY ("approval_id") REFERENCES "public"."content_approval"("id") ON DELETE restrict ON UPDATE no action;
 ALTER TABLE "content_export_job" ADD CONSTRAINT "content_export_job_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_maintenance_page" ADD CONSTRAINT "content_maintenance_page_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_maintenance_page" ADD CONSTRAINT "content_maintenance_page_task_fk" FOREIGN KEY ("task_id") REFERENCES "public"."content_maintenance_task"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_maintenance_page" ADD CONSTRAINT "content_maintenance_page_version_fk" FOREIGN KEY ("draft_id") REFERENCES "public"."content_version"("id") ON DELETE restrict ON UPDATE no action;
+ALTER TABLE "content_maintenance_task" ADD CONSTRAINT "content_maintenance_task_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_maintenance_task" ADD CONSTRAINT "content_maintenance_task_fact_fk" FOREIGN KEY ("brand_id","fact_version_id") REFERENCES "public"."brand_fact_version"("brand_id","id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_plan" ADD CONSTRAINT "content_plan_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_publication" ADD CONSTRAINT "content_publication_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_publication" ADD CONSTRAINT "content_publication_version_fk" FOREIGN KEY ("content_version_id") REFERENCES "public"."content_version"("id") ON DELETE restrict ON UPDATE no action;
@@ -1524,6 +1570,10 @@ CREATE INDEX "content_delivery_package_version_idx" ON "content_delivery_package
 CREATE INDEX "content_delivery_package_brand_idx" ON "content_delivery_package" USING btree ("brand_id","created_at","id");
 CREATE UNIQUE INDEX "content_export_job_operation_uidx" ON "content_export_job" USING btree ("brand_id","operation_id");
 CREATE INDEX "content_export_job_owner_idx" ON "content_export_job" USING btree ("owner_id","updated_at","id");
+CREATE UNIQUE INDEX "content_maintenance_page_page_uidx" ON "content_maintenance_page" USING btree ("task_id","page_id");
+CREATE INDEX "content_maintenance_page_task_idx" ON "content_maintenance_page" USING btree ("owner_id","task_id","channel","id");
+CREATE UNIQUE INDEX "content_maintenance_task_open_uidx" ON "content_maintenance_task" USING btree ("brand_id","fact_version_id") WHERE "content_maintenance_task"."status" = 'open';
+CREATE INDEX "content_maintenance_task_owner_idx" ON "content_maintenance_task" USING btree ("owner_id","brand_id","updated_at","id");
 CREATE INDEX "content_plan_brand_idx" ON "content_plan" USING btree ("brand_id","updated_at","id");
 CREATE INDEX "content_plan_owner_idx" ON "content_plan" USING btree ("owner_id","updated_at","id");
 CREATE UNIQUE INDEX "content_plan_cluster_uidx" ON "content_plan" USING btree ("brand_id","question_cluster");

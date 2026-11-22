@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { check, foreignKey, index, integer, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
 import { brand } from "./brand-schema";
+import { brandFactVersion } from "./brand-fact-schema";
 
 export const contentPlan = pgTable("content_plan", {
   id: text("id").primaryKey(),
@@ -406,6 +407,71 @@ export const contentChannelVariant = pgTable("content_channel_variant", {
     and length(${table.channel}) > 0
     and length(${table.bodyMarkdown}) > 0
     and length(${table.fingerprint}) > 0
+    and length(${table.createdAt}) between 20 and 40
+    and length(${table.updatedAt}) between 20 and 40`),
+]);
+
+// One open task per brand and fact version. Closing the task frees the partial unique key.
+// Page rows keep each channel's plan date, verification date, and planned|verified|blocked state.
+export const contentMaintenanceTask = pgTable("content_maintenance_task", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  factVersionId: text("fact_version_id").notNull(),
+  status: text("status").notNull(),
+  reason: text("reason").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "content_maintenance_task_fact_fk",
+    columns: [table.brandId, table.factVersionId],
+    foreignColumns: [brandFactVersion.brandId, brandFactVersion.id],
+  }).onDelete("cascade"),
+  uniqueIndex("content_maintenance_task_open_uidx").on(table.brandId, table.factVersionId)
+    .where(sql`${table.status} = 'open'`),
+  index("content_maintenance_task_owner_idx").on(table.ownerId, table.brandId, table.updatedAt, table.id),
+  check("content_maintenance_task_state_check", sql`${table.status} in ('open', 'closed')
+    and ${table.reason} in ('expired', 'revoked')
+    and length(${table.createdAt}) between 20 and 40
+    and length(${table.updatedAt}) between 20 and 40`),
+]);
+
+export const contentMaintenancePage = pgTable("content_maintenance_page", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  pageId: text("page_id").notNull(),
+  draftId: text("draft_id").notNull(),
+  pageUrl: text("page_url").notNull(),
+  channel: text("channel").notNull(),
+  plannedOn: text("planned_on"),
+  verifiedOn: text("verified_on"),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "content_maintenance_page_task_fk",
+    columns: [table.taskId],
+    foreignColumns: [contentMaintenanceTask.id],
+  }).onDelete("cascade"),
+  foreignKey({
+    name: "content_maintenance_page_version_fk",
+    columns: [table.draftId],
+    foreignColumns: [contentVersion.id],
+  }).onDelete("restrict"),
+  uniqueIndex("content_maintenance_page_page_uidx").on(table.taskId, table.pageId),
+  index("content_maintenance_page_task_idx").on(table.ownerId, table.taskId, table.channel, table.id),
+  check("content_maintenance_page_state_check", sql`${table.status} in ('planned', 'verified', 'blocked')
+    and length(${table.channel}) between 1 and 64
+    and length(${table.pageUrl}) > 0
+    and length(${table.pageId}) > 0
+    and (${table.plannedOn} is null or length(${table.plannedOn}) = 10)
+    and (${table.verifiedOn} is null or length(${table.verifiedOn}) = 10)
+    and (${table.status} <> 'verified' or ${table.verifiedOn} is not null)
+    and (${table.status} <> 'planned' or ${table.verifiedOn} is null)
     and length(${table.createdAt}) between 20 and 40
     and length(${table.updatedAt}) between 20 and 40`),
 ]);

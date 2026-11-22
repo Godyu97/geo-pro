@@ -104,6 +104,8 @@ export class PurgeDao {
     await this.query("DELETE FROM report_snapshot WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM report_todo WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM report_retest WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM content_maintenance_page WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM content_maintenance_task WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_publication_action WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_publication_check WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_publication WHERE brand_id = ?", [brandId]);

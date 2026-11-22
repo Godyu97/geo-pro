@@ -359,3 +359,56 @@ export const listContentQuerySchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 export type ListContentQuery = z.infer<typeof listContentQuerySchema>;
+
+const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+});
+
+export const maintenanceTaskStatuses = ["open", "closed"] as const;
+export const maintenanceTaskStatusSchema = z.enum(maintenanceTaskStatuses);
+export const maintenanceReasons = ["expired", "revoked"] as const;
+export const maintenanceReasonSchema = z.enum(maintenanceReasons);
+export const maintenancePageStatuses = ["planned", "verified", "blocked"] as const;
+export const maintenancePageStatusSchema = z.enum(maintenancePageStatuses);
+
+const maintenanceScheduleSchema = z.strictObject({
+  pageId: brandIdSchema,
+  plannedOn: calendarDate.nullable(),
+  verifiedOn: calendarDate.nullable(),
+});
+
+export const openMaintenanceSchema = z.strictObject({
+  action: z.literal("open-maintenance"),
+  brandId: brandIdSchema,
+  factVersionId: brandIdSchema,
+  reason: maintenanceReasonSchema,
+  schedules: z.array(maintenanceScheduleSchema).max(100).refine(
+    (rows) => new Set(rows.map((row) => row.pageId)).size === rows.length,
+  ).default([]),
+});
+export type OpenMaintenanceInput = z.infer<typeof openMaintenanceSchema>;
+
+export const settleMaintenanceSchema = z.strictObject({
+  action: z.literal("settle-maintenance"),
+  brandId: brandIdSchema,
+  taskId: brandIdSchema,
+  channels: z.array(z.strictObject({
+    channel: targetChannelSchema,
+    state: z.enum(["verified", "blocked"]),
+    verifiedOn: calendarDate.nullable().optional(),
+  })).min(1).max(20).refine((rows) => new Set(rows.map((row) => row.channel)).size === rows.length),
+});
+export type SettleMaintenanceInput = z.infer<typeof settleMaintenanceSchema>;
+
+export const maintenanceWriteSchema = z.discriminatedUnion("action", [
+  openMaintenanceSchema,
+  settleMaintenanceSchema,
+]);
+export type MaintenanceWriteInput = z.infer<typeof maintenanceWriteSchema>;
+
+export const calendarQuerySchema = z.strictObject({
+  brandId: brandIdSchema,
+  factVersionId: brandIdSchema.optional(),
+});
+export type CalendarQuery = z.infer<typeof calendarQuerySchema>;

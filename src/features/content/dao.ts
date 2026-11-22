@@ -18,6 +18,9 @@ import {
   publicationCheckMethodSchema,
   publicationEvidenceGradeSchema,
   publicationStatusSchema,
+  maintenancePageStatusSchema,
+  maintenanceReasonSchema,
+  maintenanceTaskStatusSchema,
   templateKindSchema,
   unitStatusSchema,
   versionStatusSchema,
@@ -250,6 +253,47 @@ export type PublicationCheckRow = z.infer<typeof publicationCheckRow>;
 export type PublicationActionRow = z.infer<typeof publicationActionRow>;
 export type ChannelVariantRow = z.infer<typeof channelVariantRow>;
 
+const maintenanceTaskRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  factVersionId: brandIdSchema,
+  status: maintenanceTaskStatusSchema,
+  reason: maintenanceReasonSchema,
+  createdAt: z.iso.datetime({ precision: 3 }),
+  updatedAt: z.iso.datetime({ precision: 3 }),
+});
+
+const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+const maintenancePageRow = z.object({
+  id: brandIdSchema,
+  taskId: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  pageId: brandIdSchema,
+  draftId: brandIdSchema,
+  pageUrl: z.string().min(1),
+  channel: z.string().min(1).max(64),
+  plannedOn: calendarDate.nullable(),
+  verifiedOn: calendarDate.nullable(),
+  status: maintenancePageStatusSchema,
+  createdAt: z.iso.datetime({ precision: 3 }),
+  updatedAt: z.iso.datetime({ precision: 3 }),
+});
+
+const affectedPublicationRow = z.object({
+  pageId: brandIdSchema,
+  draftId: brandIdSchema,
+  pageUrl: z.string().min(1),
+  channelDeclaration: z.string().min(1),
+  targetChannel: z.string().min(1),
+});
+
+export type MaintenanceTaskRow = z.infer<typeof maintenanceTaskRow>;
+export type MaintenancePageRow = z.infer<typeof maintenancePageRow>;
+export type AffectedPublicationRow = z.infer<typeof affectedPublicationRow>;
+
 const planColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", question_cluster AS "questionCluster",
   coverage_json AS "coverageJson", created_at AS "createdAt", updated_at AS "updatedAt"`;
 
@@ -322,6 +366,14 @@ const channelVariantColumns = `id, brand_id AS "brandId", owner_id AS "ownerId",
   content_version_id AS "contentVersionId", channel, body_markdown AS "bodyMarkdown",
   approval_status AS "approvalStatus", approval_id AS "approvalId",
   needs_own_approval AS "needsOwnApproval", blocked, fingerprint,
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+const maintenanceTaskColumns = `id, brand_id AS "brandId", owner_id AS "ownerId",
+  fact_version_id AS "factVersionId", status, reason, created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+const maintenancePageColumns = `id, task_id AS "taskId", brand_id AS "brandId", owner_id AS "ownerId",
+  page_id AS "pageId", draft_id AS "draftId", page_url AS "pageUrl", channel,
+  planned_on AS "plannedOn", verified_on AS "verifiedOn", status,
   created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 export class ContentDao {
@@ -973,6 +1025,117 @@ export class ContentDao {
       [ownerId, versionId],
     );
     return rows.map((row) => channelVariantRow.parse(row));
+  }
+
+  async listFactPublications(ownerId: string, brandId: string, factVersionId: string) {
+    const rows = await this.query(
+      `SELECT p.id AS "pageId", p.content_version_id AS "draftId", p.page_url AS "pageUrl",
+              p.channel_declaration AS "channelDeclaration", v.target_channel AS "targetChannel"
+       FROM content_publication p
+       JOIN content_version v
+         ON v.id = p.content_version_id AND v.owner_id = p.owner_id AND v.brand_id = p.brand_id
+       JOIN brand_fact_use u
+         ON u.brand_id = p.brand_id AND u.content_version_id = p.content_version_id AND u.fact_version_id = ?
+       WHERE p.owner_id = ? AND p.brand_id = ? AND p.status <> 'removed'
+       ORDER BY p.created_at ASC, p.id ASC
+       LIMIT 101`,
+      [factVersionId, ownerId, brandId],
+    );
+    return z.array(affectedPublicationRow).parse(rows);
+  }
+
+  async findOpenMaintenanceTask(ownerId: string, brandId: string, factVersionId: string) {
+    const [row] = await this.query(
+      `SELECT ${maintenanceTaskColumns} FROM content_maintenance_task
+       WHERE owner_id = ? AND brand_id = ? AND fact_version_id = ? AND status = 'open'`,
+      [ownerId, brandId, factVersionId],
+    );
+    return row ? maintenanceTaskRow.parse(row) : null;
+  }
+
+  async getMaintenanceTask(ownerId: string, taskId: string) {
+    const [row] = await this.query(
+      `SELECT ${maintenanceTaskColumns} FROM content_maintenance_task
+       WHERE owner_id = ? AND id = ?`,
+      [ownerId, taskId],
+    );
+    return row ? maintenanceTaskRow.parse(row) : null;
+  }
+
+  async insertMaintenanceTask(row: MaintenanceTaskRow) {
+    await this.query(
+      `INSERT INTO content_maintenance_task (
+        id, brand_id, owner_id, fact_version_id, status, reason, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.id, row.brandId, row.ownerId, row.factVersionId, row.status, row.reason, row.createdAt, row.updatedAt],
+    );
+  }
+
+  async touchMaintenanceTask(ownerId: string, taskId: string, updatedAt: string) {
+    await this.query(
+      `UPDATE content_maintenance_task SET updated_at = ?
+       WHERE owner_id = ? AND id = ? AND status = 'open'`,
+      [updatedAt, ownerId, taskId],
+    );
+  }
+
+  async insertMaintenancePages(rows: MaintenancePageRow[]) {
+    if (rows.length === 0) return;
+    await this.query(
+      `INSERT INTO content_maintenance_page (
+        id, task_id, brand_id, owner_id, page_id, draft_id, page_url, channel,
+        planned_on, verified_on, status, created_at, updated_at
+      ) VALUES ${rows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}
+       ON CONFLICT (task_id, page_id) DO NOTHING`,
+      rows.flatMap((row) => [
+        row.id, row.taskId, row.brandId, row.ownerId, row.pageId, row.draftId, row.pageUrl, row.channel,
+        row.plannedOn, row.verifiedOn, row.status, row.createdAt, row.updatedAt,
+      ]),
+    );
+  }
+
+  async listMaintenanceTasks(ownerId: string, brandId: string, factVersionId: string | undefined, limit: number) {
+    const factFilter = factVersionId ? " AND fact_version_id = ?" : "";
+    const values: QueryValue[] = factVersionId
+      ? [ownerId, brandId, factVersionId, limit]
+      : [ownerId, brandId, limit];
+    const rows = await this.query(
+      `SELECT ${maintenanceTaskColumns} FROM content_maintenance_task
+       WHERE owner_id = ? AND brand_id = ?${factFilter}
+       ORDER BY updated_at DESC, id DESC
+       LIMIT ?`,
+      values,
+    );
+    return rows.map((row) => maintenanceTaskRow.parse(row));
+  }
+
+  async listMaintenancePages(ownerId: string, taskIds: string[]) {
+    if (taskIds.length === 0) return [];
+    const rows = await this.query(
+      `SELECT ${maintenancePageColumns} FROM content_maintenance_page
+       WHERE owner_id = ? AND task_id IN (${taskIds.map(() => "?").join(", ")})
+       ORDER BY channel ASC, id ASC`,
+      [ownerId, ...taskIds],
+    );
+    return rows.map((row) => maintenancePageRow.parse(row));
+  }
+
+  async settleMaintenanceChannel(row: {
+    ownerId: string;
+    taskId: string;
+    channel: string;
+    status: "verified" | "blocked";
+    verifiedOn: string | null;
+    updatedAt: string;
+  }) {
+    await this.query(
+      `UPDATE content_maintenance_page
+       SET status = ?,
+           verified_on = CASE WHEN ? = 'blocked' THEN verified_on ELSE COALESCE(?, verified_on) END,
+           updated_at = ?
+       WHERE owner_id = ? AND task_id = ? AND channel = ?`,
+      [row.status, row.status, row.verifiedOn, row.updatedAt, row.ownerId, row.taskId, row.channel],
+    );
   }
 }
 

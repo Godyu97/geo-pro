@@ -267,6 +267,13 @@
       "when": 1795346866713,
       "tag": "0037_content_channel_variant",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1795348272487,
+      "tag": "0038_blushing_satana",
+      "breakpoints": true
     }
   ]
 }

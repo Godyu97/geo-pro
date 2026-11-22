@@ -106,6 +106,11 @@ const sections: Record<Exclude<ExportScope, "profile" | "brands">, Slice[]> = {
       src.result_status AS "resultStatus", src.evidence_json AS "evidenceJson", src.checked_at AS "checkedAt"`),
     byId("publicationActions", "content_publication_action", `src.publication_id AS "publicationId", src.kind AS "kind",
       src.status AS "status", src.reason AS "reason", src.updated_at AS "updatedAt"`),
+    byId("maintenanceTasks", "content_maintenance_task", `src.fact_version_id AS "factVersionId", src.status AS "status",
+      src.reason AS "reason", src.updated_at AS "updatedAt"`),
+    byId("maintenancePages", "content_maintenance_page", `src.task_id AS "taskId", src.page_url AS "pageUrl",
+      src.channel AS "channel", src.planned_on AS "plannedOn", src.verified_on AS "verifiedOn",
+      src.status AS "status", src.updated_at AS "updatedAt"`),
   ],
   reports: [
     byId("retests", "report_retest", `src.kind AS "kind", src.status AS "status", src.intent AS "intent", src.track AS "track",

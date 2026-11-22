@@ -37,12 +37,15 @@ import {
   verifyPublication,
   type ExportBlocker,
 } from "./commands";
+import { openContentMaintenance, readContentCalendar, settleContentMaintenance } from "./maintenance";
 import { draftContentFromBrief } from "./fact-drafts";
 import { PACKAGE_FILE_NAMES } from "./package";
 import {
   contentErrors,
+  calendarQuerySchema,
   contentWriteSchema,
   listContentQuerySchema,
+  maintenanceWriteSchema,
   type ContentError,
 } from "./contracts";
 
@@ -191,6 +194,38 @@ async function respond(result: object) {
     const failure = result as { error: ContentError; gaps?: Array<{ code: string }>; blockers?: ExportBlocker[] };
     return errorResponse(failure.error, undefined, failure.gaps, failure.blockers);
   }
+  return Response.json(result, { headers });
+}
+
+export async function contentCalendarResponse(request: Request) {
+  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  const session = await requireSession().catch(() => null);
+  if (!session) return errorResponse("SESSION_REQUIRED");
+  const entries = [...new URL(request.url).searchParams.entries()];
+  const query = calendarQuerySchema.safeParse(Object.fromEntries(entries));
+  if (!query.success) return errorResponse("INVALID_INPUT");
+  const result = await readContentCalendar(getConnection(), session.user.id, query.data);
+  if ("error" in result) return errorResponse(result.error);
+  return Response.json(result, { headers });
+}
+
+export async function contentMaintenanceResponse(request: Request) {
+  if (!sameOrigin(request) || request.method !== "POST") return errorResponse("FORBIDDEN");
+  const session = await requireSession().catch(() => null);
+  if (!session) return errorResponse("SESSION_REQUIRED");
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("INVALID_INPUT");
+  }
+  const parsed = maintenanceWriteSchema.safeParse(body);
+  if (!parsed.success) return errorResponse("INVALID_INPUT");
+  const db = getConnection();
+  const result = parsed.data.action === "open-maintenance"
+    ? await openContentMaintenance(db, session.user.id, parsed.data)
+    : await settleContentMaintenance(db, session.user.id, parsed.data);
+  if ("error" in result) return errorResponse(result.error);
   return Response.json(result, { headers });
 }
 
