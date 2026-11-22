@@ -316,6 +316,13 @@
       "when": 1795355087954,
       "tag": "0044_cheerful_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1795356221829,
+      "tag": "0045_approval_policy",
+      "breakpoints": true
     }
   ]
 }

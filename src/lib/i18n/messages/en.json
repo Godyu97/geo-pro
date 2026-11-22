@@ -370,6 +370,8 @@
     "dataDeletionStatus": "Self-service deletion is pending.",
     "teamAccess": "Team and brand access",
     "openTeam": "Manage member access",
+    "approvalPolicy": "Dual approval",
+    "openApprovalPolicy": "Manage approval policy",
     "loading": "Loading account settings…"
   },
   "dataExports": {
@@ -1907,5 +1909,36 @@
     "INVALID_INPUT": "Check the member, brand, role, and expiry.",
     "CONFLICT": "The last owner cannot leave or be revoked directly.",
     "SERVICE_UNAVAILABLE": "Team access is temporarily unavailable. Try again later."
+  },
+  "approvalPolicy": {
+    "title": "Dual approval policy",
+    "description": "A brand owner can turn on dual approval. The author then cannot approve their own facts or content; another user with the matching duty can.",
+    "backSettings": "Back to account settings",
+    "fixtureNote": "Local checks use synthetic accounts. A failed attempt stores only the version id and the reason, not the body.",
+    "historicalNote": "Turning the policy on or off affects later decisions only. Saved approvals stay as they are.",
+    "noBrands": "There are no brands to manage.",
+    "version": "Policy version",
+    "dualControl": "Require dual approval",
+    "dualControlHint": "When this is on, the author cannot approve their own version. When it is off, the brand owner still uses the existing single-approver path.",
+    "memberUser": "Reviewer account",
+    "factApprover": "Can approve facts",
+    "contentApprover": "Can approve content",
+    "factClosed": "Cannot approve facts",
+    "contentClosed": "Cannot approve content",
+    "removeDuty": "Remove",
+    "empty": "No separate approval duties yet. The brand owner can still approve alone while the policy is off.",
+    "save": "Save policy",
+    "saving": "Saving…",
+    "saved": "Approval policy saved. Historical approvals were not rewritten.",
+    "loading": "Loading approval policy…",
+    "SESSION_REQUIRED": "Sign in before managing the approval policy.",
+    "FORBIDDEN": "This session cannot change the approval policy.",
+    "DUTY": "This account does not have the matching approval duty.",
+    "NOT_FOUND": "That brand, version, or reviewer account was not found.",
+    "SEPARATION": "Dual approval is on, so the author cannot approve their own version.",
+    "FACT_INVALID": "A fact cited by this version cannot be used for approval.",
+    "OPERATION_CONFLICT": "The version and its fact references do not match, so no new approval was written.",
+    "INVALID_INPUT": "Check the brand, duties, and version. Each duty must approve facts or content.",
+    "SERVICE_UNAVAILABLE": "The approval policy is temporarily unavailable. Try again shortly."
   }
 }

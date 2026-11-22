@@ -92,6 +92,10 @@ export default async function AccountSettingsPage() {
             <h2 id="team-heading" className="font-medium">{t("teamAccess")}</h2>
             <Link href="/dashboard/settings/team" prefetch={false} className="text-sm underline underline-offset-4">{t("openTeam")}</Link>
           </section>
+          <section id="approval-policy" aria-labelledby="approval-policy-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
+            <h2 id="approval-policy-heading" className="font-medium">{t("approvalPolicy")}</h2>
+            <Link href="/dashboard/settings/approval-policy" prefetch={false} className="text-sm underline underline-offset-4">{t("openApprovalPolicy")}</Link>
+          </section>
           <section id="data-management" aria-labelledby="data-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
             <h2 id="data-heading" className="font-medium">{t("dataManagement")}</h2>
             <DataExportPanel userId={user.id} locale={locale} />

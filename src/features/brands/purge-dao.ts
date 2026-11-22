@@ -87,6 +87,9 @@ export class PurgeDao {
 
   async clearContents(target: PurgeTarget, createdAt: string | null) {
     const { ownerId, brandId } = target;
+    await this.query("DELETE FROM approval_attempt WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM brand_approval_duty WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM approval_policy WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM optimization_action_draft WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM page_check_record WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM optimization_task_evidence WHERE brand_id = ?", [brandId]);

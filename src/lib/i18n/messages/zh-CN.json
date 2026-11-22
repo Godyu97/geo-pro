@@ -370,6 +370,8 @@
     "dataDeletionStatus": "自助删除待开放。",
     "teamAccess": "团队与品牌授权",
     "openTeam": "管理成员授权",
+    "approvalPolicy": "双人审核",
+    "openApprovalPolicy": "管理审核策略",
     "loading": "正在加载账户设置…"
   },
   "dataExports": {
@@ -1907,5 +1909,36 @@
     "INVALID_INPUT": "请检查成员、品牌、角色和到期时间。",
     "CONFLICT": "最后一位负责人不能直接退出或被撤销。",
     "SERVICE_UNAVAILABLE": "团队授权暂时不可用，请稍后重试。"
+  },
+  "approvalPolicy": {
+    "title": "双人审核策略",
+    "description": "品牌负责人可以开启双人审核。开启后，作者不能批准自己提交的事实或内容，另一名具备对应职责的用户可以批准。",
+    "backSettings": "返回账户设置",
+    "fixtureNote": "本地验收使用合成账号。失败记录只保存版本编号和原因，不保存正文。",
+    "historicalNote": "开启或关闭策略只影响之后的决定，不会改写已经保存的批准记录。",
+    "noBrands": "当前没有可管理的品牌。",
+    "version": "策略版本",
+    "dualControl": "启用双人审核",
+    "dualControlHint": "启用后，作者不能批准自己的版本。关闭后，品牌负责人仍按原来的单人路径批准内容。",
+    "memberUser": "审核账号",
+    "factApprover": "可批事实",
+    "contentApprover": "可批内容",
+    "factClosed": "不可批事实",
+    "contentClosed": "不可批内容",
+    "removeDuty": "移除",
+    "empty": "还没有单独的审核职责。品牌负责人在策略关闭时仍可单人批准。",
+    "save": "保存策略",
+    "saving": "正在保存…",
+    "saved": "审核策略已保存。历史批准没有被改写。",
+    "loading": "正在加载审核策略…",
+    "SESSION_REQUIRED": "请先登录，再管理审核策略。",
+    "FORBIDDEN": "当前会话不能修改审核策略。",
+    "DUTY": "这个账号没有对应的审核职责。",
+    "NOT_FOUND": "找不到该品牌、版本或审核账号。",
+    "SEPARATION": "双人审核已开启，作者不能批准自己提交的版本。",
+    "FACT_INVALID": "版本引用的事实目前不能用于批准。",
+    "OPERATION_CONFLICT": "版本和事实的引用不一致，没有写入新的批准。",
+    "INVALID_INPUT": "请检查品牌、职责和版本。每条职责至少要能批事实或内容之一。",
+    "SERVICE_UNAVAILABLE": "审核策略暂时不可用，请稍后重试。"
   }
 }
