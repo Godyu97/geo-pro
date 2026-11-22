@@ -239,6 +239,13 @@
       "when": 1795342642771,
       "tag": "0033_gifted_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795343542546,
+      "tag": "0034_thankful_golden_guardian",
+      "breakpoints": true
     }
   ]
 }

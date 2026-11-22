@@ -1069,7 +1069,8 @@
     "emptyAnswers": "No answers match the current filters.",
     "viewTasks": "View optimization tasks",
     "competitors": "Competitors and sources",
-    "openPlans": "View sampling plans"
+    "openPlans": "View sampling plans",
+    "openAlerts": "View quality alerts"
   },
   "optimization": {
     "title": "Optimization tasks",
@@ -1490,5 +1491,36 @@
     "SESSION_REQUIRED": "Sign in first.",
     "FORBIDDEN": "This session cannot change the sampling plan.",
     "SERVICE_UNAVAILABLE": "The sampling plan cannot be read or saved right now. Try again later."
+  },
+  "qualityAlerts": {
+    "title": "Quality alerts",
+    "description": "In-app alerts are created from saved monitoring-window summaries. Insufficient coverage, citation-field changes, and mode changes stay data-quality alerts and are not written as a brand decline. Repeats for the same window merge into one alert and keep each occurrence.",
+    "noBrand": "Finish an active brand before reviewing quality alerts.",
+    "openBrand": "Set up a brand",
+    "backOverview": "Back to monitoring overview",
+    "empty": "No quality alerts yet. Insufficient coverage only raises a data-quality notice and does not claim a brand decline.",
+    "inAppOnly": "These alerts stay in the product. They are not sent by email or webhook.",
+    "kindDataQuality": "Data quality",
+    "kindTrend": "Trend",
+    "statusOpen": "Open",
+    "statusAcknowledged": "Acknowledged",
+    "statusSnoozed": "Snoozed",
+    "statusResolved": "Resolved",
+    "reasonCoverage": "The latest window does not have enough coverage. Collect more samples before treating this as a brand decline.",
+    "reasonCitation": "Citation fields changed. This is a data-quality alert, not evidence that brand performance declined.",
+    "reasonMode": "The sampling mode changed. This is a data-quality alert, not evidence that brand performance declined.",
+    "reasonTrend": "Two completed windows with sufficient coverage meet the trend condition. This page does not show a drop size.",
+    "noDecline": "This alert does not claim that brand performance declined.",
+    "window": "Window {id}",
+    "occurrences": "{count} occurrences recorded",
+    "occurredAt": "Occurred at {time}",
+    "acknowledge": "Acknowledge",
+    "snooze": "Snooze",
+    "NOT_FOUND": "This alert was not found, or it belongs to another account.",
+    "INVALID_INPUT": "The window summary is invalid. Check the window, coverage, and completion state, then try again.",
+    "ALERT_STATE_CONFLICT": "This alert cannot take that action in its current state. Occurrence records stay in place.",
+    "SESSION_REQUIRED": "Sign in first.",
+    "FORBIDDEN": "This session cannot change quality alerts.",
+    "SERVICE_UNAVAILABLE": "Quality alerts cannot be read or saved right now. Try again later."
   }
 }

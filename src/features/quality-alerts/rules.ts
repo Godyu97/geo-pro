@@ -1,5 +1,6 @@
 export type AlertKind = "data_quality" | "trend";
 export type AlertStatus = "open" | "acknowledged" | "resolved" | "snoozed";
+export type AlertReason = "coverage_insufficient" | "citation_field_changed" | "mode_changed" | "recommendation_drop";
 
 export type AlertDraft = {
   brandId: string;
@@ -31,6 +32,15 @@ export type WindowSample = {
   modeChanged: boolean;
   recommendationRate: number | null;
 };
+
+/** The latest window decides a quality reason. A trend never uses that quality reason. */
+export function monitoringAlertReason(kind: AlertKind, latest: WindowSample): AlertReason | null {
+  if (kind === "trend") return "recommendation_drop";
+  if (!latest.coverageSufficient) return "coverage_insufficient";
+  if (latest.citationFieldChanged) return "citation_field_changed";
+  if (latest.modeChanged) return "mode_changed";
+  return null;
+}
 
 /** Quality problems suppress a brand-decline claim. A trend needs two completed comparable windows. */
 export function assessMonitoringAlert(windows: readonly WindowSample[], thresholdPp = defaultThresholdPp) {

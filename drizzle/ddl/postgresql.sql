@@ -1237,6 +1237,41 @@ CREATE TABLE "sampling_slot" (
     and length("sampling_slot"."at") between 20 and 40)
 );
 
+CREATE TABLE "quality_alert" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"kind" text NOT NULL,
+	"window_id" text NOT NULL,
+	"status" text NOT NULL,
+	"claim_brand_decline" integer NOT NULL,
+	"reason" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "quality_alert_state_check" CHECK ("quality_alert"."kind" in ('data_quality', 'trend')
+    and "quality_alert"."status" in ('open', 'acknowledged', 'snoozed', 'resolved')
+    and "quality_alert"."claim_brand_decline" in (0, 1)
+    and (
+      ("quality_alert"."kind" = 'data_quality' and "quality_alert"."claim_brand_decline" = 0
+        and "quality_alert"."reason" in ('coverage_insufficient', 'citation_field_changed', 'mode_changed'))
+      or ("quality_alert"."kind" = 'trend' and "quality_alert"."claim_brand_decline" = 1 and "quality_alert"."reason" = 'recommendation_drop')
+    )
+    and length("quality_alert"."window_id") between 1 and 64
+    and length("quality_alert"."owner_id") between 1 and 128
+    and length("quality_alert"."created_at") between 20 and 40
+    and length("quality_alert"."updated_at") between 20 and 40)
+);
+
+CREATE TABLE "quality_alert_event" (
+	"id" text PRIMARY KEY NOT NULL,
+	"alert_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"occurred_at" text NOT NULL,
+	CONSTRAINT "quality_alert_event_state_check" CHECK (length("quality_alert_event"."owner_id") between 1 and 128
+    and length("quality_alert_event"."occurred_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -1321,6 +1356,9 @@ ALTER TABLE "source_inspection" ADD CONSTRAINT "source_inspection_citation_id_an
 ALTER TABLE "source_original" ADD CONSTRAINT "source_original_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sampling_plan" ADD CONSTRAINT "sampling_plan_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sampling_slot" ADD CONSTRAINT "sampling_slot_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "quality_alert" ADD CONSTRAINT "quality_alert_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "quality_alert_event" ADD CONSTRAINT "quality_alert_event_alert_id_quality_alert_id_fk" FOREIGN KEY ("alert_id") REFERENCES "public"."quality_alert"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "quality_alert_event" ADD CONSTRAINT "quality_alert_event_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -1433,3 +1471,6 @@ CREATE INDEX "source_original_owner_idx" ON "source_original" USING btree ("owne
 CREATE INDEX "source_original_brand_idx" ON "source_original" USING btree ("brand_id","created_at","id");
 CREATE INDEX "sampling_plan_owner_idx" ON "sampling_plan" USING btree ("brand_id","owner_id","id");
 CREATE INDEX "sampling_slot_plan_at_idx" ON "sampling_slot" USING btree ("plan_id","at","id");
+CREATE UNIQUE INDEX "quality_alert_open_window_uidx" ON "quality_alert" USING btree ("brand_id","kind","window_id") WHERE "quality_alert"."status" <> 'resolved';
+CREATE INDEX "quality_alert_owner_idx" ON "quality_alert" USING btree ("owner_id","brand_id","updated_at","id");
+CREATE INDEX "quality_alert_event_alert_idx" ON "quality_alert_event" USING btree ("owner_id","alert_id","occurred_at","id");

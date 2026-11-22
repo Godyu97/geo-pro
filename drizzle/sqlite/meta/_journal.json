@@ -232,6 +232,13 @@
       "when": 1795342644089,
       "tag": "0032_fresh_nighthawk",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1795343543690,
+      "tag": "0033_skinny_chimera",
+      "breakpoints": true
     }
   ]
 }

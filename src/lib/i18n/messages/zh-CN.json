@@ -1069,7 +1069,8 @@
     "emptyAnswers": "当前筛选下没有可展示的回答。",
     "viewTasks": "查看优化任务",
     "competitors": "竞品与来源",
-    "openPlans": "查看采样计划"
+    "openPlans": "查看采样计划",
+    "openAlerts": "查看质量提醒"
   },
   "optimization": {
     "title": "优化任务",
@@ -1490,5 +1491,36 @@
     "SESSION_REQUIRED": "请先登录。",
     "FORBIDDEN": "当前会话不能修改采样计划。",
     "SERVICE_UNAVAILABLE": "暂时无法读取或保存采样计划，请稍后重试。"
+  },
+  "qualityAlerts": {
+    "title": "质量提醒",
+    "description": "根据已保存的监测窗口摘要生成站内提醒。覆盖不足、引用字段变化或模式变化只记为数据质量，不会写成品牌下滑。相同窗口的重复触发会合并成一条，并保留每次发生记录。",
+    "noBrand": "先完成一个活跃品牌的建档，再查看质量提醒。",
+    "openBrand": "去建档",
+    "backOverview": "返回监测概览",
+    "empty": "还没有质量提醒。覆盖不足时只提示数据质量，不会宣称品牌表现下滑。",
+    "inAppOnly": "这些提醒只在站内显示，不会发送邮件或 Webhook。",
+    "kindDataQuality": "数据质量",
+    "kindTrend": "趋势",
+    "statusOpen": "待处理",
+    "statusAcknowledged": "已确认",
+    "statusSnoozed": "稍后处理",
+    "statusResolved": "已关闭",
+    "reasonCoverage": "最新窗口覆盖不足。请先补齐采样，不要把这次变化当成品牌表现下滑。",
+    "reasonCitation": "引用字段发生了变化。这是数据质量提醒，不代表品牌表现已经下滑。",
+    "reasonMode": "采样模式发生了变化。这是数据质量提醒，不代表品牌表现已经下滑。",
+    "reasonTrend": "两个已完成且覆盖足够的窗口满足趋势条件。这里不展示下降幅度。",
+    "noDecline": "这条提醒不宣称品牌表现下滑。",
+    "window": "窗口 {id}",
+    "occurrences": "已记录 {count} 次",
+    "occurredAt": "发生时间 {time}",
+    "acknowledge": "确认",
+    "snooze": "稍后处理",
+    "NOT_FOUND": "找不到这条提醒，或它不属于当前账号。",
+    "INVALID_INPUT": "窗口摘要无效。请检查窗口、覆盖和完成状态后再提交。",
+    "ALERT_STATE_CONFLICT": "当前状态不能这样处理。发生记录仍会保留。",
+    "SESSION_REQUIRED": "请先登录。",
+    "FORBIDDEN": "当前会话不能处理质量提醒。",
+    "SERVICE_UNAVAILABLE": "暂时无法读取或保存质量提醒，请稍后重试。"
   }
 }
