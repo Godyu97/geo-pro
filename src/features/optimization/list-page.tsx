@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
-import { getTranslator } from "@/lib/i18n/server";
+import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "../brands/dao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { listActionDrafts } from "./action-drafts";
 import { checkPagesAction } from "./actions";
 import { listPrioritizedTasks } from "./commands";
+import { ActionDraftPanel } from "./draft-panel";
 
 export async function generateMetadata() {
   const t = await getTranslator("optimization");
@@ -20,6 +22,7 @@ export default async function OptimizationListPage({
 }) {
   const session = await requireSession();
   const params = await searchParams;
+  const locale = await getLocale();
   const t = await getTranslator("optimization");
   const connection = getConnection();
   const brands = new BrandDao(connection);
@@ -36,7 +39,10 @@ export default async function OptimizationListPage({
     );
   }
 
-  const listed = await listPrioritizedTasks(connection, session.user.id, brandId, 50);
+  const [listed, drafts] = await Promise.all([
+    listPrioritizedTasks(connection, session.user.id, brandId, 50),
+    listActionDrafts(connection, session.user.id, brandId),
+  ]);
   if ("error" in listed) {
     return (
       <div role="alert" className="space-y-2 text-sm">
@@ -51,6 +57,17 @@ export default async function OptimizationListPage({
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
       </div>
+
+      {"error" in drafts ? (
+        <p role="alert" className="text-sm">{t(drafts.error)}</p>
+      ) : (
+        <ActionDraftPanel
+          locale={locale}
+          brandId={brandId}
+          drafts={drafts.drafts}
+          messages={getMessages(locale).optimization}
+        />
+      )}
 
       <section className="space-y-3 rounded-2xl border p-5">
         <h2 className="text-lg font-semibold">{t("checkPagesTitle")}</h2>

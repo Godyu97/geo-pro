@@ -130,3 +130,38 @@ export const pageCheckRecord = pgTable("page_check_record", {
     and length(${table.url}) > 0
     and length(${table.normalizedUrl}) > 0`),
 ]);
+
+// Editable diagnosis draft. A task row is written only after a person confirms.
+export const optimizationActionDraft = pgTable("optimization_action_draft", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  evidenceIds: text("evidence_ids").notNull(),
+  gapType: text("gap_type").notNull(),
+  observedGap: text("observed_gap").notNull(),
+  hypothesis: text("hypothesis").notNull(),
+  assumptionLevel: text("assumption_level").notNull(),
+  questionCluster: text("question_cluster").notNull(),
+  targetPage: text("target_page").notNull(),
+  status: text("status").notNull(),
+  modelName: text("model_name").notNull(),
+  taskId: text("task_id"),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  index("optimization_action_draft_owner_idx").on(table.ownerId, table.brandId, table.status, table.createdAt, table.id),
+  check("optimization_action_draft_state_check", sql`${table.gapType} in ('fact_error', 'name_confusion', 'key_content_missing', 'page_unreadable', 'citation_gap', 'needs_evidence')
+    and ${table.assumptionLevel} in ('observed_absence', 'verified', 'pending')
+    and ${table.status} in ('draft', 'confirmed', 'dismissed')
+    and (
+      (${table.status} = 'confirmed' and ${table.taskId} is not null)
+      or (${table.status} <> 'confirmed' and ${table.taskId} is null)
+    )
+    and length(${table.modelName}) between 1 and 128
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.createdAt}) between 20 and 40
+    and length(${table.evidenceIds}) between 38 and 400
+    and length(${table.observedGap}) between 1 and 500
+    and length(${table.hypothesis}) between 1 and 500
+    and length(${table.questionCluster}) > 0
+    and length(${table.targetPage}) > 0`),
+]);

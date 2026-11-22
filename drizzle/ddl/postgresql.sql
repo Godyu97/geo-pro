@@ -571,6 +571,38 @@ CREATE TABLE "answer_observation" (
     ))
 );
 
+CREATE TABLE "optimization_action_draft" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"evidence_ids" text NOT NULL,
+	"gap_type" text NOT NULL,
+	"observed_gap" text NOT NULL,
+	"hypothesis" text NOT NULL,
+	"assumption_level" text NOT NULL,
+	"question_cluster" text NOT NULL,
+	"target_page" text NOT NULL,
+	"status" text NOT NULL,
+	"model_name" text NOT NULL,
+	"task_id" text,
+	"created_at" text NOT NULL,
+	CONSTRAINT "optimization_action_draft_state_check" CHECK ("optimization_action_draft"."gap_type" in ('fact_error', 'name_confusion', 'key_content_missing', 'page_unreadable', 'citation_gap', 'needs_evidence')
+    and "optimization_action_draft"."assumption_level" in ('observed_absence', 'verified', 'pending')
+    and "optimization_action_draft"."status" in ('draft', 'confirmed', 'dismissed')
+    and (
+      ("optimization_action_draft"."status" = 'confirmed' and "optimization_action_draft"."task_id" is not null)
+      or ("optimization_action_draft"."status" <> 'confirmed' and "optimization_action_draft"."task_id" is null)
+    )
+    and length("optimization_action_draft"."model_name") between 1 and 128
+    and length("optimization_action_draft"."owner_id") between 1 and 128
+    and length("optimization_action_draft"."created_at") between 20 and 40
+    and length("optimization_action_draft"."evidence_ids") between 38 and 400
+    and length("optimization_action_draft"."observed_gap") between 1 and 500
+    and length("optimization_action_draft"."hypothesis") between 1 and 500
+    and length("optimization_action_draft"."question_cluster") > 0
+    and length("optimization_action_draft"."target_page") > 0)
+);
+
 CREATE TABLE "optimization_finding" (
 	"id" text PRIMARY KEY NOT NULL,
 	"brand_id" text NOT NULL,
@@ -1201,6 +1233,7 @@ ALTER TABLE "answer_citation" ADD CONSTRAINT "answer_citation_observation_fk" FO
 ALTER TABLE "answer_observation" ADD CONSTRAINT "answer_observation_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "answer_observation" ADD CONSTRAINT "answer_observation_slot_fk" FOREIGN KEY ("slot_id") REFERENCES "public"."monitoring_slot"("id") ON DELETE set null ON UPDATE no action;
 ALTER TABLE "answer_observation" ADD CONSTRAINT "answer_observation_attempt_fk" FOREIGN KEY ("attempt_id") REFERENCES "public"."monitoring_attempt"("id") ON DELETE set null ON UPDATE no action;
+ALTER TABLE "optimization_action_draft" ADD CONSTRAINT "optimization_action_draft_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "optimization_finding" ADD CONSTRAINT "optimization_finding_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "optimization_task" ADD CONSTRAINT "optimization_task_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "optimization_task" ADD CONSTRAINT "optimization_task_finding_fk" FOREIGN KEY ("primary_finding_id") REFERENCES "public"."optimization_finding"("id") ON DELETE restrict ON UPDATE no action;
@@ -1291,6 +1324,7 @@ CREATE INDEX "answer_citation_brand_idx" ON "answer_citation" USING btree ("bran
 CREATE UNIQUE INDEX "answer_observation_slot_uidx" ON "answer_observation" USING btree ("slot_id") WHERE "answer_observation"."slot_id" is not null and "answer_observation"."evidence_state" in ('complete', 'incomplete', 'contested');
 CREATE INDEX "answer_observation_brand_idx" ON "answer_observation" USING btree ("brand_id","created_at","id");
 CREATE INDEX "answer_observation_owner_idx" ON "answer_observation" USING btree ("owner_id","created_at","id");
+CREATE INDEX "optimization_action_draft_owner_idx" ON "optimization_action_draft" USING btree ("owner_id","brand_id","status","created_at","id");
 CREATE INDEX "optimization_finding_brand_idx" ON "optimization_finding" USING btree ("brand_id","created_at","id");
 CREATE INDEX "optimization_finding_owner_idx" ON "optimization_finding" USING btree ("owner_id","created_at","id");
 CREATE INDEX "optimization_finding_dedupe_idx" ON "optimization_finding" USING btree ("brand_id","question_cluster","target_page","gap_type");

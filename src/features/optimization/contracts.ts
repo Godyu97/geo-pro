@@ -45,6 +45,10 @@ export const optimizationErrors = {
   INVALID_INPUT: 400,
   OPERATION_CONFLICT: 409,
   SERVICE_UNAVAILABLE: 503,
+  AI_UNAVAILABLE: 503,
+  INVALID_MODEL_OUTPUT: 422,
+  AI_FAILED: 502,
+  DRAFT_CONFLICT: 409,
 } as const;
 export type OptimizationError = keyof typeof optimizationErrors;
 
@@ -90,10 +94,42 @@ export const updateTaskSchema = z.strictObject({
 });
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 
+export const actionDraftStatuses = ["draft", "confirmed", "dismissed"] as const;
+export const actionDraftStatusSchema = z.enum(actionDraftStatuses);
+
+export const draftFromEvidenceSchema = z.strictObject({
+  action: z.literal("draft-from-evidence"),
+  brandId: brandIdSchema,
+  operationId: brandIdSchema,
+  evidenceIds: z.array(brandIdSchema).min(1).max(5),
+});
+export type DraftFromEvidenceInput = z.infer<typeof draftFromEvidenceSchema>;
+
+export const confirmActionDraftSchema = z.strictObject({
+  action: z.literal("confirm-action-draft"),
+  brandId: brandIdSchema,
+  draftId: brandIdSchema,
+  operationId: brandIdSchema,
+  observedGap: z.string().trim().min(1).max(500).optional(),
+  hypothesis: z.string().trim().min(1).max(500).optional(),
+});
+export type ConfirmActionDraftInput = z.infer<typeof confirmActionDraftSchema>;
+
+export const dismissActionDraftSchema = z.strictObject({
+  action: z.literal("dismiss-action-draft"),
+  brandId: brandIdSchema,
+  draftId: brandIdSchema,
+  operationId: brandIdSchema,
+});
+export type DismissActionDraftInput = z.infer<typeof dismissActionDraftSchema>;
+
 export const optimizationWriteSchema = z.discriminatedUnion("action", [
   generateFromEvidenceSchema,
   checkPagesSchema,
   updateTaskSchema,
+  draftFromEvidenceSchema,
+  confirmActionDraftSchema,
+  dismissActionDraftSchema,
 ]);
 export type OptimizationWriteInput = z.infer<typeof optimizationWriteSchema>;
 

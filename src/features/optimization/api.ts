@@ -4,6 +4,11 @@ import { getConnection } from "@/lib/db/connection";
 import { requireSession } from "@/lib/auth/session";
 import { getTranslator } from "@/lib/i18n/server";
 import {
+  confirmActionDraft,
+  dismissActionDraft,
+  draftFromEvidence,
+} from "./action-drafts";
+import {
   checkPages,
   generateFromEvidence,
   listPrioritizedTasks,
@@ -87,6 +92,21 @@ export async function optimizationWriteResponse(request: Request) {
   const input = parsed.data;
   if (input.action === "generate-from-evidence") {
     const result = await generateFromEvidence(db, session.user.id, input);
+    if ("error" in result) return errorResponse(result.error);
+    return Response.json(result, { headers });
+  }
+  if (input.action === "draft-from-evidence") {
+    const result = await draftFromEvidence(db, session.user.id, input);
+    if ("error" in result) return errorResponse(result.error);
+    return Response.json(result, { headers });
+  }
+  if (input.action === "confirm-action-draft") {
+    const result = await confirmActionDraft(db, session.user.id, input);
+    if ("error" in result) return errorResponse(result.error);
+    return Response.json(result, { headers });
+  }
+  if (input.action === "dismiss-action-draft") {
+    const result = await dismissActionDraft(db, session.user.id, input);
     if ("error" in result) return errorResponse(result.error);
     return Response.json(result, { headers });
   }

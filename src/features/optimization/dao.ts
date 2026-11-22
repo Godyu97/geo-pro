@@ -4,6 +4,7 @@ import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import {
+  actionDraftStatusSchema,
   assumptionLevelSchema,
   gapTypeSchema,
   pagePublicStatusSchema,
@@ -73,9 +74,33 @@ const pageCheckRow = z.object({
   createdAt: z.iso.datetime({ precision: 3 }),
 });
 
+const actionDraftRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1).max(128),
+  evidenceIds: z.string().min(38).max(400),
+  gapType: gapTypeSchema,
+  observedGap: z.string().min(1).max(500),
+  hypothesis: z.string().min(1).max(500),
+  assumptionLevel: assumptionLevelSchema,
+  questionCluster: z.string().min(1),
+  targetPage: z.string().min(1),
+  status: actionDraftStatusSchema,
+  modelName: z.string().min(1).max(128),
+  taskId: brandIdSchema.nullable(),
+  createdAt: z.iso.datetime({ precision: 3 }),
+});
+
+const evidenceIdList = z.array(brandIdSchema).min(1).max(5);
+
 export type FindingRow = z.infer<typeof findingRow>;
 export type TaskRow = z.infer<typeof taskRow>;
 export type PageCheckRow = z.infer<typeof pageCheckRow>;
+export type ActionDraftRow = Omit<z.infer<typeof actionDraftRow>, "evidenceIds"> & { evidenceIds: string[] };
+
+function presentActionDraft(row: z.infer<typeof actionDraftRow>): ActionDraftRow {
+  return { ...row, evidenceIds: evidenceIdList.parse(JSON.parse(row.evidenceIds)) };
+}
 
 const findingColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", gap_type AS "gapType",
   question_cluster AS "questionCluster", target_page AS "targetPage",
@@ -94,6 +119,12 @@ const taskColumns = `id, brand_id AS "brandId", owner_id AS "ownerId",
   reorder_reason AS "reorderReason", completion_note AS "completionNote",
   dismiss_reason AS "dismissReason", retest_conclusion AS "retestConclusion",
   created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+const actionDraftColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", evidence_ids AS "evidenceIds",
+  gap_type AS "gapType", observed_gap AS "observedGap", hypothesis,
+  assumption_level AS "assumptionLevel", question_cluster AS "questionCluster",
+  target_page AS "targetPage", status, model_name AS "modelName", task_id AS "taskId",
+  created_at AS "createdAt"`;
 
 const pageColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", task_id AS "taskId",
   url, normalized_url AS "normalizedUrl", checked_at AS "checkedAt",
@@ -309,5 +340,69 @@ export class OptimizationDao {
       [id],
     );
     return row ? findingRow.parse(row) : null;
+  }
+
+  async insertActionDraft(row: ActionDraftRow) {
+    await queryWithParameters(
+      this.db,
+      `INSERT INTO optimization_action_draft (
+        id, brand_id, owner_id, evidence_ids, gap_type, observed_gap, hypothesis,
+        assumption_level, question_cluster, target_page, status, model_name, task_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.brandId, row.ownerId, JSON.stringify(row.evidenceIds), row.gapType,
+        row.observedGap, row.hypothesis, row.assumptionLevel, row.questionCluster, row.targetPage,
+        row.status, row.modelName, row.taskId, row.createdAt,
+      ],
+    );
+  }
+
+  async listOpenActionDrafts(ownerId: string, brandId: string, limit: number, evidenceId?: string) {
+    const values: QueryValue[] = [ownerId, brandId];
+    let sql = `SELECT ${actionDraftColumns}
+      FROM optimization_action_draft
+      WHERE owner_id = ? AND brand_id = ? AND status = 'draft'`;
+    if (evidenceId) {
+      sql += " AND evidence_ids LIKE ?";
+      values.push(`%"${evidenceId}"%`);
+    }
+    sql += " ORDER BY created_at DESC, id DESC LIMIT ?";
+    values.push(limit);
+    const rows = await queryWithParameters(this.db, sql, values);
+    return rows.map((row) => presentActionDraft(actionDraftRow.parse(row)));
+  }
+
+  async actionDraftForOwner(ownerId: string, brandId: string, draftId: string) {
+    const [row] = await queryWithParameters(
+      this.db,
+      `SELECT ${actionDraftColumns}
+       FROM optimization_action_draft
+       WHERE id = ? AND owner_id = ? AND brand_id = ?`,
+      [draftId, ownerId, brandId],
+    );
+    return row ? presentActionDraft(actionDraftRow.parse(row)) : null;
+  }
+
+  async confirmActionDraft(row: ActionDraftRow) {
+    const rows = await queryWithParameters(
+      this.db,
+      `UPDATE optimization_action_draft
+       SET status = 'confirmed', task_id = ?, observed_gap = ?, hypothesis = ?
+       WHERE id = ? AND owner_id = ? AND brand_id = ? AND status = 'draft'
+       RETURNING id`,
+      [row.taskId, row.observedGap, row.hypothesis, row.id, row.ownerId, row.brandId],
+    );
+    return rows.length === 1;
+  }
+
+  async dismissActionDraft(id: string, ownerId: string, brandId: string) {
+    const rows = await queryWithParameters(
+      this.db,
+      `UPDATE optimization_action_draft SET status = 'dismissed'
+       WHERE id = ? AND owner_id = ? AND brand_id = ? AND status = 'draft'
+       RETURNING id`,
+      [id, ownerId, brandId],
+    );
+    return rows.length === 1;
   }
 }

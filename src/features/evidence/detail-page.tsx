@@ -4,7 +4,9 @@ import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { Button } from "@/components/ui/button";
+import { listActionDrafts } from "../optimization/action-drafts";
 import { generateOptimizationAction } from "../optimization/actions";
+import { ActionDraftPanel } from "../optimization/draft-panel";
 import { AnalysisDraftPanel } from "./analysis-draft-form";
 import { readObservation } from "./commands";
 import { ReviseAnalysisForm } from "./revise-form";
@@ -23,10 +25,12 @@ export default async function EvidenceDetailPage({
   const { observationId } = await params;
   const locale = await getLocale();
   const t = await getTranslator("evidence");
+  const optimization = await getTranslator("optimization");
   const detail = await readObservation(getConnection(), session.user.id, observationId);
   if (!detail) notFound();
 
   const { observation, citations, analyses, latestAnalysis, citationPool, drafts } = detail;
+  const actionDrafts = await listActionDrafts(getConnection(), session.user.id, observation.brandId, observation.id);
   const label = (value: "true" | "false" | "unknown") => t(value);
 
   return (
@@ -105,6 +109,17 @@ export default async function EvidenceDetailPage({
             messages={getMessages(locale).evidence}
           />
         </section>
+      )}
+      {"error" in actionDrafts ? (
+        <p role="alert" className="text-sm">{optimization(actionDrafts.error)}</p>
+      ) : (
+        <ActionDraftPanel
+          locale={locale}
+          brandId={observation.brandId}
+          evidenceIds={observation.evidenceState === "draft_evidence" ? undefined : [observation.id]}
+          drafts={actionDrafts.drafts}
+          messages={getMessages(locale).optimization}
+        />
       )}
       {observation.evidenceState !== "draft_evidence" ? (
         <form action={generateOptimizationAction} className="rounded-2xl border px-4 py-4">
