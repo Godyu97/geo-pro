@@ -1760,6 +1760,46 @@ CREATE TABLE "image_asset_use" (
     and length("image_asset_use"."created_at") between 20 and 40)
 );
 
+CREATE TABLE "intervention_batch" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"status" text NOT NULL,
+	"effective_at" text,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "intervention_batch_state_check" CHECK ("intervention_batch"."status" in ('pending', 'effective')
+    and length("intervention_batch"."id") = 36
+    and length("intervention_batch"."brand_id") = 36
+    and length("intervention_batch"."owner_id") between 1 and 128
+    and (
+      ("intervention_batch"."status" = 'pending' and "intervention_batch"."effective_at" is null)
+      or ("intervention_batch"."status" = 'effective' and "intervention_batch"."effective_at" is not null
+        and length("intervention_batch"."effective_at") between 20 and 40)
+    )
+    and length("intervention_batch"."created_at") between 20 and 40
+    and length("intervention_batch"."updated_at") between 20 and 40)
+);
+
+CREATE TABLE "intervention_batch_page" (
+	"id" text PRIMARY KEY NOT NULL,
+	"batch_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"page_key" text NOT NULL,
+	"verified_at" text,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "intervention_batch_page_state_check" CHECK (length("intervention_batch_page"."id") = 36
+    and length("intervention_batch_page"."batch_id") = 36
+    and length("intervention_batch_page"."brand_id") = 36
+    and length("intervention_batch_page"."owner_id") between 1 and 128
+    and length("intervention_batch_page"."page_key") between 1 and 300
+    and ("intervention_batch_page"."verified_at" is null or length("intervention_batch_page"."verified_at") between 20 and 40)
+    and length("intervention_batch_page"."created_at") between 20 and 40
+    and length("intervention_batch_page"."updated_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -1891,6 +1931,9 @@ ALTER TABLE "image_asset_todo" ADD CONSTRAINT "image_asset_todo_brand_id_brand_i
 ALTER TABLE "image_asset_todo" ADD CONSTRAINT "image_asset_todo_asset_fk" FOREIGN KEY ("asset_id") REFERENCES "public"."image_asset"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "image_asset_use" ADD CONSTRAINT "image_asset_use_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "image_asset_use" ADD CONSTRAINT "image_asset_use_asset_fk" FOREIGN KEY ("asset_id") REFERENCES "public"."image_asset"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "intervention_batch" ADD CONSTRAINT "intervention_batch_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "intervention_batch_page" ADD CONSTRAINT "intervention_batch_page_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "intervention_batch_page" ADD CONSTRAINT "intervention_batch_page_batch_fk" FOREIGN KEY ("batch_id") REFERENCES "public"."intervention_batch"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -2051,3 +2094,5 @@ CREATE UNIQUE INDEX "image_asset_todo_use_uidx" ON "image_asset_todo" USING btre
 CREATE INDEX "image_asset_todo_asset_idx" ON "image_asset_todo" USING btree ("asset_id","created_at","id");
 CREATE UNIQUE INDEX "image_asset_use_pair_uidx" ON "image_asset_use" USING btree ("asset_id","content_version_id");
 CREATE INDEX "image_asset_use_asset_idx" ON "image_asset_use" USING btree ("asset_id","created_at","id");
+CREATE INDEX "intervention_batch_owner_idx" ON "intervention_batch" USING btree ("owner_id","brand_id","created_at","id");
+CREATE UNIQUE INDEX "intervention_batch_page_key_uidx" ON "intervention_batch_page" USING btree ("batch_id","page_key");

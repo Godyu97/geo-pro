@@ -35,6 +35,7 @@ export default async function ReportsListPage({
         <Link href="/dashboard/brands" prefetch={false} className="underline underline-offset-4">{t("goBrands")}</Link>
         <p className="flex flex-wrap gap-4">
           <Link href="/dashboard/reports/observations" prefetch={false} className="text-sm underline underline-offset-4">{t("openObservations")}</Link>
+          <Link href="/dashboard/reports/interventions" prefetch={false} className="text-sm underline underline-offset-4">{t("openInterventions")}</Link>
           <Link href="/dashboard/reports/leads" prefetch={false} className="text-sm underline underline-offset-4">{t("openLeads")}</Link>
           <Link href="/dashboard/reports/lead-quality" prefetch={false} className="text-sm underline underline-offset-4">{t("openLeadQuality")}</Link>
           <Link href="/dashboard/reports/lead-suggestions" prefetch={false} className="text-sm underline underline-offset-4">{t("openLeadSuggestions")}</Link>
@@ -84,6 +85,7 @@ export default async function ReportsListPage({
         <p className="text-sm text-muted-foreground">{t("description")}</p>
         <p className="flex flex-wrap gap-4">
           <Link href="/dashboard/reports/observations" prefetch={false} className="text-sm underline underline-offset-4">{t("openObservations")}</Link>
+          <Link href="/dashboard/reports/interventions" prefetch={false} className="text-sm underline underline-offset-4">{t("openInterventions")}</Link>
           <Link href="/dashboard/reports/leads" prefetch={false} className="text-sm underline underline-offset-4">{t("openLeads")}</Link>
           <Link href="/dashboard/reports/lead-quality" prefetch={false} className="text-sm underline underline-offset-4">{t("openLeadQuality")}</Link>
           <Link href="/dashboard/reports/lead-suggestions" prefetch={false} className="text-sm underline underline-offset-4">{t("openLeadSuggestions")}</Link>
