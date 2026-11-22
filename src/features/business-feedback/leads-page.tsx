@@ -63,6 +63,9 @@ export default async function BusinessLeadsPage({
             <Link href="/dashboard/reports/lead-quality" prefetch={false}>{t("openQuality")}</Link>
           </Button>
           <Button asChild variant="outline">
+            <Link href="/dashboard/reports/lead-suggestions" prefetch={false}>{t("openSuggestions")}</Link>
+          </Button>
+          <Button asChild variant="outline">
             <Link href={`/dashboard/reports?brandId=${active.id}`} prefetch={false}>{t("backReports")}</Link>
           </Button>
         </div>

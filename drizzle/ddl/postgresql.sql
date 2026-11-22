@@ -1580,6 +1580,25 @@ CREATE TABLE "lead_validity_rule" (
     and length("lead_validity_rule"."created_at") between 20 and 40)
 );
 
+CREATE TABLE "lead_question_suggestion" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"summary_hash" text NOT NULL,
+	"status" text NOT NULL,
+	"model_name" text NOT NULL,
+	"suggestion_json" text NOT NULL,
+	"injection_ignored" integer NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "lead_question_suggestion_state_check" CHECK ("lead_question_suggestion"."status" in ('draft', 'accepted', 'discarded')
+    and "lead_question_suggestion"."injection_ignored" in (0, 1)
+    and length("lead_question_suggestion"."summary_hash") = 64
+    and length("lead_question_suggestion"."model_name") between 1 and 128
+    and length("lead_question_suggestion"."suggestion_json") between 20 and 2000
+    and length("lead_question_suggestion"."owner_id") between 1 and 128
+    and length("lead_question_suggestion"."created_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -1696,6 +1715,7 @@ ALTER TABLE "lead_observation" ADD CONSTRAINT "lead_observation_brand_id_brand_i
 ALTER TABLE "lead_qualification" ADD CONSTRAINT "lead_qualification_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "lead_qualification" ADD CONSTRAINT "lead_qualification_rule_id_lead_validity_rule_id_fk" FOREIGN KEY ("rule_id") REFERENCES "public"."lead_validity_rule"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "lead_validity_rule" ADD CONSTRAINT "lead_validity_rule_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "lead_question_suggestion" ADD CONSTRAINT "lead_question_suggestion_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -1840,3 +1860,4 @@ CREATE INDEX "lead_qualification_status_idx" ON "lead_qualification" USING btree
 CREATE INDEX "lead_qualification_rule_idx" ON "lead_qualification" USING btree ("rule_id","rule_version");
 CREATE UNIQUE INDEX "lead_validity_rule_version_uidx" ON "lead_validity_rule" USING btree ("brand_id","version");
 CREATE INDEX "lead_validity_rule_owner_idx" ON "lead_validity_rule" USING btree ("owner_id","brand_id","version","id");
+CREATE INDEX "lead_question_suggestion_owner_idx" ON "lead_question_suggestion" USING btree ("owner_id","brand_id","created_at","id");
