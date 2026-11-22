@@ -178,7 +178,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       assert.ok(older.versions.items.every((item) => !listed.versions.items.some((first) => first.id === item.id)));
 
       await db.transaction((tx) => new PurgeDao(tx).clearContents(scope, time));
-      for (const table of ["prompt_draft", "prompt_set", "prompt_reference"]) {
+      for (const table of ["prompt_draft", "prompt_set", "prompt_reference", "prompt_ai_suggestion"]) {
         assert.deepEqual(await queryWithParameters(db, `SELECT brand_id FROM ${table} WHERE brand_id = ?`, [scope.brandId]), []);
       }
     } finally {

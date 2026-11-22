@@ -2,7 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
-import { draftContent, timestamp, type DraftContent, type PromptCursor } from "./contracts.ts";
+import { draftContent, suggestionCandidate, timestamp, type DraftContent, type PromptCursor, type PromptSuggestion, type SuggestionCandidate } from "./contracts.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 
 const revision = z.number().int().positive();
@@ -151,6 +151,58 @@ export class PromptDao {
       ORDER BY s.brand_id, s.created_at, s.id LIMIT ?`,
     after ? [ownerId, after.brandId, after.at, after.id, limit] : [ownerId, limit]);
     return z.array(exportSetRow).parse(rows).map((row) => ({ ...row, content: parseContent(row.content) }));
+  }
+
+  async suggestions(ownerId: string): Promise<PromptSuggestion[]> {
+    const rows = await this.query(`SELECT id, prompt_set_id AS "promptSetId", candidate, created_at AS "createdAt"
+      FROM prompt_ai_suggestion WHERE brand_id = ? AND owner_id = ? AND status = 'draft'
+      ORDER BY created_at DESC, id DESC LIMIT 20`, [this.brandId, ownerId]);
+    const suggestions: PromptSuggestion[] = [];
+    for (const row of z.array(z.object({
+      id: brandIdSchema, promptSetId: brandIdSchema.nullable(), candidate: z.string(), createdAt: timestamp,
+    })).parse(rows)) {
+      const candidate = parseSuggestionCandidate(row.candidate);
+      if (candidate) suggestions.push({ id: row.id, promptSetId: row.promptSetId, createdAt: row.createdAt, candidate });
+    }
+    return suggestions;
+  }
+
+  async suggestion(ownerId: string, id: string) {
+    const [row] = await this.query(`SELECT id, prompt_set_id AS "promptSetId", status, candidate, created_at AS "createdAt"
+      FROM prompt_ai_suggestion WHERE brand_id = ? AND owner_id = ? AND id = ?`, [this.brandId, ownerId, id]);
+    if (!row) return null;
+    const parsed = z.object({
+      id: brandIdSchema, promptSetId: brandIdSchema.nullable(),
+      status: z.enum(["draft", "accepted", "dismissed"]), candidate: z.string(), createdAt: timestamp,
+    }).parse(row);
+    const candidate = parseSuggestionCandidate(parsed.candidate);
+    return candidate ? { ...parsed, candidate } : null;
+  }
+
+  async insertSuggestions(ownerId: string, rows: Array<{
+    id: string; promptSetId: string | null; modelName: string; candidate: SuggestionCandidate; createdAt: string;
+  }>) {
+    if (!rows.length) return;
+    await this.query(`INSERT INTO prompt_ai_suggestion
+      (id, brand_id, owner_id, prompt_set_id, status, model_name, candidate, created_at)
+      VALUES ${rows.map(() => "(?, ?, ?, ?, 'draft', ?, ?, ?)").join(", ")}`,
+    rows.flatMap((row) => [row.id, this.brandId, ownerId, row.promptSetId, row.modelName, JSON.stringify(row.candidate), row.createdAt]));
+  }
+
+  async markSuggestion(ownerId: string, id: string, status: "accepted" | "dismissed") {
+    const rows = await this.query(`UPDATE prompt_ai_suggestion SET status = ?
+      WHERE brand_id = ? AND owner_id = ? AND id = ? AND status = 'draft' RETURNING id`,
+    [status, this.brandId, ownerId, id]);
+    return rows.length === 1;
+  }
+}
+
+function parseSuggestionCandidate(value: string) {
+  try {
+    const candidate = suggestionCandidate.safeParse(JSON.parse(value));
+    return candidate.success ? candidate.data : null;
+  } catch {
+    return null;
   }
 }
 

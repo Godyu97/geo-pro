@@ -74,6 +74,8 @@ async function acceptance(browser, db) {
     await page.goto(root);
     await page.getByRole("link", { name: "监测问题" }).click();
     await expect(page.getByRole("heading", { name: "监测问题" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "生成购买问题候选" })).toBeVisible();
+    await expect(page.getByText("还没有待处理的生成候选。", { exact: true })).toBeVisible();
     await expect(page.getByText("非品牌候选")).toBeVisible();
     await checkLayout(page);
     for (let index = 0; index < 3; index += 1) await page.getByRole("button", { name: "加入草稿" }).nth(index).click();
@@ -107,6 +109,8 @@ async function acceptance(browser, db) {
     await expect(exclusion.getByRole("listitem")).toHaveText(edited);
     await page.getByLabel("界面语言", { exact: true }).selectOption("en");
     await expect(page.getByRole("heading", { name: "Monitoring questions" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Generate buying-question candidates" })).toBeVisible();
+    await expect(page.getByText("No generated candidates are waiting for review.", { exact: true })).toBeVisible();
     await expect(page.getByText(edited).first()).toBeVisible();
     await expect(page.getByText(comparison).first()).toBeVisible();
     await page.reload();

@@ -953,7 +953,20 @@
     "awareness": "Awareness",
     "consider": "Consideration",
     "compare": "Comparison",
-    "decide": "Decision"
+    "decide": "Decision",
+    "generateSuggestions": "Generate buying-question candidates",
+    "generatingSuggestions": "Generating candidates…",
+    "suggestionIntro": "Generated questions are saved as drafts first. Exact duplicates are discarded, and close matches are kept with a warning. A candidate enters the question draft only after you accept it. This does not freeze the set or start monitoring.",
+    "suggestionEmpty": "No generated candidates are waiting for review.",
+    "suggestionSimilar": "This candidate is close to an existing question. Confirm it before accepting.",
+    "acceptSuggestion": "Accept",
+    "dismissSuggestion": "Dismiss",
+    "suggestionAccepted": "Accepted and added to the draft.",
+    "suggestionDismissed": "This candidate was dismissed.",
+    "suggestionDiscarded": "Discarded {count} exact duplicate candidates.",
+    "aiUnavailable": "The generation service is not configured, so no candidate was saved.",
+    "invalidModelOutput": "The model output could not be read, so no candidate or question was saved.",
+    "aiFailed": "Generation did not finish, so no candidate was saved."
   },
   "evidence": {
     "title": "Answer evidence",

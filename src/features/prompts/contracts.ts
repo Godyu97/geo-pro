@@ -72,9 +72,30 @@ export const promptCommand = z.discriminatedUnion("action", [
 export const cursorSchema = z.object({ at: timestamp, id });
 export const promptScope = z.strictObject({ ownerId: z.string().min(1).max(128), brandId: id });
 
+export const suggestionCandidate = z.strictObject({
+  text: promptQuestion.shape.text,
+  type: questionType,
+  stage: buyingStage,
+  warnings: z.array(z.literal("similar")).max(1),
+});
+
+export const suggestionCommand = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("generate"), promptSetId: id.nullable() }),
+  z.strictObject({ action: z.literal("accept"), id }),
+  z.strictObject({ action: z.literal("dismiss"), id }),
+]);
+
 export type DraftContent = z.infer<typeof draftContent>;
 export type PromptQuestion = z.infer<typeof promptQuestion>;
 export type PromptCluster = z.infer<typeof promptCluster>;
 export type PromptCommand = z.infer<typeof promptCommand>;
 export type PromptCursor = z.infer<typeof cursorSchema>;
 export type PromptScope = z.infer<typeof promptScope>;
+export type SuggestionCandidate = z.infer<typeof suggestionCandidate>;
+export type SuggestionCommand = z.infer<typeof suggestionCommand>;
+export type PromptSuggestion = {
+  id: string;
+  promptSetId: string | null;
+  createdAt: string;
+  candidate: SuggestionCandidate;
+};

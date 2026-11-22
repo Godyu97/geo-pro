@@ -953,7 +953,20 @@
     "awareness": "了解",
     "consider": "考虑",
     "compare": "比较",
-    "decide": "决定"
+    "decide": "决定",
+    "generateSuggestions": "生成购买问题候选",
+    "generatingSuggestions": "正在生成候选…",
+    "suggestionIntro": "生成结果先保存为草案。完全重复的题目会被丢弃，接近的题目会保留并提示。只有接受后才会进入题集草稿，不会冻结题集，也不会开始监测。",
+    "suggestionEmpty": "还没有待处理的生成候选。",
+    "suggestionSimilar": "这道候选与已有题目接近。接受前请确认是否保留。",
+    "acceptSuggestion": "接受",
+    "dismissSuggestion": "放弃",
+    "suggestionAccepted": "已接受并加入草稿。",
+    "suggestionDismissed": "已放弃这道候选。",
+    "suggestionDiscarded": "已丢弃 {count} 条完全重复的候选。",
+    "aiUnavailable": "生成服务尚未配置，没有保存候选。",
+    "invalidModelOutput": "模型输出无法解析，没有保存候选或题目。",
+    "aiFailed": "生成没有完成，没有保存候选。"
   },
   "evidence": {
     "title": "回答证据",

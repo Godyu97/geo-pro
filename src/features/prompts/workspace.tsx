@@ -33,6 +33,7 @@ export function PromptWorkspaceView({ brandId, locale, data, messages }: {
   const t = createTranslator(locale, messages);
   const router = useRouter();
   const [content, setContent] = useState<DraftContent>(data.editor);
+  const [suggestions, setSuggestions] = useState(data.suggestions);
   const [paste, setPaste] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -104,6 +105,39 @@ export function PromptWorkspaceView({ brandId, locale, data, messages }: {
     });
   }
 
+  function postSuggestion(command: { action: "generate"; promptSetId: string | null } | { action: "accept" | "dismiss"; id: string }) {
+    startTransition(async () => {
+      setMessage(command.action === "generate" ? t("generatingSuggestions") : null);
+      const response = await fetch(`/api/brands/${brandId}/questions/suggestions`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command),
+      });
+      const body = await response.json() as {
+        error?: string; traceId?: string; suggestions?: PromptWorkspace["suggestions"];
+        discarded?: number; content?: DraftContent; revision?: number;
+      };
+      if (!response.ok || body.error) {
+        setMessage(`${t((body.error ?? "unavailable") as keyof Copy)}${body.traceId ? ` ${body.traceId}` : ""}`);
+        return;
+      }
+      if (command.action === "generate" && body.suggestions) {
+        setSuggestions(body.suggestions);
+        setMessage(body.discarded ? t("suggestionDiscarded", { count: formatNumber(locale, body.discarded) }) : null);
+        return;
+      }
+      if (command.action === "accept" && body.content && typeof body.revision === "number") {
+        revision.current = body.revision;
+        setContent(body.content);
+        setSuggestions((current) => current.filter((item) => item.id !== command.id));
+        setMessage(t("suggestionAccepted"));
+        return;
+      }
+      if (command.action === "dismiss") {
+        setSuggestions((current) => current.filter((item) => item.id !== command.id));
+        setMessage(t("suggestionDismissed"));
+      }
+    });
+  }
+
   return (
     <form className="grid gap-5" onSubmit={submit}>
       <section className={panelClass} aria-labelledby="prompt-summary">
@@ -138,6 +172,31 @@ export function PromptWorkspaceView({ brandId, locale, data, messages }: {
               })}>
                 {t("addCandidate")}
               </Button>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className={panelClass} aria-labelledby="prompt-suggestions">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 id="prompt-suggestions" className="font-semibold">{t("generateSuggestions")}</h2>
+          <Button type="button" variant="outline" disabled={data.readOnly || pending} onClick={() => postSuggestion({
+            action: "generate", promptSetId: data.selected?.id ?? data.draft?.baseSetId ?? null,
+          })}>
+            {t("generateSuggestions")}
+          </Button>
+        </div>
+        <p className="text-sm text-muted-foreground">{t("suggestionIntro")}</p>
+        {suggestions.length === 0 && <p>{t("suggestionEmpty")}</p>}
+        <ul className="space-y-3">
+          {suggestions.map((suggestion) => (
+            <li className="space-y-2 border-t pt-3" key={suggestion.id}>
+              <p className="min-w-0 text-sm break-words">{suggestion.candidate.text}</p>
+              {suggestion.candidate.warnings.includes("similar") && <p className="text-sm">{t("suggestionSimilar")}</p>}
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" disabled={data.readOnly || pending} onClick={() => postSuggestion({ action: "accept", id: suggestion.id })}>{t("acceptSuggestion")}</Button>
+                <Button type="button" variant="outline" disabled={data.readOnly || pending} onClick={() => postSuggestion({ action: "dismiss", id: suggestion.id })}>{t("dismissSuggestion")}</Button>
+              </div>
             </li>
           ))}
         </ul>

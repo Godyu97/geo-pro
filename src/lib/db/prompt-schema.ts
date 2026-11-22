@@ -46,3 +46,24 @@ export const promptReference = pgTable("prompt_reference", {
     foreignColumns: [promptSet.brandId, promptSet.id] }).onDelete("cascade"),
   index("prompt_reference_question_idx").on(table.brandId, table.questionId),
 ]);
+
+// Reviewable buying-question candidate. Bytes stay here until a person accepts
+// the text into prompt_draft; dismissal and exact duplicates never enter the set.
+export const promptAiSuggestion = pgTable("prompt_ai_suggestion", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  promptSetId: text("prompt_set_id"),
+  status: text("status").notNull(),
+  modelName: text("model_name").notNull(),
+  candidate: text("candidate").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  index("prompt_ai_suggestion_owner_idx").on(table.brandId, table.ownerId, table.createdAt),
+  check("prompt_ai_suggestion_state_check", sql`${table.status} in ('draft', 'accepted', 'dismissed')
+    and length(${table.modelName}) between 1 and 128
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.candidate}) between 2 and 8000
+    and length(${table.createdAt}) between 20 and 40
+    and (${table.promptSetId} is null or length(${table.promptSetId}) = 36)`),
+]);

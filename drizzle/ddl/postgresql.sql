@@ -325,6 +325,23 @@ CREATE TABLE "sampling_answer_network" (
     and "sampling_answer_network"."qualifies_required_search" in (0, 1))
 );
 
+CREATE TABLE "prompt_ai_suggestion" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"prompt_set_id" text,
+	"status" text NOT NULL,
+	"model_name" text NOT NULL,
+	"candidate" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "prompt_ai_suggestion_state_check" CHECK ("prompt_ai_suggestion"."status" in ('draft', 'accepted', 'dismissed')
+    and length("prompt_ai_suggestion"."model_name") between 1 and 128
+    and length("prompt_ai_suggestion"."owner_id") between 1 and 128
+    and length("prompt_ai_suggestion"."candidate") between 2 and 8000
+    and length("prompt_ai_suggestion"."created_at") between 20 and 40
+    and ("prompt_ai_suggestion"."prompt_set_id" is null or length("prompt_ai_suggestion"."prompt_set_id") = 36))
+);
+
 CREATE TABLE "prompt_draft" (
 	"brand_id" text PRIMARY KEY NOT NULL,
 	"revision" integer NOT NULL,
@@ -1150,6 +1167,7 @@ ALTER TABLE "brand_fact_version" ADD CONSTRAINT "fact_version_paste_fk" FOREIGN 
 ALTER TABLE "capability_version" ADD CONSTRAINT "capability_version_channel_id_capability_channel_id_fk" FOREIGN KEY ("channel_id") REFERENCES "public"."capability_channel"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "sampling_answer_network" ADD CONSTRAINT "sampling_answer_network_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sampling_answer_network" ADD CONSTRAINT "sampling_answer_network_version_fk" FOREIGN KEY ("channel_id","channel_version") REFERENCES "public"."capability_version"("channel_id","version") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "prompt_ai_suggestion" ADD CONSTRAINT "prompt_ai_suggestion_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "prompt_draft" ADD CONSTRAINT "prompt_draft_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "prompt_reference" ADD CONSTRAINT "prompt_reference_set_fk" FOREIGN KEY ("brand_id","set_version_id") REFERENCES "public"."prompt_set"("brand_id","id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "prompt_set" ADD CONSTRAINT "prompt_set_entity_fk" FOREIGN KEY ("brand_id","entity_version") REFERENCES "public"."brand_version"("brand_id","version") ON DELETE cascade ON UPDATE no action;
@@ -1229,6 +1247,7 @@ CREATE INDEX "fact_version_recent_idx" ON "brand_fact_version" USING btree ("bra
 CREATE INDEX "capability_channel_vendor_kind_idx" ON "capability_channel" USING btree ("vendor_id","kind","id");
 CREATE INDEX "sampling_answer_network_brand_created_idx" ON "sampling_answer_network" USING btree ("brand_id","created_at","id");
 CREATE INDEX "sampling_answer_network_channel_version_idx" ON "sampling_answer_network" USING btree ("channel_id","channel_version");
+CREATE INDEX "prompt_ai_suggestion_owner_idx" ON "prompt_ai_suggestion" USING btree ("brand_id","owner_id","created_at");
 CREATE INDEX "prompt_reference_question_idx" ON "prompt_reference" USING btree ("brand_id","question_id");
 CREATE UNIQUE INDEX "prompt_set_version_uidx" ON "prompt_set" USING btree ("brand_id","set_id","version");
 CREATE INDEX "prompt_set_recent_idx" ON "prompt_set" USING btree ("brand_id","created_at","id");

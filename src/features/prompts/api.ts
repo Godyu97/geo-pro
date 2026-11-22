@@ -14,7 +14,7 @@ function json(data: unknown, status = 200) {
   return Response.json(data, { status, headers: { "Cache-Control": "private, no-store" } });
 }
 
-async function access(request: Request, context: Context) {
+export async function access(request: Request, context: Context) {
   const session = await getSessionState();
   if (session.status === "anonymous") return json({ error: "signIn" }, 401);
   if (session.status !== "authenticated") return json(promptUnavailable(), 503);

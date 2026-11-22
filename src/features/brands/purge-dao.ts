@@ -96,6 +96,7 @@ export class PurgeDao {
     await this.query("DELETE FROM monitoring_slot WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM monitoring_run WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM brand_draft WHERE owner_id = ? AND scope = ?", [ownerId, brandId]);
+    await this.query("DELETE FROM prompt_ai_suggestion WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM prompt_reference WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM prompt_set WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM prompt_draft WHERE brand_id = ?", [brandId]);

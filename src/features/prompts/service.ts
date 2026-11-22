@@ -19,12 +19,13 @@ export async function readPromptWorkspace(db: QueryConnection, scope: PromptScop
   const brand = await new BrandDao(db).version(scope.ownerId, scope.brandId);
   if (!brand) return null;
   const dao = new PromptDao(db, scope.brandId);
-  const [draft, versions, selected, referenced, family] = await Promise.all([
+  const [draft, versions, selected, referenced, family, suggestions] = await Promise.all([
     dao.draft(),
     dao.versions(query.after),
     query.version ? dao.version(query.version) : Promise.resolve(null),
     dao.referencedIds(),
     dao.familyId(),
+    dao.suggestions(scope.ownerId),
   ]);
   if (query.version && !selected) return null;
   const base = draft?.baseSetId ? await dao.version(draft.baseSetId) : null;
@@ -49,6 +50,7 @@ export async function readPromptWorkspace(db: QueryConnection, scope: PromptScop
     exclusion: draftExclusion,
     gaps: briefFrom(editor),
     referenced,
+    suggestions,
     familyId: family,
     versions: {
       items: versions.slice(0, pageSize).map((item) => ({
