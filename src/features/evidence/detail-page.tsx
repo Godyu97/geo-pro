@@ -5,6 +5,7 @@ import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { Button } from "@/components/ui/button";
 import { generateOptimizationAction } from "../optimization/actions";
+import { AnalysisDraftPanel } from "./analysis-draft-form";
 import { readObservation } from "./commands";
 import { ReviseAnalysisForm } from "./revise-form";
 
@@ -25,7 +26,7 @@ export default async function EvidenceDetailPage({
   const detail = await readObservation(getConnection(), session.user.id, observationId);
   if (!detail) notFound();
 
-  const { observation, citations, analyses, latestAnalysis, citationPool } = detail;
+  const { observation, citations, analyses, latestAnalysis, citationPool, drafts } = detail;
   const label = (value: "true" | "false" | "unknown") => t(value);
 
   return (
@@ -71,6 +72,13 @@ export default async function EvidenceDetailPage({
           ))}
         </ul>
       </section>
+      <AnalysisDraftPanel
+        locale={locale}
+        observationId={observation.id}
+        expectedVersion={latestAnalysis?.version ?? null}
+        drafts={drafts}
+        messages={getMessages(locale).evidence}
+      />
       {latestAnalysis && (
         <section className="space-y-2">
           <h2 className="font-medium">{t("analysisHistory")}</h2>

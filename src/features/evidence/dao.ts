@@ -5,7 +5,7 @@ import { queryWithParameters, type QueryConnection, type QueryValue } from "../.
 import { brandIdSchema } from "../brands/contracts.ts";
 import { networkModes } from "../capabilities/contracts.ts";
 import {
-  analysisStatuses, captureMethods, citationOrigins, citationSetStates, evidenceStates,
+  analysisDraftStatuses, analysisStatuses, captureMethods, citationOrigins, citationSetStates, evidenceStates,
   ownershipStates, pageStatuses, sourceModes, triStateSchema,
 } from "./contracts.ts";
 
@@ -64,9 +64,23 @@ const analysisRow = z.object({
   createdAt: z.iso.datetime({ precision: 3 }),
 });
 
+const analysisDraftRow = z.object({
+  id: brandIdSchema,
+  observationId: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1).max(128),
+  mentioned: triStateSchema,
+  recommended: triStateSchema,
+  officialSiteCited: triStateSchema,
+  status: z.enum(analysisDraftStatuses),
+  modelName: z.string().min(1).max(128),
+  createdAt: z.iso.datetime({ precision: 3 }),
+});
+
 export type ObservationRow = z.infer<typeof observationRow>;
 export type CitationRow = z.infer<typeof citationRow>;
 export type AnalysisRow = z.infer<typeof analysisRow>;
+export type AnalysisDraftRow = z.infer<typeof analysisDraftRow>;
 
 const observationColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", slot_id AS "slotId", attempt_id AS "attemptId",
   source_mode AS "sourceMode", capture_method AS "captureMethod", question_text AS "questionText", answer_text AS "answerText",
@@ -77,6 +91,10 @@ const observationColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", sl
 const citationColumns = `id, observation_id AS "observationId", brand_id AS "brandId", raw_url AS "rawUrl",
   normalized_url AS "normalizedUrl", citation_origin AS "citationOrigin", position_label AS "positionLabel",
   ownership, page_status AS "pageStatus", created_at AS "createdAt"`;
+
+const analysisDraftColumns = `id, observation_id AS "observationId", brand_id AS "brandId", owner_id AS "ownerId",
+  mentioned, recommended, official_site_cited AS "officialSiteCited", status,
+  model_name AS "modelName", created_at AS "createdAt"`;
 
 const analysisColumns = `id, observation_id AS "observationId", brand_id AS "brandId", version,
   entity_version AS "entityVersion", rule_version AS "ruleVersion", mentioned, recommended,
@@ -346,6 +364,48 @@ export class EvidenceDao {
       [observationId],
     );
     return rows.map((row) => analysisRow.parse(row));
+  }
+
+  async insertAnalysisDraft(row: AnalysisDraftRow) {
+    await this.query(
+      `INSERT INTO answer_analysis_draft (
+        id, observation_id, brand_id, owner_id, mentioned, recommended, official_site_cited,
+        status, model_name, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.observationId, row.brandId, row.ownerId, row.mentioned, row.recommended,
+        row.officialSiteCited, row.status, row.modelName, row.createdAt,
+      ],
+    );
+  }
+
+  async openAnalysisDrafts(ownerId: string, observationId: string) {
+    const rows = await this.query(
+      `SELECT ${analysisDraftColumns} FROM answer_analysis_draft
+       WHERE observation_id = ? AND owner_id = ? AND status = 'draft'
+       ORDER BY created_at DESC, id DESC LIMIT 20`,
+      [observationId, ownerId],
+    );
+    return rows.map((row) => analysisDraftRow.parse(row));
+  }
+
+  async analysisDraftForOwner(ownerId: string, observationId: string, draftId: string) {
+    const [row] = await this.query(
+      `SELECT ${analysisDraftColumns} FROM answer_analysis_draft
+       WHERE id = ? AND observation_id = ? AND owner_id = ?`,
+      [draftId, observationId, ownerId],
+    );
+    return row ? analysisDraftRow.parse(row) : null;
+  }
+
+  async markAnalysisDraft(id: string, ownerId: string, observationId: string, status: "applied" | "dismissed") {
+    const rows = await this.query(
+      `UPDATE answer_analysis_draft SET status = ?
+       WHERE id = ? AND owner_id = ? AND observation_id = ? AND status = 'draft'
+       RETURNING id`,
+      [status, id, ownerId, observationId],
+    );
+    return rows.length === 1;
   }
 
   async latestAnalysis(observationId: string) {

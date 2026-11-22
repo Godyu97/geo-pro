@@ -95,3 +95,32 @@ export const answerAnalysisVersion = pgTable("answer_analysis_version", {
     and ${table.status} in ('pending', 'classified', 'needs_review', 'revised')
     and (${table.revisedFrom} is null or ${table.revisedFrom} <> ${table.id})`),
 ]);
+
+// Overwritable model draft. Overview, retests, and reports keep using
+// answer_analysis_version until a person applies this row.
+export const answerAnalysisDraft = pgTable("answer_analysis_draft", {
+  id: text("id").primaryKey(),
+  observationId: text("observation_id").notNull(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  mentioned: text("mentioned").notNull(),
+  recommended: text("recommended").notNull(),
+  officialSiteCited: text("official_site_cited").notNull(),
+  status: text("status").notNull(),
+  modelName: text("model_name").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "answer_analysis_draft_observation_fk",
+    columns: [table.observationId],
+    foreignColumns: [answerObservation.id],
+  }).onDelete("cascade"),
+  index("answer_analysis_draft_observation_idx").on(table.observationId, table.createdAt),
+  check("answer_analysis_draft_state_check", sql`${table.mentioned} in ('true', 'false', 'unknown')
+    and ${table.recommended} in ('true', 'false', 'unknown')
+    and ${table.officialSiteCited} in ('true', 'false', 'unknown')
+    and ${table.status} in ('draft', 'applied', 'dismissed')
+    and length(${table.modelName}) between 1 and 128
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.createdAt}) between 20 and 40`),
+]);

@@ -6,6 +6,7 @@ import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
+import { executeAnalysisDraft } from "./analysis-drafts";
 import {
   ingestAdoptedObservation,
   readObservation,
@@ -68,6 +69,34 @@ export async function evidenceWriteResponse(request: Request) {
   } catch {
     const traceId = randomUUID();
     console.error("evidence-write-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+function isDraftFailure(result: object): result is { error: EvidenceError; traceId?: string } {
+  if ("observation" in result || !("error" in result) || typeof result.error !== "string") return false;
+  return Object.hasOwn(evidenceErrors, result.error);
+}
+
+export async function analysisDraftResponse(request: Request, observationId: string) {
+  const gate = await requireSameOrigin(request);
+  if ("error" in gate) return gate.error;
+  try {
+    if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
+    const result = await executeAnalysisDraft(
+      getConnection(),
+      gate.session.session.user.id,
+      observationId,
+      await readBoundedJson(request, 8_192),
+    );
+    if (isDraftFailure(result)) {
+      const traceId = "traceId" in result && typeof result.traceId === "string" ? result.traceId : undefined;
+      return failure(result.error, traceId);
+    }
+    return Response.json(result, { headers: privateHeaders });
+  } catch {
+    const traceId = randomUUID();
+    console.error("analysis-draft-unavailable", { traceId });
     return failure("SERVICE_UNAVAILABLE", traceId);
   }
 }

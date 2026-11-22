@@ -3,7 +3,7 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import type { CacheStore } from "../../lib/cache/store.ts";
 import { openCache } from "../../lib/cache/store.ts";
-import type { DatabaseConnection } from "../../lib/db/connection.ts";
+import type { DatabaseConnection, TransactionConnection } from "../../lib/db/connection.ts";
 import { PromptDao } from "../prompts/dao.ts";
 import {
   type EvidenceError,
@@ -33,7 +33,7 @@ function wroteObservation(result: unknown): result is { observation: unknown } {
   return result !== null && typeof result === "object" && "observation" in result;
 }
 
-async function releaseOverview<T>(ownerId: string, brandId: string, result: T, cache?: CacheStore) {
+export async function releaseOverview<T>(ownerId: string, brandId: string, result: T, cache?: CacheStore) {
   if (wroteObservation(result)) await invalidateEvidenceOverview(ownerId, brandId, cache ?? openCache());
   return result;
 }
@@ -311,6 +311,57 @@ export async function submitManualEvidence(
   return releaseOverview(ownerId, input.brandId, result, cache);
 }
 
+export async function appendAnalysisRevision(
+  tx: TransactionConnection,
+  ownerId: string,
+  input: ReviseAnalysisInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  const dao = new EvidenceDao(tx);
+  const existing = await dao.operation(ownerId, input.operationId);
+  if (existing) return JSON.parse(existing) as ReturnType<typeof detailPayload> & { replayed: true };
+
+  const brand = await owned(dao, ownerId, input.brandId);
+  if ("error" in brand) return brand;
+
+  const observation = await dao.observationForOwner(ownerId, input.observationId);
+  if (!observation || observation.brandId !== input.brandId) return denied("NOT_FOUND");
+
+  const latest = await dao.latestAnalysis(observation.id);
+  if (!latest) return denied("NOT_FOUND");
+  if (latest.version !== input.expectedVersion) return denied("VERSION_CONFLICT");
+
+  const now = clock();
+  await dao.markAnalysisRevised(latest.id, input.brandId);
+  const analysis: AnalysisRow = {
+    id: randomUUID(),
+    observationId: observation.id,
+    brandId: input.brandId,
+    version: latest.version + 1,
+    entityVersion: observation.entityVersion,
+    ruleVersion: analysisRuleVersion,
+    mentioned: input.mentioned,
+    recommended: input.recommended,
+    officialSiteCited: input.officialSiteCited,
+    evidenceSpan: input.evidenceSpan ?? latest.evidenceSpan,
+    status: input.recommended === "true" && input.mentioned === "false" ? "needs_review" : "classified",
+    revisedFrom: latest.id,
+    reason: input.reason,
+    reviewerId: ownerId,
+    createdAt: now,
+  };
+  await dao.insertAnalysis(analysis);
+  const citations = await dao.citationsFor(observation.id);
+  const analyses = await dao.analysesFor(observation.id);
+  const payload = {
+    ...detailPayload(observation, citations, analyses),
+    replayed: false as const,
+    previousAnalysisId: latest.id,
+  };
+  await dao.recordOperation(ownerId, input.operationId, operationFingerprint(input), payload, now, input.brandId);
+  return payload;
+}
+
 export async function reviseAnalysis(
   db: DatabaseConnection,
   ownerId: string,
@@ -318,51 +369,7 @@ export async function reviseAnalysis(
   clock: Clock = () => new Date().toISOString(),
   cache?: CacheStore,
 ) {
-  const result = await db.transaction(async (tx) => {
-    const dao = new EvidenceDao(tx);
-    const existing = await dao.operation(ownerId, input.operationId);
-    if (existing) return JSON.parse(existing) as ReturnType<typeof detailPayload> & { replayed: true };
-
-    const brand = await owned(dao, ownerId, input.brandId);
-    if ("error" in brand) return brand;
-
-    const observation = await dao.observationForOwner(ownerId, input.observationId);
-    if (!observation || observation.brandId !== input.brandId) return denied("NOT_FOUND");
-
-    const latest = await dao.latestAnalysis(observation.id);
-    if (!latest) return denied("NOT_FOUND");
-    if (latest.version !== input.expectedVersion) return denied("VERSION_CONFLICT");
-
-    const now = clock();
-    await dao.markAnalysisRevised(latest.id, input.brandId);
-    const analysis: AnalysisRow = {
-      id: randomUUID(),
-      observationId: observation.id,
-      brandId: input.brandId,
-      version: latest.version + 1,
-      entityVersion: observation.entityVersion,
-      ruleVersion: analysisRuleVersion,
-      mentioned: input.mentioned,
-      recommended: input.recommended,
-      officialSiteCited: input.officialSiteCited,
-      evidenceSpan: input.evidenceSpan ?? latest.evidenceSpan,
-      status: input.recommended === "true" && input.mentioned === "false" ? "needs_review" : "classified",
-      revisedFrom: latest.id,
-      reason: input.reason,
-      reviewerId: ownerId,
-      createdAt: now,
-    };
-    await dao.insertAnalysis(analysis);
-    const citations = await dao.citationsFor(observation.id);
-    const analyses = await dao.analysesFor(observation.id);
-    const payload = {
-      ...detailPayload(observation, citations, analyses),
-      replayed: false as const,
-      previousAnalysisId: latest.id,
-    };
-    await dao.recordOperation(ownerId, input.operationId, operationFingerprint(input), payload, now, input.brandId);
-    return payload;
-  });
+  const result = await db.transaction((tx) => appendAnalysisRevision(tx, ownerId, input, clock));
   return releaseOverview(ownerId, input.brandId, result, cache);
 }
 
@@ -374,11 +381,12 @@ export async function readObservation(
   const dao = new EvidenceDao(db);
   const observation = await dao.observationForOwner(ownerId, observationId);
   if (!observation) return null;
-  const [citations, analyses] = await Promise.all([
+  const [citations, analyses, drafts] = await Promise.all([
     dao.citationsFor(observation.id),
     dao.analysesFor(observation.id),
+    dao.openAnalysisDrafts(ownerId, observation.id),
   ]);
-  return detailPayload(observation, citations, analyses);
+  return { ...detailPayload(observation, citations, analyses), drafts };
 }
 
 export async function readObservationBySlot(

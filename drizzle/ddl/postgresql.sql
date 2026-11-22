@@ -472,6 +472,26 @@ CREATE TABLE "monitoring_slot" (
       or ("monitoring_slot"."status" <> 'succeeded' and "monitoring_slot"."adopted_attempt_id" is null)))
 );
 
+CREATE TABLE "answer_analysis_draft" (
+	"id" text PRIMARY KEY NOT NULL,
+	"observation_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"mentioned" text NOT NULL,
+	"recommended" text NOT NULL,
+	"official_site_cited" text NOT NULL,
+	"status" text NOT NULL,
+	"model_name" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "answer_analysis_draft_state_check" CHECK ("answer_analysis_draft"."mentioned" in ('true', 'false', 'unknown')
+    and "answer_analysis_draft"."recommended" in ('true', 'false', 'unknown')
+    and "answer_analysis_draft"."official_site_cited" in ('true', 'false', 'unknown')
+    and "answer_analysis_draft"."status" in ('draft', 'applied', 'dismissed')
+    and length("answer_analysis_draft"."model_name") between 1 and 128
+    and length("answer_analysis_draft"."owner_id") between 1 and 128
+    and length("answer_analysis_draft"."created_at") between 20 and 40)
+);
+
 CREATE TABLE "answer_analysis_version" (
 	"id" text PRIMARY KEY NOT NULL,
 	"observation_id" text NOT NULL,
@@ -1174,6 +1194,8 @@ ALTER TABLE "prompt_set" ADD CONSTRAINT "prompt_set_entity_fk" FOREIGN KEY ("bra
 ALTER TABLE "monitoring_attempt" ADD CONSTRAINT "monitoring_attempt_slot_fk" FOREIGN KEY ("slot_id") REFERENCES "public"."monitoring_slot"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "monitoring_run" ADD CONSTRAINT "monitoring_run_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "monitoring_slot" ADD CONSTRAINT "monitoring_slot_run_fk" FOREIGN KEY ("run_id") REFERENCES "public"."monitoring_run"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "answer_analysis_draft" ADD CONSTRAINT "answer_analysis_draft_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "answer_analysis_draft" ADD CONSTRAINT "answer_analysis_draft_observation_fk" FOREIGN KEY ("observation_id") REFERENCES "public"."answer_observation"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "answer_analysis_version" ADD CONSTRAINT "answer_analysis_observation_fk" FOREIGN KEY ("observation_id") REFERENCES "public"."answer_observation"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "answer_citation" ADD CONSTRAINT "answer_citation_observation_fk" FOREIGN KEY ("observation_id") REFERENCES "public"."answer_observation"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "answer_observation" ADD CONSTRAINT "answer_observation_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
@@ -1261,6 +1283,7 @@ CREATE INDEX "monitoring_run_brand_recent_idx" ON "monitoring_run" USING btree (
 CREATE UNIQUE INDEX "monitoring_slot_position_uidx" ON "monitoring_slot" USING btree ("run_id","question_id","channel_id","repeat_index");
 CREATE INDEX "monitoring_slot_brand_idx" ON "monitoring_slot" USING btree ("brand_id","run_id");
 CREATE INDEX "monitoring_slot_reservation_idx" ON "monitoring_slot" USING btree ("brand_id","reservation_id");
+CREATE INDEX "answer_analysis_draft_observation_idx" ON "answer_analysis_draft" USING btree ("observation_id","created_at");
 CREATE UNIQUE INDEX "answer_analysis_version_uidx" ON "answer_analysis_version" USING btree ("observation_id","version");
 CREATE INDEX "answer_analysis_brand_idx" ON "answer_analysis_version" USING btree ("brand_id","observation_id","version");
 CREATE INDEX "answer_citation_observation_idx" ON "answer_citation" USING btree ("observation_id","id");

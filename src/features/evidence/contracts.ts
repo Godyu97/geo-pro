@@ -14,6 +14,7 @@ export const citationOrigins = [
 export const ownershipStates = ["owned_domain", "owned_account", "competitor", "third_party", "unknown"] as const;
 export const pageStatuses = ["unknown", "reachable", "restricted", "not_applicable"] as const;
 export const analysisStatuses = ["pending", "classified", "needs_review", "revised"] as const;
+export const analysisDraftStatuses = ["draft", "applied", "dismissed"] as const;
 export const sourceModes = ["model_api", "consumer_ui"] as const;
 export const captureMethods = ["official_api", "manual", "assisted", "isolated"] as const;
 
@@ -27,6 +28,10 @@ export const evidenceErrors = {
   EVIDENCE_INCOMPLETE: 409,
   OPERATION_CONFLICT: 409,
   SERVICE_UNAVAILABLE: 503,
+  AI_UNAVAILABLE: 503,
+  INVALID_MODEL_OUTPUT: 422,
+  AI_FAILED: 502,
+  DRAFT_CONFLICT: 409,
 } as const;
 export type EvidenceError = keyof typeof evidenceErrors;
 
@@ -95,6 +100,33 @@ export const reviseAnalysisSchema = z.strictObject({
   reason: z.string().min(1).max(1000),
 });
 export type ReviseAnalysisInput = z.infer<typeof reviseAnalysisSchema>;
+
+export const generateAnalysisDraftSchema = z.strictObject({
+  action: z.literal("generate"),
+});
+
+export const applyAnalysisDraftSchema = z.strictObject({
+  action: z.literal("apply"),
+  draftId: brandIdSchema,
+  expectedVersion: z.int().positive(),
+  operationId: brandIdSchema,
+  mentioned: triStateSchema,
+  recommended: triStateSchema,
+  officialSiteCited: triStateSchema,
+  reason: z.string().min(1).max(1000),
+});
+
+export const dismissAnalysisDraftSchema = z.strictObject({
+  action: z.literal("dismiss"),
+  draftId: brandIdSchema,
+});
+
+export const analysisDraftCommandSchema = z.discriminatedUnion("action", [
+  generateAnalysisDraftSchema,
+  applyAnalysisDraftSchema,
+  dismissAnalysisDraftSchema,
+]);
+export type AnalysisDraftCommand = z.infer<typeof analysisDraftCommandSchema>;
 
 export const evidenceWriteSchema = z.discriminatedUnion("action", [
   ingestAdoptedSchema,
