@@ -22,9 +22,13 @@ import {
   type BriefDraftFields,
   type ConfirmBriefInput,
   type ContentError,
+  type ApproveChannelVariantInput,
+  type BlockChannelVariantInput,
+  type ExportChannelVariantInput,
   type ExportConfirmInput,
   type ExportMode,
   type ExportPreflightInput,
+  type SaveChannelVariantInput,
   type GenerateBatchInput,
   type MarkPublicationRemovedInput,
   type PackageKind,
@@ -38,7 +42,13 @@ import {
   type UpdateVariantInput,
   type VerifyPublicationInput,
 } from "./contracts.ts";
-import { ContentDao, type AssetRow, type BriefVersionRow, type ContentVersionRow, type PackageRow, type UnitRow } from "./dao.ts";
+import { ContentDao, type AssetRow, type BriefVersionRow, type ChannelVariantRow, type ContentVersionRow, type PackageRow, type UnitRow } from "./dao.ts";
+import {
+  channelVariantFingerprint,
+  variantNeedsOwnApproval,
+  variantRejection,
+  type VariantRejectionCode,
+} from "../channel-variants/rules.ts";
 import {
   buildPackageFiles,
   computeApprovalFingerprint,
@@ -1499,6 +1509,12 @@ async function readStoredPackageFiles(
   return { ok: true, files };
 }
 
+type VariantPackageSource = {
+  bodyMarkdown: string;
+  targetChannel: string;
+  approvalId: string;
+};
+
 async function assemblePackage(
   db: QueryConnection,
   objectDb: DatabaseConnection,
@@ -1508,15 +1524,21 @@ async function assemblePackage(
   kind: PackageKind,
   now: string,
   options: ObjectCommandOptions,
+  source?: VariantPackageSource,
 ): Promise<AssembleResult> {
   const dao = new ContentDao(db);
   const version = await ownedVersion(dao, ownerId, brandId, versionId);
   if (!version) return { ok: false, error: "NOT_FOUND" };
-  const fingerprint = versionFingerprint(version);
-  const approval = (await dao.listApprovalsForVersions(ownerId, [version.id]))
-    .find((item) => item.contentFingerprint === fingerprint) ?? null;
+  const projected = source
+    ? { ...version, bodyMarkdown: source.bodyMarkdown, targetChannel: source.targetChannel }
+    : version;
+  const fingerprint = versionFingerprint(projected);
+  const approvals = await dao.listApprovalsForVersions(ownerId, [version.id]);
+  const approval = source
+    ? approvals.find((item) => item.id === source.approvalId && item.contentFingerprint === fingerprint) ?? null
+    : approvals.find((item) => item.contentFingerprint === fingerprint) ?? null;
   if (kind === "formal") {
-    if (version.status !== "approved" || !approval) return { ok: false, error: "APPROVAL_REQUIRED" };
+    if ((!source && version.status !== "approved") || !approval) return { ok: false, error: "APPROVAL_REQUIRED" };
     if (version.labelingProfileStatus !== "verified") return { ok: false, error: "LABELING_UNVERIFIED" };
   }
 
@@ -1566,8 +1588,8 @@ async function assemblePackage(
     version: {
       id: version.id,
       title: version.title,
-      bodyMarkdown: version.bodyMarkdown,
-      targetChannel: version.targetChannel,
+      bodyMarkdown: projected.bodyMarkdown,
+      targetChannel: projected.targetChannel,
       labelingProfileVersion: version.labelingProfileVersion,
       labelingProfileStatus: version.labelingProfileStatus,
       factVersionIds: factIds,
@@ -1594,7 +1616,7 @@ async function assemblePackage(
     ownerId,
     contentVersionId: version.id,
     approvalId: approval?.id ?? null,
-    targetChannel: version.targetChannel,
+    targetChannel: projected.targetChannel,
     kind,
     contentFingerprint: fingerprint,
     factVersionIdsJson: JSON.stringify([...factIds].sort()),
@@ -2306,5 +2328,278 @@ export async function readPublication(
     actions,
     version: { id: version.id, title: version.title, status: version.status },
     readOnly: brand.status !== "active",
+  };
+}
+
+function asChannelVariant(row: ChannelVariantRow) {
+  return {
+    id: row.id,
+    channel: row.channel,
+    approved: row.approvalStatus === "approved",
+    body: row.bodyMarkdown,
+  };
+}
+
+function presentChannelVariant(row: ChannelVariantRow, version: ContentVersionRow) {
+  const variant = asChannelVariant(row);
+  const masterApproved = version.status === "approved";
+  const rejection: VariantRejectionCode | null = variantRejection({
+    masterApproved,
+    variant,
+    masterBody: version.bodyMarkdown,
+    blocked: row.blocked === 1,
+  });
+  return {
+    id: row.id,
+    brandId: row.brandId,
+    contentVersionId: row.contentVersionId,
+    channel: row.channel,
+    bodyMarkdown: row.bodyMarkdown,
+    approvalStatus: row.approvalStatus,
+    approvalId: row.approvalId,
+    needsOwnApproval: row.needsOwnApproval === 1,
+    blocked: row.blocked === 1,
+    rejection,
+    fingerprint: row.fingerprint,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export async function readChannelVariants(
+  db: DatabaseConnection,
+  ownerId: string,
+  versionId: string,
+) {
+  const dao = new ContentDao(db);
+  const version = await dao.getContentVersion(ownerId, versionId);
+  if (!version) return denied("NOT_FOUND");
+  const brand = await new BrandDao(db).owned(ownerId, version.brandId);
+  if (!brand) return denied("NOT_FOUND");
+  const rows = await dao.listChannelVariants(ownerId, version.id);
+  return {
+    version: {
+      id: version.id,
+      brandId: version.brandId,
+      title: version.title,
+      bodyMarkdown: version.bodyMarkdown,
+      status: version.status,
+      targetChannel: version.targetChannel,
+    },
+    variants: rows.map((row) => presentChannelVariant(row, version)),
+    readOnly: brand.status !== "active",
+  };
+}
+
+export async function readChannelVariant(
+  db: DatabaseConnection,
+  ownerId: string,
+  variantId: string,
+) {
+  const dao = new ContentDao(db);
+  const row = await dao.getChannelVariant(ownerId, variantId);
+  if (!row) return denied("NOT_FOUND");
+  const version = await dao.getContentVersion(ownerId, row.contentVersionId);
+  if (!version || version.brandId !== row.brandId) return denied("NOT_FOUND");
+  const brand = await new BrandDao(db).owned(ownerId, row.brandId);
+  if (!brand) return denied("NOT_FOUND");
+  return { variant: presentChannelVariant(row, version), readOnly: brand.status !== "active" };
+}
+
+export async function saveChannelVariant(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: SaveChannelVariantInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  return locked(db, ownerId, async (transaction) => {
+    if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+    const dao = new ContentDao(transaction);
+    const version = await ownedVersion(dao, ownerId, input.brandId, input.versionId);
+    if (!version) return denied("NOT_FOUND");
+    const now = clock();
+    const existing = await dao.getChannelVariantForVersion(ownerId, version.id, input.channel);
+    const bodyChanged = !existing || existing.bodyMarkdown !== input.bodyMarkdown;
+    const approvalStatus = bodyChanged || !existing ? "draft" as const : existing.approvalStatus;
+    const approvalId = bodyChanged || !existing ? null : existing.approvalId;
+    const needs = variantNeedsOwnApproval(version.status === "approved", {
+      id: existing?.id ?? version.id,
+      channel: input.channel,
+      approved: approvalStatus === "approved",
+      body: input.bodyMarkdown,
+    }, version.bodyMarkdown);
+    const fingerprint = channelVariantFingerprint(input.channel, input.bodyMarkdown);
+    const needsFlag = needs ? 1 : 0;
+    if (!existing) {
+      const row: ChannelVariantRow = {
+        id: randomUUID(),
+        brandId: input.brandId,
+        ownerId,
+        contentVersionId: version.id,
+        channel: input.channel,
+        bodyMarkdown: input.bodyMarkdown,
+        approvalStatus,
+        approvalId,
+        needsOwnApproval: needsFlag,
+        blocked: 0,
+        fingerprint,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await dao.insertChannelVariant(row);
+      return { variant: presentChannelVariant(row, version), replayed: false };
+    }
+    if (!bodyChanged && existing.needsOwnApproval === needsFlag && existing.fingerprint === fingerprint) {
+      return { variant: presentChannelVariant(existing, version), replayed: true };
+    }
+    const next: ChannelVariantRow = {
+      ...existing,
+      bodyMarkdown: input.bodyMarkdown,
+      approvalStatus,
+      approvalId,
+      needsOwnApproval: needsFlag,
+      fingerprint,
+      updatedAt: now,
+    };
+    await dao.updateChannelVariantBody(next);
+    return { variant: presentChannelVariant(next, version), replayed: false };
+  });
+}
+
+export async function approveChannelVariant(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: ApproveChannelVariantInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  return locked(db, ownerId, async (transaction) => {
+    if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+    const dao = new ContentDao(transaction);
+    const version = await ownedVersion(dao, ownerId, input.brandId, input.versionId);
+    if (!version) return denied("NOT_FOUND");
+    const variant = await dao.getChannelVariantForVersion(ownerId, version.id, input.channel);
+    if (!variant) return denied("NOT_FOUND");
+    const projected = { ...version, bodyMarkdown: variant.bodyMarkdown, targetChannel: variant.channel };
+    const contentFingerprint = versionFingerprint(projected);
+    const now = clock();
+    if (variant.approvalStatus === "approved" && variant.approvalId) {
+      const own = (await dao.listApprovals(ownerId, version.id)).find((item) =>
+        item.id === variant.approvalId
+        && item.decision === "approved"
+        && item.contentFingerprint === contentFingerprint);
+      if (own) return { variant: presentChannelVariant(variant, version), approvalId: own.id, replayed: true };
+    }
+    const approvalId = randomUUID();
+    await dao.insertApproval({
+      id: approvalId,
+      brandId: input.brandId,
+      ownerId,
+      contentVersionId: version.id,
+      contentFingerprint,
+      factVersionIdsJson: version.factVersionIdsJson,
+      decision: "approved",
+      actorId: ownerId,
+      createdAt: now,
+    });
+    const needs = variantNeedsOwnApproval(version.status === "approved", {
+      id: variant.id,
+      channel: variant.channel,
+      approved: true,
+      body: variant.bodyMarkdown,
+    }, version.bodyMarkdown);
+    const next: ChannelVariantRow = {
+      ...variant,
+      approvalStatus: "approved",
+      approvalId,
+      needsOwnApproval: needs ? 1 : 0,
+      updatedAt: now,
+    };
+    await dao.updateChannelVariantApproval(next);
+    return { variant: presentChannelVariant(next, version), approvalId, replayed: false };
+  });
+}
+
+export async function blockChannelVariant(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: BlockChannelVariantInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  return locked(db, ownerId, async (transaction) => {
+    if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+    const dao = new ContentDao(transaction);
+    const version = await ownedVersion(dao, ownerId, input.brandId, input.versionId);
+    if (!version) return denied("NOT_FOUND");
+    const variant = await dao.getChannelVariantForVersion(ownerId, version.id, input.channel);
+    if (!variant) return denied("NOT_FOUND");
+    if (variant.blocked === 1) return { variant: presentChannelVariant(variant, version), replayed: true };
+    const now = clock();
+    await dao.blockChannelVariant(ownerId, variant.id, now);
+    const next: ChannelVariantRow = { ...variant, blocked: 1, updatedAt: now };
+    return { variant: presentChannelVariant(next, version), replayed: false };
+  });
+}
+
+export async function exportChannelVariant(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: ExportChannelVariantInput,
+  clock: Clock = () => new Date().toISOString(),
+  options: ObjectCommandOptions = {},
+) {
+  if (!await activeBrand(db, ownerId, input.brandId)) return denied("NOT_FOUND");
+  const dao = new ContentDao(db);
+  const version = await ownedVersion(dao, ownerId, input.brandId, input.versionId);
+  if (!version) return denied("NOT_FOUND");
+  const variant = await dao.getChannelVariantForVersion(ownerId, version.id, input.channel);
+  if (!variant) return denied("NOT_FOUND");
+  if (variant.blocked === 1) return denied("VARIANT_CHANNEL_BLOCKED");
+  const gateVariant = asChannelVariant(variant);
+  if (variantNeedsOwnApproval(version.status === "approved", gateVariant, version.bodyMarkdown) || !variant.approvalId) {
+    return denied("VARIANT_REAPPROVAL_REQUIRED");
+  }
+
+  const now = clock();
+  const gate = await withEligibleFacts(
+    db,
+    { ownerId, brandId: input.brandId },
+    { factVersionIds: parseIds(version.factVersionIdsJson), contentVersionId: version.id, stage: "delivery" },
+    async (transaction) => {
+      const txDao = new ContentDao(transaction);
+      const currentVersion = await ownedVersion(txDao, ownerId, input.brandId, input.versionId);
+      const current = currentVersion
+        ? await txDao.getChannelVariantForVersion(ownerId, currentVersion.id, input.channel)
+        : null;
+      if (!currentVersion || !current || !current.approvalId) {
+        return { ok: false as const, error: "NOT_FOUND" as const };
+      }
+      if (current.blocked === 1) return { ok: false as const, error: "VARIANT_CHANNEL_BLOCKED" as const };
+      if (variantNeedsOwnApproval(currentVersion.status === "approved", asChannelVariant(current), currentVersion.bodyMarkdown)) {
+        return { ok: false as const, error: "VARIANT_REAPPROVAL_REQUIRED" as const };
+      }
+      return assemblePackage(
+        transaction,
+        db,
+        ownerId,
+        input.brandId,
+        currentVersion.id,
+        "formal",
+        now,
+        { ...options, connection: transaction },
+        {
+          bodyMarkdown: current.bodyMarkdown,
+          targetChannel: current.channel,
+          approvalId: current.approvalId,
+        },
+      );
+    },
+    () => new Date(now),
+  );
+  if ("error" in gate) return factFailure(gate);
+  if (!gate.data.ok) return denied(gate.data.error);
+  return {
+    package: summarizePackage(gate.data.row),
+    approvalId: gate.data.row.approvalId,
+    replayed: false,
   };
 }

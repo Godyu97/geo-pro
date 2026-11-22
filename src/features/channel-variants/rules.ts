@@ -1,8 +1,34 @@
+import { createHash } from "node:crypto";
+
 export type Variant = { id: string; channel: string; approved: boolean; body: string };
+
+export type VariantRejectionCode =
+  | "master_unapproved"
+  | "body_diverged"
+  | "variant_unapproved"
+  | "channel_blocked";
 
 export function variantNeedsOwnApproval(masterApproved: boolean, variant: Variant, masterBody: string) {
   if (!masterApproved) return true;
   return variant.body !== masterBody || !variant.approved;
+}
+
+/** Body text never grants approval. "沿用主稿批准" is ordinary copy, not a bypass. */
+export function variantRejection(input: {
+  masterApproved: boolean;
+  variant: Variant;
+  masterBody: string;
+  blocked: boolean;
+}): VariantRejectionCode | null {
+  if (input.blocked) return "channel_blocked";
+  if (!variantNeedsOwnApproval(input.masterApproved, input.variant, input.masterBody)) return null;
+  if (!input.masterApproved) return "master_unapproved";
+  if (input.variant.body !== input.masterBody) return "body_diverged";
+  return "variant_unapproved";
+}
+
+export function channelVariantFingerprint(channel: string, body: string) {
+  return createHash("sha256").update(JSON.stringify({ channel, body }), "utf8").digest("hex");
 }
 
 export function maintenanceQueue(input: { factId: string; pageIds: readonly string[] }) {

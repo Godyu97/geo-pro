@@ -73,6 +73,11 @@ export default async function ContentVersionPage({
 
       <section className="space-y-2 rounded-2xl border p-5 text-sm">
         <p>{t("channel")}: {version.targetChannel}</p>
+        <p>
+          <Link href={`/dashboard/content/versions/${version.id}/variants`} prefetch={false} className="underline-offset-4 hover:underline">
+            {t("openChannelVariants")}
+          </Link>
+        </p>
         <p>{t("labelingVersion")}: {version.labelingProfileVersion}</p>
         <p>{t("labelingStatus")}: {t(version.labelingProfileStatus)}</p>
         <p>{t("imagesAttached")}: {assets.length}</p>

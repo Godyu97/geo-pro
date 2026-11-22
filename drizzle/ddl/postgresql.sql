@@ -796,6 +796,30 @@ CREATE TABLE "content_brief_version" (
     and length("content_brief_version"."fact_version_ids_json") > 1)
 );
 
+CREATE TABLE "content_channel_variant" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"content_version_id" text NOT NULL,
+	"channel" text NOT NULL,
+	"body_markdown" text NOT NULL,
+	"approval_status" text NOT NULL,
+	"approval_id" text,
+	"needs_own_approval" integer NOT NULL,
+	"blocked" integer DEFAULT 0 NOT NULL,
+	"fingerprint" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "content_channel_variant_state_check" CHECK ("content_channel_variant"."approval_status" in ('draft', 'approved')
+    and "content_channel_variant"."needs_own_approval" in (0, 1)
+    and "content_channel_variant"."blocked" in (0, 1)
+    and length("content_channel_variant"."channel") > 0
+    and length("content_channel_variant"."body_markdown") > 0
+    and length("content_channel_variant"."fingerprint") > 0
+    and length("content_channel_variant"."created_at") between 20 and 40
+    and length("content_channel_variant"."updated_at") between 20 and 40)
+);
+
 CREATE TABLE "content_delivery_package" (
 	"id" text PRIMARY KEY NOT NULL,
 	"brand_id" text NOT NULL,
@@ -1382,6 +1406,9 @@ ALTER TABLE "content_brief" ADD CONSTRAINT "content_brief_brand_id_brand_id_fk" 
 ALTER TABLE "content_brief" ADD CONSTRAINT "content_brief_plan_fk" FOREIGN KEY ("plan_id") REFERENCES "public"."content_plan"("id") ON DELETE set null ON UPDATE no action;
 ALTER TABLE "content_brief_version" ADD CONSTRAINT "content_brief_version_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_brief_version" ADD CONSTRAINT "content_brief_version_brief_fk" FOREIGN KEY ("brief_id") REFERENCES "public"."content_brief"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_channel_variant" ADD CONSTRAINT "content_channel_variant_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_channel_variant" ADD CONSTRAINT "content_channel_variant_version_fk" FOREIGN KEY ("content_version_id") REFERENCES "public"."content_version"("id") ON DELETE restrict ON UPDATE no action;
+ALTER TABLE "content_channel_variant" ADD CONSTRAINT "content_channel_variant_approval_fk" FOREIGN KEY ("approval_id") REFERENCES "public"."content_approval"("id") ON DELETE restrict ON UPDATE no action;
 ALTER TABLE "content_delivery_package" ADD CONSTRAINT "content_delivery_package_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_delivery_package" ADD CONSTRAINT "content_delivery_package_version_fk" FOREIGN KEY ("content_version_id") REFERENCES "public"."content_version"("id") ON DELETE restrict ON UPDATE no action;
 ALTER TABLE "content_delivery_package" ADD CONSTRAINT "content_delivery_package_approval_fk" FOREIGN KEY ("approval_id") REFERENCES "public"."content_approval"("id") ON DELETE restrict ON UPDATE no action;
@@ -1490,6 +1517,9 @@ CREATE INDEX "content_brief_brand_idx" ON "content_brief" USING btree ("brand_id
 CREATE INDEX "content_brief_owner_idx" ON "content_brief" USING btree ("owner_id","updated_at","id");
 CREATE UNIQUE INDEX "content_brief_version_rev_uidx" ON "content_brief_version" USING btree ("brief_id","revision");
 CREATE INDEX "content_brief_version_brand_idx" ON "content_brief_version" USING btree ("brand_id","created_at","id");
+CREATE UNIQUE INDEX "content_channel_variant_channel_uidx" ON "content_channel_variant" USING btree ("content_version_id","channel");
+CREATE UNIQUE INDEX "content_channel_variant_approval_uidx" ON "content_channel_variant" USING btree ("approval_id");
+CREATE INDEX "content_channel_variant_owner_idx" ON "content_channel_variant" USING btree ("owner_id","brand_id","updated_at","id");
 CREATE INDEX "content_delivery_package_version_idx" ON "content_delivery_package" USING btree ("content_version_id","created_at","id");
 CREATE INDEX "content_delivery_package_brand_idx" ON "content_delivery_package" USING btree ("brand_id","created_at","id");
 CREATE UNIQUE INDEX "content_export_job_operation_uidx" ON "content_export_job" USING btree ("brand_id","operation_id");

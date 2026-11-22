@@ -219,6 +219,22 @@ const publicationActionRow = z.object({
   updatedAt: z.iso.datetime({ precision: 3 }),
 });
 
+const channelVariantRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  contentVersionId: brandIdSchema,
+  channel: z.string().min(1),
+  bodyMarkdown: z.string().min(1),
+  approvalStatus: z.enum(["draft", "approved"]),
+  approvalId: brandIdSchema.nullable(),
+  needsOwnApproval: flag,
+  blocked: flag,
+  fingerprint: z.string().min(1),
+  createdAt: z.iso.datetime({ precision: 3 }),
+  updatedAt: z.iso.datetime({ precision: 3 }),
+});
+
 export type PlanRow = z.infer<typeof planRow>;
 export type BriefRow = z.infer<typeof briefRow>;
 export type BriefVersionRow = z.infer<typeof briefVersionRow>;
@@ -232,6 +248,7 @@ export type ExportJobRow = z.infer<typeof exportJobRow>;
 export type PublicationRow = z.infer<typeof publicationRow>;
 export type PublicationCheckRow = z.infer<typeof publicationCheckRow>;
 export type PublicationActionRow = z.infer<typeof publicationActionRow>;
+export type ChannelVariantRow = z.infer<typeof channelVariantRow>;
 
 const planColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", question_cluster AS "questionCluster",
   coverage_json AS "coverageJson", created_at AS "createdAt", updated_at AS "updatedAt"`;
@@ -300,6 +317,12 @@ const publicationCheckColumns = `id, publication_id AS "publicationId", brand_id
 
 const publicationActionColumns = `id, publication_id AS "publicationId", brand_id AS "brandId", owner_id AS "ownerId",
   kind, status, reason, created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+const channelVariantColumns = `id, brand_id AS "brandId", owner_id AS "ownerId",
+  content_version_id AS "contentVersionId", channel, body_markdown AS "bodyMarkdown",
+  approval_status AS "approvalStatus", approval_id AS "approvalId",
+  needs_own_approval AS "needsOwnApproval", blocked, fingerprint,
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 export class ContentDao {
   private readonly db: QueryConnection;
@@ -877,6 +900,79 @@ export class ContentDao {
       [ownerId, publicationId],
     );
     return z.array(publicationActionRow).parse(rows);
+  }
+
+  async insertChannelVariant(row: ChannelVariantRow) {
+    await this.query(
+      `INSERT INTO content_channel_variant (
+        id, brand_id, owner_id, content_version_id, channel, body_markdown,
+        approval_status, approval_id, needs_own_approval, blocked, fingerprint, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id, row.brandId, row.ownerId, row.contentVersionId, row.channel, row.bodyMarkdown,
+        row.approvalStatus, row.approvalId, row.needsOwnApproval, row.blocked, row.fingerprint,
+        row.createdAt, row.updatedAt,
+      ],
+    );
+  }
+
+  async updateChannelVariantBody(row: Pick<ChannelVariantRow,
+    "id" | "ownerId" | "bodyMarkdown" | "approvalStatus" | "approvalId" | "needsOwnApproval" | "fingerprint" | "updatedAt">) {
+    await this.query(
+      `UPDATE content_channel_variant SET
+        body_markdown = ?, approval_status = ?, approval_id = ?, needs_own_approval = ?,
+        fingerprint = ?, updated_at = ?
+       WHERE owner_id = ? AND id = ?`,
+      [
+        row.bodyMarkdown, row.approvalStatus, row.approvalId, row.needsOwnApproval,
+        row.fingerprint, row.updatedAt, row.ownerId, row.id,
+      ],
+    );
+  }
+
+  async updateChannelVariantApproval(row: Pick<ChannelVariantRow,
+    "id" | "ownerId" | "approvalStatus" | "approvalId" | "needsOwnApproval" | "updatedAt">) {
+    await this.query(
+      `UPDATE content_channel_variant SET
+        approval_status = ?, approval_id = ?, needs_own_approval = ?, updated_at = ?
+       WHERE owner_id = ? AND id = ?`,
+      [row.approvalStatus, row.approvalId, row.needsOwnApproval, row.updatedAt, row.ownerId, row.id],
+    );
+  }
+
+  async blockChannelVariant(ownerId: string, id: string, updatedAt: string) {
+    await this.query(
+      `UPDATE content_channel_variant SET blocked = 1, updated_at = ?
+       WHERE owner_id = ? AND id = ? AND blocked = 0`,
+      [updatedAt, ownerId, id],
+    );
+  }
+
+  async getChannelVariant(ownerId: string, variantId: string) {
+    const [row] = await this.query(
+      `SELECT ${channelVariantColumns} FROM content_channel_variant WHERE owner_id = ? AND id = ?`,
+      [ownerId, variantId],
+    );
+    return row ? channelVariantRow.parse(row) : null;
+  }
+
+  async getChannelVariantForVersion(ownerId: string, versionId: string, channel: string) {
+    const [row] = await this.query(
+      `SELECT ${channelVariantColumns} FROM content_channel_variant
+       WHERE owner_id = ? AND content_version_id = ? AND channel = ?`,
+      [ownerId, versionId, channel],
+    );
+    return row ? channelVariantRow.parse(row) : null;
+  }
+
+  async listChannelVariants(ownerId: string, versionId: string) {
+    const rows = await this.query(
+      `SELECT ${channelVariantColumns} FROM content_channel_variant
+       WHERE owner_id = ? AND content_version_id = ?
+       ORDER BY channel ASC, id ASC`,
+      [ownerId, versionId],
+    );
+    return rows.map((row) => channelVariantRow.parse(row));
   }
 }
 

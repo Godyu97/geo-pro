@@ -253,6 +253,13 @@
       "when": 1795345961200,
       "tag": "0035_gorgeous_whirlwind",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1795346867994,
+      "tag": "0036_content_channel_variant",
+      "breakpoints": true
     }
   ]
 }

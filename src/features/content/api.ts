@@ -15,6 +15,8 @@ import {
   pauseBatch,
   readBatch,
   readBriefDetail,
+  readChannelVariant,
+  readChannelVariants,
   readContentVersion,
   readDeliveryPackage,
   readPublication,
@@ -27,6 +29,10 @@ import {
   submitManualEvidence,
   submitPublication,
   submitReview,
+  approveChannelVariant,
+  blockChannelVariant,
+  exportChannelVariant,
+  saveChannelVariant,
   updateVariant,
   verifyPublication,
   type ExportBlocker,
@@ -107,6 +113,24 @@ export async function contentVersionResponse(request: Request, versionId: string
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
   const result = await readContentVersion(getConnection(), session.user.id, versionId);
+  if ("error" in result) return errorResponse(result.error);
+  return Response.json(result, { headers });
+}
+
+export async function channelVariantsResponse(request: Request, versionId: string) {
+  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  const session = await requireSession().catch(() => null);
+  if (!session) return errorResponse("SESSION_REQUIRED");
+  const result = await readChannelVariants(getConnection(), session.user.id, versionId);
+  if ("error" in result) return errorResponse(result.error);
+  return Response.json(result, { headers });
+}
+
+export async function channelVariantResponse(request: Request, variantId: string) {
+  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  const session = await requireSession().catch(() => null);
+  if (!session) return errorResponse("SESSION_REQUIRED");
+  const result = await readChannelVariant(getConnection(), session.user.id, variantId);
   if ("error" in result) return errorResponse(result.error);
   return Response.json(result, { headers });
 }
@@ -210,6 +234,10 @@ export async function contentWriteResponse(request: Request) {
   if (input.action === "approve-content") return respond(await approveContent(db, session.user.id, input));
   if (input.action === "reject-content") return respond(await rejectContent(db, session.user.id, input));
   if (input.action === "update-variant") return respond(await updateVariant(db, session.user.id, input));
+  if (input.action === "save-channel-variant") return respond(await saveChannelVariant(db, session.user.id, input));
+  if (input.action === "approve-channel-variant") return respond(await approveChannelVariant(db, session.user.id, input));
+  if (input.action === "block-channel-variant") return respond(await blockChannelVariant(db, session.user.id, input));
+  if (input.action === "export-channel-variant") return respond(await exportChannelVariant(db, session.user.id, input));
   if (input.action === "register-asset") return respond(await registerAsset(db, session.user.id, input));
   if (input.action === "export-preflight") return respond(await exportPreflight(db, session.user.id, input));
   if (input.action === "export-confirm") return respond(await exportConfirm(db, session.user.id, input));

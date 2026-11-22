@@ -369,3 +369,43 @@ export const contentPublicationAction = pgTable("content_publication_action", {
     and ${table.status} in ('open', 'done', 'cancelled')
     and length(${table.reason}) > 0`),
 ]);
+
+// One channel body per master version. Approval is the variant's own row, never the master's approval id.
+// needs_own_approval stores variantNeedsOwnApproval; blocked does not rewrite other channels.
+export const contentChannelVariant = pgTable("content_channel_variant", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  contentVersionId: text("content_version_id").notNull(),
+  channel: text("channel").notNull(),
+  bodyMarkdown: text("body_markdown").notNull(),
+  approvalStatus: text("approval_status").notNull(),
+  approvalId: text("approval_id"),
+  needsOwnApproval: integer("needs_own_approval").notNull(),
+  blocked: integer("blocked").notNull().default(0),
+  fingerprint: text("fingerprint").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "content_channel_variant_version_fk",
+    columns: [table.contentVersionId],
+    foreignColumns: [contentVersion.id],
+  }).onDelete("restrict"),
+  foreignKey({
+    name: "content_channel_variant_approval_fk",
+    columns: [table.approvalId],
+    foreignColumns: [contentApproval.id],
+  }).onDelete("restrict"),
+  uniqueIndex("content_channel_variant_channel_uidx").on(table.contentVersionId, table.channel),
+  uniqueIndex("content_channel_variant_approval_uidx").on(table.approvalId),
+  index("content_channel_variant_owner_idx").on(table.ownerId, table.brandId, table.updatedAt, table.id),
+  check("content_channel_variant_state_check", sql`${table.approvalStatus} in ('draft', 'approved')
+    and ${table.needsOwnApproval} in (0, 1)
+    and ${table.blocked} in (0, 1)
+    and length(${table.channel}) > 0
+    and length(${table.bodyMarkdown}) > 0
+    and length(${table.fingerprint}) > 0
+    and length(${table.createdAt}) between 20 and 40
+    and length(${table.updatedAt}) between 20 and 40`),
+]);

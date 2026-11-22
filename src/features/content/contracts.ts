@@ -128,6 +128,8 @@ export const contentErrors = {
   EVIDENCE_TOO_LARGE: 413,
   SCREENSHOT_REQUIRED: 422,
   SERVICE_UNAVAILABLE: 503,
+  VARIANT_REAPPROVAL_REQUIRED: 422,
+  VARIANT_CHANNEL_BLOCKED: 422,
 } as const;
 export type ContentError = keyof typeof contentErrors;
 
@@ -250,6 +252,38 @@ export const exportConfirmSchema = z.strictObject({
 });
 export type ExportConfirmInput = z.infer<typeof exportConfirmSchema>;
 
+const channelVariantCommand = {
+  brandId: brandIdSchema,
+  operationId: brandIdSchema,
+  versionId: brandIdSchema,
+  channel: targetChannelSchema,
+};
+
+export const saveChannelVariantSchema = z.strictObject({
+  action: z.literal("save-channel-variant"),
+  ...channelVariantCommand,
+  bodyMarkdown: z.string().min(1).max(50_000),
+});
+export type SaveChannelVariantInput = z.infer<typeof saveChannelVariantSchema>;
+
+export const approveChannelVariantSchema = z.strictObject({
+  action: z.literal("approve-channel-variant"),
+  ...channelVariantCommand,
+});
+export type ApproveChannelVariantInput = z.infer<typeof approveChannelVariantSchema>;
+
+export const blockChannelVariantSchema = z.strictObject({
+  action: z.literal("block-channel-variant"),
+  ...channelVariantCommand,
+});
+export type BlockChannelVariantInput = z.infer<typeof blockChannelVariantSchema>;
+
+export const exportChannelVariantSchema = z.strictObject({
+  action: z.literal("export-channel-variant"),
+  ...channelVariantCommand,
+});
+export type ExportChannelVariantInput = z.infer<typeof exportChannelVariantSchema>;
+
 export const submitPublicationSchema = z.strictObject({
   action: z.literal("submit-publication"),
   brandId: brandIdSchema,
@@ -308,6 +342,10 @@ export const contentWriteSchema = z.discriminatedUnion("action", [
   registerAssetSchema,
   exportPreflightSchema,
   exportConfirmSchema,
+  saveChannelVariantSchema,
+  approveChannelVariantSchema,
+  blockChannelVariantSchema,
+  exportChannelVariantSchema,
   submitPublicationSchema,
   verifyPublicationSchema,
   submitManualEvidenceSchema,

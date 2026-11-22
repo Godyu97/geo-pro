@@ -7,9 +7,12 @@ import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import {
+  approveChannelVariant,
   approveContent,
+  blockChannelVariant,
   cancelBatch,
   confirmBrief,
+  exportChannelVariant,
   exportConfirm,
   exportPreflight,
   generateBatch,
@@ -19,6 +22,7 @@ import {
   resumeBatch,
   retryFailed,
   saveBriefDraft,
+  saveChannelVariant,
   submitManualEvidence,
   submitPublication,
   submitReview,
@@ -26,15 +30,19 @@ import {
   verifyPublication,
 } from "./commands";
 import {
+  approveChannelVariantSchema,
   approveContentSchema,
   batchControlSchema,
+  blockChannelVariantSchema,
   confirmBriefSchema,
+  exportChannelVariantSchema,
   exportConfirmSchema,
   exportPreflightSchema,
   generateBatchSchema,
   registerAssetSchema,
   rejectContentSchema,
   saveBriefDraftSchema,
+  saveChannelVariantSchema,
   submitManualEvidenceSchema,
   submitPublicationSchema,
   submitReviewSchema,
@@ -347,4 +355,67 @@ export async function submitManualEvidenceAction(formData: FormData): Promise<vo
   });
   if ("error" in result) redirect(evidencePath(result.error));
   revalidatePath(publicationPath(publicationId));
+}
+
+function variantPath(versionId: string) {
+  return `/dashboard/content/versions/${versionId}/variants`;
+}
+
+function channelCommand(formData: FormData) {
+  return {
+    brandId: String(formData.get("brandId") ?? ""),
+    versionId: String(formData.get("versionId") ?? ""),
+    channel: String(formData.get("channel") ?? ""),
+    operationId: randomUUID(),
+  };
+}
+
+export async function saveChannelVariantAction(formData: FormData) {
+  const session = await requireSession();
+  const base = channelCommand(formData);
+  const parsed = saveChannelVariantSchema.safeParse({
+    action: "save-channel-variant",
+    ...base,
+    bodyMarkdown: String(formData.get("bodyMarkdown") ?? ""),
+  });
+  if (!parsed.success) return { ok: false as const, error: "INVALID_INPUT" as const };
+  const result = await saveChannelVariant(getConnection(), session.user.id, parsed.data);
+  if ("error" in result) return { ok: false as const, error: result.error };
+  revalidatePath(variantPath(parsed.data.versionId));
+  revalidatePath(versionPath(parsed.data.versionId));
+  return { ok: true as const };
+}
+
+export async function approveChannelVariantAction(formData: FormData) {
+  const session = await requireSession();
+  const base = channelCommand(formData);
+  const parsed = approveChannelVariantSchema.safeParse({ action: "approve-channel-variant", ...base });
+  if (!parsed.success) return { ok: false as const, error: "INVALID_INPUT" as const };
+  const result = await approveChannelVariant(getConnection(), session.user.id, parsed.data);
+  if ("error" in result) return { ok: false as const, error: result.error };
+  revalidatePath(variantPath(parsed.data.versionId));
+  return { ok: true as const };
+}
+
+export async function blockChannelVariantAction(formData: FormData) {
+  const session = await requireSession();
+  const base = channelCommand(formData);
+  const parsed = blockChannelVariantSchema.safeParse({ action: "block-channel-variant", ...base });
+  if (!parsed.success) return { ok: false as const, error: "INVALID_INPUT" as const };
+  const result = await blockChannelVariant(getConnection(), session.user.id, parsed.data);
+  if ("error" in result) return { ok: false as const, error: result.error };
+  revalidatePath(variantPath(parsed.data.versionId));
+  return { ok: true as const };
+}
+
+export async function exportChannelVariantAction(formData: FormData) {
+  const session = await requireSession();
+  const base = channelCommand(formData);
+  const parsed = exportChannelVariantSchema.safeParse({ action: "export-channel-variant", ...base });
+  if (!parsed.success) return { ok: false as const, error: "INVALID_INPUT" as const };
+  const result = await exportChannelVariant(getConnection(), session.user.id, parsed.data);
+  if ("error" in result) return { ok: false as const, error: result.error };
+  revalidatePath(variantPath(parsed.data.versionId));
+  revalidatePath(versionPath(parsed.data.versionId));
+  return { ok: true as const };
 }

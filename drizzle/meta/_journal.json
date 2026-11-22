@@ -260,6 +260,13 @@
       "when": 1795345960184,
       "tag": "0036_condemned_may_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1795346866713,
+      "tag": "0037_content_channel_variant",
+      "breakpoints": true
     }
   ]
 }
