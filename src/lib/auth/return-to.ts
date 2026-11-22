@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const safeDashboardPaths = [
   "/dashboard", "/dashboard/maintenance", "/dashboard/maintenance/capabilities", "/dashboard/maintenance/support",
-  "/dashboard/settings", "/dashboard/settings/usage", "/dashboard/monitoring/new", "/dashboard/monitoring/plans", "/dashboard/monitoring/alerts", "/dashboard/brands", "/dashboard/brands/new",
+  "/dashboard/settings", "/dashboard/settings/usage", "/dashboard/monitoring/new", "/dashboard/monitoring/plans", "/dashboard/monitoring/alerts", "/dashboard/reports/observations", "/dashboard/brands", "/dashboard/brands/new",
 ];
 const brandPath = /^\/dashboard\/brands\/[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}(?:\/delete|\/recovery|\/facts|\/questions|\/entity-reviews|\/entity-corrections)?$/i;
 const monitoringRunPath = /^\/dashboard\/monitoring\/runs\/[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i;

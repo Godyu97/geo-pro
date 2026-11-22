@@ -267,6 +267,13 @@
       "when": 1795348273860,
       "tag": "0037_optimal_living_mummy",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1795349415958,
+      "tag": "0038_shallow_machine_man",
+      "breakpoints": true
     }
   ]
 }
