@@ -87,7 +87,10 @@ export default async function EvidenceOverviewPage({
       <div className="space-y-6">
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>
-        <Button asChild><Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link></Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild><Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link></Button>
+          <Button asChild variant="outline"><Link href="/dashboard/monitoring/plans" prefetch={false}>{t("openPlans")}</Link></Button>
+        </div>
       </div>
     );
   }
@@ -124,7 +127,12 @@ export default async function EvidenceOverviewPage({
           <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
         </div>
-        <Badge variant="outline">{overview.scope.brandName}</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href="/dashboard/monitoring/plans" prefetch={false}>{t("openPlans")}</Link>
+          </Button>
+          <Badge variant="outline">{overview.scope.brandName}</Badge>
+        </div>
       </div>
 
       <form className="flex flex-wrap gap-3 rounded-2xl border bg-secondary/40 p-4" method="get">

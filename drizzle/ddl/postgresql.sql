@@ -1199,6 +1199,44 @@ CREATE TABLE "source_original" (
     ))
 );
 
+CREATE TABLE "sampling_plan" (
+	"id" text NOT NULL,
+	"version" integer NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"phase" text NOT NULL,
+	"currency" text NOT NULL,
+	"budget_minor" integer NOT NULL,
+	"spent_minor" integer NOT NULL,
+	"pending_minor" integer NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "sampling_plan_id_version_pk" PRIMARY KEY("id","version"),
+	CONSTRAINT "sampling_plan_state_check" CHECK ("sampling_plan"."version" > 0
+    and "sampling_plan"."phase" in ('draft', 'active', 'paused', 'ended')
+    and length("sampling_plan"."currency") = 3
+    and "sampling_plan"."budget_minor" >= 0 and "sampling_plan"."spent_minor" >= 0 and "sampling_plan"."pending_minor" >= 0
+    and length("sampling_plan"."owner_id") between 1 and 128
+    and length("sampling_plan"."created_at") between 20 and 40)
+);
+
+CREATE TABLE "sampling_slot" (
+	"id" text PRIMARY KEY NOT NULL,
+	"plan_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"channel_id" text NOT NULL,
+	"at" text NOT NULL,
+	"status" text NOT NULL,
+	"manual" integer NOT NULL,
+	"cost_minor" integer NOT NULL,
+	CONSTRAINT "sampling_slot_state_check" CHECK ("sampling_slot"."status" in ('scheduled', 'completed', 'failed', 'paused')
+    and "sampling_slot"."manual" in (0, 1)
+    and "sampling_slot"."cost_minor" >= 0
+    and length("sampling_slot"."channel_id") between 1 and 64
+    and length("sampling_slot"."owner_id") between 1 and 128
+    and length("sampling_slot"."at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -1281,6 +1319,8 @@ ALTER TABLE "research_brief" ADD CONSTRAINT "research_brief_brand_id_brand_id_fk
 ALTER TABLE "source_inspection" ADD CONSTRAINT "source_inspection_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "source_inspection" ADD CONSTRAINT "source_inspection_citation_id_answer_citation_id_fk" FOREIGN KEY ("citation_id") REFERENCES "public"."answer_citation"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "source_original" ADD CONSTRAINT "source_original_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "sampling_plan" ADD CONSTRAINT "sampling_plan_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "sampling_slot" ADD CONSTRAINT "sampling_slot_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -1391,3 +1431,5 @@ CREATE INDEX "stored_object_brand_idx" ON "stored_object" USING btree ("brand_id
 CREATE UNIQUE INDEX "source_original_object_uidx" ON "source_original" USING btree ("stored_object_id") WHERE "source_original"."stored_object_id" is not null;
 CREATE INDEX "source_original_owner_idx" ON "source_original" USING btree ("owner_id","brand_id","created_at","id");
 CREATE INDEX "source_original_brand_idx" ON "source_original" USING btree ("brand_id","created_at","id");
+CREATE INDEX "sampling_plan_owner_idx" ON "sampling_plan" USING btree ("brand_id","owner_id","id");
+CREATE INDEX "sampling_slot_plan_at_idx" ON "sampling_slot" USING btree ("plan_id","at","id");

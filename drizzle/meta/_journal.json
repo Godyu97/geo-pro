@@ -232,6 +232,13 @@
       "when": 1795340133592,
       "tag": "0032_optimization_action_draft",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795342642771,
+      "tag": "0033_gifted_cloak",
+      "breakpoints": true
     }
   ]
 }
