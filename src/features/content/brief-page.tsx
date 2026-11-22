@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { confirmBriefAction, saveBriefAction } from "./actions";
 import { readBriefDetail } from "./commands";
+import { FactDraftButton } from "./fact-draft-button";
 
 export async function generateMetadata() {
   const t = await getTranslator("content");
@@ -116,6 +117,18 @@ export default async function ContentBriefPage({
             <Button type="submit" variant="outline">{t("confirmBrief")}</Button>
           </form>
         ) : null}
+        <div className="mt-4 space-y-2 border-t pt-4">
+          <p className="text-sm text-muted-foreground">{t("factDraftHint")}</p>
+          <FactDraftButton
+            brandId={brief.brandId}
+            briefId={brief.id}
+            label={t("generateFactDraft")}
+            pendingLabel={t("generatingFactDraft")}
+            readyLabel={t("factDraftReady")}
+            openLabel={t("openVersion")}
+            fallbackError={t("AI_FAILED")}
+          />
+        </div>
         {version ? (
           <p className="mt-4 text-xs text-muted-foreground">
             rev {version.revision} · {version.templateKind}

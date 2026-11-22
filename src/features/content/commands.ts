@@ -953,11 +953,35 @@ function parseIds(json: string): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function claimsRecord(claimsJson: string): Record<string, string> {
+  const parsed: unknown = JSON.parse(claimsJson);
+  if (Array.isArray(parsed)) {
+    const record: Record<string, string> = {};
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const text = "text" in item && typeof item.text === "string" ? item.text : "";
+      const factVersionId = "factVersionId" in item && typeof item.factVersionId === "string"
+        ? item.factVersionId
+        : "";
+      if (text.trim() && factVersionId) record[text] = factVersionId;
+    }
+    return record;
+  }
+  if (parsed && typeof parsed === "object") {
+    const record: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "string") record[key] = value;
+    }
+    return record;
+  }
+  return {};
+}
+
 function versionFingerprint(version: ContentVersionRow) {
   return computeApprovalFingerprint({
     title: version.title,
     bodyMarkdown: version.bodyMarkdown,
-    claims: JSON.parse(version.claimsJson) as Record<string, string>,
+    claims: claimsRecord(version.claimsJson),
     imageAssetIds: parseIds(version.imageAssetIdsJson),
     targetChannel: version.targetChannel,
     labelingProfileVersion: version.labelingProfileVersion,
@@ -1739,19 +1763,13 @@ export async function readExportJob(
 }
 
 function parseClaims(version: ContentVersionRow): string[] {
-  const parsed = JSON.parse(version.claimsJson) as unknown;
-  if (Array.isArray(parsed)) {
-    return parsed
-      .map((item) => (typeof item === "string" ? item : ""))
-      .filter((claim) => claim.trim().length > 0);
+  const parsed: unknown = JSON.parse(version.claimsJson);
+  if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
+    return parsed.map((item) => item.trim()).filter((claim) => claim.length > 0);
   }
-  if (parsed && typeof parsed === "object") {
-    // Template drafts store claims as { [claimText]: factVersionId }.
-    return Object.keys(parsed as Record<string, unknown>)
-      .map((claim) => claim.trim())
-      .filter((claim) => claim.length > 0);
-  }
-  return [];
+  return Object.keys(claimsRecord(version.claimsJson))
+    .map((claim) => claim.trim())
+    .filter((claim) => claim.length > 0);
 }
 
 const preservedOnFetchFailure = new Set([

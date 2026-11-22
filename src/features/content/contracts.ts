@@ -112,6 +112,10 @@ export const contentErrors = {
   OPERATION_CONFLICT: 409,
   APPROVAL_REQUIRED: 422,
   FACT_INVALID: 422,
+  UNGROUNDED_CLAIM: 422,
+  INVALID_MODEL_OUTPUT: 422,
+  AI_UNAVAILABLE: 503,
+  AI_FAILED: 502,
   LABELING_UNVERIFIED: 422,
   PREFLIGHT_REQUIRED: 422,
   SUBSET_INVALID: 422,
@@ -172,6 +176,14 @@ export const generateBatchSchema = z.strictObject({
   }).optional(),
 });
 export type GenerateBatchInput = z.infer<typeof generateBatchSchema>;
+
+export const draftFromFactsSchema = z.strictObject({
+  action: z.literal("draft-from-facts"),
+  brandId: brandIdSchema,
+  briefId: brandIdSchema,
+  operationId: brandIdSchema,
+});
+export type DraftFromFactsInput = z.infer<typeof draftFromFactsSchema>;
 
 export const batchControlSchema = z.strictObject({
   action: z.enum(["pause-batch", "resume-batch", "cancel-batch", "retry-failed"]),
@@ -287,6 +299,7 @@ export const contentWriteSchema = z.discriminatedUnion("action", [
   saveBriefDraftSchema,
   confirmBriefSchema,
   generateBatchSchema,
+  draftFromFactsSchema,
   batchControlSchema,
   submitReviewSchema,
   approveContentSchema,

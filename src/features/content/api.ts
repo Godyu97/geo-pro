@@ -31,6 +31,7 @@ import {
   verifyPublication,
   type ExportBlocker,
 } from "./commands";
+import { draftContentFromBrief } from "./fact-drafts";
 import { PACKAGE_FILE_NAMES } from "./package";
 import {
   contentErrors,
@@ -197,6 +198,11 @@ export async function contentWriteResponse(request: Request) {
   }
   if (input.action === "generate-batch") {
     const result = await generateBatch(db, session.user.id, input);
+    if ("error" in result) return errorResponse(result.error, undefined, result.gaps);
+    return Response.json(result, { headers });
+  }
+  if (input.action === "draft-from-facts") {
+    const result = await draftContentFromBrief(db, session.user.id, input);
     if ("error" in result) return errorResponse(result.error, undefined, result.gaps);
     return Response.json(result, { headers });
   }
