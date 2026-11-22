@@ -74,6 +74,9 @@ export default async function ContentListPage({
           <Link href={`/dashboard/content/sources?brandId=${brandId}`} prefetch={false} className="underline underline-offset-4">
             {t("sourcesLink")}
           </Link>
+          <Link href={`/dashboard/content/templates?brandId=${brandId}`} prefetch={false} className="underline underline-offset-4">
+            {t("templatesLink")}
+          </Link>
           <Link href={`/dashboard/content/calendar?brandId=${brandId}`} prefetch={false} className="underline underline-offset-4">
             {t("calendarLink")}
           </Link>

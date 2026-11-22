@@ -1670,6 +1670,41 @@ CREATE TABLE "brand_approval_duty" (
     and length("brand_approval_duty"."updated_at") between 20 and 40)
 );
 
+CREATE TABLE "content_template" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text,
+	"owner_id" text,
+	"is_system" integer NOT NULL,
+	"source_template_id" text,
+	"fact_gate" integer NOT NULL,
+	"public_license_gate" integer NOT NULL,
+	"review_gate" integer NOT NULL,
+	"status" text NOT NULL,
+	"asks_to_invent_case_study" integer NOT NULL,
+	"name" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "content_template_state_check" CHECK ("content_template"."is_system" in (0, 1)
+    and "content_template"."fact_gate" in (0, 1)
+    and "content_template"."public_license_gate" in (0, 1)
+    and "content_template"."review_gate" in (0, 1)
+    and "content_template"."asks_to_invent_case_study" in (0, 1)
+    and "content_template"."status" in ('draft', 'published', 'retired')
+    and length("content_template"."id") = 36
+    and length("content_template"."name") between 1 and 120
+    and length("content_template"."created_at") between 20 and 40
+    and length("content_template"."updated_at") between 20 and 40
+    and ("content_template"."brand_id" is null or length("content_template"."brand_id") = 36)
+    and ("content_template"."owner_id" is null or length("content_template"."owner_id") between 1 and 128)
+    and ("content_template"."source_template_id" is null or length("content_template"."source_template_id") = 36)
+    and (
+      ("content_template"."is_system" = 1 and "content_template"."brand_id" is null and "content_template"."owner_id" is null and "content_template"."source_template_id" is null)
+      or ("content_template"."is_system" = 0 and "content_template"."brand_id" is not null and "content_template"."owner_id" is not null
+        and "content_template"."source_template_id" is not null
+        and "content_template"."fact_gate" = 1 and "content_template"."public_license_gate" = 1 and "content_template"."review_gate" = 1)
+    ))
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -1794,6 +1829,8 @@ ALTER TABLE "approval_attempt" ADD CONSTRAINT "approval_attempt_brand_id_brand_i
 ALTER TABLE "approval_policy" ADD CONSTRAINT "approval_policy_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_approval_duty" ADD CONSTRAINT "brand_approval_duty_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_approval_duty" ADD CONSTRAINT "brand_approval_duty_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_template" ADD CONSTRAINT "content_template_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "content_template" ADD CONSTRAINT "content_template_source_fk" FOREIGN KEY ("source_template_id") REFERENCES "public"."content_template"("id") ON DELETE restrict ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -1947,3 +1984,5 @@ CREATE INDEX "approval_attempt_version_idx" ON "approval_attempt" USING btree ("
 CREATE UNIQUE INDEX "approval_policy_brand_uidx" ON "approval_policy" USING btree ("brand_id");
 CREATE UNIQUE INDEX "brand_approval_duty_pair_uidx" ON "brand_approval_duty" USING btree ("brand_id","user_id");
 CREATE INDEX "brand_approval_duty_user_idx" ON "brand_approval_duty" USING btree ("user_id","brand_id");
+CREATE INDEX "content_template_system_idx" ON "content_template" USING btree ("is_system","created_at","id");
+CREATE INDEX "content_template_owner_idx" ON "content_template" USING btree ("owner_id","brand_id","created_at","id");

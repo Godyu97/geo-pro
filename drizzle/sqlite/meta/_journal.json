@@ -316,6 +316,13 @@
       "when": 1795356223091,
       "tag": "0044_approval_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1795357759621,
+      "tag": "0045_content_template",
+      "breakpoints": true
     }
   ]
 }
