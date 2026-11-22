@@ -281,6 +281,13 @@
       "when": 1795350519687,
       "tag": "0039_military_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1795351917655,
+      "tag": "0040_cooing_shriek",
+      "breakpoints": true
     }
   ]
 }
