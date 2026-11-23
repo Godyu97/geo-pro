@@ -64,9 +64,18 @@ function IntakeNotice({ t, mode }: { t: Translate; mode: BrandIntakeMode }) {
   );
 }
 
+function LocalObservationsLink({ t }: { t: Translate }) {
+  return (
+    <Link href="/dashboard/brands/local-observations" prefetch={false} className="inline-block text-sm underline underline-offset-4">
+      {t("openLocalObservations")}
+    </Link>
+  );
+}
+
 function ClosedBrandIntake({ t, items }: { t: Translate; items: PilotAdmissionItem[] }) {
   return (
     <BrandFrame title={t("title")} back="/dashboard" backLabel={t("workspace")}>
+      <LocalObservationsLink t={t} />
       <section className="max-w-3xl space-y-2 rounded-xl border bg-card p-5">
         <h2 className="font-semibold">{t("closedTitle")}</h2>
         <p className="text-sm leading-6 text-muted-foreground">{t("closedDescription")}</p>
@@ -119,6 +128,7 @@ export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Q
   return (
     <BrandFrame title={t("title")} back="/dashboard" backLabel={t("workspace")}>
       <IntakeNotice t={t} mode={intake.mode} />
+      <LocalObservationsLink t={t} />
       {"unavailable" in result ? <BrandLoadFailure t={t} href="/dashboard/brands" /> : (
         <>
           <section aria-labelledby="brand-current" className="max-w-3xl rounded-xl border bg-card p-5 sm:p-6">

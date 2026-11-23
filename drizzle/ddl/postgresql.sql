@@ -2181,6 +2181,25 @@ CREATE TABLE "sync_authorization" (
     and length("sync_authorization"."updated_at") between 20 and 40)
 );
 
+CREATE TABLE "local_observation" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"target_city" text NOT NULL,
+	"sampled_city" text,
+	"ranked" integer NOT NULL,
+	"claimed_local_users" integer NOT NULL,
+	"recorded_at" text NOT NULL,
+	CONSTRAINT "local_observation_state_check" CHECK ("local_observation"."ranked" = 0
+    and "local_observation"."claimed_local_users" = 0
+    and length("local_observation"."target_city") between 1 and 80
+    and ("local_observation"."sampled_city" is null or length("local_observation"."sampled_city") between 1 and 80)
+    and length("local_observation"."id") = 36
+    and length("local_observation"."brand_id") = 36
+    and length("local_observation"."owner_id") between 1 and 128
+    and length("local_observation"."recorded_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -2350,6 +2369,8 @@ ALTER TABLE "sync_attempt" ADD CONSTRAINT "sync_attempt_owner_id_user_id_fk" FOR
 ALTER TABLE "sync_attempt" ADD CONSTRAINT "sync_attempt_authorization_fk" FOREIGN KEY ("authorization_id") REFERENCES "public"."sync_authorization"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sync_authorization" ADD CONSTRAINT "sync_authorization_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sync_authorization" ADD CONSTRAINT "sync_authorization_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "local_observation" ADD CONSTRAINT "local_observation_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "local_observation" ADD CONSTRAINT "local_observation_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -2538,3 +2559,4 @@ CREATE INDEX "connector_event_source_owner_idx" ON "connector_event_source" USIN
 CREATE INDEX "crawler_observation_owner_idx" ON "crawler_observation" USING btree ("owner_id","observed_at","id");
 CREATE INDEX "sync_attempt_owner_idx" ON "sync_attempt" USING btree ("owner_id","authorization_id","attempted_at","id");
 CREATE INDEX "sync_authorization_owner_idx" ON "sync_authorization" USING btree ("owner_id","created_at","id");
+CREATE INDEX "local_observation_owner_idx" ON "local_observation" USING btree ("owner_id","recorded_at","id");
