@@ -379,6 +379,13 @@
       "when": 1795409271136,
       "tag": "0053_service_order",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795410013954,
+      "tag": "0054_whitelabel_share",
+      "breakpoints": true
     }
   ]
 }

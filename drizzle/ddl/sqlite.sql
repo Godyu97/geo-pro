@@ -2347,3 +2347,43 @@ CREATE TABLE `service_order` (
 );
 
 CREATE INDEX `service_order_owner_idx` ON `service_order` (`owner_id`,`created_at`,`id`);
+CREATE TABLE `whitelabel_share` (
+	`id` text PRIMARY KEY NOT NULL,
+	`brand_id` text NOT NULL,
+	`owner_id` text NOT NULL,
+	`track` text NOT NULL,
+	`sample_size` integer NOT NULL,
+	`grade` text NOT NULL,
+	`expires_at` text NOT NULL,
+	`revoked` integer NOT NULL,
+	`created_at` text NOT NULL,
+	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`owner_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "whitelabel_share_state_check" CHECK("whitelabel_share"."revoked" in (0, 1)
+    and "whitelabel_share"."sample_size" between 0 and 2000000000
+    and length("whitelabel_share"."track") between 1 and 64
+    and "whitelabel_share"."track" not glob '*[^a-z0-9_]*'
+    and length("whitelabel_share"."grade") between 1 and 32
+    and "whitelabel_share"."grade" not glob '*[^a-z0-9_]*'
+    and length("whitelabel_share"."id") = 36
+    and length("whitelabel_share"."brand_id") = 36
+    and length("whitelabel_share"."owner_id") between 1 and 128
+    and length("whitelabel_share"."expires_at") between 20 and 40
+    and length("whitelabel_share"."created_at") between 20 and 40)
+);
+
+CREATE INDEX `whitelabel_share_owner_idx` ON `whitelabel_share` (`owner_id`,`created_at`,`id`);
+CREATE TABLE `whitelabel_share_access` (
+	`id` text PRIMARY KEY NOT NULL,
+	`share_id` text NOT NULL,
+	`visitor_id` text NOT NULL,
+	`accessed_at` text NOT NULL,
+	FOREIGN KEY (`share_id`) REFERENCES `whitelabel_share`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`visitor_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "whitelabel_share_access_state_check" CHECK(length("whitelabel_share_access"."id") = 36
+    and length("whitelabel_share_access"."share_id") = 36
+    and length("whitelabel_share_access"."visitor_id") between 1 and 128
+    and length("whitelabel_share_access"."accessed_at") between 20 and 40)
+);
+
+CREATE INDEX `whitelabel_share_access_share_idx` ON `whitelabel_share_access` (`share_id`,`accessed_at`,`id`);

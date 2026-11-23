@@ -2018,6 +2018,38 @@ CREATE TABLE "service_order" (
     and length("service_order"."created_at") between 20 and 40)
 );
 
+CREATE TABLE "whitelabel_share" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"track" text NOT NULL,
+	"sample_size" integer NOT NULL,
+	"grade" text NOT NULL,
+	"expires_at" text NOT NULL,
+	"revoked" integer NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "whitelabel_share_state_check" CHECK ("whitelabel_share"."revoked" in (0, 1)
+    and "whitelabel_share"."sample_size" between 0 and 2000000000
+    and "whitelabel_share"."track" ~ '^[a-z0-9_]{1,64}$'
+    and "whitelabel_share"."grade" ~ '^[a-z0-9_]{1,32}$'
+    and length("whitelabel_share"."id") = 36
+    and length("whitelabel_share"."brand_id") = 36
+    and length("whitelabel_share"."owner_id") between 1 and 128
+    and length("whitelabel_share"."expires_at") between 20 and 40
+    and length("whitelabel_share"."created_at") between 20 and 40)
+);
+
+CREATE TABLE "whitelabel_share_access" (
+	"id" text PRIMARY KEY NOT NULL,
+	"share_id" text NOT NULL,
+	"visitor_id" text NOT NULL,
+	"accessed_at" text NOT NULL,
+	CONSTRAINT "whitelabel_share_access_state_check" CHECK (length("whitelabel_share_access"."id") = 36
+    and length("whitelabel_share_access"."share_id") = 36
+    and length("whitelabel_share_access"."visitor_id") between 1 and 128
+    and length("whitelabel_share_access"."accessed_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -2166,6 +2198,10 @@ ALTER TABLE "brand_delegation" ADD CONSTRAINT "brand_delegation_brand_id_brand_i
 ALTER TABLE "delegation_action" ADD CONSTRAINT "delegation_action_delegation_id_brand_delegation_id_fk" FOREIGN KEY ("delegation_id") REFERENCES "public"."brand_delegation"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "service_order" ADD CONSTRAINT "service_order_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "service_order" ADD CONSTRAINT "service_order_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "whitelabel_share" ADD CONSTRAINT "whitelabel_share_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "whitelabel_share" ADD CONSTRAINT "whitelabel_share_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "whitelabel_share_access" ADD CONSTRAINT "whitelabel_share_access_share_id_whitelabel_share_id_fk" FOREIGN KEY ("share_id") REFERENCES "public"."whitelabel_share"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "whitelabel_share_access" ADD CONSTRAINT "whitelabel_share_access_visitor_id_user_id_fk" FOREIGN KEY ("visitor_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -2341,3 +2377,5 @@ CREATE UNIQUE INDEX "brand_delegation_pair_uidx" ON "brand_delegation" USING btr
 CREATE INDEX "brand_delegation_org_idx" ON "brand_delegation" USING btree ("organization_id","brand_id");
 CREATE INDEX "delegation_action_delegation_idx" ON "delegation_action" USING btree ("delegation_id","status");
 CREATE INDEX "service_order_owner_idx" ON "service_order" USING btree ("owner_id","created_at","id");
+CREATE INDEX "whitelabel_share_owner_idx" ON "whitelabel_share" USING btree ("owner_id","created_at","id");
+CREATE INDEX "whitelabel_share_access_share_idx" ON "whitelabel_share_access" USING btree ("share_id","accessed_at","id");

@@ -112,6 +112,10 @@ export default async function AccountSettingsPage() {
             <h2 id="service-orders-heading" className="font-medium">{t("serviceOrders")}</h2>
             <Link href="/dashboard/commercial/orders" prefetch={false} className="text-sm underline underline-offset-4">{t("openServiceOrders")}</Link>
           </section>
+          <section id="whitelabel-shares" aria-labelledby="whitelabel-shares-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
+            <h2 id="whitelabel-shares-heading" className="font-medium">{t("whitelabelShares")}</h2>
+            <Link href="/dashboard/reports/shares" prefetch={false} className="text-sm underline underline-offset-4">{t("openWhitelabelShares")}</Link>
+          </section>
           <section id="data-management" aria-labelledby="data-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
             <h2 id="data-heading" className="font-medium">{t("dataManagement")}</h2>
             <DataExportPanel userId={user.id} locale={locale} />
