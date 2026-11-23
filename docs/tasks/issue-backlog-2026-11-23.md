@@ -22,3 +22,26 @@
 建议从 #106 开始。#106–#114 是 P1，各自使用已有纯函数，彼此不共用新表。#115–#117 是 P2，也各自建表。#117 只在范围允许时调用 Responses API，单测使用回环 mock。
 
 本批没有重开 #21、#31、#32。这三张仍是真人试点项。
+
+## 同日第二批
+
+#106–#117 已关闭。下面这 12 张是当前 `status:ready` 队列。采样协议、采样条件、探索观察、演示观察、保留政策、容量上限、混杂因素、对照页、渠道画像、策略模板、负责人转移和成员邀请都还没有各自的表。每周行动草案、团队授权和正式检查点已有实现，本批只补这些缺口，不重复建单。
+
+| 顺序 | Issue | 里程碑 | 模块 | 依赖 | 对应任务 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | [#118](https://github.com/Godyu97/geo-pro/issues/118) | M0 | 采样协议 | 无 | [T-M0-05](M0.md#t-m0-05)、[S-M0-05](../specs/M0.md#s-m0-05) |
+| 2 | [#119](https://github.com/Godyu97/geo-pro/issues/119) | M0 | 采样条件 | 无 | [T-M0-06](M0.md#t-m0-06)、[S-M0-06](../specs/M0.md#s-m0-06) |
+| 3 | [#120](https://github.com/Godyu97/geo-pro/issues/120) | M0 | 探索观察 | 无 | [T-M0-04](M0.md#t-m0-04)、[S-M0-04](../specs/M0.md#s-m0-04) |
+| 4 | [#121](https://github.com/Godyu97/geo-pro/issues/121) | M0 | 演示观察 | 无 | [T-M0-04](M0.md#t-m0-04)、[S-M0-04](../specs/M0.md#s-m0-04) |
+| 5 | [#122](https://github.com/Godyu97/geo-pro/issues/122) | M0 | 保留策略 | 无 | [T-M0-01](M0.md#t-m0-01) |
+| 6 | [#123](https://github.com/Godyu97/geo-pro/issues/123) | M0 | 对象容量 | 无 | [T-M1-04](M1.md#t-m1-04) |
+| 7 | [#124](https://github.com/Godyu97/geo-pro/issues/124) | M1 | 混杂因素 | 无 | [T-M1-06](M1.md#t-m1-06)、[S-M1-06](../specs/M1.md#s-m1-06) |
+| 8 | [#125](https://github.com/Godyu97/geo-pro/issues/125) | M1 | 对照预注册 | 无 | [T-M1-06](M1.md#t-m1-06)、[S-M1-06](../specs/M1.md#s-m1-06) |
+| 9 | [#126](https://github.com/Godyu97/geo-pro/issues/126) | M1 | 渠道画像 | 无 | [T-M1-05](M1.md#t-m1-05)、[S-M1-05](../specs/M1.md#s-m1-05) |
+| 10 | [#127](https://github.com/Godyu97/geo-pro/issues/127) | M2 | 策略模板 | 无 | [T-M2-05](M2.md#t-m2-05)、[S-M2-05](../specs/M2.md#s-m2-05)、AC-M2-05-3 |
+| 11 | [#128](https://github.com/Godyu97/geo-pro/issues/128) | M1 | 负责人转移 | 无 | [T-M1-08](M1.md#t-m1-08)、[S-M1-08](../specs/M1.md#s-m1-08) |
+| 12 | [#129](https://github.com/Godyu97/geo-pro/issues/129) | M1 | 成员邀请 | 无 | [T-M1-08](M1.md#t-m1-08)、[S-M1-08](../specs/M1.md#s-m1-08) |
+
+建议从 #118 开始。十二张单各自建表，不共用新表。#127 只在起草说明时调用 Responses API，单测使用回环 mock。#129 不发信。
+
+这一批也没有重开 #21、#31、#32。
