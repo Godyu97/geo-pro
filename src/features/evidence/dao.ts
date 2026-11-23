@@ -6,7 +6,7 @@ import { brandIdSchema } from "../brands/contracts.ts";
 import { networkModes } from "../capabilities/contracts.ts";
 import {
   analysisDraftStatuses, analysisStatuses, captureMethods, citationOrigins, citationSetStates, evidenceStates,
-  ownershipStates, pageStatuses, sourceModes, triStateSchema,
+  networkTriggers, ownershipStates, pageStatuses, sourceModes, triStateSchema,
 } from "./contracts.ts";
 
 const observationRow = z.object({
@@ -28,6 +28,7 @@ const observationRow = z.object({
   observedRegion: z.union([z.literal("unknown"), z.string().length(2)]),
   newSession: triStateSchema,
   productMode: triStateSchema,
+  networkTrigger: z.enum(networkTriggers),
   entityVersion: z.int().positive(),
   citationSetState: z.enum(citationSetStates),
   evidenceState: z.enum(evidenceStates),
@@ -92,7 +93,7 @@ const observationColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", sl
   entity_version AS "entityVersion", citation_set_state AS "citationSetState", evidence_state AS "evidenceState",
   locator_ref AS "locatorRef", collector_id AS "collectorId", missing_reason AS "missingReason", created_at AS "createdAt",
   target_region AS "targetRegion", observed_region AS "observedRegion", new_session AS "newSession",
-  product_mode AS "productMode"`;
+  product_mode AS "productMode", network_trigger AS "networkTrigger"`;
 
 const citationColumns = `id, observation_id AS "observationId", brand_id AS "brandId", raw_url AS "rawUrl",
   normalized_url AS "normalizedUrl", citation_origin AS "citationOrigin", position_label AS "positionLabel",
@@ -128,6 +129,37 @@ const overviewContextSchema = z.object({
   taskStamp: sqlCount,
 });
 
+const nullableMinor = z.preprocess(
+  (value) => value == null ? null : value,
+  z.int().nonnegative().nullable(),
+);
+
+const adoptedAttemptRow = z.object({
+  attemptId: brandIdSchema,
+  slotId: brandIdSchema,
+  rawText: z.string(),
+  transport: z.enum(["isolated", "official_api"]),
+  receipt: z.string().nullable(),
+  costState: z.enum(["none", "pending", "known", "unknown"]),
+  actualMinor: nullableMinor,
+  currency: z.string().length(3).nullable(),
+  synthetic: z.coerce.number().int().min(0).max(1),
+  questionId: brandIdSchema,
+  runId: brandIdSchema,
+  track: z.enum(["model_api", "consumer_ui"]),
+  region: z.string(),
+  language: z.string(),
+  requestedNetworkMode: z.enum(networkModes),
+  promptSetId: brandIdSchema,
+  entityVersion: z.coerce.number().int().positive(),
+});
+
+const attemptCostRow = z.object({
+  costState: z.enum(["none", "pending", "known", "unknown"]),
+  actualMinor: nullableMinor,
+  currency: z.string().length(3).nullable(),
+});
+
 const adoptedPromptSchema = z.object({
   slotId: brandIdSchema,
   questionId: brandIdSchema,
@@ -152,7 +184,7 @@ const scopedColumns = `o.id, o.brand_id AS "brandId", o.owner_id AS "ownerId", o
   o.entity_version AS "entityVersion", o.citation_set_state AS "citationSetState", o.evidence_state AS "evidenceState",
   o.locator_ref AS "locatorRef", o.collector_id AS "collectorId", o.missing_reason AS "missingReason", o.created_at AS "createdAt",
   o.target_region AS "targetRegion", o.observed_region AS "observedRegion", o.new_session AS "newSession",
-  o.product_mode AS "productMode"`;
+  o.product_mode AS "productMode", o.network_trigger AS "networkTrigger"`;
 
 function chunkIds(ids: string[]) {
   const unique = [...new Set(ids)];
@@ -190,6 +222,7 @@ export function scopedObservationQuery(input: ScopedObservationInput) {
   return {
     sql: `SELECT ${scopedColumns}
          , s.question_id AS "questionId"
+         , s.natural_question AS "naturalQuestion"
          , a.mentioned AS "mentioned"
          , a.recommended AS "recommended"
          , a.official_site_cited AS "officialSiteCited"
@@ -262,7 +295,8 @@ export class EvidenceDao {
   async adoptedAttempt(ownerId: string, brandId: string, slotId: string) {
     const [row] = await this.query(
       `SELECT a.id AS "attemptId", a.slot_id AS "slotId", a.raw_text AS "rawText", a.transport,
-              s.question_id AS "questionId", r.id AS "runId", r.track, r.region, r.language,
+              a.receipt, a.cost_state AS "costState", a.actual_minor AS "actualMinor", a.currency,
+              a.synthetic, s.question_id AS "questionId", r.id AS "runId", r.track, r.region, r.language,
               r.requested_network_mode AS "requestedNetworkMode", r.prompt_set_id AS "promptSetId",
               b.entity_version AS "entityVersion"
        FROM monitoring_attempt a
@@ -273,20 +307,18 @@ export class EvidenceDao {
       [brandId, slotId, ownerId],
     );
     if (!row) return null;
-    return z.object({
-      attemptId: brandIdSchema,
-      slotId: brandIdSchema,
-      rawText: z.string(),
-      transport: z.enum(["isolated", "official_api"]),
-      questionId: brandIdSchema,
-      runId: brandIdSchema,
-      track: z.enum(["model_api", "consumer_ui"]),
-      region: z.string(),
-      language: z.string(),
-      requestedNetworkMode: z.enum(networkModes),
-      promptSetId: brandIdSchema,
-      entityVersion: z.coerce.number().int().positive(),
-    }).parse(row);
+    return adoptedAttemptRow.parse(row);
+  }
+
+  async attemptCost(ownerId: string, attemptId: string) {
+    const [row] = await this.query(
+      `SELECT a.cost_state AS "costState", a.actual_minor AS "actualMinor", a.currency
+       FROM monitoring_attempt a
+       JOIN monitoring_run r ON r.id = a.run_id AND r.owner_id = ?
+       WHERE a.id = ?`,
+      [ownerId, attemptId],
+    );
+    return row ? attemptCostRow.parse(row) : null;
   }
 
   async insertObservation(row: ObservationRow) {
@@ -295,14 +327,14 @@ export class EvidenceDao {
         id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method, question_text, answer_text,
         fingerprint, captured_at, region, language, requested_network_mode, entity_version, citation_set_state,
         evidence_state, locator_ref, collector_id, missing_reason, created_at,
-        target_region, observed_region, new_session, product_mode
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        target_region, observed_region, new_session, product_mode, network_trigger
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.id, row.brandId, row.ownerId, row.slotId, row.attemptId, row.sourceMode, row.captureMethod,
         row.questionText, row.answerText, row.fingerprint, row.capturedAt, row.region, row.language,
         row.requestedNetworkMode, row.entityVersion, row.citationSetState, row.evidenceState,
         row.locatorRef, row.collectorId, row.missingReason, row.createdAt,
-        row.targetRegion, row.observedRegion, row.newSession, row.productMode,
+        row.targetRegion, row.observedRegion, row.newSession, row.productMode, row.networkTrigger,
       ],
     );
   }
@@ -500,6 +532,7 @@ export class EvidenceDao {
     return rows.map((row) => ({
       observation: observationRow.parse(row),
       questionId: row.questionId == null ? null : brandIdSchema.parse(row.questionId),
+      naturalQuestion: row.naturalQuestion == null ? null : z.coerce.number().int().min(0).max(1).parse(row.naturalQuestion),
       mentioned: row.mentioned == null ? null : triStateSchema.parse(row.mentioned),
       recommended: row.recommended == null ? null : triStateSchema.parse(row.recommended),
       officialSiteCited: row.officialSiteCited == null ? null : triStateSchema.parse(row.officialSiteCited),

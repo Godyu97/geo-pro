@@ -617,6 +617,7 @@ CREATE TABLE "answer_observation" (
 	"observed_region" text DEFAULT 'unknown' NOT NULL,
 	"new_session" text DEFAULT 'unknown' NOT NULL,
 	"product_mode" text DEFAULT 'unknown' NOT NULL,
+	"network_trigger" text DEFAULT 'unknown' NOT NULL,
 	CONSTRAINT "answer_observation_state_check" CHECK ("answer_observation"."source_mode" in ('model_api', 'consumer_ui')
     and "answer_observation"."capture_method" in ('official_api', 'manual', 'assisted', 'isolated')
     and "answer_observation"."citation_set_state" in ('complete', 'partial', 'unsupported', 'missing')
@@ -628,6 +629,7 @@ CREATE TABLE "answer_observation" (
     and ("answer_observation"."observed_region" = 'unknown' or length("answer_observation"."observed_region") = 2)
     and "answer_observation"."new_session" in ('true', 'false', 'unknown')
     and "answer_observation"."product_mode" in ('true', 'false', 'unknown')
+    and "answer_observation"."network_trigger" in ('triggered', 'not_triggered', 'unknown')
     and (
       ("answer_observation"."evidence_state" = 'draft_evidence')
       or ("answer_observation"."evidence_state" in ('complete', 'incomplete', 'contested') and length("answer_observation"."answer_text") > 0)

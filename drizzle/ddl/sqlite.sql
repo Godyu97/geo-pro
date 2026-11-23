@@ -704,6 +704,7 @@ CREATE TABLE `answer_observation` (
 	`observed_region` text DEFAULT 'unknown' NOT NULL,
 	`new_session` text DEFAULT 'unknown' NOT NULL,
 	`product_mode` text DEFAULT 'unknown' NOT NULL,
+	`network_trigger` text DEFAULT 'unknown' NOT NULL,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`slot_id`) REFERENCES `monitoring_slot`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`attempt_id`) REFERENCES `monitoring_attempt`(`id`) ON UPDATE no action ON DELETE set null,
@@ -718,6 +719,7 @@ CREATE TABLE `answer_observation` (
     and ("answer_observation"."observed_region" = 'unknown' or length("answer_observation"."observed_region") = 2)
     and "answer_observation"."new_session" in ('true', 'false', 'unknown')
     and "answer_observation"."product_mode" in ('true', 'false', 'unknown')
+    and "answer_observation"."network_trigger" in ('triggered', 'not_triggered', 'unknown')
     and (
       ("answer_observation"."evidence_state" = 'draft_evidence')
       or ("answer_observation"."evidence_state" in ('complete', 'incomplete', 'contested') and length("answer_observation"."answer_text") > 0)

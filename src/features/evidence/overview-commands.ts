@@ -5,6 +5,7 @@ import type { CacheStore } from "../../lib/cache/store.ts";
 import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { listPrioritizedTasks } from "../optimization/commands.ts";
+import { functionalMockMarker } from "../functional-mock/mode.ts";
 import { PromptDao } from "../prompts/dao.ts";
 import { questionType } from "../prompts/contracts.ts";
 import type { EvidenceError } from "./contracts.ts";
@@ -85,6 +86,8 @@ export async function readEvidenceOverview(
   const samples: OverviewSample[] = [];
 
   for (const row of rows) {
+    if (row.observation.answerText.includes(functionalMockMarker)) continue;
+    if (row.naturalQuestion === 0) continue;
     let type: QuestionType = "unknown";
     if (row.questionId && row.observation.slotId) {
       const cachedType = typeByQuestionId.get(row.questionId);
@@ -100,6 +103,7 @@ export async function readEvidenceOverview(
       }
     }
 
+    if (type === "exploration") continue;
     if (type === "unknown") type = "discovery";
 
     samples.push({

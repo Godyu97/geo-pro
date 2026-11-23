@@ -34,4 +34,4 @@
 
 三笔尝试的写入时间都是 `2026-11-23T14:24:23.720Z`，模型 `deepseek-flash`，处置 `adopted`，费用状态 `known`，原文留在开发库。本轮实际费用合计 3。额度账上 6 笔采样尝试均为已知费用，实际合计 6，没有待核对行；6 笔预留均已结算。
 
-本次不勾选 T-M0-04/05 或阶段门禁。正式 10 题 × 2 轮仍由 [#31](https://github.com/Godyu97/geo-pro/issues/31) 跟踪，入证由 [#133](https://github.com/Godyu97/geo-pro/issues/133) 跟踪。
+本次不勾选 T-M0-04/05 或阶段门禁。正式 10 题 × 2 轮仍由 [#31](https://github.com/Godyu97/geo-pro/issues/31) 跟踪。这 3 条回执的入证见 [#133](https://github.com/Godyu97/geo-pro/issues/133) 与 [官方入证](M0-133-official-evidence.md)。

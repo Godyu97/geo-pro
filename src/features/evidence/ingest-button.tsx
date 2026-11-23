@@ -41,8 +41,6 @@ export function IngestEvidenceButton({
                 brandName,
                 officialWebsite: officialWebsite || null,
                 aliases: [],
-                citationSetState: "complete",
-                citations: [],
               }),
             });
             const body = await response.json().catch(() => null);

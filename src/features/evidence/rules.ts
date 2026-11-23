@@ -1,6 +1,49 @@
 import { createHash } from "node:crypto";
-import type { TriState } from "./contracts.ts";
-import { nativeCited } from "./contracts.ts";
+import { parseOfficialReceipt } from "../../lib/ai/official-sampling.ts";
+import { citationSetStates, nativeCited, networkTriggers, type TriState } from "./contracts.ts";
+
+type CitationSetState = (typeof citationSetStates)[number];
+type NetworkTrigger = (typeof networkTriggers)[number];
+
+export type AdoptedCitationInput = {
+  rawUrl: string;
+  citationOrigin: "provider_native";
+  positionLabel: string;
+  ownership: "unknown";
+  pageStatus: "unknown";
+};
+
+/** Vendor receipt is the only citation and trigger source for an official attempt. */
+export function officialAttemptCapture(receiptText: string | null): {
+  citationSetState: CitationSetState;
+  networkTrigger: NetworkTrigger;
+  citations: AdoptedCitationInput[];
+} {
+  const receipt = parseOfficialReceipt(receiptText);
+  if (!receipt) return { citationSetState: "missing", networkTrigger: "unknown", citations: [] };
+  const citations: AdoptedCitationInput[] = [];
+  for (const item of receipt.citations) {
+    let url: URL;
+    try {
+      url = new URL(item.url);
+    } catch {
+      continue;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+    citations.push({
+      rawUrl: url.toString(),
+      citationOrigin: "provider_native",
+      positionLabel: String(item.position),
+      ownership: "unknown",
+      pageStatus: "unknown",
+    });
+  }
+  return {
+    citationSetState: receipt.citationSetState,
+    networkTrigger: receipt.networkTrigger,
+    citations,
+  };
+}
 
 export const analysisRuleVersion = "s-m0-06-v1";
 

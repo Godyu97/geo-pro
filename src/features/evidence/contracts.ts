@@ -62,6 +62,7 @@ export const pageStatuses = ["unknown", "reachable", "restricted", "not_applicab
 export const analysisStatuses = ["pending", "classified", "needs_review", "revised"] as const;
 export const analysisDraftStatuses = ["draft", "applied", "dismissed"] as const;
 export const sourceModes = ["model_api", "consumer_ui"] as const;
+export const networkTriggers = ["triggered", "not_triggered", "unknown"] as const;
 export const captureMethods = ["official_api", "manual", "assisted", "isolated"] as const;
 
 export const evidenceErrors = {

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
+import { formatMinorUnits } from "../monitoring/format";
 import { Button } from "@/components/ui/button";
 import { listActionDrafts } from "../optimization/action-drafts";
 import { generateOptimizationAction } from "../optimization/actions";
@@ -29,9 +30,24 @@ export default async function EvidenceDetailPage({
   const detail = await readObservation(getConnection(), session.user.id, observationId);
   if (!detail) notFound();
 
-  const { observation, citations, analyses, latestAnalysis, citationPool, drafts } = detail;
+  const { observation, citations, analyses, latestAnalysis, citationPool, drafts, capture } = detail;
   const actionDrafts = await listActionDrafts(getConnection(), session.user.id, observation.brandId, observation.id);
   const label = (value: "true" | "false" | "unknown") => t(value);
+  const requestedNetwork = observation.requestedNetworkMode === "on"
+    ? "requestedNetworkOn"
+    : observation.requestedNetworkMode === "off"
+      ? "requestedNetworkOff"
+      : "requestedNetworkUnknown";
+  const networkTrigger = observation.networkTrigger === "triggered"
+    ? "networkTriggerTriggered"
+    : observation.networkTrigger === "not_triggered"
+      ? "networkTriggerNotTriggered"
+      : "networkTriggerUnknown";
+  const costText = capture.costState === "known" && capture.actualMinor !== null && capture.currency
+    ? t("costKnown", { amount: formatMinorUnits(locale, capture.actualMinor, capture.currency) })
+    : capture.costState === "none"
+      ? t("costNone")
+      : t("costPending");
 
   return (
     <div className="space-y-6">
@@ -67,6 +83,18 @@ export default async function EvidenceDetailPage({
           <div>
             <dt className="text-muted-foreground">{t("productMode")}</dt>
             <dd>{label(observation.productMode)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">{t("requestedNetwork")}</dt>
+            <dd>{t(requestedNetwork)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">{t("networkTrigger")}</dt>
+            <dd>{t(networkTrigger)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">{t("captureCost")}</dt>
+            <dd>{costText}</dd>
           </div>
         </dl>
       </section>

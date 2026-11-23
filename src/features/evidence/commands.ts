@@ -21,6 +21,7 @@ import {
   classifyLabels,
   fingerprintAnswer,
   normalizeUrl,
+  officialAttemptCapture,
 } from "./rules.ts";
 
 type Failure = { error: EvidenceError; next?: string | null };
@@ -41,6 +42,27 @@ export async function releaseOverview<T>(ownerId: string, brandId: string, resul
 
 function operationFingerprint(input: unknown) {
   return createHash("sha256").update(JSON.stringify(input), "utf8").digest("hex");
+}
+
+function isUniqueViolation(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return /unique|duplicate key/i.test(message);
+}
+
+async function replayAdoptedSlot(
+  db: DatabaseConnection,
+  ownerId: string,
+  brandId: string,
+  slotId: string,
+) {
+  const dao = new EvidenceDao(db);
+  const prior = await dao.observationBySlot(ownerId, brandId, slotId);
+  if (!prior || prior.evidenceState === "draft_evidence") return null;
+  const [citations, analyses] = await Promise.all([
+    dao.citationsFor(prior.id),
+    dao.analysesFor(prior.id),
+  ]);
+  return { ...detailPayload(prior, citations, analyses), replayed: true as const };
 }
 
 async function owned(dao: EvidenceDao, ownerId: string, brandId: string) {
@@ -106,7 +128,9 @@ export async function ingestAdoptedObservation(
   clock: Clock = () => new Date().toISOString(),
   cache?: CacheStore,
 ) {
-  const result = await db.transaction(async (tx) => {
+  let result: Awaited<ReturnType<typeof replayAdoptedSlot>> | Failure | (ReturnType<typeof detailPayload> & { replayed: boolean });
+  try {
+    result = await db.transaction(async (tx) => {
     const dao = new EvidenceDao(tx);
     const existing = await dao.operation(ownerId, input.operationId);
     if (existing) return JSON.parse(existing) as ReturnType<typeof detailPayload> & { replayed: true };
@@ -118,13 +142,27 @@ export async function ingestAdoptedObservation(
     if (!adopted?.rawText) return denied("NOT_FOUND");
 
     const prior = await dao.observationBySlot(ownerId, input.brandId, input.slotId);
-    if (prior && prior.evidenceState !== "draft_evidence") return denied("OPERATION_CONFLICT");
+    if (prior && prior.evidenceState !== "draft_evidence") {
+      const [priorCitations, priorAnalyses] = await Promise.all([
+        dao.citationsFor(prior.id),
+        dao.analysesFor(prior.id),
+      ]);
+      return { ...detailPayload(prior, priorCitations, priorAnalyses), replayed: true as const };
+    }
 
     const prompt = await new PromptDao(tx, input.brandId).version(adopted.promptSetId);
     const questionText = prompt?.content.questions.find((item) => item.id === adopted.questionId)?.text
       ?? adopted.questionId;
 
-    const conditions = resolveSamplingConditions({
+    const official = adopted.transport === "official_api";
+    const captured = official ? officialAttemptCapture(adopted.receipt) : null;
+    const conditions = resolveSamplingConditions(official ? {
+      region: adopted.region,
+      targetRegion: adopted.region,
+      observedRegion: "unknown",
+      newSession: "unknown",
+      productMode: "unknown",
+    } : {
       region: adopted.region,
       targetRegion: input.targetRegion,
       observedRegion: input.observedRegion,
@@ -135,9 +173,10 @@ export async function ingestAdoptedObservation(
 
     const now = clock();
     const observationId = randomUUID();
-    const citations = buildCitations(observationId, input.brandId, now, input.citations ?? []);
-    const citationSetState = input.citationSetState
+    const citationSetState = captured?.citationSetState
+      ?? input.citationSetState
       ?? (input.citations ? "complete" : "missing");
+    const citations = buildCitations(observationId, input.brandId, now, captured?.citations ?? input.citations ?? []);
     const labels = classifyLabels({
       answerText: adopted.rawText,
       brandName: input.brandName,
@@ -166,6 +205,7 @@ export async function ingestAdoptedObservation(
       observedRegion: conditions.observedRegion,
       newSession: conditions.newSession,
       productMode: conditions.productMode,
+      networkTrigger: captured?.networkTrigger ?? "unknown",
       language: adopted.language,
       requestedNetworkMode: adopted.requestedNetworkMode,
       entityVersion: adopted.entityVersion,
@@ -201,7 +241,12 @@ export async function ingestAdoptedObservation(
     const payload = { ...detailPayload(observation, citations, [analysis]), replayed: false as const };
     await dao.recordOperation(ownerId, input.operationId, operationFingerprint(input), payload, now, input.brandId);
     return payload;
-  });
+    });
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    result = await replayAdoptedSlot(db, ownerId, input.brandId, input.slotId);
+    if (!result) throw error;
+  }
   return releaseOverview(ownerId, input.brandId, result, cache);
 }
 
@@ -282,6 +327,7 @@ export async function submitManualEvidence(
       observedRegion: conditions.observedRegion,
       newSession: conditions.newSession,
       productMode: conditions.productMode,
+      networkTrigger: "unknown",
       language: input.language,
       requestedNetworkMode: input.requestedNetworkMode,
       entityVersion: input.entityVersion,
@@ -408,12 +454,22 @@ export async function readObservation(
   const dao = new EvidenceDao(db);
   const observation = await dao.observationForOwner(ownerId, observationId);
   if (!observation) return null;
-  const [citations, analyses, drafts] = await Promise.all([
+  const [citations, analyses, drafts, cost] = await Promise.all([
     dao.citationsFor(observation.id),
     dao.analysesFor(observation.id),
     dao.openAnalysisDrafts(ownerId, observation.id),
+    observation.attemptId ? dao.attemptCost(ownerId, observation.attemptId) : Promise.resolve(null),
   ]);
-  return { ...detailPayload(observation, citations, analyses), drafts };
+  const known = cost?.costState === "known" && cost.actualMinor !== null && cost.currency;
+  return {
+    ...detailPayload(observation, citations, analyses),
+    drafts,
+    capture: {
+      costState: cost?.costState ?? "none",
+      actualMinor: known ? cost.actualMinor : null,
+      currency: known ? cost.currency : null,
+    },
+  };
 }
 
 export async function readObservationBySlot(
