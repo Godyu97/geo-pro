@@ -351,6 +351,13 @@
       "when": 1795405293119,
       "tag": "0049_external_connection",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1795406280678,
+      "tag": "0050_notification_endpoint",
+      "breakpoints": true
     }
   ]
 }

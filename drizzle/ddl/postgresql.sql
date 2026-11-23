@@ -1911,6 +1911,45 @@ CREATE TABLE "external_connection" (
     and length("external_connection"."updated_at") between 20 and 40)
 );
 
+CREATE TABLE "notification_delivery" (
+	"id" text PRIMARY KEY NOT NULL,
+	"endpoint_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"sent" integer NOT NULL,
+	"body_has_customer_text" integer NOT NULL,
+	"body_hash" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "notification_delivery_state_check" CHECK ("notification_delivery"."sent" in (0, 1)
+    and "notification_delivery"."body_has_customer_text" in (0, 1)
+    and ("notification_delivery"."body_has_customer_text" = 0 or "notification_delivery"."sent" = 0)
+    and length("notification_delivery"."id") = 36
+    and length("notification_delivery"."endpoint_id") = 36
+    and length("notification_delivery"."brand_id") = 36
+    and length("notification_delivery"."owner_id") between 1 and 128
+    and length("notification_delivery"."body_hash") = 64
+    and "notification_delivery"."body_hash" = lower("notification_delivery"."body_hash")
+    and "notification_delivery"."body_hash" ~ '^[0-9a-f]{64}$'
+    and length("notification_delivery"."created_at") between 20 and 40)
+);
+
+CREATE TABLE "notification_endpoint" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"label" text NOT NULL,
+	"status" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "notification_endpoint_state_check" CHECK ("notification_endpoint"."status" in ('verified', 'revoked')
+    and length("notification_endpoint"."id") = 36
+    and length("notification_endpoint"."brand_id") = 36
+    and length("notification_endpoint"."owner_id") between 1 and 128
+    and length("notification_endpoint"."label") between 1 and 80
+    and length("notification_endpoint"."created_at") between 20 and 40
+    and length("notification_endpoint"."updated_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -2051,6 +2090,9 @@ ALTER TABLE "capture_sheet" ADD CONSTRAINT "capture_sheet_brand_id_brand_id_fk" 
 ALTER TABLE "external_action" ADD CONSTRAINT "external_action_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "external_action" ADD CONSTRAINT "external_action_connection_fk" FOREIGN KEY ("connection_id") REFERENCES "public"."external_connection"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "external_connection" ADD CONSTRAINT "external_connection_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "notification_delivery" ADD CONSTRAINT "notification_delivery_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "notification_delivery" ADD CONSTRAINT "notification_delivery_endpoint_fk" FOREIGN KEY ("endpoint_id") REFERENCES "public"."notification_endpoint"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "notification_endpoint" ADD CONSTRAINT "notification_endpoint_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -2218,3 +2260,5 @@ CREATE INDEX "capture_sheet_owner_idx" ON "capture_sheet" USING btree ("owner_id
 CREATE UNIQUE INDEX "external_action_key_uidx" ON "external_action" USING btree ("connection_id","idempotency_key");
 CREATE INDEX "external_action_connection_idx" ON "external_action" USING btree ("owner_id","connection_id","created_at","id");
 CREATE INDEX "external_connection_owner_idx" ON "external_connection" USING btree ("owner_id","brand_id","created_at","id");
+CREATE INDEX "notification_delivery_endpoint_idx" ON "notification_delivery" USING btree ("owner_id","endpoint_id","created_at","id");
+CREATE INDEX "notification_endpoint_owner_idx" ON "notification_endpoint" USING btree ("owner_id","brand_id","created_at","id");
