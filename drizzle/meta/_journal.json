@@ -351,6 +351,13 @@
       "when": 1795361282698,
       "tag": "0049_capture_sheet",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795405292084,
+      "tag": "0050_external_connection",
+      "breakpoints": true
     }
   ]
 }

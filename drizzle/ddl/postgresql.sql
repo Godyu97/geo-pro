@@ -1851,6 +1851,66 @@ CREATE TABLE "capture_sheet" (
     and length("capture_sheet"."updated_at") between 20 and 40)
 );
 
+CREATE TABLE "external_action" (
+	"id" text PRIMARY KEY NOT NULL,
+	"connection_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"idempotency_key" text NOT NULL,
+	"confirmed" integer NOT NULL,
+	"status" text NOT NULL,
+	"receipt_kind" text,
+	"effective_at" text,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "external_action_state_check" CHECK ("external_action"."confirmed" in (0, 1)
+    and "external_action"."status" in ('confirmed', 'acknowledged', 'unknown', 'failed', 'reconciled')
+    and ("external_action"."receipt_kind" is null or "external_action"."receipt_kind" in ('draft_created', 'public_url'))
+    and length("external_action"."id") = 36
+    and length("external_action"."connection_id") = 36
+    and length("external_action"."brand_id") = 36
+    and length("external_action"."owner_id") between 1 and 128
+    and length("external_action"."idempotency_key") between 8 and 80
+    and length("external_action"."created_at") between 20 and 40
+    and length("external_action"."updated_at") between 20 and 40
+    and (
+      ("external_action"."status" = 'failed' and "external_action"."receipt_kind" is null and "external_action"."effective_at" is null)
+      or ("external_action"."status" in ('confirmed', 'unknown') and "external_action"."confirmed" = 1 and "external_action"."receipt_kind" is null and "external_action"."effective_at" is null)
+      or (
+        "external_action"."status" in ('acknowledged', 'reconciled')
+        and "external_action"."confirmed" = 1
+        and (
+          ("external_action"."receipt_kind" is null and "external_action"."effective_at" is null)
+          or ("external_action"."receipt_kind" = 'draft_created' and "external_action"."effective_at" is null)
+          or ("external_action"."receipt_kind" = 'public_url' and "external_action"."effective_at" is not null and length("external_action"."effective_at") between 20 and 40)
+        )
+      )
+    ))
+);
+
+CREATE TABLE "external_connection" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"label" text NOT NULL,
+	"can_read" integer NOT NULL,
+	"can_draft" integer NOT NULL,
+	"can_publish" integer NOT NULL,
+	"status" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "external_connection_state_check" CHECK ("external_connection"."status" in ('pending', 'verified', 'revoked')
+    and "external_connection"."can_read" in (0, 1)
+    and "external_connection"."can_draft" in (0, 1)
+    and "external_connection"."can_publish" in (0, 1)
+    and length("external_connection"."id") = 36
+    and length("external_connection"."brand_id") = 36
+    and length("external_connection"."owner_id") between 1 and 128
+    and length("external_connection"."label") between 1 and 80
+    and length("external_connection"."created_at") between 20 and 40
+    and length("external_connection"."updated_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -1988,6 +2048,9 @@ ALTER TABLE "intervention_batch_page" ADD CONSTRAINT "intervention_batch_page_ba
 ALTER TABLE "capture_attempt" ADD CONSTRAINT "capture_attempt_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "capture_attempt" ADD CONSTRAINT "capture_attempt_sheet_fk" FOREIGN KEY ("sheet_id") REFERENCES "public"."capture_sheet"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "capture_sheet" ADD CONSTRAINT "capture_sheet_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "external_action" ADD CONSTRAINT "external_action_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "external_action" ADD CONSTRAINT "external_action_connection_fk" FOREIGN KEY ("connection_id") REFERENCES "public"."external_connection"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "external_connection" ADD CONSTRAINT "external_connection_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -2152,3 +2215,6 @@ CREATE INDEX "intervention_batch_owner_idx" ON "intervention_batch" USING btree 
 CREATE UNIQUE INDEX "intervention_batch_page_key_uidx" ON "intervention_batch_page" USING btree ("batch_id","page_key");
 CREATE INDEX "capture_attempt_sheet_idx" ON "capture_attempt" USING btree ("owner_id","sheet_id","created_at","id");
 CREATE INDEX "capture_sheet_owner_idx" ON "capture_sheet" USING btree ("owner_id","brand_id","created_at","id");
+CREATE UNIQUE INDEX "external_action_key_uidx" ON "external_action" USING btree ("connection_id","idempotency_key");
+CREATE INDEX "external_action_connection_idx" ON "external_action" USING btree ("owner_id","connection_id","created_at","id");
+CREATE INDEX "external_connection_owner_idx" ON "external_connection" USING btree ("owner_id","brand_id","created_at","id");
