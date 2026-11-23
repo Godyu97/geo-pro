@@ -9,13 +9,13 @@ import { CapabilityRetryButton } from "../capabilities/retry-button";
 import { RegistrationForm } from "./registration-form";
 import { readRegistration } from "./service";
 
-export async function MonitoringRegistration() {
+export async function MonitoringRegistration({ brandId }: { brandId?: string }) {
   const session = await requireSession();
   const locale = await getLocale();
   const t = await getTranslator("monitoring");
   const messages = getMessages(locale).monitoring;
   const intake = brandIntakeOrigin(await headers());
-  const result = await readRegistration(session.user.id);
+  const result = await readRegistration(session.user.id, brandId);
   if ("traceId" in result && !("brand" in result)) {
     return (
       <section aria-labelledby="monitoring-registration" className="space-y-3 rounded-xl border p-5">
@@ -32,7 +32,7 @@ export async function MonitoringRegistration() {
         <h2 id="monitoring-registration" className="font-medium">{t("title")}</h2>
         <p className="mt-2 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
       </div>
-      {intake?.mode === "mock" && result.brand && (
+      {intake?.mode === "mock" && result.brand?.status === "active" && (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">{t("mockQuotaNote")}</p>
           <ApplyMockQuotaButton
@@ -44,21 +44,24 @@ export async function MonitoringRegistration() {
           />
         </div>
       )}
-      {!result.brand && (
+      {"missing" in result && result.missing && <p className="text-sm">{t("NOT_FOUND")}</p>}
+      {result.brand && result.brand.status !== "active" && <p className="text-sm">{t("archivedBrand")}</p>}
+      {!result.brand && !("missing" in result && result.missing) && (
         <p className="text-sm">
           {t("noBrand")} <Link className="underline underline-offset-4" href="/dashboard/brands/new" prefetch={false}>{t("openBrand")}</Link>
         </p>
       )}
-      {result.brand && result.sets.length === 0 && (
+      {result.brand?.status === "active" && result.sets.length === 0 && (
         <p className="text-sm">
           {t("noPromptSet")} <Link className="underline underline-offset-4" href={`/dashboard/brands/${result.brand.id}/questions`} prefetch={false}>{t("openQuestions")}</Link>
         </p>
       )}
-      {result.brand && result.sets.length > 0 && (
+      {result.brand && result.brand.status === "active" && result.sets.length > 0 && (
         <RegistrationForm
           locale={locale}
           messages={messages}
           brandId={result.brand.id}
+          brandName={result.brand.name}
           sets={result.sets}
           channels={result.channels}
           grant={result.grant}

@@ -38,6 +38,7 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
     );
   }
   const questions = [...new Map(result.slots.map((slot) => [slot.questionId, slot])).values()];
+  const channels = [...new Map(result.slots.map((slot) => [slot.channelId, slot.channelVersion])).entries()];
   const payable = result.currency ? formatMinorUnits(locale, result.customerPayableMinor, result.currency) : formatNumber(locale, result.customerPayableMinor);
   const counts = {
     succeeded: result.slots.filter((slot) => slot.status === "succeeded").length,
@@ -54,7 +55,8 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
   }
   const connection = getConnection();
   const mockRun = brandIntakeOrigin(await headers())?.mode === "mock";
-  const brand = await new BrandDao(connection).active(session.user.id);
+  const ownedBrand = await new BrandDao(connection).version(session.user.id, result.brandId);
+  const brand = ownedBrand ? { id: ownedBrand.id, name: ownedBrand.fields.name, website: ownedBrand.fields.website } : null;
   const evidenceDao = new EvidenceDao(connection);
   const evidenceBySlot = new Map<string, string>();
   for (const slot of result.slots) {
@@ -79,11 +81,24 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
       <dl className="grid gap-3 text-sm sm:grid-cols-2">
         <div><dt className="text-muted-foreground">{t(statusLabel[result.status])}</dt><dd>{t(result.samplingComplete === 1 ? "samplingComplete" : "samplingIncomplete")}</dd></div>
         <div><dt className="text-muted-foreground">{t("track")}</dt><dd>{t(result.track)}</dd></div>
-        <div><dt className="text-muted-foreground">{t("promptSet")}</dt><dd>{t("promptVersion", { version: result.promptSetVersion })}</dd></div>
+        <div><dt className="text-muted-foreground">{t("promptSet")}</dt><dd className="wrap-anywhere">{t("frozenPrompt", { id: result.promptSetId, version: formatNumber(locale, result.promptSetVersion) })}</dd></div>
         <div><dt className="text-muted-foreground">{t("scopeLabel")}</dt><dd>{t("scope", { region: result.region, language: result.language })}</dd></div>
+        <div><dt className="text-muted-foreground">{t("network")}</dt><dd>{t(result.requestedNetworkMode === "on" ? "networkOn" : result.requestedNetworkMode === "off" ? "networkOff" : "networkUnknown")}</dd></div>
+        <div>
+          <dt className="text-muted-foreground">{t("frozenBrandLabel")}</dt>
+          <dd className="wrap-anywhere">
+            <Link className="underline underline-offset-4" href={`/dashboard/brands/${result.brandId}`} prefetch={false}>{result.brandId}</Link>
+          </dd>
+        </div>
         <div><dt className="text-muted-foreground">{t("customerPayableLabel")}</dt><dd>{payable}</dd></div>
         <div><dt className="text-muted-foreground">{t("created")}</dt><dd>{formatDateTime(locale, new Date(result.createdAt))}</dd></div>
       </dl>
+      <ul className="space-y-1 text-sm">
+        {channels.map(([channelId, version]) => (
+          <li key={channelId} className="wrap-anywhere">{t("frozenChannel", { id: channelId, version: formatNumber(locale, version) })}</li>
+        ))}
+      </ul>
+      {brand && !brand.website && <p className="text-sm">{t("websiteCitationNa")}</p>}
       <p className="text-sm">{t("planned", { count: formatNumber(locale, result.slotCount) })}</p>
       <p className="text-sm">{t("progressCounts", {
         succeeded: formatNumber(locale, counts.succeeded), failed: formatNumber(locale, counts.failed),
@@ -181,7 +196,7 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
                             brandId={result.brandId}
                             slotId={slot.id}
                             brandName={brand.name}
-                            officialWebsite={null}
+                            officialWebsite={brand.website || null}
                             messages={getMessages(locale).evidence}
                           />
                         )

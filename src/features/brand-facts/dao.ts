@@ -64,6 +64,13 @@ export class FactDao {
     return row ? version(row) : null;
   }
 
+  async latestVersions() {
+    const rows = await this.read(versionColumns, "brand_fact_version",
+      `AND f.version = (SELECT MAX(v.version) FROM brand_fact_version v
+        WHERE v.brand_id = f.brand_id AND v.fact_id = f.fact_id)`);
+    return rows.map(version);
+  }
+
   async priorApproval(item: FactVersion) {
     const [row] = await this.read(versionColumns, "brand_fact_version",
       "AND f.fact_id = ? AND f.version < ? AND f.state = 'approved' ORDER BY f.version DESC LIMIT 1",

@@ -19,6 +19,7 @@ import { BrandDeletionButtons } from "./deletion-buttons";
 import { brandErrorMessage } from "./error-messages";
 import { mockBrandFields } from "@/features/functional-mock/brand-profile";
 import { brandIntakeDecision, type BrandIntakeMode } from "./intake";
+import { BrandMonitoringReadiness } from "@/features/monitoring/brand-readiness";
 import { readPilotAdmission, type PilotAdmissionItem } from "./pilot-admission";
 import { readBrandData } from "./service";
 
@@ -332,7 +333,11 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
           </CardContent>
         </Card>
         <div className="space-y-4 rounded-xl border bg-card p-5">
-          <p className="text-sm leading-6 text-muted-foreground">{t("monitorUnavailable")}</p>
+          <BrandMonitoringReadiness
+            ownerId={user.id}
+            brand={{ id, status: brand.status, version: brand.version, website }}
+            historical={snapshot}
+          />
           <div className="flex flex-wrap gap-2">
             {!snapshot && brand.status === "active" && <Button asChild><Link href={href + "?edit=1"} prefetch={false}>{t("edit")}</Link></Button>}
             {snapshot && <Button asChild><Link href={href} prefetch={false}>{t("currentVersion")}</Link></Button>}

@@ -31,11 +31,12 @@ const nextMessage = {
 } as const;
 
 export function RegistrationForm({
-  locale, messages, brandId, sets, channels, grant, recent, emailVerified,
+  locale, messages, brandId, brandName, sets, channels, grant, recent, emailVerified,
 }: {
   locale: Locale;
   messages: Copy;
   brandId: string;
+  brandName: string;
   sets: SetOption[];
   channels: ChannelOption[];
   grant: GrantOption;
@@ -183,6 +184,24 @@ export function RegistrationForm({
       )}
       {snapshot && (
         <div className="space-y-1 rounded-lg border p-3 text-sm">
+          <p className="wrap-anywhere">{t("previewBrand", { name: brandName })}</p>
+          <p>{t("previewScope", {
+            version: formatNumber(locale, snapshot.promptSetVersion),
+            region: snapshot.region,
+            language: snapshot.language,
+          })}</p>
+          <ul className="space-y-1">
+            {snapshot.channels.map((channel) => (
+              <li key={channel.channelId} className="wrap-anywhere">{t("previewChannel", {
+                name: channels.find((item) => item.channelId === channel.channelId)?.displayName ?? channel.channelId,
+                version: formatNumber(locale, channel.version),
+              })}</li>
+            ))}
+          </ul>
+          <p>{t("previewMode", {
+            mode: t(snapshot.requestedNetworkMode === "on" ? "networkOn" : snapshot.requestedNetworkMode === "off" ? "networkOff" : "networkUnknown"),
+            repeats: formatNumber(locale, snapshot.repeats),
+          })}</p>
           <p>{t("previewSummary", {
             questions: formatNumber(locale, snapshot.questionCount),
             natural: formatNumber(locale, snapshot.naturalCount),
@@ -190,6 +209,7 @@ export function RegistrationForm({
             repeats: formatNumber(locale, snapshot.repeats),
             slots: formatNumber(locale, snapshot.questionCount * snapshot.channels.length * snapshot.repeats),
           })}</p>
+          <p className="text-muted-foreground">{t("recheckNote")}</p>
           <p>{t("customerPayable", { amount: payable })}</p>
           {snapshot.ceiling ? (
             <>

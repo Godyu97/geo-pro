@@ -10,8 +10,10 @@ export async function generateMetadata() {
   return { title: t("runTitle"), robots: { index: false, follow: false } };
 }
 
-export default async function RunConfirmPage() {
+export default async function RunConfirmPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireSession();
+  const query = await searchParams;
+  const requested = Array.isArray(query.brandId) ? query.brandId[0] : query.brandId;
   const locale = await getLocale();
   const t = await getTranslator("capabilities");
   const result = await readUserCapabilities();
@@ -30,7 +32,7 @@ export default async function RunConfirmPage() {
       ) : (
         <RunConfirmForm locale={locale} messages={getMessages(locale).capabilities} channels={result.items} />
       )}
-      <MonitoringRegistration />
+      <MonitoringRegistration brandId={requested} />
     </div>
   );
 }
