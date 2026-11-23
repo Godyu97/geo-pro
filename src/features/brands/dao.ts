@@ -56,6 +56,25 @@ const deletionImpactSchema = z.object({
   unresolvedAttempts: z.coerce.number().int().nonnegative(),
 });
 const brandColumns = 'b.id, b.status, b.revision, b.entity_version AS "entityVersion", b.created_at AS "createdAt"';
+const retentionPolicySchema = z.object({
+  version: z.number().int().positive(),
+  summaryZh: z.string(),
+  summaryEn: z.string(),
+  recoverableDays: z.number().int().positive(),
+  publishedAt: z.iso.datetime(),
+});
+const retentionViewSchema = z.object({
+  acceptedVersion: z.number().int().positive().nullable(),
+  acceptedAt: z.iso.datetime().nullable(),
+  acceptedSummaryZh: z.string().nullable(),
+  acceptedSummaryEn: z.string().nullable(),
+  acceptedRecoverableDays: z.number().int().positive().nullable(),
+  currentVersion: z.number().int().positive().nullable(),
+  currentSummaryZh: z.string().nullable(),
+  currentSummaryEn: z.string().nullable(),
+  currentRecoverableDays: z.number().int().positive().nullable(),
+  currentPublishedAt: z.iso.datetime().nullable(),
+});
 
 export const brandPageSize = 20;
 export type BrandRecord = z.infer<typeof brandRowSchema>;
@@ -237,7 +256,62 @@ export class BrandDao {
     await this.query(`INSERT INTO brand_operation (owner_id, operation_id, fingerprint, result, created_at, scope)
       VALUES (?, ?, ?, ?, ?, ?)`, [ownerId, id, fingerprint, JSON.stringify(result), time, scope]);
   }
+
+  async lockRetentionPolicies(mode: "share" | "exclusive") {
+    const statement = mode === "share"
+      ? "LOCK TABLE retention_policy IN SHARE MODE"
+      : "LOCK TABLE retention_policy IN EXCLUSIVE MODE";
+    await this.query(statement, []);
+  }
+
+  async requireCurrentRetention(accepted: number | undefined): Promise<{ error: "RETENTION_UNPUBLISHED" | "RETENTION_NOT_ACCEPTED" } | { version: number }> {
+    if (this.connection.kind === "postgresql") await this.lockRetentionPolicies("share");
+    const policy = await this.currentRetentionPolicy();
+    if (!policy) return { error: "RETENTION_UNPUBLISHED" };
+    if (accepted !== policy.version) return { error: "RETENTION_NOT_ACCEPTED" };
+    return { version: policy.version };
+  }
+
+  async currentRetentionPolicy() {
+    const [row] = await this.query(`SELECT version, summary_zh AS "summaryZh", summary_en AS "summaryEn",
+      recoverable_days AS "recoverableDays", published_at AS "publishedAt"
+      FROM retention_policy ORDER BY version DESC LIMIT 1`, []);
+    return row ? retentionPolicySchema.parse(row) : null;
+  }
+
+  async insertRetentionPolicy(input: { summaryZh: string; summaryEn: string; recoverableDays: number; publishedAt: string }) {
+    const [row] = await this.query(`INSERT INTO retention_policy
+      (version, summary_zh, summary_en, recoverable_days, published_at)
+      SELECT coalesce(max(version), 0) + 1, ?, ?, ?, ? FROM retention_policy
+      RETURNING version, summary_zh AS "summaryZh", summary_en AS "summaryEn",
+        recoverable_days AS "recoverableDays", published_at AS "publishedAt"`,
+    [input.summaryZh, input.summaryEn, input.recoverableDays, input.publishedAt]);
+    return retentionPolicySchema.parse(row);
+  }
+
+  async insertRetentionAcceptance(brandId: string, policyVersion: number, acceptedAt: string) {
+    await this.query(`INSERT INTO brand_retention_acceptance (brand_id, policy_version, accepted_at) VALUES (?, ?, ?)`,
+      [brandId, policyVersion, acceptedAt]);
+  }
+
+  // One owner-scoped read. A newer published row is returned beside the accepted row and is not written back.
+  async retentionView(ownerId: string, brandId: string) {
+    const [row] = await this.query(`SELECT a.policy_version AS "acceptedVersion", a.accepted_at AS "acceptedAt",
+      accepted.summary_zh AS "acceptedSummaryZh", accepted.summary_en AS "acceptedSummaryEn",
+      accepted.recoverable_days AS "acceptedRecoverableDays",
+      current.version AS "currentVersion", current.summary_zh AS "currentSummaryZh",
+      current.summary_en AS "currentSummaryEn", current.recoverable_days AS "currentRecoverableDays",
+      current.published_at AS "currentPublishedAt"
+      FROM brand b
+      LEFT JOIN brand_retention_acceptance a ON a.brand_id = b.id
+      LEFT JOIN retention_policy accepted ON accepted.version = a.policy_version
+      LEFT JOIN retention_policy current ON current.version = (SELECT max(version) FROM retention_policy)
+      WHERE b.owner_id = ? AND b.id = ? AND b.frozen_at IS NULL`, [ownerId, brandId]);
+    return row ? retentionViewSchema.parse(row) : null;
+  }
 }
 
 export type BrandDraft = NonNullable<Awaited<ReturnType<BrandDao["draft"]>>>;
 export type BrandVersion = NonNullable<Awaited<ReturnType<BrandDao["version"]>>>;
+export type RetentionPolicyRecord = NonNullable<Awaited<ReturnType<BrandDao["currentRetentionPolicy"]>>>;
+export type RetentionView = NonNullable<Awaited<ReturnType<BrandDao["retentionView"]>>>;

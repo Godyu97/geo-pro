@@ -7,6 +7,7 @@ import { chromium, expect } from "@playwright/test";
 import { initialBrandFields } from "../src/features/brands/contracts.ts";
 import { queryWithParameters } from "../src/lib/db/connection.ts";
 import { testDatabase } from "../tests/maintenance/helpers.mjs";
+import { ensureRetentionPolicy } from "../tests/brands/retention-setup.mjs";
 
 const baseURL = "http://localhost:3119";
 
@@ -21,11 +22,12 @@ async function signUp(browser, locale) {
   return { context, id: (await response.json()).user.id };
 }
 
-async function brandFor({ context, id }) {
+async function brandFor({ context, id }, db) {
   const response = await context.request.post("/api/brands", {
     headers: { Origin: baseURL },
     data: {
       action: "submit", target: null, expectedDraft: null, actorId: id, operationId: randomUUID(),
+      acceptedPolicyVersion: await ensureRetentionPolicy(db),
       fields: { ...initialBrandFields, name: "Synthetic prompt brand", description: "Synthetic questions used for local acceptance" },
     },
   });
@@ -54,7 +56,7 @@ async function acceptance(browser, db) {
   const other = await signUp(browser, "en");
   const anonymous = await browser.newContext({ baseURL });
   try {
-    const brandId = await brandFor(owner);
+    const brandId = await brandFor(owner, db);
     const root = `/dashboard/brands/${brandId}`;
     const url = root + "/questions";
     const api = `/api/brands/${brandId}/questions`;

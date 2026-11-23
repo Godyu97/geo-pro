@@ -73,6 +73,12 @@ async function applyCommand(
   }
 
   if (command.action !== "discardDraft" && !current && await dao.active(ownerId)) return { error: "LIMIT_REACHED" };
+  let acceptedPolicyVersion: number | null = null;
+  if (!current && command.action === "submit") {
+    const acceptance = await dao.requireCurrentRetention(command.acceptedPolicyVersion);
+    if ("error" in acceptance) return acceptance;
+    acceptedPolicyVersion = acceptance.version;
+  }
   const scope = id ?? "new";
   const draft = await dao.draft(ownerId, scope);
   if ((draft?.version ?? null) !== command.expectedDraft) return { error: "VERSION_CONFLICT" };
@@ -99,9 +105,11 @@ async function applyCommand(
     return brandResult(updated);
   }
 
+  if (acceptedPolicyVersion === null) return { error: "RETENTION_UNPUBLISHED" };
   const brandId = randomUUID();
   await dao.insertBrand(ownerId, brandId, time);
   await dao.insertVersion(brandId, 1, command.fields, time);
+  await dao.insertRetentionAcceptance(brandId, acceptedPolicyVersion, time);
   if (draft) await dao.deleteDraft(ownerId, scope);
   return brandResult({ id: brandId, status: "active", revision: 1, entityVersion: 1 });
 }

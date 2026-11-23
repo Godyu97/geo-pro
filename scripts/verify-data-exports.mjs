@@ -10,6 +10,7 @@ import { initialBrandFields } from "../src/features/brands/contracts.ts";
 import { exportFileName } from "../src/features/data-exports/contracts.ts";
 import { queryWithParameters } from "../src/lib/db/connection.ts";
 import { testDatabase } from "../tests/maintenance/helpers.mjs";
+import { ensureRetentionPolicy } from "../tests/brands/retention-setup.mjs";
 
 function createExportBucket() {
   const objects = new Map();
@@ -127,6 +128,7 @@ async function verifyEnabled(db, owner) {
 
   const brandResponse = await request("/api/brands", { actor: owner, data: {
     action: "submit", target: null, expectedDraft: null, actorId: owner.id, operationId: randomUUID(), fields,
+    acceptedPolicyVersion: await ensureRetentionPolicy(db),
   } });
   assert.equal(brandResponse.status, 200);
   const brand = await brandResponse.json();

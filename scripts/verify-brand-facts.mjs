@@ -8,6 +8,7 @@ import { initialBrandFields } from "../src/features/brands/contracts.ts";
 import { withEligibleFacts } from "../src/features/brand-facts/service.ts";
 import { queryWithParameters } from "../src/lib/db/connection.ts";
 import { testDatabase } from "../tests/maintenance/helpers.mjs";
+import { ensureRetentionPolicy } from "../tests/brands/retention-setup.mjs";
 
 const baseURL = "http://localhost:3118";
 const original = "合成资料第一行 🚀\nSynthetic source's second line";
@@ -23,11 +24,12 @@ async function signUp(browser, locale) {
   return { context, id: (await response.json()).user.id };
 }
 
-async function brandFor({ context, id }) {
+async function brandFor({ context, id }, db) {
   const response = await context.request.post("/api/brands", {
     headers: { Origin: baseURL },
     data: {
       action: "submit", target: null, expectedDraft: null, actorId: id, operationId: randomUUID(),
+      acceptedPolicyVersion: await ensureRetentionPolicy(db),
       fields: { ...initialBrandFields, name: "Synthetic facts fixture", description: "Synthetic materials used for local acceptance" },
     },
   });
@@ -56,7 +58,7 @@ async function acceptance(browser, db) {
   const other = await signUp(browser, "en");
   const anonymous = await browser.newContext({ baseURL });
   try {
-    const brandId = await brandFor(owner);
+    const brandId = await brandFor(owner, db);
     const root = `/dashboard/brands/${brandId}`;
     const url = root + "/facts";
     const api = `/api/brands/${brandId}/facts`;

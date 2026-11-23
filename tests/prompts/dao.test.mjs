@@ -4,8 +4,8 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { openConnection, queryWithParameters } from "../../src/lib/db/connection.ts";
 import { parseDatabaseConfig } from "../../src/lib/db/config.ts";
-import { executeBrandCommand } from "../../src/features/brands/commands.ts";
 import { initialBrandFields } from "../../src/features/brands/contracts.ts";
+import { BrandDao } from "../../src/features/brands/dao.ts";
 import { PurgeDao } from "../../src/features/brands/purge-dao.ts";
 import { executePromptCommand, readPromptWorkspace } from "../../src/features/prompts/service.ts";
 import { isNearDuplicate, normalizeQuestion } from "../../src/features/prompts/rules.ts";
@@ -40,16 +40,15 @@ const primaryTexts = [
 
 async function addBrand(db) {
   const ownerId = randomUUID();
+  const brandId = randomUUID();
   await queryWithParameters(db, 'INSERT INTO "user" (id, name, email) VALUES (?, ?, ?)', [ownerId, "Prompt owner fixture", `${ownerId}@example.invalid`]);
-  const result = await executeBrandCommand(db, ownerId, {
-    action: "submit", target: null, expectedDraft: null, actorId: ownerId, operationId: randomUUID(),
-    fields: {
-      ...initialBrandFields, name: "合成品牌", description: "合成数据用于本地验收",
-      aliases: ["合成别名"], competitors: ["合成竞品"], questions: ["建档时留下的购买草稿问题"],
-    },
-  }, undefined, clock);
-  assert.ok(result.mutation);
-  return { ownerId, brandId: result.mutation.id };
+  const brands = new BrandDao(db);
+  await brands.insertBrand(ownerId, brandId, time);
+  await brands.insertVersion(brandId, 1, {
+    ...initialBrandFields, name: "合成品牌", description: "合成数据用于本地验收",
+    aliases: ["合成别名"], competitors: ["合成竞品"], questions: ["建档时留下的购买草稿问题"],
+  }, time);
+  return { ownerId, brandId };
 }
 
 for (const kind of ["sqlite", "postgresql"]) {

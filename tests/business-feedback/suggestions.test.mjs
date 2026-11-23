@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { test } from "node:test";
 import { executeBrandCommand } from "../../src/features/brands/commands.ts";
+import { ensureRetentionPolicy } from "../brands/retention-setup.mjs";
 import { initialBrandFields } from "../../src/features/brands/contracts.ts";
 import {
   decideLeadSuggestion,
@@ -168,6 +169,7 @@ async function addBrand(db) {
   await queryWithParameters(db, 'INSERT INTO "user" (id, name, email) VALUES (?, ?, ?)', [ownerId, "Lead suggestion fixture", `${ownerId}@example.invalid`]);
   const result = await executeBrandCommand(db, ownerId, {
     action: "submit", target: null, expectedDraft: null, actorId: ownerId, operationId: randomUUID(),
+    acceptedPolicyVersion: await ensureRetentionPolicy(db, clock),
     fields: {
       ...initialBrandFields, name: "合成品牌", description: "合成数据用于本地验收",
       aliases: ["合成别名"], competitors: ["合成竞品"], questions: ["建档时留下的购买草稿问题"],

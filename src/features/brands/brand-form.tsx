@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocale } from "@/lib/i18n/client";
+import { formatNumber } from "@/lib/i18n/format";
 import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
 import { cn } from "@/lib/utils";
@@ -15,7 +16,7 @@ import {
   brandDraftFieldsSchema, brandFieldNameSchema, brandFieldsSchema, initialBrandFields,
   type BrandFieldName, type BrandFields, type BrandStep, type BrandTarget,
 } from "./contracts";
-import type { BrandDraft } from "./dao";
+import type { BrandDraft, RetentionPolicyRecord } from "./dao";
 import { brandErrorMessage, brandFieldMessage } from "./error-messages";
 import { useBrandMutation } from "./use-brand-mutation";
 
@@ -50,13 +51,14 @@ function stepFor(field: BrandFieldName): BrandStep {
   return steps[1].fields.some((name) => name === field) ? 1 : 2;
 }
 
-export function BrandForm({ actorId, draft, target, current, messages, mockProfile }: {
+export function BrandForm({ actorId, draft, target, current, messages, mockProfile, policy = null }: {
   actorId: string;
   draft: BrandDraft | null;
   target: BrandTarget | null;
   current?: BrandFields;
   messages: Messages["brands"];
   mockProfile?: BrandFields;
+  policy?: Pick<RetentionPolicyRecord, "version" | "summaryZh" | "summaryEn" | "recoverableDays"> | null;
 }) {
   const { locale } = useLocale();
   const router = useRouter();
@@ -68,6 +70,8 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
   const [invalid, setInvalid] = useState<BrandFieldName[]>([]);
   const [saved, setSaved] = useState(Boolean(draft));
   const [mockFilled, setMockFilled] = useState(false);
+  const [acceptedPolicy, setAcceptedPolicy] = useState(false);
+  const [acceptRequired, setAcceptRequired] = useState(false);
   const focus = useRef<BrandFieldName | "heading" | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const composing = useRef(false);
@@ -112,7 +116,14 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
     setInvalid([]);
     setSaved(false);
     if (intent === "submit") {
-      const result = await send({ action: "submit", target, expectedDraft, fields });
+      if (!target && (!policy || !acceptedPolicy)) {
+        setAcceptRequired(true);
+        return;
+      }
+      const result = await send({
+        action: "submit", target, expectedDraft, fields,
+        ...(target || !policy ? {} : { acceptedPolicyVersion: policy.version }),
+      });
       if (result?.kind === "brand") router.replace("/dashboard/brands/" + result.id);
       return;
     }
@@ -153,6 +164,35 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
           {mockFilled && <p role="status" className="text-sm font-medium">{t("mockProfileFilled")}</p>}
         </div>
         {staleDraft && <p role="alert" className="text-sm text-destructive">{t("staleDraft")}</p>}
+        {!target && (
+          <section aria-labelledby="brand-retention" data-retention-version={policy?.version ?? ""} className="space-y-3 rounded-lg border p-4">
+            <h3 id="brand-retention" className="font-semibold">{t("retentionTitle")}</h3>
+            {policy ? (
+              <>
+                <p className="text-sm">{t("retentionVersion", { version: formatNumber(locale, policy.version) })}</p>
+                <p className="text-sm leading-6 text-muted-foreground">{t("retentionRecoverableDays", { days: formatNumber(locale, policy.recoverableDays) })}</p>
+                <div className="space-y-1 text-sm leading-6">
+                  <p className="font-medium">{t("retentionSummaryZh")}</p>
+                  <p className="whitespace-pre-wrap text-muted-foreground">{policy.summaryZh}</p>
+                </div>
+                <div className="space-y-1 text-sm leading-6">
+                  <p className="font-medium">{t("retentionSummaryEn")}</p>
+                  <p className="whitespace-pre-wrap text-muted-foreground">{policy.summaryEn}</p>
+                </div>
+                <label className="flex items-start gap-2 text-sm leading-6" htmlFor="brand-retention-accept">
+                  <input id="brand-retention-accept" className="mt-1" type="checkbox" checked={acceptedPolicy}
+                    onChange={(event) => { setAcceptedPolicy(event.target.checked); setAcceptRequired(false); }} />
+                  <span>{t("retentionAccept", { version: formatNumber(locale, policy.version) })}</span>
+                </label>
+              </>
+            ) : <p className="text-sm leading-6">{t("retentionUnpublished")}</p>}
+            {(acceptRequired || error?.code === "RETENTION_NOT_ACCEPTED" || error?.code === "RETENTION_UNPUBLISHED") && (
+              <p role="alert" className="text-sm font-medium text-destructive">
+                {t(policy ? "retentionAcceptRequired" : "retentionUnpublished")}
+              </p>
+            )}
+          </section>
+        )}
         {error && (
           <div role="alert" className="space-y-2 text-sm">
             <p className="font-medium text-destructive">{t(brandErrorMessage[error.code])}</p>
@@ -215,7 +255,7 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
                   setStep(0);
                 }}>{t("applyMockProfile")}</Button>
               )}
-              <Button type="submit">{t(step === 2 ? target ? "saveChanges" : "createBrand" : "next")}</Button>
+              <Button type="submit" disabled={step === 2 && !target && !policy}>{t(step === 2 ? target ? "saveChanges" : "createBrand" : "next")}</Button>
               {step > 0 && <Button type="button" variant="outline" onClick={() => move(previousStep)}>{t("back")}</Button>}
               <Button type="button" variant="outline" onClick={() => void save("draft")}>{t("saveDraft")}</Button>
             </div>

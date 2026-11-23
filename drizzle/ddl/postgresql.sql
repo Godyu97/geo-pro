@@ -135,6 +135,12 @@ CREATE TABLE "brand_purged_cost" (
     and length("brand_purged_cost"."currency") = 3 and "brand_purged_cost"."actual_minor" >= 0)
 );
 
+CREATE TABLE "brand_retention_acceptance" (
+	"brand_id" text PRIMARY KEY NOT NULL,
+	"policy_version" integer NOT NULL,
+	"accepted_at" text NOT NULL
+);
+
 CREATE TABLE "brand_version" (
 	"brand_id" text NOT NULL,
 	"version" integer NOT NULL,
@@ -143,6 +149,18 @@ CREATE TABLE "brand_version" (
 	"created_at" text NOT NULL,
 	CONSTRAINT "brand_version_brand_id_version_pk" PRIMARY KEY("brand_id","version"),
 	CONSTRAINT "brand_version_number_check" CHECK ("brand_version"."version" > 0)
+);
+
+CREATE TABLE "retention_policy" (
+	"version" integer PRIMARY KEY NOT NULL,
+	"summary_zh" text NOT NULL,
+	"summary_en" text NOT NULL,
+	"recoverable_days" integer NOT NULL,
+	"published_at" text NOT NULL,
+	CONSTRAINT "retention_policy_version_check" CHECK ("retention_policy"."version" > 0),
+	CONSTRAINT "retention_policy_days_check" CHECK ("retention_policy"."recoverable_days" between 1 and 3650),
+	CONSTRAINT "retention_policy_summary_check" CHECK (length("retention_policy"."summary_zh") between 1 and 2000
+    and length("retention_policy"."summary_en") between 1 and 2000)
 );
 
 CREATE TABLE "user_data_export" (
@@ -2434,6 +2452,8 @@ ALTER TABLE "brand" ADD CONSTRAINT "brand_owner_id_user_id_fk" FOREIGN KEY ("own
 ALTER TABLE "brand_draft" ADD CONSTRAINT "brand_draft_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_operation" ADD CONSTRAINT "brand_operation_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_purged_cost" ADD CONSTRAINT "brand_purged_cost_brand_id_brand_purge_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand_purge"("brand_id") ON DELETE restrict ON UPDATE no action;
+ALTER TABLE "brand_retention_acceptance" ADD CONSTRAINT "brand_retention_acceptance_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand_retention_acceptance" ADD CONSTRAINT "brand_retention_acceptance_policy_version_retention_policy_version_fk" FOREIGN KEY ("policy_version") REFERENCES "public"."retention_policy"("version") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "brand_version" ADD CONSTRAINT "brand_version_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "user_data_export" ADD CONSTRAINT "user_data_export_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "quota_attempt" ADD CONSTRAINT "quota_attempt_reservation_fk" FOREIGN KEY ("brand_id","kind","reservation_id") REFERENCES "public"."quota_reservation"("brand_id","kind","id") ON DELETE cascade ON UPDATE no action;

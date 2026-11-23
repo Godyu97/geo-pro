@@ -16,6 +16,7 @@ import { updateQuota } from "../../src/features/quotas/commands.ts";
 import { applyQuotaLedger } from "../../src/features/quotas/ledger.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, structure, testDatabase } from "../maintenance/helpers.mjs";
+import { ensureRetentionPolicy } from "./retention-setup.mjs";
 
 const before = "2026-10-01T00:00:00.000Z";
 const freezeAt = "2026-10-02T00:00:00.000Z";
@@ -87,7 +88,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     });
     const run = (input, at) => executeBrandCommand(db, input.actorId, input, session, () => new Date(at));
     assert.equal((await run(draft, before)).mutation.kind, "draft");
-    const otherCreate = command(outsider, { action: "submit", target: null, expectedDraft: null, fields });
+    const otherCreate = command(outsider, { action: "submit", target: null, expectedDraft: null, fields, acceptedPolicyVersion: await ensureRetentionPolicy(db) });
     const other = (await run(otherCreate, before)).mutation;
     const exported = (await prepareExport(db, ownerId, { actorId: ownerId, scopes: ["brands"], previousId: null, locale: "zh-CN" })).summary;
     await sql("UPDATE user_data_export SET created_at = ? WHERE owner_id = ?", [before, ownerId]);

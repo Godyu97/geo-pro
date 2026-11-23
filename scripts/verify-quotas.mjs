@@ -9,6 +9,7 @@ import { changeMaintenanceGrant } from "../src/features/maintenance/core.ts";
 import { applyQuotaLedger } from "../src/features/quotas/ledger.ts";
 import { queryWithParameters } from "../src/lib/db/connection.ts";
 import { testDatabase } from "../tests/maintenance/helpers.mjs";
+import { ensureRetentionPolicy } from "../tests/brands/retention-setup.mjs";
 
 const baseURL = "http://localhost:3107";
 const quotaPath = "/api/maintenance/quotas";
@@ -25,11 +26,12 @@ async function signUp(browser, name) {
   return { context, id: (await response.json()).user.id };
 }
 
-async function brandFor({ context, id }) {
+async function brandFor({ context, id }, db) {
   const response = await context.request.post("/api/brands", {
     headers: { Origin: baseURL },
     data: {
       action: "submit", target: null, expectedDraft: null, actorId: id, operationId: randomUUID(),
+      acceptedPolicyVersion: await ensureRetentionPolicy(db),
       fields: { ...initialBrandFields, name: "Synthetic quota brand", description: "Synthetic test data for the quota fixture" },
     },
   });
@@ -169,7 +171,7 @@ async function verifyIntegration(db, browser) {
     signUp(browser, "Synthetic B10 owner"), signUp(browser, "Synthetic B10 maintainer"), browser.newContext({ baseURL }),
   ]);
   try {
-    const brandId = await brandFor(owner);
+    const brandId = await brandFor(owner, db);
     const command = {
       actorId: maintainer.id, brandId, action: "set", operationId: randomUUID(), expectedVersion: null, reason: "pilot-approval",
       kind: "sampling", countLimit: 3, budgetMinor: 12345, currency: "CNY", expiresAt: new Date(Date.now() + 86_400_000).toISOString(),

@@ -7,6 +7,7 @@ import { brandCommandSchema, brandFieldsSchema, initialBrandFields } from "../..
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
+import { ensureRetentionPolicy } from "./retention-setup.mjs";
 
 const fields = { ...initialBrandFields, name: "合成品牌 🚀", description: "用于品牌验收的合成业务" };
 const time = "2026-11-18T08:00:00.000Z";
@@ -100,7 +101,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       const input = (properties, actorId = owner) => brandCommandSchema.parse({ operationId: randomUUID(), actorId, ...properties });
       const run = (command, account = owner) => executeBrandCommand(db, account, command);
       const expectError = async (command, code, account = owner) => assert.deepEqual(await run(command, account), { error: code });
-      const submit = { action: "submit", target: null, expectedDraft: null, fields };
+      const submit = { action: "submit", target: null, expectedDraft: null, fields, acceptedPolicyVersion: await ensureRetentionPolicy(db) };
       const draft = input({ action: "saveDraft", target: null, expectedDraft: null, fields: { ...fields, name: "北" }, step: 1 });
       const saved = (await run(draft)).mutation;
       assert.equal((await dao.draft(owner, "new")).fields.name, "北");

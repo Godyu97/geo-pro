@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { expectTextContrast } from "./appearance-helpers";
 import { registerTestAccount, submitTestAccountForm } from "./auth-helpers";
+import { publishedRetentionVersion } from "./retention-version";
 
 const baseURL = "http://localhost:3100";
 const brands = "/dashboard/brands";
@@ -209,6 +210,7 @@ test("owner can edit, view old versions, archive and restore while another accou
     headers: { Origin: baseURL },
     data: {
       action: "submit", actorId: owner.id, operationId: globalThis.crypto.randomUUID(), target: null, expectedDraft: null,
+      acceptedPolicyVersion: publishedRetentionVersion(),
       fields: { name: synthetic, description, website: "", aliases: [], region: "CN", language: "zh-CN", competitors: [], questions: [] },
     },
   });
@@ -270,6 +272,7 @@ for (const locale of ["zh-CN", "en"] as const) {
         headers: { Origin: baseURL },
         data: {
           action: "submit", target: null, expectedDraft: null, actorId: account.id, operationId: randomUUID(),
+          acceptedPolicyVersion: publishedRetentionVersion(),
           fields: { name: synthetic, description, website: "", aliases: [], region: "CN", language: "zh-CN", competitors: [], questions: [] },
         },
       });

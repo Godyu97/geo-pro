@@ -9,6 +9,7 @@ import { initialBrandFields } from "../src/features/brands/contracts.ts";
 import { getExportSummary } from "../src/features/data-exports/service.ts";
 import { queryWithParameters } from "../src/lib/db/connection.ts";
 import { testDatabase } from "../tests/maintenance/helpers.mjs";
+import { ensureRetentionPolicy } from "../tests/brands/retention-setup.mjs";
 
 const baseURL = "http://localhost:3105";
 const fields = { ...initialBrandFields, name: "Synthetic B04 测试 🚀", description: "Synthetic brand verification only" };
@@ -127,7 +128,10 @@ async function verify(kind, enabled) {
     assert.ok(output.includes("Ready"), "Owned Next.js server must be ready");
     assert.equal((await request("/api/health")).status, 200);
     const owner = await actor();
-    const create = mutation(owner, { action: "submit", target: null, expectedDraft: null, fields });
+    const create = mutation(owner, {
+      action: "submit", target: null, expectedDraft: null, fields,
+      acceptedPolicyVersion: await ensureRetentionPolicy(fixture.connection),
+    });
     if (!enabled) {
       phase = `${kind}: real intake stays closed`;
       await assertError(await request("/api/brands", { actor: owner, data: create }), 403, "INTAKE_CLOSED");

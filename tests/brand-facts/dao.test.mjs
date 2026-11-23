@@ -4,8 +4,8 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { openConnection, queryWithParameters } from "../../src/lib/db/connection.ts";
 import { parseDatabaseConfig } from "../../src/lib/db/config.ts";
-import { executeBrandCommand } from "../../src/features/brands/commands.ts";
 import { initialBrandFields } from "../../src/features/brands/contracts.ts";
+import { BrandDao } from "../../src/features/brands/dao.ts";
 import { PurgeDao } from "../../src/features/brands/purge-dao.ts";
 import { executeFactCommand, readFactWorkspace, withEligibleFacts } from "../../src/features/brand-facts/service.ts";
 import { emptyFields, previewPaste, reviewDue } from "../../src/features/brand-facts/rules.ts";
@@ -24,13 +24,12 @@ const usable = {
 
 async function addBrand(db) {
   const ownerId = randomUUID();
+  const brandId = randomUUID();
   await queryWithParameters(db, 'INSERT INTO "user" (id, name, email) VALUES (?, ?, ?)', [ownerId, "Fact owner fixture", `${ownerId}@example.invalid`]);
-  const result = await executeBrandCommand(db, ownerId, {
-    action: "submit", target: null, expectedDraft: null, actorId: ownerId, operationId: randomUUID(),
-    fields: { ...initialBrandFields, name: "Synthetic facts brand", description: "Synthetic data for local acceptance" },
-  }, undefined, clock());
-  assert.ok(result.mutation);
-  return { ownerId, brandId: result.mutation.id };
+  const brands = new BrandDao(db);
+  await brands.insertBrand(ownerId, brandId, time);
+  await brands.insertVersion(brandId, 1, { ...initialBrandFields, name: "Synthetic facts brand", description: "Synthetic data for local acceptance" }, time);
+  return { ownerId, brandId };
 }
 
 test("offline preview preserves raw UTF-16 offsets, with manual splitting beyond the preview limit", () => {

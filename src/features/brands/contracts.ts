@@ -95,7 +95,10 @@ export const brandDeadlineSchema = z.strictObject({
 
 export const brandCommandSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("saveDraft"), ...draftInput, fields: brandDraftFieldsSchema, step: brandStepSchema }),
-  z.strictObject({ action: z.literal("submit"), ...draftInput, fields: brandFieldsSchema }),
+  z.strictObject({
+    action: z.literal("submit"), ...draftInput, fields: brandFieldsSchema,
+    acceptedPolicyVersion: revisionSchema.optional(),
+  }),
   z.strictObject({ action: z.literal("discardDraft"), ...writeIdentity, brandId: brandIdSchema.nullable(), expectedDraft: brandIdSchema }),
   z.strictObject({ action: z.literal("archive"), ...statusInput }),
   z.strictObject({ action: z.literal("restore"), ...statusInput }),
@@ -130,5 +133,6 @@ export const brandErrorCodeSchema = z.enum([
   "SESSION_REQUIRED", "SESSION_CHANGED", "NOT_FOUND", "LIMIT_REACHED", "VERSION_CONFLICT", "OPERATION_CONFLICT",
   "INTAKE_CLOSED", "DEV_ACTOR_DENIED", "INVALID_INPUT", "FORBIDDEN", "SERVICE_UNAVAILABLE",
   "IDENTITY_UNVERIFIED", "REAUTH_REQUIRED", "RECOVERY_EXPIRED",
+  "RETENTION_UNPUBLISHED", "RETENTION_NOT_ACCEPTED",
 ]);
 export type BrandErrorCode = z.infer<typeof brandErrorCodeSchema>;

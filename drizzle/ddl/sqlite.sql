@@ -150,6 +150,14 @@ CREATE TABLE `brand_purged_cost` (
     and length("brand_purged_cost"."currency") = 3 and "brand_purged_cost"."actual_minor" >= 0)
 );
 
+CREATE TABLE `brand_retention_acceptance` (
+	`brand_id` text PRIMARY KEY NOT NULL,
+	`policy_version` integer NOT NULL,
+	`accepted_at` text NOT NULL,
+	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`policy_version`) REFERENCES `retention_policy`(`version`) ON UPDATE no action ON DELETE no action
+);
+
 CREATE TABLE `brand_version` (
 	`brand_id` text NOT NULL,
 	`version` integer NOT NULL,
@@ -159,6 +167,18 @@ CREATE TABLE `brand_version` (
 	PRIMARY KEY(`brand_id`, `version`),
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "brand_version_number_check" CHECK("brand_version"."version" > 0)
+);
+
+CREATE TABLE `retention_policy` (
+	`version` integer PRIMARY KEY NOT NULL,
+	`summary_zh` text NOT NULL,
+	`summary_en` text NOT NULL,
+	`recoverable_days` integer NOT NULL,
+	`published_at` text NOT NULL,
+	CONSTRAINT "retention_policy_version_check" CHECK("retention_policy"."version" > 0),
+	CONSTRAINT "retention_policy_days_check" CHECK("retention_policy"."recoverable_days" between 1 and 3650),
+	CONSTRAINT "retention_policy_summary_check" CHECK(length("retention_policy"."summary_zh") between 1 and 2000
+    and length("retention_policy"."summary_en") between 1 and 2000)
 );
 
 CREATE TABLE `user_data_export` (

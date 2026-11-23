@@ -22,6 +22,7 @@ import { brandIntakeDecision, type BrandIntakeMode } from "./intake";
 import { BrandMonitoringReadiness } from "@/features/monitoring/brand-readiness";
 import { readPilotAdmission, type PilotAdmissionItem } from "./pilot-admission";
 import { readBrandData } from "./service";
+import type { RetentionView } from "./dao";
 
 type Query = Record<string, string | string[] | undefined>;
 type Translate = Awaited<ReturnType<typeof getTranslator<"brands">>>;
@@ -54,6 +55,67 @@ function intakeCopy(mode: BrandIntakeMode) {
   if (mode === "mock") return { label: "mockLabel", description: "mockDescription" } as const;
   if (mode === "dev") return { label: "devLabel", description: "devDescription" } as const;
   return { label: "fixtureLabel", description: "fixtureDescription" } as const;
+}
+
+function PolicyText({ t, summaryZh, summaryEn, days }: { t: Translate; summaryZh: string; summaryEn: string; days: string }) {
+  return (
+    <div className="space-y-3 text-sm leading-6">
+      <p className="text-muted-foreground">{t("retentionRecoverableDays", { days })}</p>
+      <div className="space-y-1">
+        <p className="font-medium">{t("retentionSummaryZh")}</p>
+        <p className="whitespace-pre-wrap text-muted-foreground">{summaryZh}</p>
+      </div>
+      <div className="space-y-1">
+        <p className="font-medium">{t("retentionSummaryEn")}</p>
+        <p className="whitespace-pre-wrap text-muted-foreground">{summaryEn}</p>
+      </div>
+    </div>
+  );
+}
+
+function acceptedRetention(view: RetentionView) {
+  if (view.acceptedVersion === null || view.acceptedAt === null || view.acceptedSummaryZh === null || view.acceptedSummaryEn === null || view.acceptedRecoverableDays === null) return null;
+  return {
+    version: view.acceptedVersion, acceptedAt: view.acceptedAt, summaryZh: view.acceptedSummaryZh,
+    summaryEn: view.acceptedSummaryEn, recoverableDays: view.acceptedRecoverableDays,
+  };
+}
+
+function currentRetention(view: RetentionView) {
+  if (view.currentVersion === null || view.currentSummaryZh === null || view.currentSummaryEn === null || view.currentRecoverableDays === null) return null;
+  return {
+    version: view.currentVersion, summaryZh: view.currentSummaryZh, summaryEn: view.currentSummaryEn,
+    recoverableDays: view.currentRecoverableDays,
+  };
+}
+
+function RetentionRecord({ t, locale, view }: { t: Translate; locale: Awaited<ReturnType<typeof getLocale>>; view: RetentionView }) {
+  const accepted = acceptedRetention(view);
+  const current = currentRetention(view);
+  const newer = current !== null && (accepted === null || current.version > accepted.version);
+  return (
+    <section aria-labelledby="brand-retention" className="max-w-3xl space-y-4 rounded-xl border bg-card p-5">
+      <h2 id="brand-retention" className="font-semibold">{t("retentionAcceptedTitle")}</h2>
+      {accepted ? (
+        <div className="space-y-3">
+          <p className="text-sm font-medium">{t("retentionAcceptedVersion", { version: formatNumber(locale, accepted.version) })}</p>
+          <p className="text-sm text-muted-foreground">{t("retentionAcceptedAt", { time: formatDateTime(locale, new Date(accepted.acceptedAt)) })}</p>
+          <PolicyText t={t} summaryZh={accepted.summaryZh} summaryEn={accepted.summaryEn} days={formatNumber(locale, accepted.recoverableDays)} />
+        </div>
+      ) : <p className="text-sm leading-6">{t("retentionMissing")}</p>}
+      {newer && current && (
+        <aside aria-label={t("retentionPreviewTitle")} className="space-y-3 border-t pt-4">
+          <h3 className="text-sm font-semibold">{t("retentionPreviewTitle")}</h3>
+          <p className="text-sm leading-6 text-muted-foreground">
+            {accepted
+              ? t("retentionPreviewNote", { version: formatNumber(locale, current.version), accepted: formatNumber(locale, accepted.version) })
+              : t("retentionPreviewUnaccepted")}
+          </p>
+          <PolicyText t={t} summaryZh={current.summaryZh} summaryEn={current.summaryEn} days={formatNumber(locale, current.recoverableDays)} />
+        </aside>
+      )}
+    </section>
+  );
 }
 
 function IntakeNotice({ t, mode }: { t: Translate; mode: BrandIntakeMode }) {
@@ -244,7 +306,8 @@ export async function NewBrandPage() {
   const intake = decision.intake;
   const result = await readBrandData(async (dao) => {
     const active = await dao.active(user.id);
-    return { active, draft: active ? null : await dao.draft(user.id, "new") };
+    if (active) return { active, draft: null, policy: null };
+    return { active, draft: await dao.draft(user.id, "new"), policy: await dao.currentRetentionPolicy() };
   });
   return (
     <BrandFrame title={t("createTitle")} back="/dashboard/brands" backLabel={t("allBrands")}>
@@ -254,7 +317,7 @@ export async function NewBrandPage() {
           <p role="status" className="text-sm leading-6">{t("limitReached")} {t("archiveFirst")}</p>
           <Button asChild><Link href={"/dashboard/brands/" + result.data.active.id} prefetch={false}>{t("viewBrand")}</Link></Button>
         </div>
-      ) : <BrandForm key={user.id} actorId={user.id} draft={result.data.draft} target={null} messages={getMessages(locale).brands} mockProfile={intake.mode === "mock" ? mockBrandFields : undefined} />}
+      ) : <BrandForm key={user.id} actorId={user.id} draft={result.data.draft} target={null} policy={result.data.policy} messages={getMessages(locale).brands} mockProfile={intake.mode === "mock" ? mockBrandFields : undefined} />}
     </BrandFrame>
   );
 }
@@ -276,7 +339,10 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
     const brand = await dao.version(user.id, id, version.data);
     if (!brand) return null;
     const editing = query.edit === "1" && query.version === undefined && brand.status === "active";
-    return { brand, editing, draft: editing ? await dao.draft(user.id, id) : null };
+    return {
+      brand, editing, draft: editing ? await dao.draft(user.id, id) : null,
+      retention: editing ? null : await dao.retentionView(user.id, id),
+    };
   });
 
   if ("unavailable" in result) {
@@ -284,7 +350,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
     return <BrandFrame title={t("title")} back="/dashboard/brands" backLabel={t("allBrands")}><BrandLoadFailure t={t} href={retry} /></BrandFrame>;
   }
   if (!result.data) notFound();
-  const { brand, editing, draft } = result.data;
+  const { brand, editing, draft, retention } = result.data;
   const messages = getMessages(locale).brands;
   if (editing) return (
     <BrandFrame title={t("editTitle")} back={href} backLabel={t("viewBrand")}>
@@ -351,6 +417,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
           {!snapshot && <Button asChild variant="outline"><Link href={href + "/delete"} prefetch={false}>{t("reviewDeletion")}</Link></Button>}
         </div>
       </div>
+      {retention && <RetentionRecord t={t} locale={locale} view={retention} />}
     </BrandFrame>
   );
 }

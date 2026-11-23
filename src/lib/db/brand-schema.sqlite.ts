@@ -85,3 +85,23 @@ export const brandPurgedCost = sqliteTable("brand_purged_cost", {
   check("brand_purged_cost_check", sql`${table.kind} in ('sampling', 'generation')
     and length(${table.currency}) = 3 and ${table.actualMinor} >= 0`),
 ]);
+
+// Published retention text. A new version is a new row; accepted brands keep their own row.
+export const retentionPolicy = sqliteTable("retention_policy", {
+  version: integer("version").primaryKey(),
+  summaryZh: text("summary_zh").notNull(),
+  summaryEn: text("summary_en").notNull(),
+  recoverableDays: integer("recoverable_days").notNull(),
+  publishedAt: text("published_at").notNull(),
+}, (table) => [
+  check("retention_policy_version_check", sql`${table.version} > 0`),
+  check("retention_policy_days_check", sql`${table.recoverableDays} between 1 and 3650`),
+  check("retention_policy_summary_check", sql`length(${table.summaryZh}) between 1 and 2000
+    and length(${table.summaryEn}) between 1 and 2000`),
+]);
+
+export const brandRetentionAcceptance = sqliteTable("brand_retention_acceptance", {
+  brandId: text("brand_id").primaryKey().references(() => brand.id, { onDelete: "cascade" }),
+  policyVersion: integer("policy_version").notNull().references(() => retentionPolicy.version),
+  acceptedAt: text("accepted_at").notNull(),
+});

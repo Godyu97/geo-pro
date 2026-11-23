@@ -12,6 +12,7 @@ import { QuotaDao } from "../../src/features/quotas/dao.ts";
 import { applyQuotaLedger } from "../../src/features/quotas/ledger.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
+import { ensureRetentionPolicy } from "./retention-setup.mjs";
 
 const frozenAt = "2026-11-18T08:00:00.000Z";
 const restoreUntil = "2026-12-18T08:00:00.000Z";
@@ -125,7 +126,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.deepEqual(await run(recover, session, "2026-11-18T08:06:00.000Z"), { error: "REAUTH_REQUIRED" });
     assert.deepEqual(await run(recover, session, restoreUntil), { error: "RECOVERY_EXPIRED" });
 
-    const replacement = (await run(action(owner, { action: "submit", target: null, expectedDraft: null, fields }))).mutation;
+    const replacement = (await run(action(owner, { action: "submit", target: null, expectedDraft: null, fields, acceptedPolicyVersion: await ensureRetentionPolicy(db) }))).mutation;
     assert.deepEqual(await run(recover, session, recoveryTime), { error: "LIMIT_REACHED" });
     await run(action(owner, { action: "archive", brandId: replacement.id, expectedBrandRevision: 1 }));
     assert.equal((await run(recover, session, recoveryTime)).mutation.revision, 3);

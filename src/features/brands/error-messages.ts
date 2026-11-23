@@ -15,6 +15,8 @@ export const brandErrorMessage = {
   IDENTITY_UNVERIFIED: "identityUnverified",
   REAUTH_REQUIRED: "reauthRequired",
   RECOVERY_EXPIRED: "recoveryExpired",
+  RETENTION_UNPUBLISHED: "retentionUnpublished",
+  RETENTION_NOT_ACCEPTED: "retentionNotAccepted",
 } as const satisfies Record<BrandErrorCode, string>;
 
 export const brandFieldMessage = {

@@ -10,6 +10,7 @@ import { pruneMailRate, reserveMailRequest } from "../src/features/account/email
 import { initialBrandFields } from "../src/features/brands/contracts.ts";
 import { queryWithParameters as query } from "../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../tests/maintenance/helpers.mjs";
+import { ensureRetentionPolicy } from "../tests/brands/retention-setup.mjs";
 
 const base = "http://localhost:3117";
 const sourceHeader = "x-geo-mail-ip";
@@ -205,6 +206,7 @@ async function verifyHTTP(fixture, logs) {
   phase = "create and freeze a brand under an unverified owner";
   const created = await brandAPI(owner, {
     action: "submit", target: null, expectedDraft: null,
+    acceptedPolicyVersion: await ensureRetentionPolicy(fixture.connection),
     fields: { ...initialBrandFields, name: "Synthetic B17 brand", description: "Isolated email recovery fixture" },
   });
   assert.equal(created.status, 200);

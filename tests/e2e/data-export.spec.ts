@@ -5,6 +5,7 @@ import postgres from "postgres";
 import { initialBrandFields } from "../../src/features/brands/contracts";
 import { expectTextContrast } from "./appearance-helpers";
 import { registerTestAccount } from "./auth-helpers";
+import { publishedRetentionVersion } from "./retention-version";
 
 const baseURL = "http://localhost:3100";
 const settings = "/dashboard/settings?source=workspace#data-management";
@@ -59,7 +60,7 @@ const copy = {
 async function seedBrand(context: BrowserContext, actorId: string) {
   const response = await context.request.post("/api/brands", {
     headers: { Origin: baseURL },
-    data: { actorId, operationId: randomUUID(), action: "submit", target: null, expectedDraft: null, fields },
+    data: { actorId, operationId: randomUUID(), action: "submit", target: null, expectedDraft: null, fields, acceptedPolicyVersion: publishedRetentionVersion() },
   });
   expect(response.status()).toBe(200);
   return (await response.json()).id as string;

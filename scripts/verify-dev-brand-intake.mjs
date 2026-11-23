@@ -6,6 +6,7 @@ import { setTimeout } from "node:timers/promises";
 import nextEnv from "@next/env";
 import { parseDatabaseConfig } from "../src/lib/db/config.ts";
 import { getConnection, queryWithParameters } from "../src/lib/db/connection.ts";
+import { ensureRetentionPolicy, retentionDisclosure } from "../tests/brands/retention-setup.mjs";
 
 nextEnv.loadEnvConfig(process.cwd(), true);
 
@@ -135,9 +136,10 @@ try {
     assert.match(html, /value="GeoPro"/);
   }
 
+  const acceptedPolicyVersion = await ensureRetentionPolicy(getConnection(), () => new Date(), retentionDisclosure);
   const brand = await jsonOk(await request("/api/brands", {
     actor: resumed,
-    data: mutation(resumed, { action: "submit", target: null, expectedDraft: draftId, fields }),
+    data: mutation(resumed, { action: "submit", target: null, expectedDraft: draftId, fields, acceptedPolicyVersion }),
   }));
   assert.equal(brand.entityVersion, 1);
   assert.equal(brand.kind, "brand");
@@ -161,7 +163,7 @@ try {
 
   const denied = await request("/api/brands", {
     actor: outsider,
-    data: mutation(outsider, { action: "submit", target: null, expectedDraft: null, fields }),
+    data: mutation(outsider, { action: "submit", target: null, expectedDraft: null, fields, acceptedPolicyVersion }),
   });
   assert.equal(denied.status, 403);
   assert.equal((await denied.json()).error.code, "DEV_ACTOR_DENIED");
