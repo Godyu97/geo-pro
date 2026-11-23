@@ -12,10 +12,12 @@ import {
   saveSamplingPlan,
   transitionSamplingPlan,
 } from "./commands.ts";
+import { driveDueSamplingWindow } from "./due-commands.ts";
 import {
   arriveSamplingPlanSchema,
   channelIdSchema,
   createSamplingPlanSchema,
+  driveDueWindowSchema,
   expireSamplingChannelSchema,
   planPhaseSchema,
   reviseSamplingBudgetSchema,
@@ -125,5 +127,25 @@ export async function expireSamplingChannelAction(formData: FormData) {
   });
   if (!parsed.success) finish("INVALID_INPUT");
   const result = await pauseExpiredSamplingChannel(getConnection(), session.user.id, parsed.data);
+  finish("error" in result ? result.error : undefined);
+}
+
+export async function driveDueSamplingWindowAction(formData: FormData) {
+  const session = await requireSession();
+  const channelIds = [...new Set(formData.getAll("channelId").map((value) => String(value).trim()).filter(Boolean))];
+  const degrade = String(formData.get("degradeChannelId") ?? "").trim();
+  const promptIds = String(formData.get("promptIds") ?? "").split(/[\s,]+/).filter(Boolean);
+  const parsed = driveDueWindowSchema.safeParse({
+    planId: String(formData.get("planId") ?? ""),
+    timezone: String(formData.get("timezone") ?? "").trim(),
+    now: new Date().toISOString(),
+    channels: channelIds.map((channelId) => ({
+      channelId,
+      state: channelId === degrade ? "degraded" as const : "eligible" as const,
+    })),
+    promptIds,
+  });
+  if (!parsed.success) finish("INVALID_INPUT");
+  const result = await driveDueSamplingWindow(getConnection(), session.user.id, parsed.data);
   finish("error" in result ? result.error : undefined);
 }

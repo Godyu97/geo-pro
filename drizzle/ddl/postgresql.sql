@@ -1405,6 +1405,42 @@ CREATE TABLE "source_original" (
     ))
 );
 
+CREATE TABLE "sampling_due_run" (
+	"id" text PRIMARY KEY NOT NULL,
+	"plan_id" text NOT NULL,
+	"plan_version" integer NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"channel_id" text NOT NULL,
+	"window_id" text NOT NULL,
+	"slot_id" text NOT NULL,
+	"timezone" text NOT NULL,
+	"kind" text NOT NULL,
+	"status" text NOT NULL,
+	"monitoring_run_id" text,
+	"charged_minor" integer NOT NULL,
+	"prompt_ids_json" text,
+	"created_at" text NOT NULL,
+	CONSTRAINT "sampling_due_run_state_check" CHECK ("sampling_due_run"."plan_version" > 0
+    and "sampling_due_run"."kind" in ('official', 'manual')
+    and "sampling_due_run"."status" in ('reserved', 'accepted', 'sheet')
+    and "sampling_due_run"."charged_minor" >= 0
+    and length("sampling_due_run"."window_id") = 10
+    and length("sampling_due_run"."timezone") between 1 and 64
+    and length("sampling_due_run"."channel_id") between 1 and 64
+    and length("sampling_due_run"."owner_id") between 1 and 128
+    and length("sampling_due_run"."created_at") between 20 and 40
+    and (
+      ("sampling_due_run"."kind" = 'manual' and "sampling_due_run"."status" = 'sheet'
+        and "sampling_due_run"."monitoring_run_id" is null and "sampling_due_run"."charged_minor" = 0
+        and "sampling_due_run"."prompt_ids_json" is not null and length("sampling_due_run"."prompt_ids_json") between 38 and 2000)
+      or ("sampling_due_run"."kind" = 'official' and "sampling_due_run"."status" = 'reserved'
+        and "sampling_due_run"."monitoring_run_id" is null and "sampling_due_run"."charged_minor" = 0 and "sampling_due_run"."prompt_ids_json" is null)
+      or ("sampling_due_run"."kind" = 'official' and "sampling_due_run"."status" = 'accepted'
+        and "sampling_due_run"."monitoring_run_id" is not null and "sampling_due_run"."prompt_ids_json" is null)
+    ))
+);
+
 CREATE TABLE "sampling_plan" (
 	"id" text NOT NULL,
 	"version" integer NOT NULL,
@@ -1441,6 +1477,36 @@ CREATE TABLE "sampling_slot" (
     and length("sampling_slot"."channel_id") between 1 and 64
     and length("sampling_slot"."owner_id") between 1 and 128
     and length("sampling_slot"."at") between 20 and 40)
+);
+
+CREATE TABLE "sampling_window_reading" (
+	"id" text PRIMARY KEY NOT NULL,
+	"plan_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"window_id" text NOT NULL,
+	"timezone" text NOT NULL,
+	"planned_count" integer NOT NULL,
+	"eligible_count" integer NOT NULL,
+	"recommended_count" integer NOT NULL,
+	"judged_count" integer NOT NULL,
+	"coverage_sufficient" integer NOT NULL,
+	"comparable_windows" integer NOT NULL,
+	"waiting_for_trend" integer NOT NULL,
+	"alert_id" text,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "sampling_window_reading_state_check" CHECK ("sampling_window_reading"."planned_count" >= 0
+    and "sampling_window_reading"."eligible_count" >= 0 and "sampling_window_reading"."recommended_count" >= 0 and "sampling_window_reading"."judged_count" >= 0
+    and "sampling_window_reading"."recommended_count" <= "sampling_window_reading"."judged_count"
+    and "sampling_window_reading"."coverage_sufficient" in (0, 1) and "sampling_window_reading"."waiting_for_trend" in (0, 1)
+    and "sampling_window_reading"."comparable_windows" >= 0
+    and length("sampling_window_reading"."window_id") = 10
+    and length("sampling_window_reading"."timezone") between 1 and 64
+    and length("sampling_window_reading"."owner_id") between 1 and 128
+    and length("sampling_window_reading"."created_at") between 20 and 40
+    and length("sampling_window_reading"."updated_at") between 20 and 40
+    and ("sampling_window_reading"."alert_id" is null or length("sampling_window_reading"."alert_id") = 36))
 );
 
 CREATE TABLE "quality_alert" (
@@ -2640,8 +2706,12 @@ ALTER TABLE "source_inspection" ADD CONSTRAINT "source_inspection_brand_id_brand
 ALTER TABLE "source_inspection" ADD CONSTRAINT "source_inspection_citation_id_answer_citation_id_fk" FOREIGN KEY ("citation_id") REFERENCES "public"."answer_citation"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_storage_limit" ADD CONSTRAINT "brand_storage_limit_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "source_original" ADD CONSTRAINT "source_original_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "sampling_due_run" ADD CONSTRAINT "sampling_due_run_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "sampling_due_run" ADD CONSTRAINT "sampling_due_run_slot_id_sampling_slot_id_fk" FOREIGN KEY ("slot_id") REFERENCES "public"."sampling_slot"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "sampling_due_run" ADD CONSTRAINT "sampling_due_run_monitoring_run_id_monitoring_run_id_fk" FOREIGN KEY ("monitoring_run_id") REFERENCES "public"."monitoring_run"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sampling_plan" ADD CONSTRAINT "sampling_plan_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sampling_slot" ADD CONSTRAINT "sampling_slot_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "sampling_window_reading" ADD CONSTRAINT "sampling_window_reading_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "quality_alert" ADD CONSTRAINT "quality_alert_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "quality_alert_event" ADD CONSTRAINT "quality_alert_event_alert_id_quality_alert_id_fk" FOREIGN KEY ("alert_id") REFERENCES "public"."quality_alert"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "quality_alert_event" ADD CONSTRAINT "quality_alert_event_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
@@ -2877,8 +2947,12 @@ CREATE INDEX "stored_object_brand_live_idx" ON "stored_object" USING btree ("bra
 CREATE UNIQUE INDEX "source_original_object_uidx" ON "source_original" USING btree ("stored_object_id") WHERE "source_original"."stored_object_id" is not null;
 CREATE INDEX "source_original_owner_idx" ON "source_original" USING btree ("owner_id","brand_id","created_at","id");
 CREATE INDEX "source_original_brand_idx" ON "source_original" USING btree ("brand_id","created_at","id");
+CREATE UNIQUE INDEX "sampling_due_run_slot_uidx" ON "sampling_due_run" USING btree ("plan_id","channel_id","window_id","slot_id");
+CREATE INDEX "sampling_due_run_owner_idx" ON "sampling_due_run" USING btree ("owner_id","plan_id","window_id","id");
 CREATE INDEX "sampling_plan_owner_idx" ON "sampling_plan" USING btree ("brand_id","owner_id","id");
 CREATE INDEX "sampling_slot_plan_at_idx" ON "sampling_slot" USING btree ("plan_id","at","id");
+CREATE UNIQUE INDEX "sampling_window_reading_window_uidx" ON "sampling_window_reading" USING btree ("plan_id","window_id");
+CREATE INDEX "sampling_window_reading_owner_idx" ON "sampling_window_reading" USING btree ("owner_id","brand_id","window_id");
 CREATE UNIQUE INDEX "quality_alert_open_window_uidx" ON "quality_alert" USING btree ("brand_id","kind","window_id") WHERE "quality_alert"."status" <> 'resolved';
 CREATE INDEX "quality_alert_owner_idx" ON "quality_alert" USING btree ("owner_id","brand_id","updated_at","id");
 CREATE INDEX "quality_alert_event_alert_idx" ON "quality_alert_event" USING btree ("owner_id","alert_id","occurred_at","id");

@@ -166,4 +166,16 @@ export class SamplingPlanDao {
     );
     return z.array(z.object({ id: brandIdSchema })).parse(rows);
   }
+
+  async completeSlots(ownerId: string, planId: string, ids: readonly string[]) {
+    if (ids.length === 0) return [];
+    const rows = await queryWithParameters(
+      this.db,
+      `UPDATE sampling_slot SET status = 'completed'
+       WHERE owner_id = ? AND plan_id = ? AND status = 'scheduled' AND id IN (${ids.map(() => "?").join(", ")})
+       RETURNING id`,
+      [ownerId, planId, ...ids],
+    );
+    return z.array(z.object({ id: brandIdSchema })).parse(rows);
+  }
 }

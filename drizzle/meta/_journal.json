@@ -540,6 +540,13 @@
       "when": 1795457996893,
       "tag": "0076_melted_havok",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1795459780698,
+      "tag": "0077_wooden_gorgon",
+      "breakpoints": true
     }
   ]
 }

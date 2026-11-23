@@ -9,12 +9,14 @@ import { BrandDao } from "../brands/dao";
 import {
   arriveSamplingPlanAction,
   createSamplingPlanAction,
+  driveDueSamplingWindowAction,
   expireSamplingChannelAction,
   reviseSamplingBudgetAction,
   transitionSamplingPlanAction,
 } from "./actions";
 import { listSamplingPlans } from "./commands";
 import type { SamplingPlanView } from "./commands";
+import { listSamplingDueWindows } from "./due-commands";
 
 const fieldClass = "h-10 w-full rounded-md border bg-background px-3";
 const knownErrors = ["PLAN_PHASE_CONFLICT", "NOT_FOUND", "INVALID_INPUT", "VERSION_CONFLICT"] as const;
@@ -76,6 +78,9 @@ export default async function SamplingPlansPage({
 
   const listed = await listSamplingPlans(connection, session.user.id, active.id);
   const plans: SamplingPlanView[] = "error" in listed ? [] : listed.plans;
+  const due = plans.length === 0
+    ? { runs: [], readings: [] }
+    : await listSamplingDueWindows(connection, session.user.id, plans.map((plan) => plan.id));
 
   return (
     <div className="space-y-8">
@@ -184,6 +189,57 @@ export default async function SamplingPlansPage({
             ))}
           </ul>
           <p className="text-sm">{t("coverageLine", { count: plan.coverageSlotIds.length })}</p>
+          {due.runs.filter((run) => run.planId === plan.id).map((run) => (
+            <p key={run.id} className="text-sm">
+              {run.kind === "manual"
+                ? t("dueSheet", { slot: run.slotId })
+                : run.status === "accepted"
+                  ? t("dueOfficial", { slot: run.slotId, run: run.monitoringRunId ?? "", amount: amount(plan.currency, run.chargedMinor) })
+                  : t("dueReserved", { slot: run.slotId })}
+            </p>
+          ))}
+          {due.readings.filter((reading) => reading.planId === plan.id).map((reading) => (
+            <div key={reading.windowId} className="space-y-1 text-sm">
+              <p>{t("readingLine", {
+                window: reading.windowId,
+                planned: formatNumber(locale, reading.plannedCount),
+                eligible: formatNumber(locale, reading.eligibleCount),
+              })}</p>
+              <p className="text-muted-foreground">
+                {reading.waitingForTrend
+                  ? t("readingWaiting", { count: formatNumber(locale, reading.comparableWindows) })
+                  : t("readingReady")}
+              </p>
+              {reading.coverageSufficient ? null : <p>{t("readingCoverage")}</p>}
+            </div>
+          ))}
+          <p>
+            <Link href="/dashboard/monitoring/alerts" prefetch={false} className="text-sm underline-offset-4 hover:underline">
+              {t("openAlerts")}
+            </Link>
+          </p>
+          {plan.phase === "active" ? (
+            <form action={driveDueSamplingWindowAction} className="space-y-3 rounded-xl border p-4">
+              <h3 className="text-sm font-medium">{t("driveTitle")}</h3>
+              <p className="text-sm leading-6 text-muted-foreground">{t("driveHint")}</p>
+              {plan.slots.map((slot) => <input key={slot.id} type="hidden" name="channelId" value={slot.channelId} />)}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-sm">
+                  <span className="mb-1 block text-muted-foreground">{t("timezone")}</span>
+                  <input name="timezone" required defaultValue="Asia/Shanghai" maxLength={64} className={fieldClass} />
+                </label>
+                <label className="text-sm">
+                  <span className="mb-1 block text-muted-foreground">{t("degradeChannel")}</span>
+                  <input name="degradeChannelId" maxLength={64} className={fieldClass} />
+                </label>
+                <label className="text-sm sm:col-span-2">
+                  <span className="mb-1 block text-muted-foreground">{t("promptIds")}</span>
+                  <input name="promptIds" className={fieldClass} />
+                </label>
+              </div>
+              <Button type="submit" variant="outline">{t("driveWindow")}</Button>
+            </form>
+          ) : null}
           <div className="overflow-x-auto rounded-xl border">
             <table className="min-w-full text-left text-sm">
               <thead className="bg-secondary/50 text-muted-foreground">

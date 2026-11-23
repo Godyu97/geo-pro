@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { minorAmountSchema, quotaCurrencySchema } from "../quotas/contracts.ts";
+import { isTimeZone } from "./due-window.ts";
 import type { PlanPhase, SamplingSlotStatus } from "./rules.ts";
 
 export const planPhases = ["draft", "active", "paused", "ended"] as const satisfies readonly PlanPhase[];
@@ -63,6 +64,19 @@ export const reviseSamplingBudgetSchema = z.strictObject({
   nextAt: instantSchema.optional(),
 });
 
+export const dueChannelStateSchema = z.enum(["eligible", "degraded", "expired"]);
+
+export const driveDueWindowSchema = z.strictObject({
+  planId: brandIdSchema,
+  timezone: z.string().trim().min(1).max(64).refine(isTimeZone),
+  now: instantSchema,
+  channels: z.array(z.strictObject({
+    channelId: channelIdSchema,
+    state: dueChannelStateSchema,
+  })).max(32),
+  promptIds: z.array(brandIdSchema).max(10),
+});
+
 export const samplingPlanErrors = {
   SESSION_REQUIRED: 401,
   FORBIDDEN: 403,
@@ -79,3 +93,4 @@ export type TransitionSamplingPlanInput = z.infer<typeof transitionSamplingPlanS
 export type ArriveSamplingPlanInput = z.infer<typeof arriveSamplingPlanSchema>;
 export type ExpireSamplingChannelInput = z.infer<typeof expireSamplingChannelSchema>;
 export type ReviseSamplingBudgetInput = z.infer<typeof reviseSamplingBudgetSchema>;
+export type DriveDueWindowInput = z.infer<typeof driveDueWindowSchema>;
