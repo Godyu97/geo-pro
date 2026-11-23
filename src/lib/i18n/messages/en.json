@@ -1186,7 +1186,8 @@
     "openAlerts": "View quality alerts",
     "openCapture": "Open capture helper",
     "openProtocols": "View sampling protocols",
-    "openExplorations": "View diagnostic explorations"
+    "openExplorations": "View diagnostic explorations",
+    "openDemo": "Open demo space"
   },
   "optimization": {
     "title": "Optimization tasks",
@@ -2866,5 +2867,33 @@
     "NATURAL_COPY_REJECTED": "An exploration observation cannot be copied into a natural answer.",
     "OPERATION_CONFLICT": "The same save cannot switch to a different exploration observation.",
     "SERVICE_UNAVAILABLE": "Exploration observations are temporarily unavailable. Try again shortly."
+  },
+  "demoObservations": {
+    "title": "Demo space",
+    "demoBadge": "Demo data",
+    "description": "This page stores observations that carry a demo flag. These rows stay demo data. Real overviews and real reports do not read them.",
+    "notVerified": "This is not a verified customer result and does not mean a channel is verified.",
+    "fixtureNote": "Saving a demo observation does not write a natural answer, create a retest or a formal report sample, or produce a recommendation rate, ranking, or improvement percentage.",
+    "backMonitoring": "Back to monitoring",
+    "registerTitle": "Save a demo observation",
+    "brand": "Brand",
+    "question": "Question",
+    "answer": "Answer",
+    "registerAction": "Save demo observation",
+    "registering": "Saving…",
+    "saved": "Saved. This record stays in the demo space and is left out of real statistics.",
+    "empty": "No demo observations yet.",
+    "noBrands": "There is no brand available for a demo observation.",
+    "pickBrand": "Choose a brand to see saved demo observations.",
+    "demoLine": "Demo data. It does not enter real statistics.",
+    "createdAt": "Saved at {time}",
+    "loading": "Loading demo observations…",
+    "SESSION_REQUIRED": "Sign in before saving a demo observation.",
+    "FORBIDDEN": "This session cannot save that demo observation.",
+    "NOT_FOUND": "Demo observations for that brand were not found.",
+    "INVALID_INPUT": "Check the brand, question, and answer.",
+    "COPY_REJECTED": "A demo observation cannot be copied into a natural answer, retest, or formal report.",
+    "OPERATION_CONFLICT": "The same save cannot switch to a different demo observation.",
+    "SERVICE_UNAVAILABLE": "Demo observations are temporarily unavailable. Try again shortly."
   }
 }

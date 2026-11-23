@@ -484,6 +484,13 @@
       "when": 1795445440125,
       "tag": "0068_friendly_gladiator",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1795447374458,
+      "tag": "0069_harsh_nitro",
+      "breakpoints": true
     }
   ]
 }

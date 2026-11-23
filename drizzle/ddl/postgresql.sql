@@ -377,6 +377,24 @@ CREATE TABLE "prompt_set" (
 	CONSTRAINT "prompt_set_content_check" CHECK (length("prompt_set"."content") > 1)
 );
 
+CREATE TABLE "demo_observation" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"question_text" text NOT NULL,
+	"answer_text" text NOT NULL,
+	"is_demo" integer DEFAULT 1 NOT NULL,
+	"operation_id" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "demo_observation_state_check" CHECK ("demo_observation"."is_demo" = 1
+    and length("demo_observation"."id") = 36 and length("demo_observation"."brand_id") = 36
+    and length("demo_observation"."owner_id") between 1 and 128
+    and length("demo_observation"."question_text") between 1 and 4000
+    and length("demo_observation"."answer_text") between 1 and 8000
+    and length("demo_observation"."operation_id") = 36
+    and length("demo_observation"."created_at") between 20 and 40)
+);
+
 CREATE TABLE "exploration_observation" (
 	"id" text PRIMARY KEY NOT NULL,
 	"brand_id" text NOT NULL,
@@ -2433,6 +2451,8 @@ ALTER TABLE "prompt_ai_suggestion" ADD CONSTRAINT "prompt_ai_suggestion_brand_id
 ALTER TABLE "prompt_draft" ADD CONSTRAINT "prompt_draft_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "prompt_reference" ADD CONSTRAINT "prompt_reference_set_fk" FOREIGN KEY ("brand_id","set_version_id") REFERENCES "public"."prompt_set"("brand_id","id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "prompt_set" ADD CONSTRAINT "prompt_set_entity_fk" FOREIGN KEY ("brand_id","entity_version") REFERENCES "public"."brand_version"("brand_id","version") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "demo_observation" ADD CONSTRAINT "demo_observation_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "demo_observation" ADD CONSTRAINT "demo_observation_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "exploration_observation" ADD CONSTRAINT "exploration_observation_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "exploration_observation" ADD CONSTRAINT "exploration_observation_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "monitoring_attempt" ADD CONSTRAINT "monitoring_attempt_slot_fk" FOREIGN KEY ("slot_id") REFERENCES "public"."monitoring_slot"("id") ON DELETE cascade ON UPDATE no action;
@@ -2628,6 +2648,8 @@ CREATE INDEX "prompt_ai_suggestion_owner_idx" ON "prompt_ai_suggestion" USING bt
 CREATE INDEX "prompt_reference_question_idx" ON "prompt_reference" USING btree ("brand_id","question_id");
 CREATE UNIQUE INDEX "prompt_set_version_uidx" ON "prompt_set" USING btree ("brand_id","set_id","version");
 CREATE INDEX "prompt_set_recent_idx" ON "prompt_set" USING btree ("brand_id","created_at","id");
+CREATE UNIQUE INDEX "demo_observation_operation_uidx" ON "demo_observation" USING btree ("brand_id","operation_id");
+CREATE INDEX "demo_observation_owner_idx" ON "demo_observation" USING btree ("owner_id","brand_id","created_at","id");
 CREATE UNIQUE INDEX "exploration_observation_operation_uidx" ON "exploration_observation" USING btree ("brand_id","operation_id");
 CREATE INDEX "exploration_observation_owner_idx" ON "exploration_observation" USING btree ("owner_id","brand_id","created_at","id");
 CREATE UNIQUE INDEX "monitoring_attempt_ordinal_uidx" ON "monitoring_attempt" USING btree ("slot_id","kind","ordinal");

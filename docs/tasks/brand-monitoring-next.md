@@ -11,7 +11,7 @@
 | 归档、冻结与导出 | 列表区分活跃、归档和冻结。删除前预览影响，冻结后限制读取与下载。恢复沿用身份复核和时效条件。旧下载在恢复后仍须重新生成。现有品牌缺保留策略记录时展示实际状态，避免回填接受同意 |
 | 监测准备 | 品牌详情连接事实与题集，显示当前实体版本、已确认的自然发现题数、可用通道与额度状态。允许空官网并将官网引用标为不适用。事实审批用于内容门禁，采样仅发送冻结问题和已确认采样条件 |
 
-建档的版本化保留告知复用 [#122](https://github.com/Godyu97/geo-pro/issues/122)，原件容量复用 [#123](https://github.com/Godyu97/geo-pro/issues/123)。演示观察与统计隔离复用 [#121](https://github.com/Godyu97/geo-pro/issues/121)。M1 的负责人转移与成员邀请沿用 [#128](https://github.com/Godyu97/geo-pro/issues/128)、[#129](https://github.com/Godyu97/geo-pro/issues/129)。
+建档的版本化保留告知复用 [#122](https://github.com/Godyu97/geo-pro/issues/122)，原件容量复用 [#123](https://github.com/Godyu97/geo-pro/issues/123)。演示观察与统计隔离已由 [#121](https://github.com/Godyu97/geo-pro/issues/121) 交付，见 [演示观察](M0-121-demo-observations.md)。M1 的负责人转移与成员邀请沿用 [#128](https://github.com/Godyu97/geo-pro/issues/128)、[#129](https://github.com/Godyu97/geo-pro/issues/129)。
 
 ## AI 品牌监测
 

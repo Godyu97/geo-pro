@@ -192,3 +192,25 @@ export const explorationObservation = pgTable("exploration_observation", {
     and length(${table.operationId}) = 36
     and length(${table.createdAt}) between 20 and 40`),
 ]);
+
+// Demo rows stay in this table. is_demo is fixed at 1 so real statistics never read them.
+export const demoObservation = pgTable("demo_observation", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  questionText: text("question_text").notNull(),
+  answerText: text("answer_text").notNull(),
+  isDemo: integer("is_demo").notNull().default(1),
+  operationId: text("operation_id").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("demo_observation_operation_uidx").on(table.brandId, table.operationId),
+  index("demo_observation_owner_idx").on(table.ownerId, table.brandId, table.createdAt, table.id),
+  check("demo_observation_state_check", sql`${table.isDemo} = 1
+    and length(${table.id}) = 36 and length(${table.brandId}) = 36
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.questionText}) between 1 and 4000
+    and length(${table.answerText}) between 1 and 8000
+    and length(${table.operationId}) = 36
+    and length(${table.createdAt}) between 20 and 40`),
+]);

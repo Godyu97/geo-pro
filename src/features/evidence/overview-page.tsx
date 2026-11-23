@@ -94,6 +94,7 @@ export default async function EvidenceOverviewPage({
           <Button asChild variant="outline"><Link href="/dashboard/monitoring/capture" prefetch={false}>{t("openCapture")}</Link></Button>
           <Button asChild variant="outline"><Link href="/dashboard/monitoring/protocols" prefetch={false}>{t("openProtocols")}</Link></Button>
           <Button asChild variant="outline"><Link href="/dashboard/monitoring/explorations" prefetch={false}>{t("openExplorations")}</Link></Button>
+          <Button asChild variant="outline"><Link href="/dashboard/monitoring/demo" prefetch={false}>{t("openDemo")}</Link></Button>
         </div>
       </div>
     );
@@ -146,6 +147,9 @@ export default async function EvidenceOverviewPage({
           </Button>
           <Button asChild variant="outline">
             <Link href={`/dashboard/monitoring/explorations?brandId=${overview.scope.brandId}`} prefetch={false}>{t("openExplorations")}</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={`/dashboard/monitoring/demo?brandId=${overview.scope.brandId}`} prefetch={false}>{t("openDemo")}</Link>
           </Button>
           <Badge variant="outline">{overview.scope.brandName}</Badge>
         </div>
