@@ -8,7 +8,7 @@ import { loginPath } from "@/lib/auth/return-to";
 import { useLocale } from "@/lib/i18n/client";
 import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
-import { teamErrors, type TeamError, type TeamLabel, type TeamListView } from "./contracts.ts";
+import { teamErrors, type TeamError, type TeamInviteStatus, type TeamLabel, type TeamListView } from "./contracts.ts";
 
 export function TeamPanel({ labels, workspace, messages }: {
   labels: TeamLabel[];
@@ -21,6 +21,12 @@ export function TeamPanel({ labels, workspace, messages }: {
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const labelFor = (brandId: string) => labels.find((label) => label.brandId === brandId)?.name ?? t("grantedBrand");
+  const inviteStatus: Record<TeamInviteStatus, "inviteStatusOpen" | "inviteStatusAccepted" | "inviteStatusExpired" | "inviteStatusRevoked"> = {
+    open: "inviteStatusOpen",
+    accepted: "inviteStatusAccepted",
+    expired: "inviteStatusExpired",
+    revoked: "inviteStatusRevoked",
+  };
 
   async function fail(response: Response) {
     if (response.status === 401) {
@@ -40,6 +46,57 @@ export function TeamPanel({ labels, workspace, messages }: {
       const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...init.headers } });
       if (!response.ok) return await fail(response);
       setNotice(ok);
+      router.refresh();
+    } catch {
+      setNotice(t("SERVICE_UNAVAILABLE"));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function invite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const fields = new FormData(form);
+    const expiresAt = String(fields.get("expiresAt") ?? "").trim();
+    if (pending) return;
+    setPending("invite");
+    setNotice(null);
+    try {
+      const response = await fetch("/api/team/invitations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: String(fields.get("userId") ?? ""),
+          brandId: String(fields.get("brandId") ?? ""),
+          ...(expiresAt ? { expiresAt } : {}),
+        }),
+      });
+      if (!response.ok) return await fail(response);
+      const body = await response.json() as { token?: string };
+      setNotice(typeof body.token === "string" ? `${t("invited")} ${body.token}` : t("SERVICE_UNAVAILABLE"));
+      if (typeof body.token === "string") form.reset();
+      router.refresh();
+    } catch {
+      setNotice(t("SERVICE_UNAVAILABLE"));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function resendInvite(invitationId: string) {
+    if (pending) return;
+    setPending(`resend:${invitationId}`);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/team/invitations/${invitationId}/resend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (!response.ok) return await fail(response);
+      const body = await response.json() as { token?: string };
+      setNotice(typeof body.token === "string" ? `${t("resentInvite")} ${body.token}` : t("SERVICE_UNAVAILABLE"));
       router.refresh();
     } catch {
       setNotice(t("SERVICE_UNAVAILABLE"));
@@ -140,6 +197,73 @@ export function TeamPanel({ labels, workspace, messages }: {
               <Button type="submit" disabled={pending !== null}>{pending === "grant" ? t("granting") : t("grant")}</Button>
             </div>
           </form>
+        )}
+      </section>
+
+      <section aria-labelledby="invitations-heading" className="space-y-3 rounded-xl border bg-card p-5">
+        <h2 id="invitations-heading" className="font-medium">{t("invitations")}</h2>
+        <p className="text-sm leading-6 text-muted-foreground">{t("invitationHint")}</p>
+        {labels.length === 0 ? null : (
+          <form onSubmit={invite} className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">{t("brand")}</span>
+              <select name="brandId" required className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
+                {labels.map((label) => <option key={label.brandId} value={label.brandId}>{label.name}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">{t("memberUser")}</span>
+              <Input name="userId" required autoComplete="off" spellCheck={false} maxLength={128} />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">{t("expiresAt")}</span>
+              <Input name="expiresAt" autoComplete="off" spellCheck={false} placeholder="2026-12-31T00:00:00.000Z" />
+              <span className="block text-muted-foreground">{t("expiresHint")}</span>
+            </label>
+            <div className="self-end">
+              <Button type="submit" disabled={pending !== null}>{pending === "invite" ? t("inviting") : t("invite")}</Button>
+            </div>
+          </form>
+        )}
+        {workspace.invitations.length === 0 ? <p className="text-sm text-muted-foreground">{t("noInvitations")}</p> : (
+          <ul className="space-y-3 text-sm">
+            {workspace.invitations.map((invitation) => (
+              <li key={invitation.id} className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>{t(invitation.labelKey)}</span>
+                  <span className="text-muted-foreground">{t("inviteBrandId")}</span>
+                  <span className="break-all text-muted-foreground">{invitation.brandId}</span>
+                  <span>{t(inviteStatus[invitation.status])}</span>
+                  <span className="text-muted-foreground">{t("inviteAccount")}</span>
+                  <span className="break-all text-muted-foreground">{invitation.inviteeUserId}</span>
+                </div>
+                {invitation.canResend && (
+                  <Button type="button" variant="outline" disabled={pending !== null} onClick={() => resendInvite(invitation.id)}>
+                    {pending === `resend:${invitation.id}` ? t("resendingInvite") : t("resendInvite")}
+                  </Button>
+                )}
+                {invitation.canAccept && (
+                  <form className="flex flex-wrap items-end gap-2" onSubmit={(event) => {
+                    event.preventDefault();
+                    const token = String(new FormData(event.currentTarget).get("token") ?? "");
+                    void send(`accept:${invitation.id}`, `/api/team/invitations/${invitation.id}/accept`, {
+                      method: "POST",
+                      body: JSON.stringify({ token }),
+                    }, t("acceptedInvite"));
+                  }}>
+                    <label className="space-y-1">
+                      <span className="font-medium">{t("inviteToken")}</span>
+                      <Input name="token" required autoComplete="off" spellCheck={false} maxLength={43} />
+                      <span className="block text-muted-foreground">{t("inviteTokenHint")}</span>
+                    </label>
+                    <Button type="submit" disabled={pending !== null}>
+                      {pending === `accept:${invitation.id}` ? t("acceptingInvite") : t("acceptInvite")}
+                    </Button>
+                  </form>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
       </section>
 

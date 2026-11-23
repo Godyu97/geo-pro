@@ -57,3 +57,33 @@ export const brandOwnerTransfer = pgTable("brand_owner_transfer", {
     and length(${table.actorId}) between 1 and 128
     and length(${table.createdAt}) between 20 and 40`),
 ]);
+
+// One invitation row. The brand name is never stored. The token is stored only as a hash.
+// replaced_by claims a resend so a second resend cannot insert another open row.
+export const teamInvitation = pgTable("team_invitation", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  inviteeUserId: text("invitee_user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  createdBy: text("created_by").notNull().references(() => user.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+  replacedBy: text("replaced_by"),
+}, (table) => [
+  uniqueIndex("team_invitation_token_uidx").on(table.tokenHash),
+  index("team_invitation_invitee_idx").on(table.inviteeUserId, table.createdAt, table.id),
+  index("team_invitation_brand_idx").on(table.brandId, table.createdAt, table.id),
+  check("team_invitation_state_check", sql`${table.role} = 'member'
+    and ${table.status} in ('open', 'accepted', 'expired', 'revoked')
+    and ${table.inviteeUserId} <> ${table.createdBy}
+    and length(${table.inviteeUserId}) between 1 and 128
+    and length(${table.createdBy}) between 1 and 128
+    and length(${table.tokenHash}) = 64
+    and ${table.tokenHash} = lower(${table.tokenHash})
+    and length(${table.expiresAt}) between 20 and 40
+    and length(${table.createdAt}) between 20 and 40
+    and ((${table.status} in ('open', 'accepted', 'revoked') and ${table.replacedBy} is null)
+      or (${table.status} = 'expired' and (${table.replacedBy} is null or length(${table.replacedBy}) between 1 and 128)))`),
+]);

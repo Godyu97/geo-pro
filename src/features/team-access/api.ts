@@ -8,16 +8,28 @@ import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts.ts";
 import {
+  acceptTeamInvitation,
+  createTeamInvitation,
   executeQueuedBrandAction,
   exportGrantedBrands,
   grantBrandMember,
   leaveTeam,
   listTeamGrants,
+  listTeamInvitations,
   promoteBrandMember,
   readGrantedBrand,
+  resendTeamInvitation,
   revokeBrandGrant,
 } from "./commands.ts";
-import { grantInputSchema, teamErrors, teamExportLimit, type TeamError } from "./contracts.ts";
+import {
+  grantInputSchema,
+  invitationAcceptSchema,
+  invitationCreateSchema,
+  invitationResendSchema,
+  teamErrors,
+  teamExportLimit,
+  type TeamError,
+} from "./contracts.ts";
 
 const privateHeaders = {
   "Cache-Control": "private, no-store",
@@ -165,6 +177,80 @@ export async function teamActionExecuteResponse(request: Request, actionId: stri
   } catch {
     const traceId = randomUUID();
     console.error("team-action-execute-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function teamInvitationListResponse(request: Request) {
+  const gate = await requireSameOrigin(request);
+  if ("error" in gate) return gate.error;
+  if (!emptySearch(request)) return failure("INVALID_INPUT");
+  try {
+    return json(await listTeamInvitations(getConnection(), gate.session.session.user.id));
+  } catch {
+    const traceId = randomUUID();
+    console.error("team-invitation-list-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function teamInvitationCreateResponse(request: Request) {
+  const gate = await requireSameOrigin(request);
+  if ("error" in gate) return gate.error;
+  if (!emptySearch(request)) return failure("INVALID_INPUT");
+  try {
+    const command = invitationCreateSchema.safeParse(await readBoundedJson(request, 4 * 1024));
+    if (!command.success) return failure("INVALID_INPUT");
+    const result = await createTeamInvitation(getConnection(), gate.session.session.user.id, command.data);
+    if ("error" in result && result.error) return failure(result.error);
+    return json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("team-invitation-create-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function teamInvitationResendResponse(request: Request, invitationId: string) {
+  const gate = await requireSameOrigin(request);
+  if ("error" in gate) return gate.error;
+  const parsedId = brandIdSchema.safeParse(invitationId);
+  if (!parsedId.success) return failure("INVALID_INPUT");
+  if (!emptySearch(request)) return failure("INVALID_INPUT");
+  try {
+    const body = request.headers.get("content-type") ? await readBoundedJson(request, 512) : {};
+    const command = invitationResendSchema.safeParse(body ?? {});
+    if (!command.success) return failure("INVALID_INPUT");
+    const result = await resendTeamInvitation(getConnection(), gate.session.session.user.id, parsedId.data, command.data);
+    if ("error" in result && result.error) return failure(result.error);
+    return json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("team-invitation-resend-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function teamInvitationAcceptResponse(request: Request, invitationId: string) {
+  const gate = await requireSameOrigin(request);
+  if ("error" in gate) return gate.error;
+  const parsedId = brandIdSchema.safeParse(invitationId);
+  if (!parsedId.success) return failure("INVALID_INPUT");
+  if (!emptySearch(request)) return failure("INVALID_INPUT");
+  try {
+    const command = invitationAcceptSchema.safeParse(await readBoundedJson(request, 512));
+    if (!command.success) return failure("INVALID_INPUT");
+    const result = await acceptTeamInvitation(
+      getConnection(),
+      gate.session.session.user.id,
+      parsedId.data,
+      command.data.token,
+    );
+    if ("error" in result && result.error) return failure(result.error);
+    return json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("team-invitation-accept-unavailable", { traceId });
     return failure("SERVICE_UNAVAILABLE", traceId);
   }
 }

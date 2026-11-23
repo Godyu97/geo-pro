@@ -526,6 +526,13 @@
       "when": 1795457085927,
       "tag": "0074_brave_swarm",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1795457998363,
+      "tag": "0075_needy_wolfpack",
+      "breakpoints": true
     }
   ]
 }

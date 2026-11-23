@@ -3,7 +3,7 @@ import "server-only";
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
-import { teamActionStatuses, teamListLimit, teamRoles, type TeamRole } from "./contracts.ts";
+import { teamActionStatuses, teamInviteStatuses, teamListLimit, teamRoles, type TeamRole } from "./contracts.ts";
 
 const grantRow = z.object({
   id: brandIdSchema,
@@ -51,10 +51,30 @@ const transferRow = z.object({
   createdAt: z.string().min(20).max(40),
 });
 
+const invitationListRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  inviteeUserId: z.string().min(1).max(128),
+  role: z.literal("member"),
+  expiresAt: z.string().min(20).max(40),
+  status: z.enum(teamInviteStatuses),
+  createdAt: z.string().min(20).max(40),
+  replacedBy: z.string().min(1).max(128).nullable(),
+});
+
+const invitationTokenRow = invitationListRow.extend({
+  tokenHash: z.string().regex(/^[0-9a-f]{64}$/),
+});
+
 export type TeamGrantRecord = z.infer<typeof grantRow>;
 export type TeamAccessRecord = z.infer<typeof accessRow>;
 export type TeamActionRecord = z.infer<typeof actionRow>;
 export type OwnerTransferRecord = z.infer<typeof transferRow>;
+export type TeamInvitationRecord = z.infer<typeof invitationListRow>;
+export type TeamInvitationTokenRecord = z.infer<typeof invitationTokenRow>;
+
+const invitationColumns = `id, brand_id AS "brandId", invitee_user_id AS "inviteeUserId", role,
+  expires_at AS "expiresAt", status, created_at AS "createdAt", replaced_by AS "replacedBy"`;
 
 const grantColumns = `id, user_id AS "userId", brand_id AS "brandId", role, active,
   expires_at AS "expiresAt", revoked_at AS "revokedAt"`;
@@ -83,6 +103,37 @@ export function ownerTransfersByBrandQuery(brandId: string) {
       ORDER BY created_at, id
       LIMIT ?`,
     values: [brandId, teamListLimit] as QueryValue[],
+  };
+}
+
+export function invitationsForInviteeQuery(userId: string) {
+  return {
+    sql: `SELECT ${invitationColumns}
+      FROM team_invitation
+      WHERE invitee_user_id = ?
+      ORDER BY created_at, id
+      LIMIT ?`,
+    values: [userId, teamListLimit] as QueryValue[],
+  };
+}
+
+export function invitationsForBrandQuery(brandId: string) {
+  return {
+    sql: `SELECT ${invitationColumns}
+      FROM team_invitation
+      WHERE brand_id = ?
+      ORDER BY created_at, id
+      LIMIT ?`,
+    values: [brandId, teamListLimit] as QueryValue[],
+  };
+}
+
+export function invitationByTokenHashQuery(tokenHash: string) {
+  return {
+    sql: `SELECT ${invitationColumns}, token_hash AS "tokenHash"
+      FROM team_invitation
+      WHERE token_hash = ?`,
+    values: [tokenHash] as QueryValue[],
   };
 }
 
@@ -283,6 +334,86 @@ export class TeamAccessDao {
       [id],
     );
     return row ? transferRow.parse(row) : null;
+  }
+
+  async invitationsForInvitee(userId: string) {
+    const query = invitationsForInviteeQuery(userId);
+    const rows = await this.query(query.sql, query.values);
+    return rows.map((row) => invitationListRow.parse(row));
+  }
+
+  async invitationsForBrands(brandIds: readonly string[]) {
+    if (!brandIds.length) return [];
+    const rows = await this.query(
+      `SELECT ${invitationColumns}
+       FROM team_invitation
+       WHERE brand_id IN (${brandIds.map(() => "?").join(", ")})
+       ORDER BY created_at, id
+       LIMIT ?`,
+      [...brandIds, teamListLimit],
+    );
+    return rows.map((row) => invitationListRow.parse(row));
+  }
+
+  async invitationById(id: string) {
+    const [row] = await this.query(
+      `SELECT ${invitationColumns} FROM team_invitation WHERE id = ?`,
+      [id],
+    );
+    return row ? invitationListRow.parse(row) : null;
+  }
+
+  async invitationByTokenHash(tokenHash: string) {
+    const query = invitationByTokenHashQuery(tokenHash);
+    const [row] = await this.query(query.sql, query.values);
+    return row ? invitationTokenRow.parse(row) : null;
+  }
+
+  async insertInvitation(row: {
+    id: string;
+    brandId: string;
+    inviteeUserId: string;
+    createdBy: string;
+    tokenHash: string;
+    expiresAt: string;
+    createdAt: string;
+  }) {
+    await this.query(
+      `INSERT INTO team_invitation
+        (id, brand_id, invitee_user_id, created_by, role, token_hash, expires_at, status, created_at, replaced_by)
+       VALUES (?, ?, ?, ?, 'member', ?, ?, 'open', ?, NULL)`,
+      [row.id, row.brandId, row.inviteeUserId, row.createdBy, row.tokenHash, row.expiresAt, row.createdAt],
+    );
+  }
+
+  async claimInvitationResend(id: string, replacementId: string) {
+    const rows = await this.query(
+      `UPDATE team_invitation SET status = 'expired', replaced_by = ?
+       WHERE id = ? AND replaced_by IS NULL AND status IN ('open', 'expired')
+       RETURNING id`,
+      [replacementId, id],
+    );
+    return rows.length === 1;
+  }
+
+  async acceptInvitation(id: string, now: string) {
+    const rows = await this.query(
+      `UPDATE team_invitation SET status = 'accepted'
+       WHERE id = ? AND status = 'open' AND replaced_by IS NULL AND expires_at > ?
+       RETURNING id`,
+      [id, now],
+    );
+    return rows.length === 1;
+  }
+
+  async expireInvitation(id: string, now: string) {
+    const rows = await this.query(
+      `UPDATE team_invitation SET status = 'expired'
+       WHERE id = ? AND status = 'open' AND replaced_by IS NULL AND expires_at <= ?
+       RETURNING id`,
+      [id, now],
+    );
+    return rows.length === 1;
   }
 
   async stopAction(id: string) {
