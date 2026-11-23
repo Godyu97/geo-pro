@@ -1,4 +1,4 @@
-import { ArrowDown, FolderOpen, Leaf, ShieldCheck } from "lucide-react";
+import { ArrowDown, Leaf, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { headers } from "next/headers";
 
@@ -10,6 +10,8 @@ import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
 import { MonitoringCapabilityPanel } from "@/features/capabilities/settings-panel";
 import { brandIntakeDecision } from "@/features/brands/intake";
+import { WorkspaceHomePanel } from "@/features/evidence/workspace-home-panel.tsx";
+import { workspaceEntryHrefs } from "@/features/evidence/workspace-home.ts";
 
 export default async function DashboardPage() {
   // Each protected page checks the session, including RSC navigation requests.
@@ -66,35 +68,11 @@ export default async function DashboardPage() {
           </Button>
         </div>
       </section>
+      <WorkspaceHomePanel ownerId={user.id} />
       <section aria-labelledby="channels-title" className="max-w-3xl space-y-3 rounded-2xl border bg-card p-6">
         <h2 id="channels-title" className="text-lg font-semibold">{t("channelsTitle")}</h2>
         <p className="text-sm leading-7 text-muted-foreground">{t("channelsDescription")}</p>
         <MonitoringCapabilityPanel locale={locale} />
-      </section>
-      <section
-        aria-labelledby="evidence-title"
-        className="rounded-2xl border border-dashed bg-card px-6 py-9 text-center sm:px-9"
-      >
-        <span className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-muted">
-          <FolderOpen
-            className="size-5 text-muted-foreground"
-            aria-hidden="true"
-          />
-        </span>
-        <h2 id="evidence-title" className="font-medium">
-          {t("waitingEvidence")}
-        </h2>
-        <p className="mx-auto mt-2 max-w-lg text-sm leading-7 text-muted-foreground">
-          {intake ? brands("monitorUnavailable") : t("emptyDescription")}
-        </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
-          <Button asChild variant="outline" className="bg-white/70">
-            <Link href="/dashboard/monitoring/overview" prefetch={false}>{t("openOverview")}</Link>
-          </Button>
-          <Button asChild variant="outline" className="bg-white/70">
-            <Link href="/dashboard/assistant" prefetch={false}>{t("openAssistant")}</Link>
-          </Button>
-        </div>
       </section>
       <section id="modules" aria-labelledby="modules-title">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -109,6 +87,7 @@ export default async function DashboardPage() {
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {moduleLinks.map(({ id, title, icon: Icon, description, empty }) => {
             const brandEntry = id === "brands" && Boolean(intake);
+            const href = moduleHref(id);
             return (
               <Card key={id} id={id} className="scroll-mt-6 shadow-none">
                 <CardContent className="p-6">
@@ -124,7 +103,13 @@ export default async function DashboardPage() {
                   <p className="mt-2 min-h-14 text-sm leading-7 text-muted-foreground">
                     {moduleDescription ?? description}
                   </p>
-                  {!brandEntry && <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">{empty}</p>}
+                  {href ? (
+                    <Link href={href} prefetch={false} className="mt-5 inline-flex border-t pt-4 text-sm font-medium underline-offset-4 hover:underline">
+                      {t("openEntry", { title })}
+                    </Link>
+                  ) : !brandEntry ? (
+                    <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">{empty}</p>
+                  ) : null}
                 </CardContent>
               </Card>
             );
@@ -133,4 +118,17 @@ export default async function DashboardPage() {
       </section>
     </div>
   );
+}
+
+function moduleHref(id: string) {
+  switch (id) {
+    case "brands":
+    case "monitoring":
+    case "optimization":
+    case "content":
+    case "reports":
+      return workspaceEntryHrefs[id];
+    default:
+      return null;
+  }
 }

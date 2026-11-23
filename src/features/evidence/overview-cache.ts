@@ -77,6 +77,13 @@ export const overviewPayloadSchema = z.object({
     priorityBucket: z.enum(priorityBuckets),
     href: z.string(),
   })),
+  activeTasks: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    status: z.enum(["doing", "blocked"]),
+    priorityBucket: z.enum(priorityBuckets),
+    href: z.string(),
+  })),
   nextActions: z.array(z.object({
     id: z.string(),
     kind: z.enum(["start_monitoring", "view_answers", "view_tasks"]),

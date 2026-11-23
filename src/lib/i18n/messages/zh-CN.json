@@ -175,7 +175,15 @@
     "channelsDescription": "这里只展示通道能否用于正式运行。未核验或已过期的通道不能启动监测。",
     "workspaceModules": "工作台模块",
     "improving": "逐步建设，持续完善",
-    "unavailable": "尚未开放"
+    "unavailable": "尚未开放",
+    "noBrandTitle": "先建立品牌",
+    "noBrandBody": "当前账号还没有活跃品牌。请先前往品牌资料。这里不展示指标、建议或其他账号的数据。",
+    "goBrands": "前往品牌",
+    "scopeDefault": "当前品牌「{brand}」。默认范围是官方 API，未额外收窄地区、联网或时间。",
+    "metricsTitle": "当前范围的三项指标",
+    "entriesTitle": "从这里继续",
+    "openEntry": "打开{title}",
+    "nextTitle": "下一步"
   },
   "modules": {
     "brandsTitle": "品牌资料",
@@ -1204,7 +1212,18 @@
     "openCapture": "打开采集助手",
     "openProtocols": "查看采样协议",
     "openExplorations": "查看诊断实验",
-    "openDemo": "打开演示空间"
+    "openDemo": "打开演示空间",
+    "priorityUrgent": "紧急",
+    "priorityNormal": "普通",
+    "statusTodo": "待处理",
+    "statusDoing": "进行中",
+    "statusBlocked": "阻塞",
+    "statusImplemented": "已记录修改",
+    "statusRetestPending": "待复测",
+    "statusClosed": "已关闭",
+    "statusDismissed": "已驳回",
+    "activeTasks": "进行中与阻塞",
+    "activeTasksEmpty": "没有进行中或阻塞的任务。"
   },
   "optimization": {
     "title": "优化任务",

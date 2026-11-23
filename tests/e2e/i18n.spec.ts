@@ -153,7 +153,9 @@ for (const locale of ["zh-CN", "en"] as const) {
       {
         await page.goto("/dashboard?filter=保留#monitoring");
         await expect(page.getByRole("heading", { level: 1 })).toContainText(name);
-        await expect(page.getByRole("heading", { name: locale === "en" ? "Waiting for the first real evidence" : "等待第一份真实证据" })).toBeVisible();
+        await expect(page.getByRole("heading", { name: locale === "en" ? "Set up a brand first" : "先建立品牌" })).toBeVisible();
+        await expect(page.getByRole("link", { name: locale === "en" ? "Go to brands" : "前往品牌" }).first()).toBeVisible();
+        await expect(page.getByText("N/A", { exact: true })).toHaveCount(0);
         await expectNoOverflow(page);
         if (width === 375) {
           await page.getByRole("button", { name: locale === "en" ? "Toggle sidebar navigation" : "切换侧边导航" }).click();

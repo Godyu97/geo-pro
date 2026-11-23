@@ -148,17 +148,20 @@ export async function readEvidenceOverview(
   }
   nextActions.push({ id: "answers", kind: "view_answers", href: answerHref });
 
-  const prioritized = await listPrioritizedTasks(db, ownerId, scope.brandId, 3);
-  const suggestions = "error" in prioritized
-    ? []
-    : prioritized.tasks.map((task) => ({
-      id: task.id,
-      title: task.title,
-      status: task.status,
-      priorityBucket: task.priorityBucket,
-      href: `/dashboard/optimization/${task.id}`,
-    }));
-  if (suggestions.length > 0) {
+  const prioritized = await listPrioritizedTasks(db, ownerId, scope.brandId, 1_000);
+  const openTasks = "error" in prioritized ? [] : prioritized.tasks;
+  const toLink = (task: (typeof openTasks)[number]) => ({
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    priorityBucket: task.priorityBucket,
+    href: `/dashboard/optimization/${task.id}`,
+  });
+  const suggestions = openTasks.slice(0, 3).map(toLink);
+  const activeTasks = openTasks
+    .filter((task) => task.status === "doing" || task.status === "blocked")
+    .map(toLink);
+  if (suggestions.length > 0 || activeTasks.length > 0) {
     nextActions.push({ id: "tasks", kind: "view_tasks", href: tasksHref });
   }
 
@@ -176,6 +179,7 @@ export async function readEvidenceOverview(
     ...metrics,
     answers,
     suggestions,
+    activeTasks,
     nextActions: nextActions.slice(0, 3),
     demo: false,
   });

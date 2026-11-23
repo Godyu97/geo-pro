@@ -175,7 +175,15 @@
     "channelsDescription": "This shows whether a channel can start a formal run. Unverified or expired channels stay unable to start monitoring.",
     "workspaceModules": "Workspace modules",
     "improving": "Building and improving step by step",
-    "unavailable": "Not yet available"
+    "unavailable": "Not yet available",
+    "noBrandTitle": "Set up a brand first",
+    "noBrandBody": "This account has no active brand. Go to brand information first. Metrics, suggestions, and other accounts' data stay hidden.",
+    "goBrands": "Go to brands",
+    "scopeDefault": "Current brand “{brand}”. The default scope is the official API track, with no extra region, network, or time filter.",
+    "metricsTitle": "Three metrics for the current scope",
+    "entriesTitle": "Continue from here",
+    "openEntry": "Open {title}",
+    "nextTitle": "Next step"
   },
   "modules": {
     "brandsTitle": "Brand information",
@@ -1204,7 +1212,18 @@
     "openCapture": "Open capture helper",
     "openProtocols": "View sampling protocols",
     "openExplorations": "View diagnostic explorations",
-    "openDemo": "Open demo space"
+    "openDemo": "Open demo space",
+    "priorityUrgent": "Urgent",
+    "priorityNormal": "Normal",
+    "statusTodo": "To do",
+    "statusDoing": "In progress",
+    "statusBlocked": "Blocked",
+    "statusImplemented": "Changes recorded",
+    "statusRetestPending": "Awaiting retest",
+    "statusClosed": "Closed",
+    "statusDismissed": "Dismissed",
+    "activeTasks": "In progress and blocked",
+    "activeTasksEmpty": "There are no in-progress or blocked tasks."
   },
   "optimization": {
     "title": "Optimization tasks",

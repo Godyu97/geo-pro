@@ -3,57 +3,18 @@ import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { formatNumber, formatPercent } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
-import { getLocale, getTranslator } from "@/lib/i18n/server";
+import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "../brands/dao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TaskSummaryList } from "../optimization/task-summary.tsx";
+import { MetricCard } from "./metric-card.tsx";
 import { readEvidenceOverview } from "./overview-commands";
 import { overviewScopeSchema } from "./overview-contracts";
-import type { RateBreakdown } from "./metrics";
 
 function formatRate(locale: Locale, value: number | null) {
   if (value == null) return "N/A";
   return formatPercent(locale, value);
-}
-
-function MetricCard({
-  title,
-  metric,
-  locale,
-  equalWeightHint,
-  pooledHint,
-  unknownRatioLabel,
-  metricNa,
-  officialNa,
-}: {
-  title: string;
-  metric: RateBreakdown;
-  locale: Locale;
-  equalWeightHint: string;
-  pooledHint: string;
-  unknownRatioLabel: string;
-  metricNa: string;
-  officialNa: string;
-}) {
-  return (
-    <section className="rounded-2xl border bg-card p-5 shadow-none">
-      <h3 className="text-sm font-medium">{title}</h3>
-      <p className="mt-3 text-3xl font-semibold tracking-tight">
-        {metric.status === "na" ? "N/A" : formatRate(locale, metric.equalWeight)}
-      </p>
-      <p className="mt-2 text-xs leading-6 text-muted-foreground">
-        {metric.status === "na"
-          ? (metric.reason === "official-website-not-applicable" ? officialNa : metricNa)
-          : equalWeightHint}
-      </p>
-      {metric.status === "ready" && metric.pooled.rate != null ? (
-        <p className="mt-2 text-xs text-muted-foreground">{pooledHint}</p>
-      ) : null}
-      {metric.unknownRatio != null ? (
-        <p className="mt-1 text-xs text-muted-foreground">{unknownRatioLabel}</p>
-      ) : null}
-    </section>
-  );
 }
 
 export async function generateMetadata() {
@@ -71,6 +32,7 @@ export default async function EvidenceOverviewPage({
   const locale = await getLocale();
   const t = await getTranslator("evidenceOverview");
   const te = await getTranslator("evidence");
+  const labels = getMessages(locale).evidenceOverview;
   const connection = getConnection();
   const brands = new BrandDao(connection);
   const active = await brands.active(session.user.id);
@@ -197,7 +159,11 @@ export default async function EvidenceOverviewPage({
             {overview.nextActions.map((action) => (
               <Button key={action.id} asChild variant={action.kind === "start_monitoring" ? "default" : "outline"}>
                 <Link href={action.href} prefetch={false}>
-                  {action.kind === "start_monitoring" ? t("startMonitoring") : t("viewAnswers")}
+                  {action.kind === "start_monitoring"
+                    ? t("startMonitoring")
+                    : action.kind === "view_tasks"
+                      ? t("viewTasks")
+                      : t("viewAnswers")}
                 </Link>
               </Button>
             ))}
@@ -278,24 +244,12 @@ export default async function EvidenceOverviewPage({
             </Link>
           </Button>
         </div>
-        {overview.suggestions.length === 0 ? (
-          <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">
-            {t("suggestionsEmpty")}
-          </p>
-        ) : (
-          <ul className="space-y-3">
-            {overview.suggestions.map((item) => (
-              <li key={item.id} className="rounded-xl border px-4 py-3 text-sm">
-                <Link href={item.href} prefetch={false} className="font-medium underline-offset-4 hover:underline">
-                  {item.title}
-                </Link>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {item.priorityBucket} · {item.status}
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
+        <TaskSummaryList items={overview.suggestions} messages={labels} empty={t("suggestionsEmpty")} />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">{t("activeTasks")}</h2>
+        <TaskSummaryList items={overview.activeTasks} messages={labels} empty={t("activeTasksEmpty")} />
       </section>
     </div>
   );
