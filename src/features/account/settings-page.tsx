@@ -104,6 +104,10 @@ export default async function AccountSettingsPage() {
             <h2 id="notification-endpoints-heading" className="font-medium">{t("notificationEndpoints")}</h2>
             <Link href="/dashboard/settings/notifications" prefetch={false} className="text-sm underline underline-offset-4">{t("openNotificationEndpoints")}</Link>
           </section>
+          <section id="delegations" aria-labelledby="delegations-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
+            <h2 id="delegations-heading" className="font-medium">{t("delegations")}</h2>
+            <Link href="/dashboard/settings/delegations" prefetch={false} className="text-sm underline underline-offset-4">{t("openDelegations")}</Link>
+          </section>
           <section id="data-management" aria-labelledby="data-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
             <h2 id="data-heading" className="font-medium">{t("dataManagement")}</h2>
             <DataExportPanel userId={user.id} locale={locale} />
