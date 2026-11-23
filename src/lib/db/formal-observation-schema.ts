@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, pgTable, text } from "drizzle-orm/pg-core";
+import { check, index, integer, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
 import { brand } from "./brand-schema";
 
 // A frozen question-set id is stored as given. Checkpoint rows are append-only so an
@@ -69,4 +69,23 @@ export const formalConfounder = pgTable("formal_confounder", {
     and length(trim(${table.note})) between 1 and 400
     and length(${table.ownerId}) between 1 and 128
     and length(${table.recordedAt}) between 20 and 40`),
+]);
+
+// A control page is registered before any checkpoint. The label stays observation
+// so a later comparison cannot be stored as a causal experiment.
+export const formalControlPage = pgTable("formal_control_page", {
+  id: text("id").primaryKey(),
+  observationId: text("observation_id").notNull().references(() => formalObservation.id, { onDelete: "cascade" }),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  pageKey: text("page_key").notNull(),
+  label: text("label").notNull(),
+  registeredAt: text("registered_at").notNull(),
+}, (table) => [
+  uniqueIndex("formal_control_page_page_uidx").on(table.observationId, table.pageKey),
+  index("formal_control_page_observation_idx").on(table.ownerId, table.observationId, table.registeredAt, table.id),
+  check("formal_control_page_state_check", sql`${table.label} = 'observation'
+    and length(trim(${table.pageKey})) between 1 and 300
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.registeredAt}) between 20 and 40`),
 ]);

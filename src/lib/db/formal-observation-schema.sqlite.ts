@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { brand } from "./brand-schema.sqlite";
 
 export const formalObservation = sqliteTable("formal_observation", {
@@ -65,4 +65,21 @@ export const formalConfounder = sqliteTable("formal_confounder", {
     and length(trim(${table.note})) between 1 and 400
     and length(${table.ownerId}) between 1 and 128
     and length(${table.recordedAt}) between 20 and 40`),
+]);
+
+export const formalControlPage = sqliteTable("formal_control_page", {
+  id: text("id").primaryKey(),
+  observationId: text("observation_id").notNull().references(() => formalObservation.id, { onDelete: "cascade" }),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  pageKey: text("page_key").notNull(),
+  label: text("label").notNull(),
+  registeredAt: text("registered_at").notNull(),
+}, (table) => [
+  uniqueIndex("formal_control_page_page_uidx").on(table.observationId, table.pageKey),
+  index("formal_control_page_observation_idx").on(table.ownerId, table.observationId, table.registeredAt, table.id),
+  check("formal_control_page_state_check", sql`${table.label} = 'observation'
+    and length(trim(${table.pageKey})) between 1 and 300
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.registeredAt}) between 20 and 40`),
 ]);

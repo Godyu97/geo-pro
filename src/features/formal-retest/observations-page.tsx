@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "../brands/dao";
-import { appendFormalConfounderAction, createFormalObservationAction, recordFormalCheckpointAction } from "./actions";
+import { appendFormalConfounderAction, createFormalObservationAction, recordFormalCheckpointAction, registerFormalControlAction } from "./actions";
 import { listFormalObservations, type FormalObservationView } from "./commands";
 
-const knownErrors = ["NOT_FOUND", "INVALID_INPUT", "THRESHOLD_REJECTED"] as const;
+const knownErrors = ["NOT_FOUND", "INVALID_INPUT", "THRESHOLD_REJECTED", "CHECKPOINT_EXISTS"] as const;
 const inputClass = "h-10 w-full rounded-md border bg-background px-3";
 
 function isKnownError(value: string | undefined): value is (typeof knownErrors)[number] {
@@ -112,6 +112,36 @@ export default async function FormalObservationsPage({
           </div>
           <p className="text-sm tabular-nums">{t("effectiveLine", { date: observation.effectiveOn })}</p>
           <p className="text-sm tabular-nums">{t("frozenLine", { count: digits(observation.frozenNonBrandCount) })}</p>
+
+          <div className="space-y-4">
+            <h3 className="text-base font-semibold">{t("controlsHeading")}</h3>
+            <p className="text-sm leading-7 text-muted-foreground">{t("controlsHint")}</p>
+            {observation.checkpoints.length === 0 ? (
+              <form action={registerFormalControlAction} className="grid gap-4 sm:grid-cols-2">
+                <input type="hidden" name="observationId" value={observation.id} />
+                <input type="hidden" name="label" value="observation" />
+                <label className="space-y-2 text-sm sm:col-span-2">
+                  <span>{t("pageKey")}</span>
+                  <input name="pageKey" required maxLength={300} className={inputClass} />
+                  <span className="block text-muted-foreground">{t("pageKeyHint")}</span>
+                </label>
+                <div>
+                  <Button type="submit">{t("saveControl")}</Button>
+                </div>
+              </form>
+            ) : (
+              <p className="text-sm leading-7 text-muted-foreground">{t("controlsClosed")}</p>
+            )}
+            {observation.controls.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("noControls")}</p>
+            ) : observation.controls.map((control) => (
+              <article key={control.id} className="space-y-2 rounded-xl border border-dashed p-4">
+                <p className="text-sm font-medium">{t("controlLabelObservation")}</p>
+                <p className="text-sm leading-7 break-words">{control.pageKey}</p>
+                <p className="text-sm tabular-nums">{t("registeredLine", { time: control.registeredAt })}</p>
+              </article>
+            ))}
+          </div>
 
           <form action={recordFormalCheckpointAction} className="grid gap-4 sm:grid-cols-2">
             <h3 className="text-base font-semibold sm:col-span-2">{t("checkpointTitle")}</h3>

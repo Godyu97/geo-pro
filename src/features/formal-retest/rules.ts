@@ -45,6 +45,23 @@ export function recordConfounders(input: { factors: readonly string[]; threshold
   };
 }
 
+export const controlLabel = "observation" as const;
+
+/** A control page is observational. Registration does not change a checkpoint mode. */
+export function registerControlPage(input: {
+  label: string;
+  checkpointCount: number;
+  checkpointMode: "progress" | "formal" | "exploratory" | null;
+}) {
+  if (input.label !== controlLabel) {
+    return { accepted: false as const, reason: "label" as const, checkpointMode: input.checkpointMode };
+  }
+  if (input.checkpointCount > 0) {
+    return { accepted: false as const, reason: "checkpoint" as const, checkpointMode: input.checkpointMode };
+  }
+  return { accepted: true as const, label: controlLabel, checkpointMode: input.checkpointMode };
+}
+
 export function formalComparison(input: { comparableQuestions: number; frozenQuestions: number; excluded: readonly string[] }) {
   const ratio = input.frozenQuestions === 0 ? 0 : input.comparableQuestions / input.frozenQuestions;
   return {

@@ -11,8 +11,10 @@ import {
   appendFormalConfounder,
   createFormalObservation,
   listFormalConfounders,
+  listFormalControls,
   listFormalObservations,
   recordFormalCheckpoint,
+  registerFormalControl,
 } from "./commands.ts";
 import {
   createFormalObservationSchema,
@@ -141,6 +143,41 @@ export async function formalConfounderCreateResponse(request: Request, observati
   } catch {
     const traceId = randomUUID();
     console.error("formal-confounder-create-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function formalControlListResponse(request: Request, observationId: string) {
+  const gate = await requireSameOrigin(request);
+  if ("error" in gate) return gate.error;
+  const id = brandIdSchema.safeParse(observationId);
+  if (!id.success) return failure("INVALID_INPUT");
+  try {
+    if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
+    const result = await listFormalControls(getConnection(), gate.session.session.user.id, id.data);
+    if ("error" in result && result.error) return failure(result.error);
+    return json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("formal-control-list-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function formalControlCreateResponse(request: Request, observationId: string) {
+  const gate = await requireSameOrigin(request);
+  if ("error" in gate) return gate.error;
+  const id = brandIdSchema.safeParse(observationId);
+  if (!id.success) return failure("INVALID_INPUT");
+  try {
+    if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
+    const body = await readBoundedJson(request, 4096);
+    const result = await registerFormalControl(getConnection(), gate.session.session.user.id, id.data, body);
+    if ("error" in result && result.error) return failure(result.error);
+    return json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("formal-control-create-unavailable", { traceId });
     return failure("SERVICE_UNAVAILABLE", traceId);
   }
 }

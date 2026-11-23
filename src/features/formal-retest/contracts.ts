@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { brandIdSchema } from "../brands/contracts.ts";
-import { confounderFactors, type Checkpoint } from "./rules.ts";
+import { confounderFactors, controlLabel, type Checkpoint } from "./rules.ts";
 
 export const checkpoints = ["d7", "d14", "d28"] as const satisfies readonly Checkpoint[];
 export const observationStatuses = ["observing", "checkpoint_due"] as const;
@@ -41,12 +41,23 @@ export const appendFormalConfounderSchema = z.strictObject({
   note: z.string().trim().min(1).max(400).refine((value) => value.isWellFormed() && !value.includes("\0")),
 });
 
+export const controlPageKeySchema = z.string().trim().refine((value) => {
+  const length = [...value].length;
+  return length >= 1 && length <= 300 && value.isWellFormed() && !/[\u0000-\u001f\u007f]/.test(value);
+});
+
+export const registerFormalControlSchema = z.strictObject({
+  pageKey: controlPageKeySchema,
+  label: z.literal(controlLabel),
+});
+
 export const formalObservationErrors = {
   SESSION_REQUIRED: 401,
   FORBIDDEN: 403,
   NOT_FOUND: 404,
   INVALID_INPUT: 400,
   THRESHOLD_REJECTED: 409,
+  CHECKPOINT_EXISTS: 409,
   SERVICE_UNAVAILABLE: 503,
 } as const;
 
@@ -54,3 +65,4 @@ export type FormalObservationError = keyof typeof formalObservationErrors;
 export type CreateFormalObservationInput = z.infer<typeof createFormalObservationSchema>;
 export type RecordFormalCheckpointInput = z.infer<typeof recordFormalCheckpointSchema>;
 export type AppendFormalConfounderInput = z.infer<typeof appendFormalConfounderSchema>;
+export type RegisterFormalControlInput = z.infer<typeof registerFormalControlSchema>;

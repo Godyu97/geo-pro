@@ -1641,6 +1641,20 @@ CREATE TABLE "formal_confounder" (
     and length("formal_confounder"."recorded_at") between 20 and 40)
 );
 
+CREATE TABLE "formal_control_page" (
+	"id" text PRIMARY KEY NOT NULL,
+	"observation_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"page_key" text NOT NULL,
+	"label" text NOT NULL,
+	"registered_at" text NOT NULL,
+	CONSTRAINT "formal_control_page_state_check" CHECK ("formal_control_page"."label" = 'observation'
+    and length(trim("formal_control_page"."page_key")) between 1 and 300
+    and length("formal_control_page"."owner_id") between 1 and 128
+    and length("formal_control_page"."registered_at") between 20 and 40)
+);
+
 CREATE TABLE "formal_observation" (
 	"id" text PRIMARY KEY NOT NULL,
 	"brand_id" text NOT NULL,
@@ -2760,6 +2774,8 @@ ALTER TABLE "formal_checkpoint" ADD CONSTRAINT "formal_checkpoint_observation_id
 ALTER TABLE "formal_checkpoint" ADD CONSTRAINT "formal_checkpoint_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "formal_confounder" ADD CONSTRAINT "formal_confounder_observation_id_formal_observation_id_fk" FOREIGN KEY ("observation_id") REFERENCES "public"."formal_observation"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "formal_confounder" ADD CONSTRAINT "formal_confounder_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "formal_control_page" ADD CONSTRAINT "formal_control_page_observation_id_formal_observation_id_fk" FOREIGN KEY ("observation_id") REFERENCES "public"."formal_observation"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "formal_control_page" ADD CONSTRAINT "formal_control_page_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "formal_observation" ADD CONSTRAINT "formal_observation_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "assistant_plan" ADD CONSTRAINT "assistant_plan_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "assistant_plan_item" ADD CONSTRAINT "assistant_plan_item_plan_id_assistant_plan_id_fk" FOREIGN KEY ("plan_id") REFERENCES "public"."assistant_plan"("id") ON DELETE cascade ON UPDATE no action;
@@ -3002,6 +3018,8 @@ CREATE UNIQUE INDEX "entity_disambiguation_next_uidx" ON "entity_disambiguation"
 CREATE INDEX "entity_disambiguation_owner_idx" ON "entity_disambiguation" USING btree ("owner_id","brand_id","created_at","id");
 CREATE INDEX "formal_checkpoint_observation_idx" ON "formal_checkpoint" USING btree ("owner_id","observation_id","created_at","id");
 CREATE INDEX "formal_confounder_observation_idx" ON "formal_confounder" USING btree ("owner_id","observation_id","recorded_at","id");
+CREATE UNIQUE INDEX "formal_control_page_page_uidx" ON "formal_control_page" USING btree ("observation_id","page_key");
+CREATE INDEX "formal_control_page_observation_idx" ON "formal_control_page" USING btree ("owner_id","observation_id","registered_at","id");
 CREATE INDEX "formal_observation_owner_idx" ON "formal_observation" USING btree ("owner_id","brand_id","created_at","id");
 CREATE INDEX "assistant_plan_owner_idx" ON "assistant_plan" USING btree ("owner_id","brand_id","created_at","id");
 CREATE UNIQUE INDEX "assistant_plan_item_position_uidx" ON "assistant_plan_item" USING btree ("plan_id","position");

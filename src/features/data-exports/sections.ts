@@ -124,6 +124,8 @@ const sections: Record<Exclude<ExportScope, "profile" | "brands">, Slice[]> = {
       src.conclusion AS "conclusion", src.evaluated_on AS "evaluatedOn", src.created_at AS "createdAt"`),
     byId("formalConfounders", "formal_confounder", `src.observation_id AS "observationId", src.factor AS "factor",
       src.note AS "note", src.recorded_at AS "recordedAt"`),
+    byId("formalControlPages", "formal_control_page", `src.observation_id AS "observationId", src.page_key AS "pageKey",
+      src.label AS "label", src.registered_at AS "registeredAt"`),
     byId("businessLeads", "business_lead", `src.event_id AS "eventId", src.primary_class AS "primaryClass", src.created_at AS "createdAt"`),
     byId("businessLeadEvidence", "business_lead_evidence", `src.lead_id AS "leadId", src.category AS "category",
       src.position AS "position", src.created_at AS "createdAt"`),

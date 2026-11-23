@@ -54,11 +54,22 @@ const confounderRow = z.object({
   recordedAt: z.iso.datetime({ precision: 3 }),
 });
 
+const controlRow = z.object({
+  id: brandIdSchema,
+  observationId: brandIdSchema,
+  brandId: brandIdSchema,
+  pageKey: z.string().trim().min(1).max(300),
+  label: z.literal("observation"),
+  registeredAt: z.iso.datetime({ precision: 3 }),
+});
+
 export type FormalObservationRecord = z.infer<typeof observationRow>;
 export type FormalCheckpointRecord = z.infer<typeof checkpointRow>;
 export type FormalCheckpointInsert = FormalCheckpointRecord & { ownerId: string };
 export type FormalConfounderRecord = z.infer<typeof confounderRow>;
 export type FormalConfounderInsert = FormalConfounderRecord & { ownerId: string };
+export type FormalControlRecord = z.infer<typeof controlRow>;
+export type FormalControlInsert = FormalControlRecord & { ownerId: string };
 
 const observationColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", frozen_set_id AS "frozenSetId",
   effective_on AS "effectiveOn", frozen_non_brand_count AS "frozenNonBrandCount", status,
@@ -70,6 +81,9 @@ const checkpointColumns = `id, observation_id AS "observationId", brand_id AS "b
 
 const confounderColumns = `id, observation_id AS "observationId", brand_id AS "brandId", factor, note,
   recorded_at AS "recordedAt"`;
+
+const controlColumns = `id, observation_id AS "observationId", brand_id AS "brandId", page_key AS "pageKey",
+  label, registered_at AS "registeredAt"`;
 
 export function formalObservationListQuery(ownerId: string, brandId: string) {
   return {
@@ -96,6 +110,16 @@ export function formalConfounderListQuery(ownerId: string, observationIds: reado
     sql: `SELECT ${confounderColumns} FROM formal_confounder
       WHERE owner_id = ? AND observation_id IN (${observationIds.map(() => "?").join(", ")})
       ORDER BY recorded_at ASC, id ASC`,
+    values: [ownerId, ...observationIds] as QueryValue[],
+  };
+}
+
+export function formalControlListQuery(ownerId: string, observationIds: readonly string[]) {
+  if (observationIds.length === 0) return null;
+  return {
+    sql: `SELECT ${controlColumns} FROM formal_control_page
+      WHERE owner_id = ? AND observation_id IN (${observationIds.map(() => "?").join(", ")})
+      ORDER BY registered_at ASC, id ASC`,
     values: [ownerId, ...observationIds] as QueryValue[],
   };
 }
@@ -190,6 +214,39 @@ export class FormalObservationDao {
     if (!query) return [];
     const rows = await queryWithParameters(this.db, query.sql, query.values);
     return z.array(confounderRow).parse(rows);
+  }
+
+  async insertControls(rows: readonly FormalControlInsert[]) {
+    if (rows.length === 0) return;
+    const values: QueryValue[] = [];
+    const groups = rows.map((row) => {
+      values.push(row.id, row.observationId, row.brandId, row.ownerId, row.pageKey, row.label, row.registeredAt);
+      return "(?, ?, ?, ?, ?, ?, ?)";
+    });
+    await queryWithParameters(
+      this.db,
+      `INSERT INTO formal_control_page (
+        id, observation_id, brand_id, owner_id, page_key, label, registered_at
+      ) VALUES ${groups.join(", ")}`,
+      values,
+    );
+  }
+
+  async controlByPage(ownerId: string, observationId: string, pageKey: string) {
+    const [row] = await queryWithParameters(
+      this.db,
+      `SELECT ${controlColumns} FROM formal_control_page
+        WHERE owner_id = ? AND observation_id = ? AND page_key = ? LIMIT 1`,
+      [ownerId, observationId, pageKey],
+    );
+    return row ? controlRow.parse(row) : null;
+  }
+
+  async controlsFor(ownerId: string, observationIds: readonly string[]) {
+    const query = formalControlListQuery(ownerId, observationIds);
+    if (!query) return [];
+    const rows = await queryWithParameters(this.db, query.sql, query.values);
+    return z.array(controlRow).parse(rows);
   }
 
   async markCheckpointDue(ownerId: string, observationId: string, updatedAt: string) {

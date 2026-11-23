@@ -104,6 +104,7 @@ export class PurgeDao {
     await this.query("DELETE FROM prompt_reference WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM prompt_set WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM prompt_draft WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM formal_control_page WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM formal_confounder WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM formal_checkpoint WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM formal_observation WHERE brand_id = ?", [brandId]);
