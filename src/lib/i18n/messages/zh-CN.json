@@ -1262,6 +1262,8 @@
     "briefDetail": "Brief 详情",
     "batchDetail": "批次详情",
     "description": "确认 Brief 后，用隔离模板生成有事实绑定的待审草稿；不调用付费模型。",
+    "relatedEntries": "相关入口",
+    "gapCount": "补证 {count}",
     "sourcesLink": "资料原件",
     "templatesLink": "内容模板",
     "assetsLink": "图片素材",

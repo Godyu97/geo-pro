@@ -1262,6 +1262,8 @@
     "briefDetail": "Brief detail",
     "batchDetail": "Batch detail",
     "description": "Confirm briefs, then fill isolated templates into fact-bound drafts for review—no paid model calls.",
+    "relatedEntries": "Related entries",
+    "gapCount": "Gaps {count}",
     "sourcesLink": "Source originals",
     "templatesLink": "Content templates",
     "assetsLink": "Image assets",

@@ -17,6 +17,16 @@ test("workspace shell keeps a single content landmark", () => {
   assert.match(layout, /id="main-content"/);
 });
 
+test("content entry keeps the task and related actions in the workspace canvas", () => {
+  const content = read("../../src/features/content/list-page.tsx");
+  assert.doesNotMatch(content, /<main\b/);
+  assert.match(content, /aria-label=\{relatedLabel\}/);
+  assert.match(content, /break-words/);
+  assert.match(content, /relatedEntries/);
+  assert.match(content, /gapCount/);
+  assert.doesNotMatch(content, /gaps=/);
+});
+
 test("report entry stays inside the workspace canvas", () => {
   const reports = read("../../src/features/reports/list-page.tsx");
   assert.doesNotMatch(reports, /<main\b/);

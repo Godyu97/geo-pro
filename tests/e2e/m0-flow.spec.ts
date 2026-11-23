@@ -445,6 +445,18 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
               await expect(entry).toBeFocused();
             }
           }
+          if (path === "/dashboard/content") {
+            await expect(page.locator("main")).toHaveCount(1);
+            await expect(page.getByRole("heading", { name: locale === "en" ? "Content plans and drafts" : "内容计划与草稿" })).toBeVisible();
+            await expect(page.getByRole("navigation", { name: locale === "en" ? "Related entries" : "相关入口" })).toBeVisible();
+            await expect(page.getByRole("button", { name: locale === "en" ? "Save draft" : "保存草稿" })).toBeVisible();
+            await expect(page.getByText(locale === "en" ? /Gaps \d+/ : /补证 \d+/).first()).toBeVisible();
+            if (width === 375) {
+              const entry = page.getByRole("link", { name: locale === "en" ? "Content calendar" : "内容日历" });
+              await entry.focus();
+              await expect(entry).toBeFocused();
+            }
+          }
         }
       }
       await page.keyboard.press("Tab");
@@ -459,6 +471,18 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     const outsiderPage = await outsider.newPage();
     await outsiderPage.goto("/dashboard");
     await expect(outsiderPage).toHaveURL(/\/dashboard$/);
+    await outsiderPage.setViewportSize({ width: 375, height: 900 });
+    await outsiderPage.goto("/dashboard/content");
+    await expect(outsiderPage.getByRole("heading", { name: "内容计划与草稿", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("link", { name: "前往品牌", exact: true })).toBeVisible();
+    await expect(outsiderPage.locator("main")).toHaveCount(1);
+    await expectNoOverflow(outsiderPage);
+    await outsider.addCookies([{ name: "geo-locale", value: "en", url: baseURL }]);
+    await outsiderPage.goto("/dashboard/content");
+    await expect(outsiderPage.getByRole("heading", { name: "Content plans and drafts", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("link", { name: "Go to brands", exact: true })).toBeVisible();
+    await expectNoOverflow(outsiderPage);
+    await outsider.addCookies([{ name: "geo-locale", value: "zh-CN", url: baseURL }]);
     // The run route has a loading boundary, so the document status is committed
     // before notFound() replaces the streamed page. Denial is the not-found UI.
     await outsiderPage.goto(`/dashboard/monitoring/runs/${runId}`);
