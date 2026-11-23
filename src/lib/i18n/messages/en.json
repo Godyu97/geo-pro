@@ -378,6 +378,8 @@
     "openNotificationEndpoints": "Manage notification endpoints",
     "delegations": "Brand delegations",
     "openDelegations": "Manage agency delegations",
+    "serviceOrders": "Quote orders",
+    "openServiceOrders": "Register a quote order",
     "loading": "Loading account settings…"
   },
   "dataExports": {
@@ -2256,5 +2258,34 @@
     "INVALID_INPUT": "Check the organization ID, expiry time, and evidence identifiers. Expiry must be a future UTC time.",
     "CONFLICT": "That member or brand delegation is already registered.",
     "SERVICE_UNAVAILABLE": "Brand delegations are temporarily unavailable. Try again shortly."
+  },
+  "orders": {
+    "title": "Quote orders",
+    "description": "A brand owner registers one quote order. Without a payment connection, a quoted order stays awaiting payment and an unquoted order stays a draft.",
+    "backSettings": "Back to account settings",
+    "fixtureNote": "Local checks use a synthetic brand and a synthetic amount. Card numbers, payment credentials, and collection receipts are not stored.",
+    "orderTitle": "Register an order",
+    "brand": "Brand",
+    "quoted": "Quoted",
+    "unquoted": "Not quoted",
+    "quotedHint": "A checked order stays awaiting payment. An unchecked order stays a draft.",
+    "amount": "Amount (minor units)",
+    "currency": "Currency",
+    "currencyHint": "Use a three-letter uppercase code, for example CNY. The amount and currency stay the same in every interface language.",
+    "registerOrder": "Register order",
+    "saving": "Saving…",
+    "saved": "Saved as a draft or awaiting payment.",
+    "empty": "There are no orders yet.",
+    "noBrands": "There is no brand available for an order.",
+    "myOrders": "My orders",
+    "statusDraft": "Draft",
+    "statusAwaitingPayment": "Awaiting payment",
+    "createdAt": "Recorded at",
+    "loading": "Loading quote orders…",
+    "SESSION_REQUIRED": "Sign in before registering a quote order.",
+    "FORBIDDEN": "This session cannot register that order.",
+    "NOT_FOUND": "That brand or order was not found.",
+    "INVALID_INPUT": "Check the brand, amount, and three-letter currency code. Do not declare a payment connection or an already-paid state.",
+    "SERVICE_UNAVAILABLE": "Quote orders are temporarily unavailable. Try again shortly."
   }
 }

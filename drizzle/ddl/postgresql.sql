@@ -1995,6 +1995,29 @@ CREATE TABLE "delegation_action" (
     and length("delegation_action"."created_at") between 20 and 40)
 );
 
+CREATE TABLE "service_order" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"quoted" integer NOT NULL,
+	"status" text NOT NULL,
+	"paid" integer NOT NULL,
+	"amount" integer NOT NULL,
+	"currency" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "service_order_state_check" CHECK ("service_order"."paid" = 0
+    and "service_order"."quoted" in (0, 1)
+    and "service_order"."status" in ('draft', 'awaiting_payment')
+    and (("service_order"."quoted" = 1 and "service_order"."status" = 'awaiting_payment')
+      or ("service_order"."quoted" = 0 and "service_order"."status" = 'draft'))
+    and "service_order"."amount" between 0 and 2000000000
+    and "service_order"."currency" ~ '^[A-Z]{3}$'
+    and length("service_order"."id") = 36
+    and length("service_order"."brand_id") = 36
+    and length("service_order"."owner_id") between 1 and 128
+    and length("service_order"."created_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -2141,6 +2164,8 @@ ALTER TABLE "notification_endpoint" ADD CONSTRAINT "notification_endpoint_brand_
 ALTER TABLE "agency_membership" ADD CONSTRAINT "agency_membership_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_delegation" ADD CONSTRAINT "brand_delegation_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "delegation_action" ADD CONSTRAINT "delegation_action_delegation_id_brand_delegation_id_fk" FOREIGN KEY ("delegation_id") REFERENCES "public"."brand_delegation"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "service_order" ADD CONSTRAINT "service_order_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "service_order" ADD CONSTRAINT "service_order_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -2315,3 +2340,4 @@ CREATE INDEX "agency_membership_user_idx" ON "agency_membership" USING btree ("u
 CREATE UNIQUE INDEX "brand_delegation_pair_uidx" ON "brand_delegation" USING btree ("organization_id","brand_id");
 CREATE INDEX "brand_delegation_org_idx" ON "brand_delegation" USING btree ("organization_id","brand_id");
 CREATE INDEX "delegation_action_delegation_idx" ON "delegation_action" USING btree ("delegation_id","status");
+CREATE INDEX "service_order_owner_idx" ON "service_order" USING btree ("owner_id","created_at","id");

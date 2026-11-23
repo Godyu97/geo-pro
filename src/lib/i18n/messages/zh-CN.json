@@ -378,6 +378,8 @@
     "openNotificationEndpoints": "管理通知端点",
     "delegations": "品牌委托",
     "openDelegations": "管理代理委托",
+    "serviceOrders": "报价订单",
+    "openServiceOrders": "登记报价订单",
     "loading": "正在加载账户设置…"
   },
   "dataExports": {
@@ -2256,5 +2258,34 @@
     "INVALID_INPUT": "请检查组织标识、到期时间和证据标识。到期时间需要是尚未过去的 UTC 时间。",
     "CONFLICT": "该成员或该品牌委托已经登记。",
     "SERVICE_UNAVAILABLE": "品牌委托暂时不可用，请稍后重试。"
+  },
+  "orders": {
+    "title": "报价订单",
+    "description": "品牌负责人登记一份报价订单。没有支付连接时，已报价的订单保持待支付，未报价的订单保持草稿。",
+    "backSettings": "返回账户设置",
+    "fixtureNote": "本地验收使用合成品牌和合成金额。不保存卡号、支付凭据或收款回执。",
+    "orderTitle": "登记订单",
+    "brand": "品牌",
+    "quoted": "已报价",
+    "unquoted": "未报价",
+    "quotedHint": "勾选后订单保持待支付。不勾选则保持草稿。",
+    "amount": "金额（最小货币单位）",
+    "currency": "币种",
+    "currencyHint": "使用三位大写字母代码，例如 CNY。金额和币种不随界面语言改变。",
+    "registerOrder": "登记订单",
+    "saving": "正在保存…",
+    "saved": "已登记为草稿或待支付。",
+    "empty": "当前没有订单。",
+    "noBrands": "当前没有可登记订单的品牌。",
+    "myOrders": "我的订单",
+    "statusDraft": "草稿",
+    "statusAwaitingPayment": "待支付",
+    "createdAt": "记录时间",
+    "loading": "正在加载报价订单…",
+    "SESSION_REQUIRED": "请先登录，再登记报价订单。",
+    "FORBIDDEN": "当前会话不能登记该订单。",
+    "NOT_FOUND": "找不到该品牌或订单。",
+    "INVALID_INPUT": "请检查品牌、金额和三位币种代码。不要声明已开通支付，也不要写入已支付状态。",
+    "SERVICE_UNAVAILABLE": "报价订单暂时不可用，请稍后重试。"
   }
 }
