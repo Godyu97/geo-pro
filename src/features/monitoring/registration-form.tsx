@@ -60,9 +60,15 @@ export function RegistrationForm({
   function edit(update: () => void) {
     update();
     setPreview(null);
+    setStatus(null);
   }
 
   async function submit(action: "preview" | "accept") {
+    if (action === "accept" && !preview) return;
+    if (action === "preview" && track === "model_api" && !/^\d+$/.test(upper.trim())) {
+      setStatus(t("NO_TRUSTED_CEILING"));
+      return;
+    }
     setPending(true);
     setStatus(null);
     const ceiling = track === "model_api" ? { currency, upperMinor: Number(upper) } : null;
@@ -85,6 +91,7 @@ export function RegistrationForm({
       };
       if (!response.ok) {
         const code = payload.next ? nextMessage[payload.next] : payload.error?.code;
+        if (payload.next === "refresh-preview") setPreview(null);
         setStatus(code && code in messages ? t(code) : payload.error?.message ?? t("SERVICE_UNAVAILABLE"));
         return;
       }
@@ -108,80 +115,82 @@ export function RegistrationForm({
     : formatNumber(locale, 0);
   return (
     <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
-      {!emailVerified && <p className="text-sm text-muted-foreground">{t("verifyEmail")}</p>}
-      <label className="block space-y-1 text-sm">
-        <span className="font-medium">{t("promptSet")}</span>
-        <select className="w-full rounded-lg border bg-background px-3 py-2" value={setId} onChange={(event) => edit(() => setSetId(event.target.value))}>
-          {sets.map((item) => (
-            <option key={item.id} value={item.id}>
-              {t("promptVersion", { version: item.version })} · {t("scope", { region: item.region, language: item.language })}
-            </option>
-          ))}
-        </select>
-      </label>
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">{t("track")}</legend>
-        {(["model_api", "consumer_ui"] as const).map((item) => (
-          <label key={item} className="flex items-center gap-2 text-sm">
-            <input type="radio" name="monitoring-track" checked={track === item} onChange={() => edit(() => { setTrack(item); setSelected([]); })} />
-            {t(item)}
-          </label>
-        ))}
-      </fieldset>
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">{t("channels")}</legend>
-        {visible.length === 0 && <p className="text-sm text-muted-foreground">{t("noChannel")}</p>}
-        {visible.map((item) => (
-          <label key={item.channelId} className="flex min-w-0 items-start gap-2 rounded-lg border p-3 text-sm">
-            <input
-              type="checkbox"
-              className="mt-1"
-              checked={selected.includes(item.channelId)}
-              onChange={(event) => edit(() => setSelected(event.target.checked
-                ? [...selected, item.channelId]
-                : selected.filter((id) => id !== item.channelId)))}
-            />
-            <span className="min-w-0">
-              <span className="block font-medium wrap-anywhere">{item.displayName}</span>
-              <span className="text-muted-foreground">{t(item.eligibility in messages ? item.eligibility as keyof Copy : "CHANNEL_UNVERIFIED")}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="space-y-1 text-sm">
-          <span className="block font-medium">{t("repeats")}</span>
-          <input className="w-full rounded-lg border bg-background px-3 py-2" type="number" min={1} max={3} value={repeats}
-            onChange={(event) => edit(() => setRepeats(Number(event.target.value)))} />
-        </label>
-        <label className="space-y-1 text-sm">
-          <span className="block font-medium">{t("network")}</span>
-          <select className="w-full rounded-lg border bg-background px-3 py-2" value={network} onChange={(event) => edit(() => setNetwork(event.target.value as "on" | "off" | "unknown"))}>
-            <option value="on">{t("networkOn")}</option>
-            <option value="off">{t("networkOff")}</option>
-            <option value="unknown">{t("networkUnknown")}</option>
+      <fieldset disabled={pending} className="min-w-0 space-y-4">
+        {!emailVerified && <p className="text-sm text-muted-foreground">{t("verifyEmail")}</p>}
+        <label className="block space-y-1 text-sm">
+          <span className="font-medium">{t("promptSet")}</span>
+          <select className="w-full rounded-lg border bg-background px-3 py-2" value={setId} onChange={(event) => edit(() => setSetId(event.target.value))}>
+            {sets.map((item) => (
+              <option key={item.id} value={item.id}>
+                {t("promptVersion", { version: item.version })} · {t("scope", { region: item.region, language: item.language })}
+              </option>
+            ))}
           </select>
         </label>
-      </div>
-      {track === "model_api" && (
-        <fieldset className="grid gap-3 sm:grid-cols-2">
-          <legend className="text-sm font-medium sm:col-span-2">{t("ceiling")}</legend>
-          <label className="space-y-1 text-sm">
-            <span className="block">{t("currency")}</span>
-            <input className="w-full rounded-lg border bg-background px-3 py-2 uppercase" maxLength={3} value={currency}
-              onChange={(event) => edit(() => setCurrency(event.target.value.toUpperCase()))} />
-          </label>
-          <label className="space-y-1 text-sm">
-            <span className="block">{t("upperMinor")}</span>
-            <input className="w-full rounded-lg border bg-background px-3 py-2" inputMode="numeric" value={upper}
-              onChange={(event) => edit(() => setUpper(event.target.value))} />
-          </label>
-          {grant && <p className="text-sm text-muted-foreground sm:col-span-2">{t("grantLine", {
-            version: grant.version, reserved: formatNumber(locale, grant.reserved), limit: formatNumber(locale, grant.countLimit),
-            budget: formatMinorUnits(locale, grant.budgetMinor, grant.currency),
-          })}</p>}
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">{t("track")}</legend>
+          {(["model_api", "consumer_ui"] as const).map((item) => (
+            <label key={item} className="flex items-center gap-2 text-sm">
+              <input type="radio" name="monitoring-track" checked={track === item} onChange={() => edit(() => { setTrack(item); setSelected([]); })} />
+              {t(item)}
+            </label>
+          ))}
         </fieldset>
-      )}
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">{t("channels")}</legend>
+          {visible.length === 0 && <p className="text-sm text-muted-foreground">{t("noChannel")}</p>}
+          {visible.map((item) => (
+            <label key={item.channelId} className="flex min-w-0 items-start gap-2 rounded-lg border p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={selected.includes(item.channelId)}
+                onChange={(event) => edit(() => setSelected(event.target.checked
+                  ? [...selected, item.channelId]
+                  : selected.filter((id) => id !== item.channelId)))}
+              />
+              <span className="min-w-0">
+                <span className="block font-medium wrap-anywhere">{item.displayName}</span>
+                <span className="text-muted-foreground">{t(item.eligibility in messages ? item.eligibility as keyof Copy : "CHANNEL_UNVERIFIED")}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="space-y-1 text-sm">
+            <span className="block font-medium">{t("repeats")}</span>
+            <input className="w-full rounded-lg border bg-background px-3 py-2" type="number" min={1} max={3} value={repeats}
+              onChange={(event) => edit(() => setRepeats(Number(event.target.value)))} />
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="block font-medium">{t("network")}</span>
+            <select className="w-full rounded-lg border bg-background px-3 py-2" value={network} onChange={(event) => edit(() => setNetwork(event.target.value as "on" | "off" | "unknown"))}>
+              <option value="on">{t("networkOn")}</option>
+              <option value="off">{t("networkOff")}</option>
+              <option value="unknown">{t("networkUnknown")}</option>
+            </select>
+          </label>
+        </div>
+        {track === "model_api" && (
+          <fieldset className="grid gap-3 sm:grid-cols-2">
+            <legend className="text-sm font-medium sm:col-span-2">{t("ceiling")}</legend>
+            <label className="space-y-1 text-sm">
+              <span className="block">{t("currency")}</span>
+              <input className="w-full rounded-lg border bg-background px-3 py-2 uppercase" maxLength={3} value={currency}
+                onChange={(event) => edit(() => setCurrency(event.target.value.toUpperCase()))} />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="block">{t("upperMinor")}</span>
+              <input className="w-full rounded-lg border bg-background px-3 py-2" inputMode="numeric" value={upper}
+                onChange={(event) => edit(() => setUpper(event.target.value))} />
+            </label>
+            {grant && <p className="text-sm text-muted-foreground sm:col-span-2">{t("grantLine", {
+              version: grant.version, reserved: formatNumber(locale, grant.reserved), limit: formatNumber(locale, grant.countLimit),
+              budget: formatMinorUnits(locale, grant.budgetMinor, grant.currency),
+            })}</p>}
+          </fieldset>
+        )}
+      </fieldset>
       {snapshot && (
         <div className="space-y-1 rounded-lg border p-3 text-sm">
           <p className="wrap-anywhere">{t("previewBrand", { name: brandName })}</p>
@@ -199,6 +208,7 @@ export function RegistrationForm({
             ))}
           </ul>
           <p>{t("previewMode", {
+            track: t(snapshot.track),
             mode: t(snapshot.requestedNetworkMode === "on" ? "networkOn" : snapshot.requestedNetworkMode === "off" ? "networkOff" : "networkUnknown"),
             repeats: formatNumber(locale, snapshot.repeats),
           })}</p>

@@ -10,6 +10,7 @@ import { acceptMonitoringRun, previewMonitoringRun, readMonitoringRun } from "..
 import { previewRequestSchema } from "../../src/features/monitoring/contracts.ts";
 import { previewToken } from "../../src/features/monitoring/rules.ts";
 import { MonitoringDao } from "../../src/features/monitoring/dao.ts";
+import { classifyMonitoringReadiness, summarizePromptSet } from "../../src/features/monitoring/readiness.ts";
 import { PromptDao } from "../../src/features/prompts/dao.ts";
 import { updateQuota } from "../../src/features/quotas/commands.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
@@ -47,6 +48,35 @@ function capability(actorId, overrides = {}) {
     ...overrides,
   };
 }
+
+test("readiness counts confirmed natural questions and checks quota for the full scope", () => {
+  const promptSet = summarizePromptSet({
+    id: randomUUID(), version: 1, region: "CN", language: "zh-CN",
+    questions: [
+      ...Array.from({ length: 3 }, () => ({ status: "confirmed", primary: true })),
+      { status: "confirmed", primary: false }, { status: "inactive", primary: true },
+    ],
+  });
+  assert.equal(promptSet.naturalCount, 3);
+  assert.equal(promptSet.confirmedCount, 4);
+  const official = { channelId: randomUUID(), kind: "model_api", displayName: "Synthetic API", eligibility: "eligible", version: 1 };
+  const manual = { ...official, channelId: randomUUID(), kind: "consumer_ui" };
+  const scope = {
+    brandStatus: "active", historical: false, websiteEmpty: true, promptSet, channels: [official],
+    grant: { state: "active", version: 1, currency: "CNY", countRemaining: 3, budgetRemainingMinor: 100 },
+  };
+  const insufficient = classifyMonitoringReadiness(scope);
+  assert.equal(insufficient.canConfirm, false);
+  assert.equal(insufficient.officialCitation, "not-applicable");
+  assert.deepEqual(insufficient.next, ["review-inactive", "request-quota"]);
+  assert.equal(classifyMonitoringReadiness({ ...scope, grant: { ...scope.grant, countRemaining: 4 } }).canConfirm, true);
+  const expired = classifyMonitoringReadiness({ ...scope, channels: [{ ...official, eligibility: "expired" }, manual] });
+  assert.equal(expired.canConfirm, true);
+  assert.deepEqual(expired.next, ["review-inactive", "verify-channel", "request-quota"]);
+  assert.equal(classifyMonitoringReadiness({ ...scope, channels: [manual], historical: true }).canConfirm, false);
+  assert.equal(classifyMonitoringReadiness({ ...scope, channels: [manual], brandStatus: "archived" }).canConfirm, false);
+  assert.ok(classifyMonitoringReadiness({ ...scope, promptSet: null }).next.includes("add-questions"));
+});
 
 test("monitoring input rejects repeats outside 1–3 and extra fields", () => {
   const command = {

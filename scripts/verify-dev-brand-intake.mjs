@@ -262,6 +262,29 @@ try {
   assert.equal(firstBody.selected.content.questions[0].text, texts[0]);
   assert.equal((await request(promptPath + "?version=" + frozenId, { actor: peer })).status, 404);
   assert.equal((await request(factPath, { actor: outsider })).status, 403);
+  const confirmPath = "/dashboard/monitoring/new?brandId=" + brand.id;
+  for (const [locale, readiness, count, quota, confirmation, foreignMessage] of [
+    ["zh-CN", "监测准备", "已确认自然发现题 3 / 3，确认题共 3", "没有可用于官方 API 的有效采样额度", "登记监测运行", "找不到该品牌或运行"],
+    ["en", "Monitoring readiness", "3 / 3 confirmed natural-discovery questions, 3 confirmed in total", "No active sampling quota is available", "Register a monitoring run", "That brand or run was not found"],
+  ]) {
+    const ownerBrandPage = await request("/dashboard/brands/" + brand.id, { actor: resumed, locale });
+    assert.equal(ownerBrandPage.status, 200);
+    const readinessHtml = await ownerBrandPage.text();
+    for (const message of [readiness, count, quota]) assert.ok(readinessHtml.includes(message), message);
+
+    const ownerConfirmPage = await request(confirmPath, { actor: resumed, locale });
+    assert.equal(ownerConfirmPage.status, 200);
+    const confirmationHtml = await ownerConfirmPage.text();
+    assert.ok(confirmationHtml.includes(confirmation));
+    assert.match(confirmationHtml, new RegExp(`<option\\b(?=[^>]*value="${secondId}")(?=[^>]*selected="")`),
+      "The requested brand must default to its latest frozen question set");
+
+    const peerConfirmPage = await request(confirmPath, { actor: peer, locale });
+    assert.equal(peerConfirmPage.status, 200);
+    const peerHtml = await peerConfirmPage.text();
+    assert.ok(peerHtml.includes(foreignMessage));
+    assert.ok(!peerHtml.includes(secondId), "Another account cannot see the frozen question set");
+  }
 
   const db = getConnection();
   const [stored] = await queryWithParameters(

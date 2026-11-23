@@ -16,7 +16,7 @@ export async function MonitoringRegistration({ brandId }: { brandId?: string }) 
   const messages = getMessages(locale).monitoring;
   const intake = brandIntakeOrigin(await headers());
   const result = await readRegistration(session.user.id, brandId);
-  if ("traceId" in result && !("brand" in result)) {
+  if (result.kind === "unavailable") {
     return (
       <section aria-labelledby="monitoring-registration" className="space-y-3 rounded-xl border p-5">
         <h2 id="monitoring-registration" className="font-medium">{t("title")}</h2>
@@ -32,7 +32,7 @@ export async function MonitoringRegistration({ brandId }: { brandId?: string }) 
         <h2 id="monitoring-registration" className="font-medium">{t("title")}</h2>
         <p className="mt-2 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
       </div>
-      {intake?.mode === "mock" && result.brand?.status === "active" && (
+      {intake?.mode === "mock" && result.kind === "ready" && (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">{t("mockQuotaNote")}</p>
           <ApplyMockQuotaButton
@@ -44,20 +44,21 @@ export async function MonitoringRegistration({ brandId }: { brandId?: string }) 
           />
         </div>
       )}
-      {"missing" in result && result.missing && <p className="text-sm">{t("NOT_FOUND")}</p>}
-      {result.brand && result.brand.status !== "active" && <p className="text-sm">{t("archivedBrand")}</p>}
-      {!result.brand && !("missing" in result && result.missing) && (
+      {result.kind === "not-found" && <p className="text-sm">{t("NOT_FOUND")}</p>}
+      {result.kind === "archived" && <p className="text-sm">{t("archivedBrand")}</p>}
+      {result.kind === "no-brand" && (
         <p className="text-sm">
           {t("noBrand")} <Link className="underline underline-offset-4" href="/dashboard/brands/new" prefetch={false}>{t("openBrand")}</Link>
         </p>
       )}
-      {result.brand?.status === "active" && result.sets.length === 0 && (
+      {result.kind === "ready" && result.sets.length === 0 && (
         <p className="text-sm">
           {t("noPromptSet")} <Link className="underline underline-offset-4" href={`/dashboard/brands/${result.brand.id}/questions`} prefetch={false}>{t("openQuestions")}</Link>
         </p>
       )}
-      {result.brand && result.brand.status === "active" && result.sets.length > 0 && (
+      {result.kind === "ready" && result.sets.length > 0 && (
         <RegistrationForm
+          key={result.brand.id}
           locale={locale}
           messages={messages}
           brandId={result.brand.id}
@@ -69,7 +70,6 @@ export async function MonitoringRegistration({ brandId }: { brandId?: string }) 
           emailVerified={hasVerifiedEmail(session.user)}
         />
       )}
-      {result.traceId && <p className="break-all text-sm text-muted-foreground">{t("trace", { id: result.traceId })}</p>}
     </section>
   );
 }

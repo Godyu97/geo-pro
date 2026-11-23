@@ -58,7 +58,7 @@ export async function BrandMonitoringReadiness({
   const t = await getTranslator("brands");
   const monitoring = await getTranslator("monitoring");
   const result = await readBrandMonitoringReadiness(ownerId, brand, historical);
-  if (!("report" in result)) {
+  if (result.kind === "unavailable") {
     return (
       <div role="alert" className="space-y-2 text-sm">
         <p>{t("readinessUnavailable")}</p>
@@ -90,7 +90,7 @@ export async function BrandMonitoringReadiness({
     <section aria-labelledby="monitoring-readiness" className="space-y-3 text-sm">
       <h2 id="monitoring-readiness" className="font-medium">{t("readinessTitle")}</h2>
       <p className="leading-6 text-muted-foreground">{t("readinessDescription")}</p>
-      <p>{t("readinessEntity", { version: formatNumber(locale, brand.version) })}</p>
+      {!historical && <p>{t("readinessEntity", { version: formatNumber(locale, brand.version) })}</p>}
       {report.officialCitation === "not-applicable" && <p>{t("websiteNotApplicable")}</p>}
       {historical && (
         <p>
@@ -156,7 +156,6 @@ export async function BrandMonitoringReadiness({
       )}
       <div className="flex flex-wrap gap-x-4 gap-y-2">
         <Link className="underline underline-offset-4" href={`/dashboard/brands/${brand.id}/facts`} prefetch={false}>{t("readinessOpenFacts")}</Link>
-        <Link className="underline underline-offset-4" href={`/dashboard/brands/${brand.id}/questions`} prefetch={false}>{t("readinessOpenQuestions")}</Link>
         <Link className="underline underline-offset-4" href="/dashboard/settings#monitoring-capabilities" prefetch={false}>{t("readinessOpenChannels")}</Link>
         <Link className="underline underline-offset-4" href="/dashboard/settings#pilot-quotas" prefetch={false}>{t("readinessOpenQuota")}</Link>
         <Link className="underline underline-offset-4" href="/dashboard/monitoring/protocols" prefetch={false}>{t("readinessOpenProtocols")}</Link>

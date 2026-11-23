@@ -239,6 +239,8 @@ for (const kind of ["sqlite", "postgresql"]) {
         assert.equal(created.protocol.version, 1);
         assert.equal(created.protocol.searchRequired, true);
         assert.equal(await protocolCount(), 1);
+        const dao = new SamplingProtocolDao(db);
+        assert.equal(await dao.latestFrozenForBrand(owner, brand), null);
         const hidden = await createSamplingProtocol(db, outsider, {
           operationId: randomUUID(),
           brandId: brand,
@@ -315,6 +317,9 @@ for (const kind of ["sqlite", "postgresql"]) {
           timezone: nextTimezone,
         }, clock);
         assert.equal(revised.protocol.version, 2);
+        assert.equal((await dao.latestFrozenForBrand(owner, brand))?.id, revised.protocol.id);
+        assert.equal(await dao.latestFrozenForBrand(outsider, brand), null);
+        assert.equal(await dao.latestFrozenForBrand(owner, otherBrand), null);
         assert.notEqual(revised.protocol.id, frozen.protocol.id);
         assert.equal(await protocolCount(), 2);
         const [still] = await queryWithParameters(
@@ -406,6 +411,12 @@ for (const kind of ["sqlite", "postgresql"]) {
         const ownerPlan = JSON.stringify(await queryWithParameters(db, explain + ownerQuery.sql, ownerQuery.values));
         assert.match(ownerPlan, /sampling_protocol_owner_idx/);
         if (db.kind === "postgresql") assert.doesNotMatch(ownerPlan, /Seq Scan on sampling_protocol/);
+        const readinessWatch = watch(db);
+        await new SamplingProtocolDao(readinessWatch.connection).latestFrozenForBrand(owner, brand);
+        assert.equal(readinessWatch.captured.length, 1);
+        const readinessQuery = readinessWatch.captured[0];
+        const readinessPlan = JSON.stringify(await queryWithParameters(db, explain + readinessQuery.sql, readinessQuery.values));
+        assert.match(readinessPlan, /sampling_protocol_owner_idx/);
         const familyQuery = samplingProtocolFamilyQuery(owner, created.protocol.protocolId);
         const familyPlan = JSON.stringify(await queryWithParameters(db, explain + familyQuery.sql, familyQuery.values));
         assert.match(familyPlan, /sampling_protocol_(family_idx|version_key)/);

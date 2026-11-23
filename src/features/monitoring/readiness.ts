@@ -38,13 +38,6 @@ export type ReadinessFacts = {
   other: number;
 };
 
-export type ReadinessProtocol = {
-  id: string;
-  version: number;
-  targetRegion: string;
-  timezone: string;
-};
-
 export type ReadinessNext = "add-questions" | "review-inactive" | "verify-channel" | "choose-channel" | "request-quota" | "archived";
 
 export type ReadinessInput = {
@@ -54,7 +47,6 @@ export type ReadinessInput = {
   promptSet: ReadinessPromptSet | null;
   channels: ReadinessChannel[];
   grant: ReadinessGrant;
-  facts: ReadinessFacts;
 };
 
 export type ReadinessReport = {
@@ -63,7 +55,6 @@ export type ReadinessReport = {
   officialCitation: "applicable" | "not-applicable";
   official: ReadinessChannel[];
   manual: ReadinessChannel[];
-  quotaCoversMinimum: boolean;
 };
 
 type PromptQuestion = { status: "candidate" | "confirmed" | "inactive"; primary: boolean };
@@ -120,17 +111,6 @@ export function summarizeFactReadiness(facts: readonly FactVersion[], today: str
   return counts;
 }
 
-export function selectFrozenProtocol<T extends { brandId: string; status: "draft" | "frozen"; version: number }>(
-  rows: readonly T[],
-  brandId: string,
-): T | null {
-  return rows.reduce<T | null>((selected, row) => {
-    if (row.brandId !== brandId || row.status !== "frozen") return selected;
-    if (!selected || row.version > selected.version) return row;
-    return selected;
-  }, null);
-}
-
 export function classifyMonitoringReadiness(input: ReadinessInput): ReadinessReport {
   const official = input.channels.filter((item) => item.kind === "model_api");
   const manual = input.channels.filter((item) => item.kind === "consumer_ui");
@@ -139,8 +119,8 @@ export function classifyMonitoringReadiness(input: ReadinessInput): ReadinessRep
   const inactive = input.promptSet?.inactiveCount ?? 0;
   const officialEligible = official.some((item) => item.eligibility === "eligible");
   const manualEligible = manual.some((item) => item.eligibility === "eligible");
-  const quotaCoversMinimum = input.grant.state === "active"
-    && input.grant.countRemaining >= minimumNaturalQuestions
+  const quotaCoversScope = input.grant.state === "active"
+    && input.grant.countRemaining >= Math.max(minimumNaturalQuestions, input.promptSet?.confirmedCount ?? 0)
     && input.grant.budgetRemainingMinor > 0;
   const next: ReadinessNext[] = [];
   if (input.brandStatus !== "active") next.push("archived");
@@ -148,14 +128,13 @@ export function classifyMonitoringReadiness(input: ReadinessInput): ReadinessRep
   if (inactive > 0) next.push("review-inactive");
   if (tracks.some((item) => item.eligibility === "expired")) next.push("verify-channel");
   else if (!officialEligible && !manualEligible) next.push("choose-channel");
-  if (official.length > 0 && !quotaCoversMinimum) next.push("request-quota");
-  const trackReady = manualEligible || (officialEligible && quotaCoversMinimum);
+  if (official.length > 0 && !quotaCoversScope) next.push("request-quota");
+  const trackReady = manualEligible || (officialEligible && quotaCoversScope);
   return {
     canConfirm: input.brandStatus === "active" && !input.historical && natural >= minimumNaturalQuestions && trackReady,
     next,
     officialCitation: input.websiteEmpty ? "not-applicable" : "applicable",
     official,
     manual,
-    quotaCoversMinimum,
   };
 }

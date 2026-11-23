@@ -129,6 +129,15 @@ export class SamplingProtocolDao {
     return z.array(protocolRow).parse(await queryWithParameters(this.db, query.sql, query.values));
   }
 
+  async latestFrozenForBrand(ownerId: string, brandId: string) {
+    const [row] = await queryWithParameters(this.db,
+      `SELECT ${protocolColumns} FROM sampling_protocol
+        WHERE owner_id = ? AND brand_id = ? AND status = 'frozen'
+        ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [ownerId, brandId]);
+    return row ? protocolRow.parse(row) : null;
+  }
+
   async family(ownerId: string, protocolId: string) {
     const query = samplingProtocolFamilyQuery(ownerId, protocolId);
     return z.array(protocolRow).parse(await queryWithParameters(this.db, query.sql, query.values));

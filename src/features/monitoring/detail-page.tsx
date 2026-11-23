@@ -26,6 +26,7 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
   const locale = await getLocale();
   const t = await getTranslator("monitoring");
   const te = await getTranslator("evidence");
+  const tp = await getTranslator("samplingProtocols");
   const result = await readOwnedRun(session.user.id, runId);
   if (!result) notFound();
   if ("traceId" in result && result.traceId) {
@@ -55,8 +56,8 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
   }
   const connection = getConnection();
   const mockRun = brandIntakeOrigin(await headers())?.mode === "mock";
-  const ownedBrand = await new BrandDao(connection).version(session.user.id, result.brandId);
-  const brand = ownedBrand ? { id: ownedBrand.id, name: ownedBrand.fields.name, website: ownedBrand.fields.website } : null;
+  const brand = result.entityVersion === null ? null
+    : await new BrandDao(connection).version(session.user.id, result.brandId, result.entityVersion);
   const evidenceDao = new EvidenceDao(connection);
   const evidenceBySlot = new Map<string, string>();
   for (const slot of result.slots) {
@@ -87,7 +88,18 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
         <div>
           <dt className="text-muted-foreground">{t("frozenBrandLabel")}</dt>
           <dd className="wrap-anywhere">
-            <Link className="underline underline-offset-4" href={`/dashboard/brands/${result.brandId}`} prefetch={false}>{result.brandId}</Link>
+            {brand ? (
+              <Link className="underline underline-offset-4" href={`/dashboard/brands/${brand.id}?version=${brand.version}`} prefetch={false}>
+                {t("frozenBrandVersion", { name: brand.fields.name, version: formatNumber(locale, brand.version) })}
+              </Link>
+            ) : result.brandId}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{tp("title")}</dt>
+          <dd className="wrap-anywhere">
+            {result.protocol && <p>{t("frozenProtocol", { id: result.protocol.protocolId, version: formatNumber(locale, result.protocol.version) })}</p>}
+            <Link className="underline underline-offset-4" href="/dashboard/monitoring/protocols" prefetch={false}>{tp("pinTitle")}</Link>
           </dd>
         </div>
         <div><dt className="text-muted-foreground">{t("customerPayableLabel")}</dt><dd>{payable}</dd></div>
@@ -98,7 +110,7 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
           <li key={channelId} className="wrap-anywhere">{t("frozenChannel", { id: channelId, version: formatNumber(locale, version) })}</li>
         ))}
       </ul>
-      {brand && !brand.website && <p className="text-sm">{t("websiteCitationNa")}</p>}
+      {brand && !brand.fields.website && <p className="text-sm">{t("websiteCitationNa")}</p>}
       <p className="text-sm">{t("planned", { count: formatNumber(locale, result.slotCount) })}</p>
       <p className="text-sm">{t("progressCounts", {
         succeeded: formatNumber(locale, counts.succeeded), failed: formatNumber(locale, counts.failed),
@@ -195,8 +207,8 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
                           <IngestEvidenceButton
                             brandId={result.brandId}
                             slotId={slot.id}
-                            brandName={brand.name}
-                            officialWebsite={brand.website || null}
+                            brandName={brand.fields.name}
+                            officialWebsite={brand.fields.website || null}
                             messages={getMessages(locale).evidence}
                           />
                         )

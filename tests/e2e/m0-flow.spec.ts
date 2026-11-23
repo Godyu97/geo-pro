@@ -163,13 +163,42 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
 
     const prepared = fixture("prepare", { userId, brandId });
     channelIds = [String(prepared.apiChannelId), String(prepared.consumerChannelId)];
-    await page.goto("/dashboard/monitoring/new");
+    await page.goto(`/dashboard/brands/${brandId}?version=1`);
+    await expect(page.getByText(/正在查看历史实体版本/)).toBeVisible();
+    await expect(page.getByRole("link", { name: "确认此品牌的监测运行", exact: true })).toHaveCount(0);
+    await page.goto(`/dashboard/brands/${brandId}`);
+    await expect(page.getByRole("heading", { name: "监测准备", exact: true })).toBeVisible();
+    await expect(page.getByText("已确认自然发现题 3 / 3，确认题共 4", { exact: true })).toBeVisible();
+    const readiness = page.getByRole("region", { name: "监测准备" });
+    const viewport = page.viewportSize();
+    for (const width of [375, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await readiness.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    }
+    if (viewport) await page.setViewportSize(viewport);
+    await page.getByLabel("界面语言", { exact: true }).selectOption("en");
+    await expect(page.getByRole("heading", { name: "Monitoring readiness", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Confirm monitoring for this brand", exact: true })).toHaveAttribute("href", `/dashboard/monitoring/new?brandId=${brandId}`);
+    await page.getByLabel("Interface language", { exact: true }).selectOption("zh-CN");
+    await page.getByRole("link", { name: "确认此品牌的监测运行", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(`/dashboard/monitoring/new?brandId=${brandId}`);
     await page.getByRole("checkbox", { name: "北岸隔离 API 可用于正式登记", exact: true }).check();
+    await page.getByRole("button", { name: "预览范围", exact: true }).click();
+    await expect(page.getByText("没有可信费用上界，不能登记官方 API 运行。", { exact: true })).toBeVisible();
     await page.getByLabel("上界（最小货币单位）", { exact: true }).fill("10");
     await page.getByRole("button", { name: "预览范围", exact: true }).click();
     await expect(page.getByText("范围内 4 题，自然发现 3 题，通道 1 个，重复 1 次，逻辑槽位 4 个。")).toBeVisible();
+    await expect(page.getByText(`品牌 ${brandName}`, { exact: true })).toBeVisible();
+    await expect(page.getByText("北岸隔离 API，版本 2", { exact: true })).toBeVisible();
+    await page.getByLabel("界面语言", { exact: true }).selectOption("en");
+    await expect(page.getByText(`Brand: ${brandName}`, { exact: true })).toBeVisible();
+    await expect(page.getByText("Question set version 1, region CN, business language zh-CN", { exact: true })).toBeVisible();
+    await page.getByLabel("Interface language", { exact: true }).selectOption("zh-CN");
     await page.getByRole("button", { name: "登记排队运行", exact: true }).click();
     await expect(page).toHaveURL(/\/dashboard\/monitoring\/runs\/[0-9a-f-]{36}$/);
+    await expect(page.getByRole("link", { name: `${brandName}，实体版本 1`, exact: true })).toHaveAttribute("href", `/dashboard/brands/${brandId}?version=1`);
+    await expect(page.getByText(`通道 ${channelIds[0]}，版本 2`, { exact: true })).toBeVisible();
     const runId = page.url().split("/").at(-1)!;
     expect(fixture("sample", { ownerId: userId, runId }).synthetic).toBe(true);
     await page.reload();
