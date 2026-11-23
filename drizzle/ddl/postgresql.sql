@@ -2230,6 +2230,34 @@ CREATE TABLE "store_fact_use" (
     and length("store_fact_use"."recorded_at") between 20 and 40)
 );
 
+CREATE TABLE "media_review" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"kind" text NOT NULL,
+	"shown_value" text NOT NULL,
+	"approved_value" text NOT NULL,
+	"fact_version_id" text NOT NULL,
+	"reason" text NOT NULL,
+	"deliver" integer NOT NULL,
+	"recorded_at" text NOT NULL,
+	CONSTRAINT "media_review_state_check" CHECK ("media_review"."deliver" in (0, 1)
+    and "media_review"."kind" in ('image', 'script')
+    and "media_review"."reason" in ('ok', 'fact_mismatch', 'not_proof')
+    and (
+      ("media_review"."reason" = 'ok' and "media_review"."deliver" = 1 and "media_review"."shown_value" = "media_review"."approved_value")
+      or ("media_review"."reason" = 'fact_mismatch' and "media_review"."deliver" = 0 and "media_review"."shown_value" <> "media_review"."approved_value")
+      or ("media_review"."reason" = 'not_proof' and "media_review"."deliver" = 0)
+    )
+    and length("media_review"."id") = 36
+    and length("media_review"."brand_id") = 36
+    and length("media_review"."owner_id") between 1 and 128
+    and length("media_review"."fact_version_id") = 36
+    and length("media_review"."shown_value") between 1 and 4000
+    and length("media_review"."approved_value") between 1 and 4000
+    and length("media_review"."recorded_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -2405,6 +2433,9 @@ ALTER TABLE "brand_store" ADD CONSTRAINT "brand_store_brand_id_brand_id_fk" FORE
 ALTER TABLE "brand_store" ADD CONSTRAINT "brand_store_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "store_fact_use" ADD CONSTRAINT "store_fact_use_store_id_brand_store_id_fk" FOREIGN KEY ("store_id") REFERENCES "public"."brand_store"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "store_fact_use" ADD CONSTRAINT "store_fact_use_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "media_review" ADD CONSTRAINT "media_review_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "media_review" ADD CONSTRAINT "media_review_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "media_review" ADD CONSTRAINT "media_review_fact_fk" FOREIGN KEY ("brand_id","fact_version_id") REFERENCES "public"."brand_fact_version"("brand_id","id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -2596,3 +2627,5 @@ CREATE INDEX "sync_authorization_owner_idx" ON "sync_authorization" USING btree 
 CREATE INDEX "local_observation_owner_idx" ON "local_observation" USING btree ("owner_id","recorded_at","id");
 CREATE INDEX "brand_store_owner_brand_idx" ON "brand_store" USING btree ("owner_id","brand_id","created_at","id");
 CREATE INDEX "store_fact_use_owner_idx" ON "store_fact_use" USING btree ("owner_id","recorded_at","id");
+CREATE INDEX "media_review_owner_idx" ON "media_review" USING btree ("owner_id","recorded_at","id");
+CREATE INDEX "media_review_owner_brand_idx" ON "media_review" USING btree ("owner_id","brand_id","recorded_at","id");
