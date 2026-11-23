@@ -120,6 +120,7 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     await page.getByRole("button", { name: "下一步", exact: true }).click();
     await page.getByLabel("竞品", { exact: true }).fill("远帆设备");
     await page.getByRole("button", { name: "下一步", exact: true }).click();
+    await page.getByRole("checkbox", { name: /我接受保留策略版本/ }).check();
     await page.getByRole("button", { name: "保存品牌", exact: true }).click();
     await expect(page.getByRole("heading", { name: brandName, exact: true })).toBeVisible();
     await expect(page.getByText("本地验收 · 合成资料", { exact: true })).toBeVisible();
@@ -388,7 +389,8 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     expect((await report.json()).loopCompleted).toBe(true);
     await page.goto(`/dashboard/reports?brandId=${brandId}`);
     await expect(page.getByText("diagnostic")).toBeVisible();
-    await expect(page.getByText("loop=yes")).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "相关入口" })).toBeVisible();
+    await expect(page.getByText("闭环 是")).toBeVisible();
     const jsonHref = await page.getByRole("link", { name: "下载 JSON", exact: true }).getAttribute("href");
     const htmlHref = await page.getByRole("link", { name: "下载 HTML", exact: true }).getAttribute("href");
     const firstJson = await page.request.get(jsonHref!);
@@ -422,10 +424,27 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
       expect(await probe.text()).toContain(`<html lang="${locale}"`);
       for (const width of [375, 768, 1440]) {
         await page.setViewportSize({ width, height: 900 });
+        if (width === 375) {
+          await page.goto("/dashboard/reports");
+          await expect(page.getByRole("heading", { name: locale === "en" ? "Retest & reports" : "复测与报告" })).toBeVisible();
+          await expect(page.getByRole("link", { name: locale === "en" ? "Go to brands" : "前往品牌资料" })).toBeVisible();
+          await expect(page.locator("main")).toHaveCount(1);
+          await expectNoOverflow(page);
+        }
         for (const path of paths) {
           await page.goto(path);
           await expect(page.locator("html")).toHaveAttribute("lang", locale);
           await expectNoOverflow(page);
+          if (path.includes("/dashboard/reports")) {
+            await expect(page.locator("main")).toHaveCount(1);
+            await expect(page.getByRole("navigation", { name: locale === "en" ? "Related entries" : "相关入口" })).toBeVisible();
+            await expect(page.getByText(locale === "en" ? "loop yes" : "闭环 是")).toBeVisible();
+            if (width === 375) {
+              const entry = page.getByRole("link", { name: locale === "en" ? "Open the observation plan" : "打开观察计划" });
+              await entry.focus();
+              await expect(entry).toBeFocused();
+            }
+          }
         }
       }
       await page.keyboard.press("Tab");
