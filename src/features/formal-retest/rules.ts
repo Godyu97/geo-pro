@@ -30,8 +30,19 @@ export function stopObservation(input: { reason: string; slotIds: readonly strin
   return { stopped: true as const, reason: input.reason, retainedSlotIds: [...input.slotIds] };
 }
 
+export const confounderFactors = ["model", "marketing", "price"] as const;
+export type ConfounderFactor = (typeof confounderFactors)[number];
+
+const confounderFactorSet = new Set<string>(confounderFactors);
+
 export function recordConfounders(input: { factors: readonly string[]; thresholdPp: number }) {
-  return { factors: [...input.factors], thresholdPp: input.thresholdPp, thresholdChanged: false as const };
+  const factors = [...input.factors];
+  return {
+    factors,
+    thresholdPp: input.thresholdPp,
+    thresholdChanged: false as const,
+    accepted: factors.length > 0 && factors.every((factor) => confounderFactorSet.has(factor)),
+  };
 }
 
 export function formalComparison(input: { comparableQuestions: number; frozenQuestions: number; excluded: readonly string[] }) {

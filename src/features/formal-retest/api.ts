@@ -7,7 +7,13 @@ import { getConnection } from "@/lib/db/connection";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts.ts";
-import { createFormalObservation, listFormalObservations, recordFormalCheckpoint } from "./commands.ts";
+import {
+  appendFormalConfounder,
+  createFormalObservation,
+  listFormalConfounders,
+  listFormalObservations,
+  recordFormalCheckpoint,
+} from "./commands.ts";
 import {
   createFormalObservationSchema,
   formalObservationErrors,
@@ -100,6 +106,41 @@ export async function formalCheckpointCreateResponse(request: Request, observati
   } catch {
     const traceId = randomUUID();
     console.error("formal-checkpoint-create-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function formalConfounderListResponse(request: Request, observationId: string) {
+  const gate = await requireSameOrigin(request);
+  if ("error" in gate) return gate.error;
+  const id = brandIdSchema.safeParse(observationId);
+  if (!id.success) return failure("INVALID_INPUT");
+  try {
+    if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
+    const result = await listFormalConfounders(getConnection(), gate.session.session.user.id, id.data);
+    if ("error" in result && result.error) return failure(result.error);
+    return json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("formal-confounder-list-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function formalConfounderCreateResponse(request: Request, observationId: string) {
+  const gate = await requireSameOrigin(request);
+  if ("error" in gate) return gate.error;
+  const id = brandIdSchema.safeParse(observationId);
+  if (!id.success) return failure("INVALID_INPUT");
+  try {
+    if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
+    const body = await readBoundedJson(request, 4096);
+    const result = await appendFormalConfounder(getConnection(), gate.session.session.user.id, id.data, body);
+    if ("error" in result && result.error) return failure(result.error);
+    return json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("formal-confounder-create-unavailable", { traceId });
     return failure("SERVICE_UNAVAILABLE", traceId);
   }
 }

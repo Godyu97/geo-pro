@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "../brands/dao";
-import { createFormalObservationAction, recordFormalCheckpointAction } from "./actions";
+import { appendFormalConfounderAction, createFormalObservationAction, recordFormalCheckpointAction } from "./actions";
 import { listFormalObservations, type FormalObservationView } from "./commands";
 
-const knownErrors = ["NOT_FOUND", "INVALID_INPUT"] as const;
+const knownErrors = ["NOT_FOUND", "INVALID_INPUT", "THRESHOLD_REJECTED"] as const;
 const inputClass = "h-10 w-full rounded-md border bg-background px-3";
 
 function isKnownError(value: string | undefined): value is (typeof knownErrors)[number] {
@@ -45,6 +45,7 @@ export default async function FormalObservationsPage({
     exploratory: t("conclusionExploratory"),
   } as const;
   const checkpointLabel = { d7: t("checkpointD7"), d14: t("checkpointD14"), d28: t("checkpointD28") } as const;
+  const factorLabel = { model: t("factorModel"), marketing: t("factorMarketing"), price: t("factorPrice") } as const;
   const statusLabel = { observing: t("statusObserving"), checkpoint_due: t("statusCheckpointDue") } as const;
 
   if (!active) {
@@ -174,6 +175,41 @@ export default async function FormalObservationsPage({
                 ))}
               </>
             )}
+          </div>
+
+          <form action={appendFormalConfounderAction} className="grid gap-4 sm:grid-cols-2">
+            <h3 className="text-base font-semibold sm:col-span-2">{t("confounderTitle")}</h3>
+            <p className="text-sm leading-7 text-muted-foreground sm:col-span-2">{t("confounderHint")}</p>
+            <input type="hidden" name="observationId" value={observation.id} />
+            <label className="space-y-2 text-sm">
+              <span>{t("factor")}</span>
+              <select name="factor" required className={inputClass} defaultValue="model">
+                <option value="model">{factorLabel.model}</option>
+                <option value="marketing">{factorLabel.marketing}</option>
+                <option value="price">{factorLabel.price}</option>
+              </select>
+            </label>
+            <label className="space-y-2 text-sm sm:col-span-2">
+              <span>{t("note")}</span>
+              <textarea name="note" required maxLength={400} className="min-h-24 w-full rounded-md border bg-background px-3 py-2" />
+              <span className="block text-muted-foreground">{t("noteHint")}</span>
+            </label>
+            <div>
+              <Button type="submit">{t("saveConfounder")}</Button>
+            </div>
+          </form>
+
+          <div className="space-y-3">
+            <h3 className="text-base font-semibold">{t("confoundersHeading")}</h3>
+            {observation.confounders.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("noConfounders")}</p>
+            ) : observation.confounders.map((confounder) => (
+              <article key={confounder.id} className="space-y-2 rounded-xl border border-dashed p-4">
+                <p className="text-sm font-medium">{factorLabel[confounder.factor]}</p>
+                <p className="text-sm leading-7 break-words">{confounder.note}</p>
+                <p className="text-sm tabular-nums">{t("recordedLine", { time: confounder.recordedAt })}</p>
+              </article>
+            ))}
           </div>
         </section>
       ))}

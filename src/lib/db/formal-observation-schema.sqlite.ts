@@ -50,3 +50,19 @@ export const formalCheckpoint = sqliteTable("formal_checkpoint", {
     and length(${table.ownerId}) between 1 and 128
     and length(${table.createdAt}) between 20 and 40`),
 ]);
+
+export const formalConfounder = sqliteTable("formal_confounder", {
+  id: text("id").primaryKey(),
+  observationId: text("observation_id").notNull().references(() => formalObservation.id, { onDelete: "cascade" }),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  factor: text("factor").notNull(),
+  note: text("note").notNull(),
+  recordedAt: text("recorded_at").notNull(),
+}, (table) => [
+  index("formal_confounder_observation_idx").on(table.ownerId, table.observationId, table.recordedAt, table.id),
+  check("formal_confounder_state_check", sql`${table.factor} in ('model', 'marketing', 'price')
+    and length(trim(${table.note})) between 1 and 400
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.recordedAt}) between 20 and 40`),
+]);

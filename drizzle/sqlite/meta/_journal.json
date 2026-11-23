@@ -505,6 +505,13 @@
       "when": 1795450733225,
       "tag": "0071_careful_johnny_blaze",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1795454660411,
+      "tag": "0072_broad_snowbird",
+      "breakpoints": true
     }
   ]
 }

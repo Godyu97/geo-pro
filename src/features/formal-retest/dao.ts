@@ -7,6 +7,7 @@ import {
   calendarDaySchema,
   checkpointModeSchema,
   checkpointSchema,
+  confounderFactorSchema,
   frozenSetIdSchema,
   observationStatusSchema,
   questionIdSchema,
@@ -44,9 +45,20 @@ const checkpointRow = z.object({
   if (!excluded.success) ctx.addIssue({ code: "custom", message: "excluded" });
 });
 
+const confounderRow = z.object({
+  id: brandIdSchema,
+  observationId: brandIdSchema,
+  brandId: brandIdSchema,
+  factor: confounderFactorSchema,
+  note: z.string().trim().min(1).max(400),
+  recordedAt: z.iso.datetime({ precision: 3 }),
+});
+
 export type FormalObservationRecord = z.infer<typeof observationRow>;
 export type FormalCheckpointRecord = z.infer<typeof checkpointRow>;
 export type FormalCheckpointInsert = FormalCheckpointRecord & { ownerId: string };
+export type FormalConfounderRecord = z.infer<typeof confounderRow>;
+export type FormalConfounderInsert = FormalConfounderRecord & { ownerId: string };
 
 const observationColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", frozen_set_id AS "frozenSetId",
   effective_on AS "effectiveOn", frozen_non_brand_count AS "frozenNonBrandCount", status,
@@ -55,6 +67,9 @@ const observationColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", fr
 const checkpointColumns = `id, observation_id AS "observationId", brand_id AS "brandId", checkpoint, mode,
   comparable_count AS "comparableCount", excluded_json AS "excludedJson", conclusion,
   evaluated_on AS "evaluatedOn", created_at AS "createdAt"`;
+
+const confounderColumns = `id, observation_id AS "observationId", brand_id AS "brandId", factor, note,
+  recorded_at AS "recordedAt"`;
 
 export function formalObservationListQuery(ownerId: string, brandId: string) {
   return {
@@ -71,6 +86,16 @@ export function formalCheckpointListQuery(ownerId: string, observationIds: reado
     sql: `SELECT ${checkpointColumns} FROM formal_checkpoint
       WHERE owner_id = ? AND observation_id IN (${observationIds.map(() => "?").join(", ")})
       ORDER BY observation_id ASC, created_at ASC, id ASC`,
+    values: [ownerId, ...observationIds] as QueryValue[],
+  };
+}
+
+export function formalConfounderListQuery(ownerId: string, observationIds: readonly string[]) {
+  if (observationIds.length === 0) return null;
+  return {
+    sql: `SELECT ${confounderColumns} FROM formal_confounder
+      WHERE owner_id = ? AND observation_id IN (${observationIds.map(() => "?").join(", ")})
+      ORDER BY recorded_at ASC, id ASC`,
     values: [ownerId, ...observationIds] as QueryValue[],
   };
 }
@@ -142,6 +167,29 @@ export class FormalObservationDao {
     if (!query) return [];
     const rows = await queryWithParameters(this.db, query.sql, query.values);
     return z.array(checkpointRow).parse(rows);
+  }
+
+  async insertConfounders(rows: readonly FormalConfounderInsert[]) {
+    if (rows.length === 0) return;
+    const values: QueryValue[] = [];
+    const groups = rows.map((row) => {
+      values.push(row.id, row.observationId, row.brandId, row.ownerId, row.factor, row.note, row.recordedAt);
+      return "(?, ?, ?, ?, ?, ?, ?)";
+    });
+    await queryWithParameters(
+      this.db,
+      `INSERT INTO formal_confounder (
+        id, observation_id, brand_id, owner_id, factor, note, recorded_at
+      ) VALUES ${groups.join(", ")}`,
+      values,
+    );
+  }
+
+  async confoundersFor(ownerId: string, observationIds: readonly string[]) {
+    const query = formalConfounderListQuery(ownerId, observationIds);
+    if (!query) return [];
+    const rows = await queryWithParameters(this.db, query.sql, query.values);
+    return z.array(confounderRow).parse(rows);
   }
 
   async markCheckpointDue(ownerId: string, observationId: string, updatedAt: string) {
