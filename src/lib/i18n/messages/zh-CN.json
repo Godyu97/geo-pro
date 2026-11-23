@@ -1105,7 +1105,8 @@
     "openPlans": "查看采样计划",
     "openAlerts": "查看质量提醒",
     "openCapture": "打开采集助手",
-    "openProtocols": "查看采样协议"
+    "openProtocols": "查看采样协议",
+    "openExplorations": "查看诊断实验"
   },
   "optimization": {
     "title": "优化任务",
@@ -2756,5 +2757,34 @@
     "OPERATION_CONFLICT": "同一次冻结不能改成另一组字段。",
     "PIN_CONFLICT": "该运行已经钉住另一版协议。",
     "SERVICE_UNAVAILABLE": "采样协议暂时不可用，请稍后重试。"
+  },
+  "explorations": {
+    "title": "诊断实验",
+    "description": "诊断实验单独保存在探索观察中。来源固定为 custom_pipeline，并固定排除在自然发现之外。这些记录不进入提及率、推荐率或官网引用率的分子和分母。",
+    "fixtureNote": "这里只保存探索观察。不会创建监测槽位，不会预留额度，也不会调用外部模型。探索结果不是正式观察，也不表示因果提升。",
+    "backMonitoring": "返回监测",
+    "registerTitle": "保存探索观察",
+    "brand": "品牌",
+    "question": "问题",
+    "answer": "回答",
+    "reason": "排除原因",
+    "reasonValue": "custom_pipeline",
+    "reasonHint": "诊断实验只使用这一来源，并固定排除在自然发现之外。",
+    "registerAction": "保存探索观察",
+    "registering": "正在保存…",
+    "saved": "已保存。这条探索观察不会计入自然样本。",
+    "empty": "还没有探索观察。",
+    "noBrands": "当前没有可保存探索观察的品牌。",
+    "pickBrand": "选择品牌后可以查看已保存的探索观察。",
+    "excludedLine": "已排除在自然发现之外。",
+    "createdAt": "保存时间 {time}",
+    "loading": "正在加载探索观察…",
+    "SESSION_REQUIRED": "请先登录，再保存探索观察。",
+    "FORBIDDEN": "当前会话不能保存该探索观察。",
+    "NOT_FOUND": "找不到该品牌的探索观察。",
+    "INVALID_INPUT": "请检查品牌、问题和回答。",
+    "NATURAL_COPY_REJECTED": "探索观察不能写入自然回答。",
+    "OPERATION_CONFLICT": "同一次保存不能改成另一条探索观察。",
+    "SERVICE_UNAVAILABLE": "探索观察暂时不可用，请稍后重试。"
   }
 }

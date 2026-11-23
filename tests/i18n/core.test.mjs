@@ -91,6 +91,7 @@ test("login return targets preserve local filters and reject external or malform
   assert.equal(safeReturnTo("/dashboard/monitoring/alerts"), "/dashboard/monitoring/alerts");
   assert.equal(safeReturnTo("/dashboard/monitoring/capture"), "/dashboard/monitoring/capture");
   assert.equal(safeReturnTo("/dashboard/monitoring/protocols"), "/dashboard/monitoring/protocols");
+  assert.equal(safeReturnTo("/dashboard/monitoring/explorations"), "/dashboard/monitoring/explorations");
   assert.equal(safeReturnTo("/dashboard/reports/observations"), "/dashboard/reports/observations");
   assert.equal(safeReturnTo("/dashboard/reports/interventions"), "/dashboard/reports/interventions");
   assert.equal(safeReturnTo("/dashboard/reports/leads"), "/dashboard/reports/leads");

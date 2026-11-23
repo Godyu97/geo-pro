@@ -1105,7 +1105,8 @@
     "openPlans": "View sampling plans",
     "openAlerts": "View quality alerts",
     "openCapture": "Open capture helper",
-    "openProtocols": "View sampling protocols"
+    "openProtocols": "View sampling protocols",
+    "openExplorations": "View diagnostic explorations"
   },
   "optimization": {
     "title": "Optimization tasks",
@@ -2756,5 +2757,34 @@
     "OPERATION_CONFLICT": "The same freeze cannot switch to a different set of fields.",
     "PIN_CONFLICT": "This run already pins another protocol version.",
     "SERVICE_UNAVAILABLE": "Sampling protocols are temporarily unavailable. Try again shortly."
+  },
+  "explorations": {
+    "title": "Diagnostic explorations",
+    "description": "Diagnostic experiments are stored as exploration observations. The source stays custom_pipeline and the row stays excluded from natural discovery. These records do not enter the numerator or denominator of mention, recommendation, or official-site citation rates.",
+    "fixtureNote": "This page only stores exploration observations. It does not create monitoring slots, reserve quota, or call an external model. An exploration result is not a formal observation and does not show a causal lift.",
+    "backMonitoring": "Back to monitoring",
+    "registerTitle": "Save an exploration observation",
+    "brand": "Brand",
+    "question": "Question",
+    "answer": "Answer",
+    "reason": "Exclusion reason",
+    "reasonValue": "custom_pipeline",
+    "reasonHint": "A diagnostic experiment uses only this source and stays excluded from natural discovery.",
+    "registerAction": "Save exploration",
+    "registering": "Saving…",
+    "saved": "Saved. This exploration observation is not counted as a natural sample.",
+    "empty": "No exploration observations yet.",
+    "noBrands": "There is no brand available for an exploration observation.",
+    "pickBrand": "Choose a brand to see saved exploration observations.",
+    "excludedLine": "Excluded from natural discovery.",
+    "createdAt": "Saved at {time}",
+    "loading": "Loading exploration observations…",
+    "SESSION_REQUIRED": "Sign in before saving an exploration observation.",
+    "FORBIDDEN": "This session cannot save that exploration observation.",
+    "NOT_FOUND": "Exploration observations for that brand were not found.",
+    "INVALID_INPUT": "Check the brand, question, and answer.",
+    "NATURAL_COPY_REJECTED": "An exploration observation cannot be copied into a natural answer.",
+    "OPERATION_CONFLICT": "The same save cannot switch to a different exploration observation.",
+    "SERVICE_UNAVAILABLE": "Exploration observations are temporarily unavailable. Try again shortly."
   }
 }

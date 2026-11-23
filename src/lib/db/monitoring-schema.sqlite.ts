@@ -167,3 +167,27 @@ export const runProtocolPin = sqliteTable("run_protocol_pin", {
     and length(${table.ownerId}) between 1 and 128 and length(${table.protocolId}) = 36
     and length(${table.createdAt}) between 20 and 40`),
 ]);
+
+// Diagnostic experiments stay here. excluded_from_natural is fixed at 1 so the row cannot enter natural rates.
+export const explorationObservation = sqliteTable("exploration_observation", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  questionText: text("question_text").notNull(),
+  answerText: text("answer_text").notNull(),
+  exclusionReason: text("exclusion_reason").notNull(),
+  excludedFromNatural: integer("excluded_from_natural").notNull().default(1),
+  operationId: text("operation_id").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("exploration_observation_operation_uidx").on(table.brandId, table.operationId),
+  index("exploration_observation_owner_idx").on(table.ownerId, table.brandId, table.createdAt, table.id),
+  check("exploration_observation_state_check", sql`${table.excludedFromNatural} = 1
+    and ${table.exclusionReason} = 'custom_pipeline'
+    and length(${table.id}) = 36 and length(${table.brandId}) = 36
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.questionText}) between 1 and 4000
+    and length(${table.answerText}) between 1 and 8000
+    and length(${table.operationId}) = 36
+    and length(${table.createdAt}) between 20 and 40`),
+]);
