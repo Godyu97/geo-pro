@@ -67,8 +67,8 @@ export async function MarketingHomePage() {
   ];
 
   return (
-    <>
-      <header className="border-b bg-background/95">
+    <div className="visual-canvas min-h-svh">
+      <header className="border-b bg-card/90 backdrop-blur-sm">
         <nav
           aria-label={t("nav")}
           className="mx-auto flex min-h-20 max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-4 sm:px-8"
@@ -80,7 +80,7 @@ export async function MarketingHomePage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <LanguageSwitcher />
-            <Button asChild variant={authenticated ? "default" : "ghost"}>
+            <Button asChild variant={authenticated ? "default" : "ghost"} className="rounded-full px-4">
               <Link href={authenticated ? "/dashboard" : "/login"}>
                 {authenticated ? t("console") : accountUnavailable ? t("accountEntry") : common("login")}
               </Link>
@@ -107,13 +107,13 @@ export async function MarketingHomePage() {
               {t("audienceDescription")}
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Button asChild size="lg">
+              <Button asChild size="lg" className="rounded-full px-5">
                 <Link href={entryHref}>
                   {entryLabel}
                   <ArrowRight aria-hidden="true" />
                 </Link>
               </Button>
-              <Button asChild variant="outline" size="lg">
+              <Button asChild variant="outline" size="lg" className="rounded-full bg-card px-5">
                 <a href="#capabilities">{t("direction")}</a>
               </Button>
             </div>
@@ -134,7 +134,7 @@ export async function MarketingHomePage() {
               )}
             </div>
           </div>
-          <div className="rounded-3xl border bg-card p-5 shadow-[0_18px_65px_-30px_#537a7838] sm:p-7">
+          <div className="panel-float rounded-3xl border bg-card p-5 sm:p-7">
             <div className="mb-7 flex items-center justify-between border-b pb-5">
               <span className="text-sm font-medium">{t("stepsTitle")}</span>
               <Badge variant="outline">{t("directionBadge")}</Badge>
@@ -240,6 +240,6 @@ export async function MarketingHomePage() {
         <p>{t("footerEvidence")}</p>
         <p>{t("footerAvailability")}</p>
       </footer>
-    </>
+    </div>
   );
 }

@@ -33,10 +33,8 @@ export default async function LoginPage({
   const email = await getTranslator("accountEmail");
 
   return (
-    <main
-      id="main-content"
-      className="mx-auto flex min-h-svh max-w-6xl flex-col px-5 py-8 sm:px-8"
-    >
+    <main id="main-content" className="visual-canvas min-h-svh">
+    <div className="mx-auto flex min-h-svh max-w-6xl flex-col px-5 py-8 sm:px-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <BrandMark />
         <div className="flex flex-wrap items-center gap-4">
@@ -99,6 +97,7 @@ export default async function LoginPage({
       <p className="text-center text-xs text-muted-foreground">
         {common("siteTitle")}
       </p>
+    </div>
     </main>
   );
 }

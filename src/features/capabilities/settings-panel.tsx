@@ -47,11 +47,11 @@ export async function MonitoringCapabilityPanel({ locale }: { locale: Locale }) 
           <article key={item.channelId} className="min-w-0 space-y-2 rounded-lg border p-3">
             <h3 className="font-medium wrap-anywhere">{item.displayName}</h3>
             <p className="text-muted-foreground">{t(item.kind)} · {t(item.eligibility)}</p>
-            <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,auto)] gap-x-2 gap-y-1 wrap-anywhere">
-              <dt>{t("vendor")}</dt><dd>{item.vendorId}</dd>
-              <dt>{t("productEntry")}</dt><dd>{item.productEntry}</dd>
-              <dt>{t("modelVersion")}</dt><dd>{item.modelVersion}</dd>
-              <dt>{t("limits")}</dt><dd>{item.limitsSummary}</dd>
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+              <dt>{t("vendor")}</dt><dd className="wrap-anywhere">{item.vendorId}</dd>
+              <dt>{t("productEntry")}</dt><dd className="wrap-anywhere">{item.productEntry}</dd>
+              <dt>{t("modelVersion")}</dt><dd className="wrap-anywhere">{item.modelVersion}</dd>
+              <dt>{t("limits")}</dt><dd className="wrap-anywhere">{item.limitsSummary}</dd>
               {item.verifiedAt && <>
                 <dt>{t("verifiedAt")}</dt>
                 <dd><time dateTime={item.verifiedAt}>{formatDateTime(locale, new Date(item.verifiedAt))}</time></dd>

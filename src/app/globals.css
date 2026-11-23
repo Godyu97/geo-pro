@@ -50,38 +50,39 @@
 
 :root {
   color-scheme: light;
-  --background: #f5f7f6;
-  --foreground: #203435;
-  --card: oklch(1 0 0);
-  --card-foreground: #203435;
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: #256b6b;
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: #e8f0ef;
-  --secondary-foreground: #285858;
-  --muted: #edf1ef;
-  --muted-foreground: #5f6f70;
-  --accent: #e8f0ef;
-  --accent-foreground: #285858;
+  /* ui-visual-v1: lavender canvas, white surfaces, purple-blue actions. */
+  --background: #f4f6fb;
+  --foreground: #1b2433;
+  --card: #ffffff;
+  --card-foreground: #1b2433;
+  --popover: #ffffff;
+  --popover-foreground: #1b2433;
+  --primary: #4f46c5;
+  --primary-foreground: #ffffff;
+  --secondary: #eceafd;
+  --secondary-foreground: #3730a3;
+  --muted: #eef1f8;
+  --muted-foreground: #526075;
+  --accent: #eceafd;
+  --accent-foreground: #3730a3;
   --destructive: #b42318;
-  --border: #dbe3e1;
-  --input: #dbe3e1;
-  --ring: #2f7474;
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.75rem;
-  --sidebar: #f3f6f5;
-  --sidebar-foreground: #203435;
-  --sidebar-primary: #256b6b;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: #e8f0ef;
-  --sidebar-accent-foreground: #285858;
-  --sidebar-border: #dbe3e1;
-  --sidebar-ring: #2f7474;
+  --border: #e1e6f2;
+  --input: #e1e6f2;
+  --ring: #4f46c5;
+  --chart-1: #4f46c5;
+  --chart-2: #7c74e8;
+  --chart-3: #3b82c4;
+  --chart-4: #8b93a7;
+  --chart-5: #1b2433;
+  --radius: 0.875rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1b2433;
+  --sidebar-primary: #4f46c5;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eceafd;
+  --sidebar-accent-foreground: #3730a3;
+  --sidebar-border: #e1e6f2;
+  --sidebar-ring: #4f46c5;
 }
 
 .dark {
@@ -152,4 +153,15 @@
 
 .skip-link:focus {
   transform: translateY(0);
+}
+
+.visual-canvas {
+  background:
+    radial-gradient(980px 460px at 0% -10%, color-mix(in srgb, var(--primary) 16%, transparent), transparent 62%),
+    radial-gradient(720px 380px at 100% 0%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 58%),
+    var(--background);
+}
+
+.panel-float {
+  box-shadow: 0 18px 50px -28px color-mix(in srgb, var(--primary) 42%, transparent);
 }

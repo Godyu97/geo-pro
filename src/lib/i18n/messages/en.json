@@ -8,6 +8,7 @@
     "login": "Sign in",
     "dashboard": "Workspace",
     "overview": "Workspace overview",
+    "currentLocation": "Current location",
     "toggleSidebar": "Toggle sidebar navigation",
     "sidebarTitle": "Workspace navigation",
     "sidebarDescription": "Choose the workspace overview or view module status.",

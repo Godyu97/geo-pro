@@ -5,6 +5,8 @@ import type { ReactNode } from "react";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { SessionMonitor } from "@/components/layout/session-monitor";
 import { WorkspaceAccountControls } from "@/components/layout/workspace-account-controls";
+import { WorkspaceLocation } from "@/components/layout/workspace-location";
+import type { WorkspaceSectionId } from "@/components/layout/workspace-section";
 import {
   SidebarInset,
   SidebarProvider,
@@ -31,10 +33,26 @@ export default async function DashboardLayout({
   const locale = await getLocale();
   const messages = getMessages(locale);
   const t = await getTranslator("common");
+  const settings = await getTranslator("settings");
   const decision = brandIntakeDecision(await headers(), user.email);
   let brandIntake: BrandIntakeMode | "closed" | "dev-denied" = "closed";
   if (decision.state === "denied") brandIntake = "dev-denied";
   if (decision.state === "open") brandIntake = decision.intake.mode;
+  const locationLabels: Record<WorkspaceSectionId, string> = {
+    overview: t("overview"),
+    assistant: messages.dashboard.assistant,
+    maintenance: t("maintenance"),
+    settings: t("accountSettings"),
+    brands: messages.modules.brandsTitle,
+    monitoring: messages.modules.monitoringTitle,
+    optimization: messages.modules.optimizationTitle,
+    content: messages.modules.contentTitle,
+    reports: messages.modules.reportsTitle,
+    orders: settings("serviceOrders"),
+    deliveries: settings("deliveries"),
+    entitlements: settings("entitlements"),
+    workspace: t("dashboard"),
+  };
 
   return (
     <TooltipProvider>
@@ -46,7 +64,7 @@ export default async function DashboardLayout({
             <div className="flex min-w-0 flex-wrap items-center gap-3">
               <SidebarTrigger aria-label={t("toggleSidebar")} />
               <Separator orientation="vertical" className="h-5!" />
-              <span className="truncate text-sm font-medium">{t("overview")}</span>
+              <WorkspaceLocation currentLocation={t("currentLocation")} labels={locationLabels} />
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-3">
               <span className="hidden max-w-36 truncate text-xs text-muted-foreground sm:inline">

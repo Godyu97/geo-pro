@@ -36,7 +36,8 @@ export default async function AccountAccessPage({ searchParams }: PageProps) {
   ]);
   const user = state.status === "authenticated" ? state.session.user : undefined;
   return (
-    <main id="main-content" className="mx-auto flex min-h-svh max-w-3xl flex-col px-5 py-8 sm:px-8">
+    <main id="main-content" className="visual-canvas min-h-svh">
+    <div className="mx-auto flex min-h-svh max-w-3xl flex-col px-5 py-8 sm:px-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <BrandMark />
         <LanguageSwitcher />
@@ -52,6 +53,7 @@ export default async function AccountAccessPage({ searchParams }: PageProps) {
           </CardContent>
         </Card>
       </div>
+    </div>
     </main>
   );
 }

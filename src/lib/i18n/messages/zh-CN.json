@@ -8,6 +8,7 @@
     "login": "登录",
     "dashboard": "工作台",
     "overview": "工作台总览",
+    "currentLocation": "当前位置",
     "toggleSidebar": "切换侧边导航",
     "sidebarTitle": "工作台导航",
     "sidebarDescription": "选择工作台总览或查看模块状态。",

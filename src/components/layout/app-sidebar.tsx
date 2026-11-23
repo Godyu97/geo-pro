@@ -6,6 +6,7 @@ import { ArrowUpRight, ClipboardList, LayoutDashboard, CircleHelp, Settings, Shi
 
 import { BrandMark } from "@/components/layout/brand-mark";
 import { getModuleLinks } from "@/components/layout/module-links";
+import { isWorkspaceSectionActive } from "@/components/layout/workspace-section";
 import {
   Sidebar,
   SidebarContent,
@@ -44,6 +45,7 @@ export function AppSidebar({ messages, modules, brandIntake }: {
   const moduleLinks = getModuleLinks(modules);
   const { setOpenMobile } = useSidebar();
   const pathname = usePathname();
+  const sectionActive = (section: string) => isWorkspaceSectionActive(pathname, section);
 
   return (
     <Sidebar>
@@ -57,10 +59,10 @@ export function AppSidebar({ messages, modules, brandIntake }: {
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={pathname === "/dashboard"} className="h-auto min-h-10 py-2">
+                  <SidebarMenuButton asChild isActive={sectionActive("overview")} className="h-auto min-h-10 rounded-lg py-2">
                     <Link
                       href="/dashboard"
-                      aria-current={pathname === "/dashboard" ? "page" : undefined}
+                      aria-current={sectionActive("overview") ? "page" : undefined}
                       onClick={() => setOpenMobile(false)}
                     >
                       <LayoutDashboard aria-hidden="true" />
@@ -69,10 +71,10 @@ export function AppSidebar({ messages, modules, brandIntake }: {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={pathname.startsWith("/dashboard/assistant")} className="h-auto min-h-10 py-2">
+                  <SidebarMenuButton asChild isActive={sectionActive("assistant")} className="h-auto min-h-10 rounded-lg py-2">
                     <Link
                       href="/dashboard/assistant"
-                      aria-current={pathname.startsWith("/dashboard/assistant") ? "page" : undefined}
+                      aria-current={sectionActive("assistant") ? "page" : undefined}
                       onClick={() => setOpenMobile(false)}
                     >
                       <ClipboardList aria-hidden="true" />
@@ -81,18 +83,18 @@ export function AppSidebar({ messages, modules, brandIntake }: {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={pathname === "/dashboard/maintenance"} className="h-auto min-h-10 py-2">
-                    <Link href="/dashboard/maintenance" aria-current={pathname === "/dashboard/maintenance" ? "page" : undefined} onClick={() => setOpenMobile(false)}>
+                  <SidebarMenuButton asChild isActive={sectionActive("maintenance")} className="h-auto min-h-10 rounded-lg py-2">
+                    <Link href="/dashboard/maintenance" aria-current={sectionActive("maintenance") ? "page" : undefined} onClick={() => setOpenMobile(false)}>
                       <ShieldCheck aria-hidden="true" />
                       <span className="whitespace-normal">{common("maintenance")}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={pathname === "/dashboard/settings"} className="h-auto min-h-10 py-2">
+                  <SidebarMenuButton asChild isActive={sectionActive("settings")} className="h-auto min-h-10 rounded-lg py-2">
                     <Link
                       href="/dashboard/settings"
-                      aria-current={pathname === "/dashboard/settings" ? "page" : undefined}
+                      aria-current={sectionActive("settings") ? "page" : undefined}
                       onClick={() => setOpenMobile(false)}
                     >
                       <Settings aria-hidden="true" />
@@ -109,11 +111,13 @@ export function AppSidebar({ messages, modules, brandIntake }: {
               <SidebarMenu>
                 {moduleLinks.map(({ id, title, icon: Icon }) => {
                   const brandEntry = id === "brands" && brandIntake !== "closed";
+                  const active = sectionActive(id);
                   return (
                     <SidebarMenuItem key={id}>
-                      <SidebarMenuButton asChild isActive={brandEntry && pathname.startsWith("/dashboard/brands")} className="h-auto min-h-10 py-2">
+                      <SidebarMenuButton asChild isActive={active} className="h-auto min-h-10 rounded-lg py-2">
                         <a
                           href={brandEntry ? "/dashboard/brands" : pathname === "/dashboard" ? `#${id}` : `/dashboard#${id}`}
+                          aria-current={active ? "page" : undefined}
                           onClick={() => setOpenMobile(false)}
                         >
                           <Icon aria-hidden="true" />
