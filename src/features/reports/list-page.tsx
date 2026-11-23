@@ -40,6 +40,7 @@ export default async function ReportsListPage({
           <Link href="/dashboard/reports/lead-quality" prefetch={false} className="text-sm underline underline-offset-4">{t("openLeadQuality")}</Link>
           <Link href="/dashboard/reports/lead-suggestions" prefetch={false} className="text-sm underline underline-offset-4">{t("openLeadSuggestions")}</Link>
           <Link href="/dashboard/reports/shares" prefetch={false} className="text-sm underline underline-offset-4">{t("openShares")}</Link>
+          <Link href="/dashboard/reports/connector-events" prefetch={false} className="text-sm underline underline-offset-4">{t("openConnectorEvents")}</Link>
         </p>
       </main>
     );
@@ -91,6 +92,7 @@ export default async function ReportsListPage({
           <Link href="/dashboard/reports/lead-quality" prefetch={false} className="text-sm underline underline-offset-4">{t("openLeadQuality")}</Link>
           <Link href="/dashboard/reports/lead-suggestions" prefetch={false} className="text-sm underline underline-offset-4">{t("openLeadSuggestions")}</Link>
           <Link href="/dashboard/reports/shares" prefetch={false} className="text-sm underline underline-offset-4">{t("openShares")}</Link>
+          <Link href="/dashboard/reports/connector-events" prefetch={false} className="text-sm underline underline-offset-4">{t("openConnectorEvents")}</Link>
         </p>
         {mockLane && (
           <div className="space-y-2">

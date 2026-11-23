@@ -2092,6 +2092,42 @@ CREATE TABLE "data_connection_field" (
     and length("data_connection_field"."owner_id") between 1 and 128)
 );
 
+CREATE TABLE "connector_event" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"event_key" text NOT NULL,
+	"count" integer NOT NULL,
+	"conflict" integer NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "connector_event_state_check" CHECK ("connector_event"."count" = 1
+    and "connector_event"."conflict" in (0, 1)
+    and "connector_event"."event_key" ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$'
+    and length("connector_event"."id") = 36
+    and length("connector_event"."brand_id") = 36
+    and length("connector_event"."owner_id") between 1 and 128
+    and length("connector_event"."created_at") between 20 and 40
+    and length("connector_event"."updated_at") between 20 and 40)
+);
+
+CREATE TABLE "connector_event_source" (
+	"id" text PRIMARY KEY NOT NULL,
+	"event_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"source" text NOT NULL,
+	"payload_digest" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "connector_event_source_state_check" CHECK ("connector_event_source"."source" in ('csv', 'connector')
+    and "connector_event_source"."payload_digest" ~ '^[a-f0-9]{64}$'
+    and length("connector_event_source"."id") = 36
+    and length("connector_event_source"."event_id") = 36
+    and length("connector_event_source"."brand_id") = 36
+    and length("connector_event_source"."owner_id") between 1 and 128
+    and length("connector_event_source"."created_at") between 20 and 40)
+);
+
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "maintenance_grant" ADD CONSTRAINT "maintenance_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
@@ -2249,6 +2285,11 @@ ALTER TABLE "data_connection" ADD CONSTRAINT "data_connection_owner_id_user_id_f
 ALTER TABLE "data_connection_field" ADD CONSTRAINT "data_connection_field_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "data_connection_field" ADD CONSTRAINT "data_connection_field_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "data_connection_field" ADD CONSTRAINT "data_connection_field_connection_fk" FOREIGN KEY ("connection_id") REFERENCES "public"."data_connection"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "connector_event" ADD CONSTRAINT "connector_event_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "connector_event" ADD CONSTRAINT "connector_event_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "connector_event_source" ADD CONSTRAINT "connector_event_source_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "connector_event_source" ADD CONSTRAINT "connector_event_source_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "connector_event_source" ADD CONSTRAINT "connector_event_source_event_fk" FOREIGN KEY ("event_id") REFERENCES "public"."connector_event"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
@@ -2430,3 +2471,7 @@ CREATE INDEX "data_connection_owner_idx" ON "data_connection" USING btree ("owne
 CREATE UNIQUE INDEX "data_connection_field_connection_idx" ON "data_connection_field" USING btree ("connection_id","position");
 CREATE UNIQUE INDEX "data_connection_field_name_uidx" ON "data_connection_field" USING btree ("connection_id","field_name");
 CREATE INDEX "data_connection_field_owner_idx" ON "data_connection_field" USING btree ("owner_id","connection_id","position");
+CREATE UNIQUE INDEX "connector_event_key_uidx" ON "connector_event" USING btree ("owner_id","brand_id","event_key");
+CREATE INDEX "connector_event_owner_idx" ON "connector_event" USING btree ("owner_id","created_at","id");
+CREATE UNIQUE INDEX "connector_event_source_event_uidx" ON "connector_event_source" USING btree ("event_id","source");
+CREATE INDEX "connector_event_source_owner_idx" ON "connector_event_source" USING btree ("owner_id","event_id","source");

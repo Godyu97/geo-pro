@@ -393,6 +393,13 @@
       "when": 1795410895805,
       "tag": "0055_data_connection",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795411549515,
+      "tag": "0056_connector_event",
+      "breakpoints": true
     }
   ]
 }
