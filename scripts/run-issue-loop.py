@@ -76,22 +76,10 @@ DEV_PROMPT_BODY = f"""# GeoPro 单 Issue 开发与验收
 
 ## 回写和回执
 
-- progressed 表示本轮有已推送的验证增量，或新增可独立复查的纯验收证据，并且仍有明确剩余步骤。保持目标开放。
-- done 表示目标的全部适用验收已核验。先发布 Issue 验收评论，再更新为 status:done 并以 completed 原因关闭该 Issue。纯验收注明所用 Git 版本。有授权且直接关联工单的前置已经实证满足时，可将其更新为 status:ready。
-- blocked 表示缺少具体前置且本轮无可交付增量。记录已执行的检查和可验证的解除条件，经授权后更新阻塞状态。已交付部分增量且还有依赖时使用 progressed，并在 remaining 写明依赖。
-- failed 表示本轮运行或门禁失败。保留未提交工作，报告实际问题。skipped 只用于 GitHub 上目标已关闭或已退出可执行队列。
-- progressed 和 done 必须在目标 Issue 新发一条评论，逐字放入回执标记及实际核验版本的完整 SHA。写清本轮交付范围、对应需求/AC、验证命令与结果、证据定位和剩余项。剩余项写成下一轮可直接定位的行为、前置和核验方法。回执使用该评论的完整链接。仅当本轮已提交并推送时，在 commit 字段填写实际 HEAD 的完整 SHA。
-
-最终回复末尾输出一次以下格式。各字段占一行，按实际结果填写：
-
-loop-round:
-issue: #<目标编号>
-result: progressed | done | blocked | failed | skipped
-commit: <完整 SHA 或 none>
-verified: <实际通过的命令/检查，分号分隔，或 none>
-evidence: <目标 Issue 的新评论链接或 none>
-remaining: <剩余任务或失败原因，已完成则写 none>
-unblock: <明确前置，非 blocked 写 none>
+- 交付已推送的增量或可独立复查的纯验收证据时，在目标 Issue 新发一条评论，逐字放入本轮标记及实际核验版本的完整 SHA。写清交付范围、对应需求/AC、验证命令与结果、证据和剩余工作。
+- 还有具体步骤时保持目标开放，在评论写清下一步的前置和核验方法。全部适用验收已通过时，发布验收评论后更新为 status:done 并以 completed 原因关闭。经授权可将前置已实证满足的关联工单更新为 status:ready。
+- 缺少具体前置且本轮无交付时，记录已执行的检查和可验证的解除条件，经授权后更新阻塞状态。运行或门禁失败时保留未提交工作并说明问题。目标已关闭或退出可执行队列时跳过。
+- 最终回复用普通文本记录实际工作、证据和剩余事项。
 """
 
 
@@ -110,19 +98,7 @@ BACKLOG_REPLENISH_PROMPT_BODY = f"""# GeoPro 开发队列补货
 - 按能观察到的行为拆成独立纵向切片。每单以一个角色及结果为中心，在一两轮内可实现和验收。涉及多轮时写清首个独立增量和顺序，以现有架构和接口为起点，技术细节只约束业务语义、接口合同和必须保留的风险边界。
 - 工单标题写清动作及结果。正文包含角色和场景、现状与证据定位、目标行为及范围、需求/任务/SPEC/AC 引用、直接前置和满足证据、关键边界。验收写成给定条件、操作和预期结果，列出实际可用的验证入口或命令及应保留的证据。技术工单说明它解锁的现有使用或交付路径。
 - 只在已授权范围内创建有依据且前置已满足的 status:ready 工单，使用已有里程碑、优先级和模块标签，逐字放入本轮回执标记。运行上下文中的数量是上限。符合条件的工单不足时按实际数量交付，可以为空。保持业务代码与工作区干净。
-- 按授权创建后逐一核对创建回执和状态。命令失败时先检查 Issue 是否已经创建，再决定是否重试。创建失败且没有发布任何工单时用 failed，实际创建的部分批次用 backlog 并写清剩余项。
-
-最终回复末尾输出一次以下格式。各字段占一行，按实际结果填写：
-
-loop-round:
-issue: none
-result: backlog | failed
-commit: none
-verified: <实际核对动作或 none>
-evidence: none
-remaining: <部分批次、空批次或失败原因，已完成则写 none>
-unblock: none
-issues_created: <#N1, #N2 或 none>
+- 按授权创建后逐一核对创建回执和状态。命令失败时先检查 Issue 是否已经创建，再决定是否重试。最终回复用普通文本记录实际新建工单、核对结果和剩余事项。
 """
 
 
@@ -133,18 +109,6 @@ class IssueInfo:
     labels: list[str]
     created_at: datetime
     body: str
-
-
-@dataclass
-class ParsedLoopRound:
-    issue: int | None
-    result: str
-    commit: str | None
-    verified: str | None
-    evidence: str | None
-    remaining: str | None
-    unblock: str | None
-    issues_created: list[int] | None
 
 
 @dataclass
@@ -161,12 +125,8 @@ class RoundResult:
     commit_produced: bool = False
     issues_created: list[int] = field(default_factory=list)
     issues_closed: list[int] = field(default_factory=list)
-    parsed_outcome: str | None = None
-    verified: str | None = None
+    outcome: str | None = None
     evidence: str | None = None
-    remaining: str | None = None
-    unblock: str | None = None
-    blocked_on_github: bool = False
     quarantine_stash: str | None = None
     interrupt_signal: int | None = None
     error_reason: str | None = None
@@ -351,6 +311,16 @@ def fetch_issue(number: int, workspace: Path, env: dict[str, str]) -> dict[str, 
             not isinstance(item, dict) or not isinstance(item.get(property_name), str) for item in items
         ):
             raise RuntimeError(f"Issue #{number} 的 {key} 数据格式异常")
+    for comment in issue["comments"]:
+        if not isinstance(comment.get("url"), str) or not comment["url"]:
+            raise RuntimeError(f"Issue #{number} 的评论缺少链接")
+        try:
+            created_at = datetime.fromisoformat(comment.get("createdAt", "").replace("Z", "+00:00"))
+            if created_at.tzinfo is None:
+                raise ValueError("评论时间缺少时区")
+        except (AttributeError, ValueError) as exc:
+            raise RuntimeError(f"Issue #{number} 的评论时间格式异常") from exc
+        comment["createdAt"] = created_at
     return issue
 
 
@@ -388,54 +358,6 @@ def classify_issues(
     actionable.sort(key=sort_key_issue)
     excluded.sort(key=lambda pair: pair[0].number)
     return actionable, excluded
-
-
-def parse_loop_round_block(text: str | None) -> ParsedLoopRound:
-    headers = list(re.finditer(r"(?m)^loop-round:[ \t]*$", text or ""))
-    if not headers or text is None:
-        raise ValueError("缺少 loop-round 回执")
-
-    required = {"issue", "result", "commit", "verified", "evidence", "remaining", "unblock"}
-    fields: dict[str, str] = {}
-    lines = text[headers[-1].end():].strip().splitlines()
-    if lines and lines[-1].strip() == "```":
-        lines.pop()
-    for line in lines:
-        if not line.strip():
-            continue
-        key, sep, value = line.strip().partition(":")
-        if not sep or not value.strip() or key in fields or key not in required | {"issues_created"}:
-            raise ValueError("loop-round 字段为空、重复或格式不符")
-        fields[key] = value.strip()
-    if not required.issubset(fields):
-        raise ValueError("loop-round 缺少必填字段")
-
-    issue = fields["issue"]
-    if issue != "none" and not re.fullmatch(r"#[1-9]\d*", issue):
-        raise ValueError("loop-round 的 Issue 编号格式不符")
-    commit = fields["commit"]
-    if commit != "none" and not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", commit):
-        raise ValueError("loop-round 的 commit 须填写完整 SHA")
-    created = fields.get("issues_created", "none")
-    numbers: list[int] = []
-    if created != "none":
-        entries = re.split(r",\s*", created)
-        if any(not re.fullmatch(r"#[1-9]\d*", entry) for entry in entries):
-            raise ValueError("loop-round 的 issues_created 格式不符")
-        numbers = [int(entry[1:]) for entry in entries]
-        if len(set(numbers)) != len(numbers):
-            raise ValueError("loop-round 重复申报创建的 Issue")
-
-    return ParsedLoopRound(
-        issue=None if issue == "none" else int(issue[1:]),
-        result=fields["result"],
-        commit=None if commit == "none" else commit,
-        verified=None if fields["verified"] == "none" else fields["verified"],
-        evidence=None if fields["evidence"] == "none" else fields["evidence"],
-        remaining=None if fields["remaining"] == "none" else fields["remaining"],
-        unblock=None if fields["unblock"] == "none" else fields["unblock"],
-        issues_created=numbers if "issues_created" in fields else None,
-    )
 
 
 def build_dev_prompt(
@@ -480,84 +402,64 @@ def verify_round_result(
     started_at: datetime,
     replenish_count: int,
 ) -> None:
-    receipt = parse_loop_round_block(result.result_text)
-    if receipt.issue != result.target_issue:
-        raise ValueError("回执 Issue 与派发目标不一致")
-    result.parsed_outcome = receipt.result
-    result.verified = receipt.verified
-    result.evidence = receipt.evidence
-    result.remaining = receipt.remaining
-    result.unblock = receipt.unblock
-    if receipt.result == "failed":
-        raise ValueError(receipt.remaining or "Agent 报告本轮执行失败")
-
+    assert result.before_head and result.after_head
+    moved = result.before_head != result.after_head
     if result.mode == "backlog":
-        if (receipt.result != "backlog" or receipt.issues_created is None or receipt.commit
-                or receipt.evidence or receipt.unblock or result.before_head != result.after_head
-                or not receipt.verified):
-            raise ValueError("补货回执与实际 Git 状态或补货约定不符")
-        if len(receipt.issues_created) > replenish_count:
-            raise ValueError("回执申报的新建 Issue 数超过本轮上限")
-        if receipt.issues_created:
-            before_numbers = {issue.number for issue in before_issues}
-            eligible = {
-                issue.number for issue in fetch_open_issues(workspace, env)
-                if issue.number not in before_numbers and issue.created_at >= started_at
-                and "status:ready" in issue.labels and is_actionable(issue.labels)
-                and receipt_marker in issue.body
-            }
-            if not set(receipt.issues_created).issubset(eligible):
-                raise ValueError("申报的 Issue 未在本轮新建或未处于可开发状态")
-            result.issues_created = sorted(receipt.issues_created)
+        if moved:
+            raise ValueError("补货轮次含 Git 提交")
+        before_numbers = {issue.number for issue in before_issues}
+        created = sorted(
+            issue.number for issue in fetch_open_issues(workspace, env)
+            if issue.number not in before_numbers and issue.created_at >= started_at
+            and "status:ready" in issue.labels and is_actionable(issue.labels)
+            and receipt_marker in issue.body
+        )
+        if len(created) > replenish_count:
+            raise ValueError("本轮新建的可开发 Issue 数超过补货上限")
+        result.issues_created = created
+        result.outcome = "backlog"
         return
 
     assert result.target_issue is not None
     target = result.target_issue
-    if receipt.issues_created is not None:
-        raise ValueError("开发轮回执含补货字段")
-    if receipt.result in {"blocked", "skipped"}:
-        if receipt.commit or result.before_head != result.after_head:
-            raise ValueError("未交付轮次含 Git 提交")
-        issue = fetch_issue(target, workspace, env)
-        labels = [label["name"] for label in issue["labels"]]
-        if receipt.result == "blocked":
-            if issue["state"] != "OPEN" or not receipt.unblock:
-                raise ValueError("阻塞回执须对应开放 Issue 并给出具体解除条件")
-            result.blocked_on_github = not is_actionable(labels)
-        elif issue["state"] != "CLOSED" and is_actionable(labels):
-            raise ValueError("目标 Issue 仍可执行，不能确认跳过")
-        return
-
-    if receipt.result not in {"progressed", "done"} or not receipt.verified or not receipt.evidence:
-        raise ValueError("交付回执须包含合法结果、实际检查和目标 Issue 评论链接")
-    if receipt.unblock or (receipt.result == "progressed") != bool(receipt.remaining):
-        raise ValueError("交付回执的剩余工作与结果不一致")
-    moved = result.before_head != result.after_head
-    if moved != bool(receipt.commit) or (receipt.commit and receipt.commit != result.after_head):
-        raise ValueError("申报的提交与本轮 HEAD 变化不一致")
-    if receipt.commit:
-        assert result.before_head is not None
-        subject = require_output(["git", "show", "-s", "--format=%s", receipt.commit], workspace, env, "读取提交主题", 15)
-        if not subject.endswith(f"(#{target})") or not git_is_ancestor(workspace, env, result.before_head, receipt.commit):
+    if moved:
+        subject = require_output(
+            ["git", "show", "-s", "--format=%s", result.after_head], workspace, env, "读取提交主题", 15
+        )
+        if not subject.endswith(f"(#{target})") or not git_is_ancestor(
+            workspace, env, result.before_head, result.after_head
+        ):
             raise ValueError("提交没有关联目标 Issue 或不在同步基线之后")
         origin = fetch_origin_tip(workspace, env, branch)
-        if not git_is_ancestor(workspace, env, receipt.commit, origin):
-            raise ValueError(f"origin/{branch} 尚未包含申报提交")
+        if not git_is_ancestor(workspace, env, result.after_head, origin):
+            raise ValueError(f"origin/{branch} 尚未包含本轮提交")
 
     issue = fetch_issue(target, workspace, env)
-    evidence_version = receipt.commit or result.before_head
-    if not evidence_version or not any(
-        comment.get("url") == receipt.evidence and receipt_marker in comment["body"]
-        and evidence_version in comment["body"]
-        for comment in issue["comments"]
-    ):
-        raise ValueError("目标 Issue 找不到同时包含本轮标记和核验版本的验收评论")
-    if receipt.result == "done":
-        if issue["state"] != "CLOSED" or issue.get("stateReason") != "COMPLETED":
+    evidence = next(
+        (comment["url"] for comment in reversed(issue["comments"])
+         if receipt_marker in comment["body"] and result.after_head in comment["body"]
+         and comment["createdAt"] >= started_at),
+        None,
+    )
+    labels = [label["name"] for label in issue["labels"]]
+    if not evidence:
+        if not moved and issue["state"] == "CLOSED":
+            result.outcome = "skipped"
+            return
+        if not moved and not is_actionable(labels):
+            blocking_labels = NON_ACTIONABLE_LABELS.intersection(labels) - {"status:done"}
+            result.outcome = "blocked" if blocking_labels else "skipped"
+            return
+        raise ValueError("目标 Issue 找不到同时包含本轮标记和核验版本的新验收评论")
+
+    if issue["state"] == "CLOSED":
+        if issue.get("stateReason") != "COMPLETED":
             raise ValueError("目标 Issue 尚未以完成原因关闭")
         result.issues_closed = [target]
-    elif issue["state"] != "OPEN":
-        raise ValueError("部分交付应保持目标 Issue 开放")
+        result.outcome = "done"
+    else:
+        result.outcome = "progressed"
+    result.evidence = evidence
     result.commit_produced = moved
 
 
@@ -729,9 +631,7 @@ def run_round(
         error = f"第 {round_index} 轮执行超过 {round_timeout} 秒，已终止进程组"
     elif proc.returncode:
         error = f"cursor-agent 进程非零退出（退出码 {proc.returncode}，详见轮次日志）"
-    elif result_event is None:
-        error = "未收到 stream-json 的 result 事件"
-    elif result_event.get("is_error") or result_event.get("subtype") != "success":
+    elif result_event is not None and (result_event.get("is_error") or result_event.get("subtype") != "success"):
         error = "cursor-agent 的 result 事件标记失败"
 
     return RoundResult(
@@ -922,8 +822,8 @@ def print_summary(
         extra = []
         if r.commit_produced and r.after_head:
             extra.append(f"commit={r.after_head[:7]}")
-        if r.parsed_outcome:
-            extra.append(f"outcome={r.parsed_outcome}")
+        if r.outcome:
+            extra.append(f"outcome={r.outcome}")
         if r.issues_created:
             extra.append(f"created={len(r.issues_created)}")
         if r.issues_closed:
@@ -1106,7 +1006,7 @@ def run_loop(
             if target_num is not None:
                 issue_failures.pop(target_num, None)
 
-            outcome = result.parsed_outcome
+            outcome = result.outcome
             if mode == "backlog":
                 count = len(result.issues_created)
                 if count:
@@ -1121,8 +1021,6 @@ def run_loop(
             else:
                 consecutive_noop = 0
                 assert target_num is not None
-                if outcome == "blocked" and not result.blocked_on_github:
-                    skipped_issues[target_num] = result.unblock or "等待直接前置"
                 if result.commit_produced:
                     dev_commits += 1
                 if outcome == "progressed":

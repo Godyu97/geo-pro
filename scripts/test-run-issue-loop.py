@@ -77,11 +77,9 @@ def git(*args):
 
 
 marker = re.search(r"<!-- geopro-loop:[0-9a-f]+ -->", prompt)[0]
-fields = {"issue": "#131", "result": "done", "commit": "none", "verified": "fixture check",
-          "evidence": "none", "remaining": "none", "unblock": "none"}
+reply = "已执行本轮检查。详情见工单评论。"
 if "最多新建 Issue：" in prompt:
-    fields.update(issue="none", result="backlog", issues_created="none")
-    if scenario in {"backlog-created", "backlog-foreign", "backlog-reopened"}:
+    if scenario in {"backlog-created", "backlog-foreign", "backlog-reopened", "backlog-over-limit"}:
         opened = {
             "number": 132, "title": "fixture issue", "labels": [{"name": "status:ready"}],
             "created_at": ("2020-01-01T00:00:00Z" if scenario == "backlog-reopened"
@@ -89,37 +87,48 @@ if "最多新建 Issue：" in prompt:
             "body": "someone else's issue" if scenario == "backlog-foreign" else marker,
         }
         state["open"].append(opened)
-        fields["issues_created"] = "#132"
+        if scenario == "backlog-over-limit":
+            state["open"].append({**opened, "number": 133})
 else:
-    if scenario in {"pushed", "unpushed"}:
+    first_prose_round = scenario == "pushed-with-prose" and not Path("change.txt").exists()
+    if scenario in {"pushed", "unpushed", "wrong-commit-issue"} or first_prose_round:
         Path("change.txt").write_text("fixture change")
         git("add", "change.txt")
-        git("commit", "-m", "feat: fixture change (#131)")
-        if scenario == "pushed":
+        issue_number = 999 if scenario == "wrong-commit-issue" else 131
+        git("commit", "-m", f"feat: fixture change (#{issue_number})")
+        if scenario != "unpushed":
             git("push", "origin", "main")
-    if scenario in {"pushed", "unpushed", "claim-sync"}:
-        fields.update(result="progressed", commit=git("rev-parse", "HEAD"), remaining="second slice")
-    elif scenario == "acceptance-progress":
-        fields.update(result="progressed", remaining="second verification")
-    else:
+    keep_open = {
+        "pushed", "unpushed", "wrong-commit-issue", "claim-sync", "acceptance-progress",
+        "stale-comment", "old-comment", "not-closed", "wrong-version", "blocked",
+    }
+    if scenario not in keep_open and not first_prose_round:
         state["open"] = []
-        state["target"]["state"] = "OPEN" if scenario == "not-closed" else "CLOSED"
+        state["target"]["state"] = "CLOSED"
         state["target"]["stateReason"] = "NOT_PLANNED" if scenario == "closed-not-planned" else "COMPLETED"
     if scenario == "dirty":
         Path("unfinished.txt").write_text("uncommitted agent work")
-    if scenario == "wrong-issue":
-        fields["issue"] = "#999"
+    if scenario == "blocked":
+        blocker = {"name": "status:blocked"}
+        state["target"]["labels"].append(blocker)
+        state["open"][0]["labels"].append(blocker)
     if scenario == "stale-comment":
         marker = "<!-- geopro-loop:old -->"
-
-    fields["evidence"] = "https://example.test/owner/repo/issues/131#issuecomment-1"
-    state["target"]["comments"] = [{"url": fields["evidence"], "body": marker + "\n" + git("rev-parse", "HEAD")}]
+    if scenario not in {"claim-sync", "blocked", "closed-without-evidence"}:
+        version = "0" * 40 if scenario == "wrong-version" else git("rev-parse", "HEAD")
+        comments = state["target"]["comments"]
+        comments.append({
+            "url": f"https://example.test/owner/repo/issues/131#issuecomment-{len(comments) + 1}",
+            "body": f"已核对本轮验收。版本为 {version}。\n{marker}",
+            "createdAt": ("2020-01-01T00:00:00Z" if scenario == "old-comment"
+                          else datetime.now(timezone.utc).isoformat()),
+        })
+    if scenario == "pushed-with-prose":
+        reply += "\n\nloop-round:\nunblock: none后面还有补充说明。\n\n下一轮可继续核对。"
 
 state_file.write_text(json.dumps(state))
-receipt = "loop-round:\n" + "\n".join(f"{name}: {value}" for name, value in fields.items())
-if scenario == "duplicate-field":
-    receipt += "\nresult: done"
-print(json.dumps({"type": "result", "subtype": "success", "result": receipt}), end="", flush=True)
+if scenario != "no-result":
+    print(json.dumps({"type": "result", "subtype": "success", "result": reply}), end="", flush=True)
 '''
 
 
@@ -190,6 +199,22 @@ class IssueLoopTest(unittest.TestCase):
         self.assertEqual(summary["dev_commits"], 1)
         self.assertEqual(summary["rounds"][0]["after_head"], self.git("rev-parse", "origin/main"))
 
+    def test_continues_after_a_pushed_commit_with_extra_reply_text(self):
+        self.run_loop("pushed-with-prose", "--prompt-mode", "dev", "--max-rounds", "2")
+        summary = self.summary()
+        first, second = summary["rounds"]
+        self.assertEqual(summary["dev_commits"], 1)
+        self.assertEqual(first["outcome"], "progressed")
+        self.assertIn("none后面还有补充说明。", first["result_text"])
+        self.assertEqual(second["outcome"], "done")
+        self.assertEqual(second["issues_closed"], [131])
+
+    def test_accepts_current_evidence_without_final_reply(self):
+        self.run_loop("no-result")
+        result, = self.summary()["rounds"]
+        self.assertEqual(result["outcome"], "done")
+        self.assertIsNone(result["result_text"])
+
     def test_sync_alone_does_not_count_as_development(self):
         upstream = self.root / "upstream"
         self.git("clone", str(self.origin), str(upstream), cwd=self.root)
@@ -205,7 +230,7 @@ class IssueLoopTest(unittest.TestCase):
         summary = self.summary()
         self.assertEqual(summary["dev_commits"], 0)
         self.assertEqual(len(summary["rounds"]), 1)
-        self.assertIn("尚未包含申报提交", summary["rounds"][0]["error_reason"])
+        self.assertIn("尚未包含本轮提交", summary["rounds"][0]["error_reason"])
         self.assertNotEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/main"))
 
     def test_accepts_completed_pure_verification_without_commit(self):
@@ -220,39 +245,59 @@ class IssueLoopTest(unittest.TestCase):
         summary = self.summary()
         result, = summary["rounds"]
         self.assertTrue(result["success"])
-        self.assertEqual(result["parsed_outcome"], "progressed")
+        self.assertEqual(result["outcome"], "progressed")
         self.assertIn("131", summary["skipped_issues"])
 
-    def test_rejects_disappearance_without_confirmed_closure(self):
-        self.run_loop("not-closed", expected_exit=1)
-        self.assertEqual(self.summary()["rounds"][0]["issues_closed"], [])
+    def test_counts_new_evidence_on_open_issue_as_progress(self):
+        self.run_loop("not-closed")
+        result, = self.summary()["rounds"]
+        self.assertEqual(result["outcome"], "progressed")
+        self.assertEqual(result["issues_closed"], [])
+
+    def test_does_not_count_closure_without_current_evidence(self):
+        self.run_loop("closed-without-evidence")
+        result, = self.summary()["rounds"]
+        self.assertEqual(result["outcome"], "skipped")
+        self.assertEqual(result["issues_closed"], [])
+
+    def test_recognizes_github_blocked_state_without_evidence(self):
+        self.run_loop("blocked")
+        result, = self.summary()["rounds"]
+        self.assertEqual(result["outcome"], "blocked")
 
     def test_rejects_noncompletion_closure(self):
         self.run_loop("closed-not-planned", expected_exit=1)
         self.assertEqual(self.summary()["rounds"][0]["issues_closed"], [])
 
-    def test_rejects_wrong_issue(self):
-        self.run_loop("wrong-issue", expected_exit=1)
-        self.assertIn("与派发目标不一致", self.summary()["rounds"][0]["error_reason"])
+    def test_rejects_commit_for_wrong_issue(self):
+        self.run_loop("wrong-commit-issue", expected_exit=1)
+        self.assertIn("没有关联目标 Issue", self.summary()["rounds"][0]["error_reason"])
 
-    def test_rejects_duplicate_receipt_field(self):
-        self.run_loop("duplicate-field", expected_exit=1)
-        self.assertIn("重复", self.summary()["rounds"][0]["error_reason"])
+    def test_rejects_comment_with_wrong_version(self):
+        self.run_loop("wrong-version", expected_exit=1)
+        self.assertIn("核验版本", self.summary()["rounds"][0]["error_reason"])
 
     def test_rejects_old_comment_as_current_evidence(self):
-        self.run_loop("stale-comment", expected_exit=1)
-        self.assertIn("本轮标记", self.summary()["rounds"][0]["error_reason"])
+        for scenario in ("stale-comment", "old-comment"):
+            with self.subTest(scenario=scenario):
+                proc = self.run_loop(scenario, expected_exit=1)
+                self.assertIn("本轮标记", proc.stderr)
 
     def test_counts_only_verified_backlog_issues(self):
         self.run_loop("backlog-created", "--prompt-mode", "backlog")
         self.assertEqual(self.summary()["rounds"][0]["issues_created"], [132])
 
-    def test_rejects_issues_created_by_other_work(self):
-        self.run_loop("backlog-foreign", "--prompt-mode", "backlog", expected_exit=1)
+    def test_excludes_issues_created_by_other_work(self):
+        self.run_loop("backlog-foreign", "--prompt-mode", "backlog")
         self.assertEqual(self.summary()["issues_created_total"], 0)
 
-    def test_rejects_reopened_issue_as_new(self):
-        self.run_loop("backlog-reopened", "--prompt-mode", "backlog", expected_exit=1)
+    def test_excludes_reopened_issue_from_new_issues(self):
+        self.run_loop("backlog-reopened", "--prompt-mode", "backlog")
+        self.assertEqual(self.summary()["issues_created_total"], 0)
+
+    def test_rejects_backlog_over_the_limit(self):
+        self.run_loop("backlog-over-limit", "--prompt-mode", "backlog",
+                      "--replenish-count", "1", expected_exit=1)
         self.assertEqual(self.summary()["issues_created_total"], 0)
 
     def test_empty_backlog_attempt_does_not_starve_ready_issue(self):
