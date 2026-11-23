@@ -204,7 +204,7 @@ export function scopedObservationQuery(input: ScopedObservationInput) {
     `o.evidence_state IN ('complete', 'incomplete', 'contested', 'draft_evidence')`,
   ];
   if (input.region) {
-    filters.push(`o.region = ?`);
+    filters.push(`o.target_region = ?`);
     values.push(input.region);
   }
   if (input.requestedNetworkMode) {

@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { TaskSummaryList } from "../optimization/task-summary.tsx";
 import { MetricCard } from "./metric-card.tsx";
 import { readEvidenceOverview } from "./overview-commands";
-import { overviewScopeSchema } from "./overview-contracts";
+import { overviewScopeFromSearch, overviewScopePath } from "./overview-contracts";
+import { OverviewScopeForm } from "./scope-form";
 
 function formatRate(locale: Locale, value: number | null) {
   if (value == null) return "N/A";
@@ -37,12 +38,9 @@ export default async function EvidenceOverviewPage({
   const brands = new BrandDao(connection);
   const active = await brands.active(session.user.id);
 
-  const brandId = typeof params.brandId === "string" ? params.brandId : active?.id;
-  const sourceMode = typeof params.sourceMode === "string" ? params.sourceMode : "model_api";
-  const region = typeof params.region === "string" ? params.region : undefined;
-  const requestedNetworkMode = typeof params.requestedNetworkMode === "string"
-    ? params.requestedNetworkMode
-    : undefined;
+  const brandId = (typeof params.brandId === "string" && params.brandId.trim())
+    ? params.brandId.trim()
+    : active?.id;
 
   if (!brandId) {
     return (
@@ -62,16 +60,16 @@ export default async function EvidenceOverviewPage({
     );
   }
 
-  const parsed = overviewScopeSchema.safeParse({
-    brandId,
-    sourceMode,
-    region,
-    requestedNetworkMode,
-  });
+  const parsed = overviewScopeFromSearch(params, { brandId, sourceMode: "model_api" });
   if (!parsed.success) {
     return (
-      <div role="alert" className="space-y-2 text-sm">
+      <div role="alert" className="space-y-4 text-sm">
         <p>{t("invalidScope")}</p>
+        {active?.id ? (
+          <Button asChild variant="outline">
+            <Link href={`/dashboard/monitoring/overview?brandId=${active.id}`} prefetch={false}>{t("clearFilters")}</Link>
+          </Button>
+        ) : null}
       </div>
     );
   }
@@ -85,7 +83,7 @@ export default async function EvidenceOverviewPage({
     );
   }
 
-  const answersHref = `/dashboard/monitoring/answers?brandId=${overview.scope.brandId}&sourceMode=${overview.scope.sourceMode}`;
+  const answersHref = overviewScopePath("/dashboard/monitoring/answers", parsed.data);
 
   return (
     <div className="space-y-8">
@@ -117,33 +115,7 @@ export default async function EvidenceOverviewPage({
         </div>
       </div>
 
-      <form className="flex flex-wrap gap-3 rounded-2xl border bg-secondary/40 p-4" method="get">
-        <input type="hidden" name="brandId" value={overview.scope.brandId} />
-        <label className="text-sm">
-          <span className="mb-1 block text-muted-foreground">{t("track")}</span>
-          <select
-            name="sourceMode"
-            defaultValue={overview.scope.sourceMode}
-            className="h-10 rounded-md border bg-background px-3"
-          >
-            <option value="model_api">{t("trackApi")}</option>
-            <option value="consumer_ui">{t("trackConsumer")}</option>
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-muted-foreground">{t("region")}</span>
-          <input
-            name="region"
-            defaultValue={overview.scope.region ?? ""}
-            maxLength={2}
-            placeholder="CN"
-            className="h-10 w-24 rounded-md border bg-background px-3"
-          />
-        </label>
-        <div className="flex items-end">
-          <Button type="submit" variant="outline">{t("applyFilters")}</Button>
-        </div>
-      </form>
+      <OverviewScopeForm scope={parsed.data} t={t} />
 
       {overview.smallSample ? (
         <p className="rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground" role="status">

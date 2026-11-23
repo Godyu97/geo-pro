@@ -120,7 +120,7 @@ export function overviewCacheIdentity(input: {
 }) {
   return digest([
     "evidence-overview",
-    "v1",
+    "target-region-v2",
     input.ownerId,
     input.brandId,
     input.scope.sourceMode,

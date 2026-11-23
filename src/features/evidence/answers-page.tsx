@@ -2,13 +2,15 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
-import { getTranslator } from "@/lib/i18n/server";
+import { formatCount } from "@/lib/i18n/format";
+import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockEvidenceButton } from "@/features/functional-mock/run-buttons";
 import { BrandDao } from "../brands/dao";
 import { Button } from "@/components/ui/button";
 import { readEvidenceOverview } from "./overview-commands";
-import { overviewScopeSchema } from "./overview-contracts";
+import { overviewScopeFromSearch, overviewScopePath } from "./overview-contracts";
+import { OverviewScopeForm } from "./scope-form";
 
 export async function generateMetadata() {
   const t = await getTranslator("evidenceOverview");
@@ -22,6 +24,8 @@ export default async function EvidenceAnswersPage({
 }) {
   const session = await requireSession();
   const params = await searchParams;
+  const locale = await getLocale();
+  const messages = getMessages(locale).evidenceOverview;
   const t = await getTranslator("evidenceOverview");
   const te = await getTranslator("evidence");
   const connection = getConnection();
@@ -29,9 +33,9 @@ export default async function EvidenceAnswersPage({
   const active = await brands.active(session.user.id);
   const mockLane = brandIntakeOrigin(await headers())?.mode === "mock";
 
-  const brandId = typeof params.brandId === "string" ? params.brandId : active?.id;
-  const sourceMode = typeof params.sourceMode === "string" ? params.sourceMode : "model_api";
-  const region = typeof params.region === "string" ? params.region : undefined;
+  const brandId = (typeof params.brandId === "string" && params.brandId.trim())
+    ? params.brandId.trim()
+    : active?.id;
 
   if (!brandId) {
     return (
@@ -42,9 +46,18 @@ export default async function EvidenceAnswersPage({
     );
   }
 
-  const parsed = overviewScopeSchema.safeParse({ brandId, sourceMode, region });
+  const parsed = overviewScopeFromSearch(params, { brandId, sourceMode: "model_api" });
   if (!parsed.success) {
-    return <p role="alert" className="text-sm">{t("invalidScope")}</p>;
+    return (
+      <div role="alert" className="space-y-4 text-sm">
+        <p>{t("invalidScope")}</p>
+        {active?.id ? (
+          <Button asChild variant="outline">
+            <Link href={`/dashboard/monitoring/answers?brandId=${active.id}`} prefetch={false}>{t("clearFilters")}</Link>
+          </Button>
+        ) : null}
+      </div>
+    );
   }
 
   const overview = await readEvidenceOverview(connection, session.user.id, parsed.data);
@@ -52,7 +65,11 @@ export default async function EvidenceAnswersPage({
     return <p role="alert" className="text-sm">{te(overview.error)}</p>;
   }
 
-  const overviewHref = `/dashboard/monitoring/overview?brandId=${overview.scope.brandId}&sourceMode=${overview.scope.sourceMode}`;
+  const overviewHref = overviewScopePath("/dashboard/monitoring/overview", parsed.data);
+  const answerCount = formatCount(locale, overview.answers.length, {
+    one: messages.answerCountOne,
+    other: messages.answerCountOther,
+  });
 
   return (
     <div className="space-y-6">
@@ -70,6 +87,8 @@ export default async function EvidenceAnswersPage({
           </Button>
         </div>
       </div>
+      <OverviewScopeForm scope={parsed.data} t={t} />
+      <p className="text-sm text-muted-foreground">{answerCount}</p>
       {mockLane && (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">{te("mockEvidenceNote")}</p>
@@ -108,7 +127,7 @@ export default async function EvidenceAnswersPage({
               </dl>
               <div className="mt-4">
                 <Button asChild size="sm" variant="outline">
-                  <Link href={`/dashboard/monitoring/evidence/${answer.observationId}`} prefetch={false}>
+                  <Link href={overviewScopePath(`/dashboard/monitoring/evidence/${answer.observationId}`, parsed.data)} prefetch={false}>
                     {te("openEvidence")}
                   </Link>
                 </Button>

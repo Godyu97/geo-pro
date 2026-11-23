@@ -22,7 +22,7 @@ import {
   storeOverviewCache,
   type OverviewPayload,
 } from "./overview-cache.ts";
-import type { OverviewScope } from "./overview-contracts.ts";
+import { overviewScopePath, type OverviewScope } from "./overview-contracts.ts";
 
 type Failure = { error: EvidenceError };
 
@@ -112,7 +112,7 @@ export async function readEvidenceOverview(
       questionText: row.observation.questionText,
       questionType: type,
       sourceMode: row.observation.sourceMode,
-      region: row.observation.region,
+      region: row.observation.targetRegion,
       requestedNetworkMode: row.observation.requestedNetworkMode,
       capturedAt: row.observation.capturedAt,
       evidenceState: row.observation.evidenceState,
@@ -140,7 +140,7 @@ export async function readEvidenceOverview(
       officialSiteCited: item.officialSiteCited,
     }));
 
-  const answerHref = `/dashboard/monitoring/answers?brandId=${scope.brandId}&sourceMode=${scope.sourceMode}`;
+  const answerHref = overviewScopePath("/dashboard/monitoring/answers", scope);
   const tasksHref = `/dashboard/optimization?brandId=${scope.brandId}`;
   const nextActions: Array<{ id: string; kind: "start_monitoring" | "view_answers" | "view_tasks"; href: string }> = [];
   if (metrics.viewStatus === "empty") {

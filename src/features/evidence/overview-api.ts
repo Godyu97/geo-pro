@@ -7,7 +7,7 @@ import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
 import { evidenceErrors, type EvidenceError } from "./contracts";
 import { readEvidenceOverview } from "./overview-commands";
-import { overviewQuerySchema } from "./overview-contracts";
+import { overviewScopeFromSearch } from "./overview-contracts";
 
 const privateHeaders = {
   "Cache-Control": "private, no-store",
@@ -35,19 +35,15 @@ export async function evidenceOverviewResponse(request: Request) {
       return failure("FORBIDDEN");
     }
     const url = new URL(request.url);
-    const parsed = overviewQuerySchema.safeParse({
-      brandId: url.searchParams.get("brandId") ?? undefined,
-      sourceMode: url.searchParams.get("sourceMode") ?? undefined,
-      region: url.searchParams.get("region") || undefined,
-      requestedNetworkMode: url.searchParams.get("requestedNetworkMode") || undefined,
-      from: url.searchParams.get("from") || undefined,
-      to: url.searchParams.get("to") || undefined,
-      hasOfficialWebsite: url.searchParams.has("hasOfficialWebsite")
-        ? url.searchParams.get("hasOfficialWebsite") === "1"
-        : undefined,
-    });
+    const parsed = overviewScopeFromSearch(Object.fromEntries(url.searchParams.entries()));
     if (!parsed.success) return failure("INVALID_INPUT");
-    const result = await readEvidenceOverview(getConnection(), session.session.user.id, parsed.data);
+    const hasOfficialWebsite = url.searchParams.has("hasOfficialWebsite")
+      ? url.searchParams.get("hasOfficialWebsite") === "1"
+      : undefined;
+    const result = await readEvidenceOverview(getConnection(), session.session.user.id, {
+      ...parsed.data,
+      ...(hasOfficialWebsite === undefined ? {} : { hasOfficialWebsite }),
+    });
     if ("error" in result) return failure(result.error);
     return Response.json(result, { headers: privateHeaders });
   } catch {

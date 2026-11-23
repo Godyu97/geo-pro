@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { submitManualEvidence } from "../../src/features/evidence/commands.ts";
+import { scopedObservationQuery } from "../../src/features/evidence/dao.ts";
 import {
   aggregateOverviewMetrics,
   filterSamplesByScope,
 } from "../../src/features/evidence/metrics.ts";
 import { readEvidenceOverview } from "../../src/features/evidence/overview-commands.ts";
+import {
+  overviewScopeForReturn,
+  overviewScopeFromSearch,
+  overviewScopePath,
+} from "../../src/features/evidence/overview-contracts.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
 import { execFileSync } from "node:child_process";
@@ -175,5 +181,213 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(apiView.sampleCount, 0);
     assert.ok(consumerView.sampleCount >= 1);
     assert.ok(consumerView.answers.every((item) => item.sourceMode === "consumer_ui"));
+  });
+}
+
+test("scope query keeps track, region, network and time and drops blanks", () => {
+  const brandId = randomUUID();
+  const parsed = overviewScopeFromSearch({
+    brandId,
+    sourceMode: "consumer_ui",
+    region: "cn",
+    requestedNetworkMode: "",
+    from: "2026-11-20T08:00:00.000Z",
+    to: " ",
+  });
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.data.region, "CN");
+  assert.equal(parsed.data.requestedNetworkMode, undefined);
+  assert.equal(parsed.data.to, undefined);
+  const href = overviewScopePath("/dashboard/monitoring/answers", parsed.data);
+  const url = new URL(href, "http://localhost");
+  assert.equal(url.searchParams.get("brandId"), brandId);
+  assert.equal(url.searchParams.get("sourceMode"), "consumer_ui");
+  assert.equal(url.searchParams.get("region"), "CN");
+  assert.equal(url.searchParams.get("from"), "2026-11-20T08:00:00.000Z");
+  assert.equal(url.searchParams.has("requestedNetworkMode"), false);
+  assert.equal(url.searchParams.has("to"), false);
+  const roundTrip = overviewScopeFromSearch(Object.fromEntries(url.searchParams.entries()));
+  assert.equal(roundTrip.success, true);
+  assert.equal(roundTrip.data.region, "CN");
+  assert.equal(roundTrip.data.from, "2026-11-20T08:00:00.000Z");
+});
+
+test("unknown region and network stay out of a positive filter unless that value is selected", () => {
+  const samples = [
+    sample({ region: "CN", requestedNetworkMode: "on" }),
+    sample({ region: "unknown", requestedNetworkMode: "unknown" }),
+    sample({ region: "US", requestedNetworkMode: "off" }),
+  ];
+  assert.deepEqual(
+    filterSamplesByScope(samples, { requestedNetworkMode: "on" }).map((item) => item.requestedNetworkMode),
+    ["on"],
+  );
+  assert.equal(filterSamplesByScope(samples, { requestedNetworkMode: "unknown" }).length, 1);
+  assert.deepEqual(filterSamplesByScope(samples, { region: "CN" }).map((item) => item.region), ["CN"]);
+  assert.equal(filterSamplesByScope(samples, { region: "unknown" })[0].region, "unknown");
+  assert.equal(filterSamplesByScope(samples, {}).length, 3);
+  const early = sample({ capturedAt: "2026-11-20T08:00:00.000Z" });
+  const late = sample({ capturedAt: "2026-11-21T08:00:00.000Z" });
+  const windowed = filterSamplesByScope([early, late], {
+    from: "2026-11-20T00:00:00.000Z",
+    to: "2026-11-20T23:59:59.999Z",
+  });
+  assert.deepEqual(windowed.map((item) => item.observationId), [early.observationId]);
+});
+
+test("return links keep a valid region when the time window cannot be parsed", () => {
+  const brandId = randomUUID();
+  const scope = overviewScopeForReturn({
+    brandId,
+    sourceMode: "model_api",
+    region: "CN",
+    requestedNetworkMode: "off",
+    from: "yesterday",
+  }, { brandId, sourceMode: "consumer_ui" });
+  assert.equal(scope.sourceMode, "model_api");
+  assert.equal(scope.region, "CN");
+  assert.equal(scope.requestedNetworkMode, "off");
+  assert.equal(scope.from, undefined);
+  const otherBrand = randomUUID();
+  const kept = overviewScopeForReturn({
+    brandId: otherBrand,
+    sourceMode: "consumer_ui",
+    region: "US",
+  }, { brandId, sourceMode: "model_api" });
+  assert.equal(kept.brandId, brandId);
+  assert.equal(kept.region, "US");
+  assert.equal(kept.sourceMode, "consumer_ui");
+});
+
+function sha(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+async function insertScopedObservation(db, row) {
+  await queryWithParameters(db, `INSERT INTO answer_observation (
+    id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method, question_text, answer_text,
+    fingerprint, captured_at, region, language, requested_network_mode, entity_version, citation_set_state,
+    evidence_state, locator_ref, collector_id, missing_reason, created_at,
+    target_region, observed_region, new_session, product_mode, network_trigger
+  ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, 'zh-CN', ?, 1, 'complete', 'complete', NULL, NULL, NULL, ?, ?, ?, 'unknown', 'unknown', 'unknown')`, [
+    row.id, row.brandId, row.ownerId, row.sourceMode, row.captureMethod, row.questionText, "样本回答",
+    sha(row.id), row.capturedAt, row.targetRegion, row.requestedNetworkMode, row.capturedAt,
+    row.targetRegion, row.observedRegion,
+  ]);
+  await queryWithParameters(db, `INSERT INTO answer_analysis_version (
+    id, observation_id, brand_id, version, entity_version, rule_version, mentioned, recommended,
+    official_site_cited, evidence_span, status, revised_from, reason, reviewer_id, created_at
+  ) VALUES (?, ?, ?, 1, 1, 's-m0-06-v1', 'true', ?, 'false', NULL, 'classified', NULL, NULL, NULL, ?)`, [
+    randomUUID(), row.id, row.brandId, row.recommended, row.capturedAt,
+  ]);
+}
+
+for (const kind of ["sqlite", "postgresql"]) {
+  test(`${kind}: overview scope keeps one track, target region, requested network and time window`, async (t) => {
+    const fixture = await testDatabase(kind);
+    t.after(() => fixture.cleanup());
+    const db = fixture.connection;
+    const [owner, outsider] = await Promise.all([account(db), account(db)]);
+    const brand = randomUUID();
+    const otherBrand = randomUUID();
+    const brands = new BrandDao(db);
+    await brands.insertBrand(owner, brand, time);
+    await brands.insertVersion(brand, 1, fields, time);
+    await brands.insertBrand(outsider, otherBrand, time);
+    await brands.insertVersion(otherBrand, 1, fields, time);
+
+    const ids = {
+      targetCnObservedUs: randomUUID(),
+      targetUsObservedCn: randomUUID(),
+      networkOn: randomUUID(),
+      networkUnknown: randomUUID(),
+      laterDay: randomUUID(),
+      consumer: randomUUID(),
+      otherBrand: randomUUID(),
+      otherOwner: randomUUID(),
+    };
+    const day = "2026-11-20T08:00:00.000Z";
+    const nextDay = "2026-11-21T08:00:00.000Z";
+    const rows = [
+      ["targetCnObservedUs", "model_api", "official_api", "CN", "US", "off", day, "true", owner, brand],
+      ["targetUsObservedCn", "model_api", "official_api", "US", "CN", "off", day, "true", owner, brand],
+      ["networkOn", "model_api", "official_api", "CN", "CN", "on", day, "false", owner, brand],
+      ["networkUnknown", "model_api", "official_api", "CN", "CN", "unknown", day, "true", owner, brand],
+      ["laterDay", "model_api", "official_api", "CN", "CN", "off", nextDay, "true", owner, brand],
+      ["consumer", "consumer_ui", "manual", "CN", "CN", "off", day, "true", owner, brand],
+      ["otherBrand", "model_api", "official_api", "CN", "CN", "off", day, "true", outsider, otherBrand],
+      ["otherOwner", "model_api", "official_api", "CN", "CN", "off", day, "true", outsider, brand],
+    ];
+    for (const [key, sourceMode, captureMethod, targetRegion, observedRegion, requestedNetworkMode, capturedAt, recommended, ownerId, brandId] of rows) {
+      await insertScopedObservation(db, {
+        id: ids[key], brandId, ownerId, sourceMode, captureMethod, questionText: key,
+        targetRegion, observedRegion, requestedNetworkMode, capturedAt, recommended,
+      });
+    }
+
+    const answerIds = (view) => new Set(view.answers.map((item) => item.observationId));
+    const consumerView = await readEvidenceOverview(db, owner, { brandId: brand, sourceMode: "consumer_ui" });
+    assert.equal(consumerView.error, undefined);
+    assert.deepEqual(answerIds(consumerView), new Set([ids.consumer]));
+    assert.equal(consumerView.sampleCount, 1);
+    const consumerHref = new URL(consumerView.nextActions.find((item) => item.kind === "view_answers").href, "http://localhost");
+    assert.equal(consumerHref.searchParams.get("sourceMode"), "consumer_ui");
+    assert.equal(consumerHref.searchParams.get("brandId"), brand);
+
+    const china = await readEvidenceOverview(db, owner, { brandId: brand, sourceMode: "model_api", region: "CN" });
+    assert.deepEqual(answerIds(china), new Set([ids.targetCnObservedUs, ids.networkOn, ids.networkUnknown, ids.laterDay]));
+    assert.equal(answerIds(china).has(ids.targetUsObservedCn), false);
+
+    const offline = await readEvidenceOverview(db, owner, {
+      brandId: brand, sourceMode: "model_api", region: "CN", requestedNetworkMode: "off",
+    });
+    assert.deepEqual(answerIds(offline), new Set([ids.targetCnObservedUs, ids.laterDay]));
+
+    const windowed = await readEvidenceOverview(db, owner, {
+      brandId: brand,
+      sourceMode: "model_api",
+      region: "CN",
+      requestedNetworkMode: "off",
+      from: "2026-11-20T00:00:00.000Z",
+      to: "2026-11-20T23:59:59.999Z",
+    });
+    assert.deepEqual(answerIds(windowed), new Set([ids.targetCnObservedUs]));
+    assert.equal(windowed.metrics.recommended.equalWeight, 1);
+    const windowHref = new URL(windowed.nextActions.find((item) => item.kind === "view_answers").href, "http://localhost");
+    assert.equal(windowHref.searchParams.get("region"), "CN");
+    assert.equal(windowHref.searchParams.get("requestedNetworkMode"), "off");
+    assert.equal(windowHref.searchParams.get("from"), "2026-11-20T00:00:00.000Z");
+    assert.equal(windowHref.searchParams.get("to"), "2026-11-20T23:59:59.999Z");
+
+    const online = await readEvidenceOverview(db, owner, {
+      brandId: brand, sourceMode: "model_api", requestedNetworkMode: "on",
+    });
+    assert.deepEqual(answerIds(online), new Set([ids.networkOn]));
+    assert.equal(answerIds(online).has(ids.networkUnknown), false);
+    assert.equal(online.metrics.recommended.equalWeight, 0);
+
+    const unknownRegion = await readEvidenceOverview(db, owner, {
+      brandId: brand, sourceMode: "model_api", region: "unknown",
+    });
+    assert.equal(unknownRegion.sampleCount, 0);
+    assert.equal(unknownRegion.answers.length, 0);
+
+    const scoped = scopedObservationQuery({
+      ownerId: owner,
+      brandId: brand,
+      sourceMode: "model_api",
+      region: "CN",
+      requestedNetworkMode: "off",
+      from: "2026-11-20T00:00:00.000Z",
+      to: "2026-11-20T23:59:59.999Z",
+    });
+    assert.match(scoped.sql, /o\.target_region = \?/);
+    assert.doesNotMatch(scoped.sql, /observed_region = \?/);
+    assert.doesNotMatch(scoped.sql, /network_trigger = \?/);
+    const explainPrefix = kind === "sqlite" ? "EXPLAIN QUERY PLAN " : "EXPLAIN (COSTS OFF) ";
+    const plan = await queryWithParameters(db, `${explainPrefix}${scoped.sql}`, scoped.values);
+    console.log(`${kind} target-region scope ${scoped.values.length} params`);
+    console.log(plan.map((row) => JSON.stringify(row)).join("\n"));
+    assert.ok(JSON.stringify(plan).length > 20);
   });
 }

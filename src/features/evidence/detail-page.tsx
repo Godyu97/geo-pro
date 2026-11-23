@@ -10,6 +10,7 @@ import { generateOptimizationAction } from "../optimization/actions";
 import { ActionDraftPanel } from "../optimization/draft-panel";
 import { AnalysisDraftPanel } from "./analysis-draft-form";
 import { readObservation } from "./commands";
+import { overviewScopeForReturn, overviewScopePath } from "./overview-contracts";
 import { ReviseAnalysisForm } from "./revise-form";
 
 export async function generateMetadata() {
@@ -19,13 +20,17 @@ export async function generateMetadata() {
 
 export default async function EvidenceDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ observationId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await requireSession();
   const { observationId } = await params;
+  const query = await searchParams;
   const locale = await getLocale();
   const t = await getTranslator("evidence");
+  const overview = await getTranslator("evidenceOverview");
   const optimization = await getTranslator("optimization");
   const detail = await readObservation(getConnection(), session.user.id, observationId);
   if (!detail) notFound();
@@ -43,6 +48,12 @@ export default async function EvidenceDetailPage({
     : observation.networkTrigger === "not_triggered"
       ? "networkTriggerNotTriggered"
       : "networkTriggerUnknown";
+  const preserved = overviewScopeForReturn(query, {
+    brandId: observation.brandId,
+    sourceMode: observation.sourceMode,
+  });
+  const answersHref = overviewScopePath("/dashboard/monitoring/answers", preserved);
+  const overviewHref = overviewScopePath("/dashboard/monitoring/overview", preserved);
   const costText = capture.costState === "known" && capture.actualMinor !== null && capture.currency
     ? t("costKnown", { amount: formatMinorUnits(locale, capture.actualMinor, capture.currency) })
     : capture.costState === "none"
@@ -177,9 +188,14 @@ export default async function EvidenceDetailPage({
           <Button type="submit">{t("generateOptimization")}</Button>
         </form>
       ) : null}
-      <Link className="inline-block text-sm underline underline-offset-4" href="/dashboard/monitoring" prefetch={false}>
-        {t("backToRun")}
-      </Link>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline">
+          <Link href={answersHref} prefetch={false}>{overview("backAnswers")}</Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href={overviewHref} prefetch={false}>{overview("backOverview")}</Link>
+        </Button>
+      </div>
     </div>
   );
 }
