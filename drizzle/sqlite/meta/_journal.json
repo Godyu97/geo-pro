@@ -547,6 +547,13 @@
       "when": 1795460962303,
       "tag": "0077_brave_captain_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1795461993200,
+      "tag": "0078_panoramic_vermin",
+      "breakpoints": true
     }
   ]
 }

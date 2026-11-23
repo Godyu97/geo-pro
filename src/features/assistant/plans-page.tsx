@@ -59,9 +59,14 @@ export default async function AssistantPlansPage({
           <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
         </div>
-        <Button asChild variant="outline">
-          <Link href="/dashboard" prefetch={false}>{t("backOverview")}</Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link href="/dashboard/assistant/strategies" prefetch={false}>{t("strategiesLink")}</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/dashboard" prefetch={false}>{t("backOverview")}</Link>
+          </Button>
+        </div>
       </div>
 
       {isKnownError(errorCode) ? (

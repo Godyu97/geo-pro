@@ -1714,6 +1714,40 @@ CREATE TABLE "assistant_plan_item" (
     and length("assistant_plan_item"."updated_at") between 20 and 40)
 );
 
+CREATE TABLE "strategy_template" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"industry" text NOT NULL,
+	"sampling_condition" text NOT NULL,
+	"evidence_strength" text NOT NULL,
+	"failure_case" text NOT NULL,
+	"explanation" text NOT NULL,
+	"strategy_label" text NOT NULL,
+	"guaranteed" integer NOT NULL,
+	"successes" integer NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "strategy_template_state_check" CHECK ("strategy_template"."strategy_label" = 'observation'
+    and "strategy_template"."guaranteed" = 0
+    and "strategy_template"."successes" between 0 and 1000000
+    and "strategy_template"."evidence_strength" in ('single_observation', 'repeated_observation', 'insufficient')
+    and (
+      ("strategy_template"."successes" >= 2 and "strategy_template"."evidence_strength" in ('single_observation', 'repeated_observation'))
+      or ("strategy_template"."successes" = 1 and "strategy_template"."evidence_strength" = 'single_observation')
+      or ("strategy_template"."successes" = 0 and "strategy_template"."evidence_strength" = 'insufficient')
+    )
+    and length("strategy_template"."id") = 36
+    and length("strategy_template"."brand_id") = 36
+    and length("strategy_template"."owner_id") between 1 and 128
+    and length("strategy_template"."industry") between 1 and 120
+    and length("strategy_template"."sampling_condition") between 1 and 500
+    and length("strategy_template"."failure_case") between 1 and 2000
+    and length("strategy_template"."explanation") between 1 and 4000
+    and length("strategy_template"."created_at") between 20 and 40
+    and length("strategy_template"."updated_at") between 20 and 40)
+);
+
 CREATE TABLE "business_lead" (
 	"id" text PRIMARY KEY NOT NULL,
 	"brand_id" text NOT NULL,
@@ -2731,6 +2765,8 @@ ALTER TABLE "assistant_plan" ADD CONSTRAINT "assistant_plan_brand_id_brand_id_fk
 ALTER TABLE "assistant_plan_item" ADD CONSTRAINT "assistant_plan_item_plan_id_assistant_plan_id_fk" FOREIGN KEY ("plan_id") REFERENCES "public"."assistant_plan"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "assistant_plan_item" ADD CONSTRAINT "assistant_plan_item_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "assistant_plan_item" ADD CONSTRAINT "assistant_plan_item_fact_fk" FOREIGN KEY ("brand_id","fact_version_id") REFERENCES "public"."brand_fact_version"("brand_id","id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "strategy_template" ADD CONSTRAINT "strategy_template_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "strategy_template" ADD CONSTRAINT "strategy_template_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "business_lead" ADD CONSTRAINT "business_lead_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "business_lead_evidence" ADD CONSTRAINT "business_lead_evidence_lead_id_business_lead_id_fk" FOREIGN KEY ("lead_id") REFERENCES "public"."business_lead"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "business_lead_evidence" ADD CONSTRAINT "business_lead_evidence_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
@@ -2970,6 +3006,7 @@ CREATE INDEX "formal_observation_owner_idx" ON "formal_observation" USING btree 
 CREATE INDEX "assistant_plan_owner_idx" ON "assistant_plan" USING btree ("owner_id","brand_id","created_at","id");
 CREATE UNIQUE INDEX "assistant_plan_item_position_uidx" ON "assistant_plan_item" USING btree ("plan_id","position");
 CREATE INDEX "assistant_plan_item_owner_idx" ON "assistant_plan_item" USING btree ("owner_id","plan_id","position");
+CREATE INDEX "strategy_template_owner_idx" ON "strategy_template" USING btree ("owner_id","brand_id","created_at","id");
 CREATE UNIQUE INDEX "business_lead_brand_event_uidx" ON "business_lead" USING btree ("brand_id","event_id");
 CREATE INDEX "business_lead_owner_idx" ON "business_lead" USING btree ("owner_id","brand_id","created_at","id");
 CREATE UNIQUE INDEX "business_lead_evidence_lead_idx" ON "business_lead_evidence" USING btree ("lead_id","position");

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { check, foreignKey, index, integer, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
+import { user } from "./auth-schema";
 import { brand } from "./brand-schema";
 import { brandFactVersion } from "./brand-fact-schema";
 
@@ -65,6 +66,46 @@ export const assistantPlanItem = pgTable("assistant_plan_item", {
     and length(${table.actionText}) between 1 and 200
     and length(${table.factVersionId}) between 1 and 64
     and length(${table.ownerId}) between 1 and 128
+    and length(${table.createdAt}) between 20 and 40
+    and length(${table.updatedAt}) between 20 and 40`),
+]);
+
+// A reusable observation template. assistant_plan stores one weekly draft and
+// its fixed observation label; it does not keep industry, sampling conditions,
+// evidence strength, or a failure case. guaranteed stays 0 and the label stays
+// observation. One success cannot be stored as a repeated observation.
+export const strategyTemplate = pgTable("strategy_template", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  industry: text("industry").notNull(),
+  samplingCondition: text("sampling_condition").notNull(),
+  evidenceStrength: text("evidence_strength").notNull(),
+  failureCase: text("failure_case").notNull(),
+  explanation: text("explanation").notNull(),
+  strategyLabel: text("strategy_label").notNull(),
+  guaranteed: integer("guaranteed").notNull(),
+  successes: integer("successes").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  index("strategy_template_owner_idx").on(table.ownerId, table.brandId, table.createdAt, table.id),
+  check("strategy_template_state_check", sql`${table.strategyLabel} = 'observation'
+    and ${table.guaranteed} = 0
+    and ${table.successes} between 0 and 1000000
+    and ${table.evidenceStrength} in ('single_observation', 'repeated_observation', 'insufficient')
+    and (
+      (${table.successes} >= 2 and ${table.evidenceStrength} in ('single_observation', 'repeated_observation'))
+      or (${table.successes} = 1 and ${table.evidenceStrength} = 'single_observation')
+      or (${table.successes} = 0 and ${table.evidenceStrength} = 'insufficient')
+    )
+    and length(${table.id}) = 36
+    and length(${table.brandId}) = 36
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.industry}) between 1 and 120
+    and length(${table.samplingCondition}) between 1 and 500
+    and length(${table.failureCase}) between 1 and 2000
+    and length(${table.explanation}) between 1 and 4000
     and length(${table.createdAt}) between 20 and 40
     and length(${table.updatedAt}) between 20 and 40`),
 ]);
