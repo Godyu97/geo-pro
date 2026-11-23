@@ -204,7 +204,8 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     await page.reload();
     await expect(page.getByText("成功 3，失败 1，待核对 0，未执行 0，已取消 0")).toBeVisible();
     await expect(page.getByText("隔离合成结果").first()).toBeVisible();
-    await expect(page.getByText("真实供应商执行尚未接通。此页面不会生成模拟回答。")).toBeVisible();
+    await expect(page.getByText("执行只发送已冻结的题目和已确认的采样条件。调用前会记下本次尝试和费用上界。超时、中断或未知回执进入待核对并保留预留；确认没有产生费用后，才按原上界重试。")).toBeVisible();
+    await expect(page.getByText("真实供应商执行尚未接通。此页面不会生成模拟回答。")).toHaveCount(0);
 
     await page.goto("/dashboard/monitoring/overview");
     await expect(page.getByRole("heading", { name: "暂无有效样本", exact: true })).toBeVisible();
