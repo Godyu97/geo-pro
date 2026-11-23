@@ -400,6 +400,13 @@
       "when": 1795412369637,
       "tag": "0056_crawler_observation",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1795413149920,
+      "tag": "0057_sync_authorization",
+      "breakpoints": true
     }
   ]
 }
