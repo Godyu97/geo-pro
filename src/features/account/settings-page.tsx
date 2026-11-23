@@ -124,6 +124,10 @@ export default async function AccountSettingsPage() {
             <h2 id="brand-deliveries-heading" className="font-medium">{t("deliveries")}</h2>
             <Link href="/dashboard/commercial/deliveries" prefetch={false} className="text-sm underline underline-offset-4">{t("openDeliveries")}</Link>
           </section>
+          <section id="service-entitlements" aria-labelledby="service-entitlements-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
+            <h2 id="service-entitlements-heading" className="font-medium">{t("entitlements")}</h2>
+            <Link href="/dashboard/commercial/entitlements" prefetch={false} className="text-sm underline underline-offset-4">{t("openEntitlements")}</Link>
+          </section>
           <section id="whitelabel-shares" aria-labelledby="whitelabel-shares-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
             <h2 id="whitelabel-shares-heading" className="font-medium">{t("whitelabelShares")}</h2>
             <Link href="/dashboard/reports/shares" prefetch={false} className="text-sm underline underline-offset-4">{t("openWhitelabelShares")}</Link>
