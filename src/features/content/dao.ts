@@ -234,6 +234,10 @@ const channelVariantRow = z.object({
   needsOwnApproval: flag,
   blocked: flag,
   fingerprint: z.string().min(1),
+  channelProfileVersionId: brandIdSchema.nullable(),
+  profileVersionNumber: z.number().int().min(1).max(1_000_000).nullable(),
+  profileMaxCharacters: z.number().int().min(1).max(1_000_000).nullable(),
+  profileChannelKey: z.string().min(1).max(64).nullable(),
   createdAt: z.iso.datetime({ precision: 3 }),
   updatedAt: z.iso.datetime({ precision: 3 }),
 });
@@ -362,11 +366,18 @@ const publicationCheckColumns = `id, publication_id AS "publicationId", brand_id
 const publicationActionColumns = `id, publication_id AS "publicationId", brand_id AS "brandId", owner_id AS "ownerId",
   kind, status, reason, created_at AS "createdAt", updated_at AS "updatedAt"`;
 
-const channelVariantColumns = `id, brand_id AS "brandId", owner_id AS "ownerId",
-  content_version_id AS "contentVersionId", channel, body_markdown AS "bodyMarkdown",
-  approval_status AS "approvalStatus", approval_id AS "approvalId",
-  needs_own_approval AS "needsOwnApproval", blocked, fingerprint,
-  created_at AS "createdAt", updated_at AS "updatedAt"`;
+const channelVariantColumns = `v.id, v.brand_id AS "brandId", v.owner_id AS "ownerId",
+  v.content_version_id AS "contentVersionId", v.channel, v.body_markdown AS "bodyMarkdown",
+  v.approval_status AS "approvalStatus", v.approval_id AS "approvalId",
+  v.needs_own_approval AS "needsOwnApproval", v.blocked, v.fingerprint,
+  v.channel_profile_version_id AS "channelProfileVersionId",
+  p.version_number AS "profileVersionNumber", p.max_characters AS "profileMaxCharacters",
+  p.channel_key AS "profileChannelKey",
+  v.created_at AS "createdAt", v.updated_at AS "updatedAt"`;
+
+const channelVariantFrom = `content_channel_variant v
+  LEFT JOIN channel_profile_version p
+    ON p.id = v.channel_profile_version_id AND p.owner_id = v.owner_id AND p.brand_id = v.brand_id`;
 
 const maintenanceTaskColumns = `id, brand_id AS "brandId", owner_id AS "ownerId",
   fact_version_id AS "factVersionId", status, reason, created_at AS "createdAt", updated_at AS "updatedAt"`;
@@ -958,12 +969,13 @@ export class ContentDao {
     await this.query(
       `INSERT INTO content_channel_variant (
         id, brand_id, owner_id, content_version_id, channel, body_markdown,
-        approval_status, approval_id, needs_own_approval, blocked, fingerprint, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        approval_status, approval_id, needs_own_approval, blocked, fingerprint,
+        channel_profile_version_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.id, row.brandId, row.ownerId, row.contentVersionId, row.channel, row.bodyMarkdown,
         row.approvalStatus, row.approvalId, row.needsOwnApproval, row.blocked, row.fingerprint,
-        row.createdAt, row.updatedAt,
+        row.channelProfileVersionId, row.createdAt, row.updatedAt,
       ],
     );
   }
@@ -1002,7 +1014,7 @@ export class ContentDao {
 
   async getChannelVariant(ownerId: string, variantId: string) {
     const [row] = await this.query(
-      `SELECT ${channelVariantColumns} FROM content_channel_variant WHERE owner_id = ? AND id = ?`,
+      `SELECT ${channelVariantColumns} FROM ${channelVariantFrom} WHERE v.owner_id = ? AND v.id = ?`,
       [ownerId, variantId],
     );
     return row ? channelVariantRow.parse(row) : null;
@@ -1010,8 +1022,8 @@ export class ContentDao {
 
   async getChannelVariantForVersion(ownerId: string, versionId: string, channel: string) {
     const [row] = await this.query(
-      `SELECT ${channelVariantColumns} FROM content_channel_variant
-       WHERE owner_id = ? AND content_version_id = ? AND channel = ?`,
+      `SELECT ${channelVariantColumns} FROM ${channelVariantFrom}
+       WHERE v.owner_id = ? AND v.content_version_id = ? AND v.channel = ?`,
       [ownerId, versionId, channel],
     );
     return row ? channelVariantRow.parse(row) : null;
@@ -1019,9 +1031,9 @@ export class ContentDao {
 
   async listChannelVariants(ownerId: string, versionId: string) {
     const rows = await this.query(
-      `SELECT ${channelVariantColumns} FROM content_channel_variant
-       WHERE owner_id = ? AND content_version_id = ?
-       ORDER BY channel ASC, id ASC`,
+      `SELECT ${channelVariantColumns} FROM ${channelVariantFrom}
+       WHERE v.owner_id = ? AND v.content_version_id = ?
+       ORDER BY v.channel ASC, v.id ASC`,
       [ownerId, versionId],
     );
     return rows.map((row) => channelVariantRow.parse(row));

@@ -919,6 +919,42 @@ CREATE TABLE `page_check_record` (
 
 CREATE INDEX `page_check_brand_idx` ON `page_check_record` (`brand_id`,`checked_at`,`id`);
 CREATE INDEX `page_check_owner_idx` ON `page_check_record` (`owner_id`,`checked_at`,`id`);
+CREATE TABLE `channel_profile` (
+	`id` text PRIMARY KEY NOT NULL,
+	`brand_id` text NOT NULL,
+	`owner_id` text NOT NULL,
+	`channel_key` text NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "channel_profile_state_check" CHECK(length("channel_profile"."channel_key") between 1 and 64
+    and length("channel_profile"."created_at") between 20 and 40
+    and length("channel_profile"."updated_at") between 20 and 40)
+);
+
+CREATE UNIQUE INDEX `channel_profile_brand_channel_uidx` ON `channel_profile` (`brand_id`,`channel_key`);
+CREATE INDEX `channel_profile_owner_idx` ON `channel_profile` (`owner_id`,`brand_id`,`updated_at`,`id`);
+CREATE TABLE `channel_profile_version` (
+	`id` text PRIMARY KEY NOT NULL,
+	`profile_id` text NOT NULL,
+	`brand_id` text NOT NULL,
+	`owner_id` text NOT NULL,
+	`channel_key` text NOT NULL,
+	`max_characters` integer,
+	`note` text NOT NULL,
+	`version_number` integer NOT NULL,
+	`created_at` text NOT NULL,
+	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`profile_id`) REFERENCES `channel_profile`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "channel_profile_version_state_check" CHECK(length("channel_profile_version"."channel_key") between 1 and 64
+    and ("channel_profile_version"."max_characters" is null or "channel_profile_version"."max_characters" between 1 and 1000000)
+    and length("channel_profile_version"."note") between 1 and 2000
+    and "channel_profile_version"."version_number" between 1 and 1000000
+    and length("channel_profile_version"."created_at") between 20 and 40)
+);
+
+CREATE UNIQUE INDEX `channel_profile_version_number_uidx` ON `channel_profile_version` (`profile_id`,`version_number`);
+CREATE INDEX `channel_profile_version_owner_idx` ON `channel_profile_version` (`owner_id`,`brand_id`,`channel_key`,`version_number`,`id`);
 CREATE TABLE `content_approval` (
 	`id` text PRIMARY KEY NOT NULL,
 	`brand_id` text NOT NULL,
@@ -1057,9 +1093,11 @@ CREATE TABLE `content_channel_variant` (
 	`fingerprint` text NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
+	`channel_profile_version_id` text,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`content_version_id`) REFERENCES `content_version`(`id`) ON UPDATE no action ON DELETE restrict,
 	FOREIGN KEY (`approval_id`) REFERENCES `content_approval`(`id`) ON UPDATE no action ON DELETE restrict,
+	FOREIGN KEY (`channel_profile_version_id`) REFERENCES `channel_profile_version`(`id`) ON UPDATE no action ON DELETE restrict,
 	CONSTRAINT "content_channel_variant_state_check" CHECK("content_channel_variant"."approval_status" in ('draft', 'approved')
     and "content_channel_variant"."needs_own_approval" in (0, 1)
     and "content_channel_variant"."blocked" in (0, 1)

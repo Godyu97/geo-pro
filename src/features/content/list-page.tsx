@@ -34,6 +34,7 @@ function relatedLinks(
   return [
     { href: `/dashboard/content/sources?${query}`, label: t("sourcesLink") },
     { href: `/dashboard/content/templates?${query}`, label: t("templatesLink") },
+    { href: `/dashboard/content/channel-profiles?${query}`, label: t("channelProfilesLink") },
     { href: `/dashboard/content/assets?${query}`, label: t("assetsLink") },
     { href: `/dashboard/content/media-reviews?${query}`, label: t("mediaReviewsLink") },
     { href: `/dashboard/content/calendar?${query}`, label: t("calendarLink") },

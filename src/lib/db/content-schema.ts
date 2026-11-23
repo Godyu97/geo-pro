@@ -371,8 +371,51 @@ export const contentPublicationAction = pgTable("content_publication_action", {
     and length(${table.reason}) > 0`),
 ]);
 
+// One profile per brand and channel key. Publishing appends a version and does not rewrite older limits.
+export const channelProfile = pgTable("channel_profile", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  channelKey: text("channel_key").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("channel_profile_brand_channel_uidx").on(table.brandId, table.channelKey),
+  index("channel_profile_owner_idx").on(table.ownerId, table.brandId, table.updatedAt, table.id),
+  check("channel_profile_state_check", sql`length(${table.channelKey}) between 1 and 64
+    and length(${table.createdAt}) between 20 and 40
+    and length(${table.updatedAt}) between 20 and 40`),
+]);
+
+// Immutable layout snapshot. max_characters null means that version sets no length ceiling.
+export const channelProfileVersion = pgTable("channel_profile_version", {
+  id: text("id").primaryKey(),
+  profileId: text("profile_id").notNull(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  channelKey: text("channel_key").notNull(),
+  maxCharacters: integer("max_characters"),
+  note: text("note").notNull(),
+  versionNumber: integer("version_number").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "channel_profile_version_profile_fk",
+    columns: [table.profileId],
+    foreignColumns: [channelProfile.id],
+  }).onDelete("cascade"),
+  uniqueIndex("channel_profile_version_number_uidx").on(table.profileId, table.versionNumber),
+  index("channel_profile_version_owner_idx").on(table.ownerId, table.brandId, table.channelKey, table.versionNumber, table.id),
+  check("channel_profile_version_state_check", sql`length(${table.channelKey}) between 1 and 64
+    and (${table.maxCharacters} is null or ${table.maxCharacters} between 1 and 1000000)
+    and length(${table.note}) between 1 and 2000
+    and ${table.versionNumber} between 1 and 1000000
+    and length(${table.createdAt}) between 20 and 40`),
+]);
+
 // One channel body per master version. Approval is the variant's own row, never the master's approval id.
 // needs_own_approval stores variantNeedsOwnApproval; blocked does not rewrite other channels.
+// channel_profile_version_id stays null for variants saved before a profile existed.
 export const contentChannelVariant = pgTable("content_channel_variant", {
   id: text("id").primaryKey(),
   brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
@@ -387,6 +430,8 @@ export const contentChannelVariant = pgTable("content_channel_variant", {
   fingerprint: text("fingerprint").notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  // Appended so ALTER TABLE matches a fresh table's column order.
+  channelProfileVersionId: text("channel_profile_version_id"),
 }, (table) => [
   foreignKey({
     name: "content_channel_variant_version_fk",
@@ -397,6 +442,11 @@ export const contentChannelVariant = pgTable("content_channel_variant", {
     name: "content_channel_variant_approval_fk",
     columns: [table.approvalId],
     foreignColumns: [contentApproval.id],
+  }).onDelete("restrict"),
+  foreignKey({
+    name: "content_channel_variant_profile_fk",
+    columns: [table.channelProfileVersionId],
+    foreignColumns: [channelProfileVersion.id],
   }).onDelete("restrict"),
   uniqueIndex("content_channel_variant_channel_uidx").on(table.contentVersionId, table.channel),
   uniqueIndex("content_channel_variant_approval_uidx").on(table.approvalId),

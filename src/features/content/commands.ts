@@ -43,8 +43,10 @@ import {
   type VerifyPublicationInput,
 } from "./contracts.ts";
 import { ContentDao, type AssetRow, type BriefVersionRow, type ChannelVariantRow, type ContentVersionRow, type PackageRow, type UnitRow } from "./dao.ts";
+import { ChannelProfileDao } from "../channel-variants/dao.ts";
 import {
   channelVariantFingerprint,
+  exceedsPinnedCharacterLimit,
   variantNeedsOwnApproval,
   variantRejection,
   type VariantRejectionCode,
@@ -2361,9 +2363,19 @@ function presentChannelVariant(row: ChannelVariantRow, version: ContentVersionRo
     blocked: row.blocked === 1,
     rejection,
     fingerprint: row.fingerprint,
+    channelProfileVersionId: row.channelProfileVersionId,
+    profileVersionNumber: row.profileVersionNumber,
+    profileMaxCharacters: row.profileMaxCharacters,
+    profileChannelKey: row.profileChannelKey,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+function profileLimitExceeded(row: ChannelVariantRow) {
+  if (row.channelProfileVersionId && row.profileVersionNumber == null) return denied("NOT_FOUND");
+  if (exceedsPinnedCharacterLimit(row.bodyMarkdown, row.profileMaxCharacters)) return denied("PROFILE_LIMIT_EXCEEDED");
+  return null;
 }
 
 export async function readChannelVariants(
@@ -2419,6 +2431,23 @@ export async function saveChannelVariant(
     if (!version) return denied("NOT_FOUND");
     const now = clock();
     const existing = await dao.getChannelVariantForVersion(ownerId, version.id, input.channel);
+    const profiles = new ChannelProfileDao(transaction);
+    let pinnedId: string | null = existing?.channelProfileVersionId ?? null;
+    let pinnedNumber = existing?.profileVersionNumber ?? null;
+    let pinnedMax = existing?.profileMaxCharacters ?? null;
+    let pinnedKey = existing?.profileChannelKey ?? null;
+    if (!existing) {
+      if (!input.profileVersionId) return denied("PROFILE_VERSION_REQUIRED");
+      const pin = await profiles.getVersion(ownerId, input.profileVersionId);
+      if (!pin || pin.brandId !== input.brandId) return denied("NOT_FOUND");
+      if (pin.channelKey !== input.channel) return denied("PROFILE_VERSION_REQUIRED");
+      pinnedId = pin.id;
+      pinnedNumber = pin.versionNumber;
+      pinnedMax = pin.maxCharacters;
+      pinnedKey = pin.channelKey;
+    } else if (input.profileVersionId && input.profileVersionId !== existing.channelProfileVersionId) {
+      return denied("PROFILE_PIN_LOCKED");
+    }
     const bodyChanged = !existing || existing.bodyMarkdown !== input.bodyMarkdown;
     const approvalStatus = bodyChanged || !existing ? "draft" as const : existing.approvalStatus;
     const approvalId = bodyChanged || !existing ? null : existing.approvalId;
@@ -2443,6 +2472,10 @@ export async function saveChannelVariant(
         needsOwnApproval: needsFlag,
         blocked: 0,
         fingerprint,
+        channelProfileVersionId: pinnedId,
+        profileVersionNumber: pinnedNumber,
+        profileMaxCharacters: pinnedMax,
+        profileChannelKey: pinnedKey,
         createdAt: now,
         updatedAt: now,
       };
@@ -2553,6 +2586,8 @@ export async function exportChannelVariant(
   if (!version) return denied("NOT_FOUND");
   const variant = await dao.getChannelVariantForVersion(ownerId, version.id, input.channel);
   if (!variant) return denied("NOT_FOUND");
+  const limited = profileLimitExceeded(variant);
+  if (limited) return limited;
   if (variant.blocked === 1) return denied("VARIANT_CHANNEL_BLOCKED");
   const gateVariant = asChannelVariant(variant);
   if (variantNeedsOwnApproval(version.status === "approved", gateVariant, version.bodyMarkdown) || !variant.approvalId) {
@@ -2572,6 +2607,12 @@ export async function exportChannelVariant(
         : null;
       if (!currentVersion || !current || !current.approvalId) {
         return { ok: false as const, error: "NOT_FOUND" as const };
+      }
+      if (current.channelProfileVersionId && current.profileVersionNumber == null) {
+        return { ok: false as const, error: "NOT_FOUND" as const };
+      }
+      if (exceedsPinnedCharacterLimit(current.bodyMarkdown, current.profileMaxCharacters)) {
+        return { ok: false as const, error: "PROFILE_LIMIT_EXCEEDED" as const };
       }
       if (current.blocked === 1) return { ok: false as const, error: "VARIANT_CHANNEL_BLOCKED" as const };
       if (variantNeedsOwnApproval(currentVersion.status === "approved", asChannelVariant(current), currentVersion.bodyMarkdown)) {

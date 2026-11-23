@@ -18,6 +18,14 @@ export type ChannelVariantView = {
   needsOwnApproval: boolean;
   blocked: boolean;
   rejection: "master_unapproved" | "body_diverged" | "variant_unapproved" | "channel_blocked" | null;
+  channelProfileVersionId: string | null;
+  pinLabel: string;
+};
+
+type ProfileOption = {
+  id: string;
+  channelKey: string;
+  label: string;
 };
 
 type Copy = {
@@ -42,6 +50,8 @@ type Copy = {
   empty: string;
   unsaved: string;
   hint: string;
+  pin: string;
+  pinRequired: string;
   errors: Record<string, string>;
 };
 
@@ -50,46 +60,63 @@ const areaClass = "w-full rounded-md border bg-background px-3 py-2";
 
 // Locale refresh replaces server copy but must not remount this editor.
 // The map keeps unsubmitted bodies if the client tree is reconciled again.
-const draftMemory = new Map<string, { channel: string; drafts: Record<string, string> }>();
+const draftMemory = new Map<string, { channel: string; drafts: Record<string, string>; pins: Record<string, string> }>();
 
 export function ChannelVariantEditor({
   versionId,
   brandId,
   variants,
+  profiles,
   readOnly,
   copy,
 }: {
   versionId: string;
   brandId: string;
   variants: ChannelVariantView[];
+  profiles: ProfileOption[];
   readOnly: boolean;
   copy: Copy;
 }) {
   const router = useRouter();
   const serverDrafts = Object.fromEntries(variants.map((item) => [item.channel, item.bodyMarkdown]));
+  const serverPins = Object.fromEntries(variants.flatMap((item) => item.channelProfileVersionId ? [[item.channel, item.channelProfileVersionId]] : []));
   const remembered = draftMemory.get(versionId);
-  const [channel, setChannel] = useState(remembered?.channel ?? variants[0]?.channel ?? "zhihu");
+  const initialChannel = remembered?.channel ?? variants[0]?.channel ?? "";
+  const [channel, setChannel] = useState(initialChannel);
   const [drafts, setDrafts] = useState<Record<string, string>>(remembered?.drafts ?? serverDrafts);
+  const [pins, setPins] = useState<Record<string, string>>(remembered?.pins ?? serverPins);
+  const [profileVersionId, setProfileVersionId] = useState(remembered?.pins?.[initialChannel] ?? serverPins[initialChannel] ?? "");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  function persist(nextChannel: string, nextDrafts: Record<string, string>) {
-    draftMemory.set(versionId, { channel: nextChannel, drafts: nextDrafts });
+  function persist(nextChannel: string, nextDrafts: Record<string, string>, nextPins: Record<string, string>) {
+    draftMemory.set(versionId, { channel: nextChannel, drafts: nextDrafts, pins: nextPins });
   }
 
   function updateBody(value: string) {
     const next = { ...drafts, [channel]: value };
     setDrafts(next);
-    persist(channel, next);
+    persist(channel, next, pins);
     setFeedback(null);
   }
 
   function updateChannel(value: string) {
+    const savedPin = variants.find((item) => item.channel === value);
+    const nextPin = savedPin ? (savedPin.channelProfileVersionId ?? "") : (pins[value] ?? "");
     setChannel(value);
-    persist(value, drafts);
+    setProfileVersionId(nextPin);
+    persist(value, drafts, pins);
     setFeedback(null);
     setError(null);
+  }
+
+  function updatePin(value: string) {
+    const nextPins = { ...pins, [channel]: value };
+    setPins(nextPins);
+    setProfileVersionId(value);
+    persist(channel, drafts, nextPins);
+    setFeedback(null);
   }
 
   const saved = variants.find((item) => item.channel === channel) ?? null;
@@ -110,6 +137,7 @@ export function ChannelVariantEditor({
     formData.set("versionId", versionId);
     formData.set("channel", channel);
     formData.set("bodyMarkdown", body);
+    if (profileVersionId) formData.set("profileVersionId", profileVersionId);
     try {
       const result = await action(formData);
       if (!result.ok) {
@@ -140,6 +168,9 @@ export function ChannelVariantEditor({
                 <span>{item.approvalStatus === "approved" ? copy.approved : copy.draft}</span>
               </div>
               <p className="mt-2 text-muted-foreground">
+                {copy.pin}: {item.pinLabel}
+              </p>
+              <p className="mt-2 text-muted-foreground">
                 {copy.reason}: {item.rejection ? copy[item.rejection] : copy.none}
                 {item.blocked ? ` · ${copy.blocked}` : ""}
               </p>
@@ -167,6 +198,25 @@ export function ChannelVariantEditor({
             className={inputClass}
           />
         </label>
+        {saved ? (
+          <p className="text-sm">{copy.pin}: {saved.pinLabel}</p>
+        ) : (
+          <label className="block text-sm">
+            <span className="mb-1 block text-muted-foreground">{copy.pin}</span>
+            <select
+              name="profileVersionId"
+              required
+              value={profileVersionId}
+              onChange={(event) => updatePin(event.target.value)}
+              className={inputClass}
+            >
+              <option value="">{copy.pinRequired}</option>
+              {profiles.filter((item) => item.channelKey === channel).map((item) => (
+                <option key={item.id} value={item.id}>{item.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="block text-sm">
           <span className="mb-1 block text-muted-foreground">{copy.body}</span>
           <textarea

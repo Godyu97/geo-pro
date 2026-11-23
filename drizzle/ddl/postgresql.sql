@@ -802,6 +802,35 @@ CREATE TABLE "page_check_record" (
     and length("page_check_record"."normalized_url") > 0)
 );
 
+CREATE TABLE "channel_profile" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"channel_key" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "channel_profile_state_check" CHECK (length("channel_profile"."channel_key") between 1 and 64
+    and length("channel_profile"."created_at") between 20 and 40
+    and length("channel_profile"."updated_at") between 20 and 40)
+);
+
+CREATE TABLE "channel_profile_version" (
+	"id" text PRIMARY KEY NOT NULL,
+	"profile_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"channel_key" text NOT NULL,
+	"max_characters" integer,
+	"note" text NOT NULL,
+	"version_number" integer NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "channel_profile_version_state_check" CHECK (length("channel_profile_version"."channel_key") between 1 and 64
+    and ("channel_profile_version"."max_characters" is null or "channel_profile_version"."max_characters" between 1 and 1000000)
+    and length("channel_profile_version"."note") between 1 and 2000
+    and "channel_profile_version"."version_number" between 1 and 1000000
+    and length("channel_profile_version"."created_at") between 20 and 40)
+);
+
 CREATE TABLE "content_approval" (
 	"id" text PRIMARY KEY NOT NULL,
 	"brand_id" text NOT NULL,
@@ -915,6 +944,7 @@ CREATE TABLE "content_channel_variant" (
 	"fingerprint" text NOT NULL,
 	"created_at" text NOT NULL,
 	"updated_at" text NOT NULL,
+	"channel_profile_version_id" text,
 	CONSTRAINT "content_channel_variant_state_check" CHECK ("content_channel_variant"."approval_status" in ('draft', 'approved')
     and "content_channel_variant"."needs_own_approval" in (0, 1)
     and "content_channel_variant"."blocked" in (0, 1)
@@ -2519,6 +2549,9 @@ ALTER TABLE "optimization_task_evidence" ADD CONSTRAINT "optimization_task_evide
 ALTER TABLE "optimization_task_evidence" ADD CONSTRAINT "optimization_task_evidence_finding_fk" FOREIGN KEY ("finding_id") REFERENCES "public"."optimization_finding"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "page_check_record" ADD CONSTRAINT "page_check_record_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "page_check_record" ADD CONSTRAINT "page_check_task_fk" FOREIGN KEY ("task_id") REFERENCES "public"."optimization_task"("id") ON DELETE set null ON UPDATE no action;
+ALTER TABLE "channel_profile" ADD CONSTRAINT "channel_profile_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "channel_profile_version" ADD CONSTRAINT "channel_profile_version_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "channel_profile_version" ADD CONSTRAINT "channel_profile_version_profile_fk" FOREIGN KEY ("profile_id") REFERENCES "public"."channel_profile"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_approval" ADD CONSTRAINT "content_approval_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_approval" ADD CONSTRAINT "content_approval_version_fk" FOREIGN KEY ("content_version_id") REFERENCES "public"."content_version"("id") ON DELETE restrict ON UPDATE no action;
 ALTER TABLE "content_asset" ADD CONSTRAINT "content_asset_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
@@ -2533,6 +2566,7 @@ ALTER TABLE "content_brief_version" ADD CONSTRAINT "content_brief_version_brief_
 ALTER TABLE "content_channel_variant" ADD CONSTRAINT "content_channel_variant_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_channel_variant" ADD CONSTRAINT "content_channel_variant_version_fk" FOREIGN KEY ("content_version_id") REFERENCES "public"."content_version"("id") ON DELETE restrict ON UPDATE no action;
 ALTER TABLE "content_channel_variant" ADD CONSTRAINT "content_channel_variant_approval_fk" FOREIGN KEY ("approval_id") REFERENCES "public"."content_approval"("id") ON DELETE restrict ON UPDATE no action;
+ALTER TABLE "content_channel_variant" ADD CONSTRAINT "content_channel_variant_profile_fk" FOREIGN KEY ("channel_profile_version_id") REFERENCES "public"."channel_profile_version"("id") ON DELETE restrict ON UPDATE no action;
 ALTER TABLE "content_delivery_package" ADD CONSTRAINT "content_delivery_package_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "content_delivery_package" ADD CONSTRAINT "content_delivery_package_version_fk" FOREIGN KEY ("content_version_id") REFERENCES "public"."content_version"("id") ON DELETE restrict ON UPDATE no action;
 ALTER TABLE "content_delivery_package" ADD CONSTRAINT "content_delivery_package_approval_fk" FOREIGN KEY ("approval_id") REFERENCES "public"."content_approval"("id") ON DELETE restrict ON UPDATE no action;
@@ -2729,6 +2763,10 @@ CREATE INDEX "optimization_task_owner_idx" ON "optimization_task" USING btree ("
 CREATE INDEX "optimization_task_evidence_brand_idx" ON "optimization_task_evidence" USING btree ("brand_id","task_id","finding_id");
 CREATE INDEX "page_check_brand_idx" ON "page_check_record" USING btree ("brand_id","checked_at","id");
 CREATE INDEX "page_check_owner_idx" ON "page_check_record" USING btree ("owner_id","checked_at","id");
+CREATE UNIQUE INDEX "channel_profile_brand_channel_uidx" ON "channel_profile" USING btree ("brand_id","channel_key");
+CREATE INDEX "channel_profile_owner_idx" ON "channel_profile" USING btree ("owner_id","brand_id","updated_at","id");
+CREATE UNIQUE INDEX "channel_profile_version_number_uidx" ON "channel_profile_version" USING btree ("profile_id","version_number");
+CREATE INDEX "channel_profile_version_owner_idx" ON "channel_profile_version" USING btree ("owner_id","brand_id","channel_key","version_number","id");
 CREATE INDEX "content_approval_version_idx" ON "content_approval" USING btree ("content_version_id","created_at","id");
 CREATE INDEX "content_approval_brand_idx" ON "content_approval" USING btree ("brand_id","created_at","id");
 CREATE INDEX "content_asset_brand_idx" ON "content_asset" USING btree ("brand_id","created_at","id");

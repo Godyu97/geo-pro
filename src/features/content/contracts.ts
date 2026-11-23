@@ -130,6 +130,9 @@ export const contentErrors = {
   SERVICE_UNAVAILABLE: 503,
   VARIANT_REAPPROVAL_REQUIRED: 422,
   VARIANT_CHANNEL_BLOCKED: 422,
+  PROFILE_VERSION_REQUIRED: 422,
+  PROFILE_LIMIT_EXCEEDED: 409,
+  PROFILE_PIN_LOCKED: 409,
 } as const;
 export type ContentError = keyof typeof contentErrors;
 
@@ -263,6 +266,7 @@ export const saveChannelVariantSchema = z.strictObject({
   action: z.literal("save-channel-variant"),
   ...channelVariantCommand,
   bodyMarkdown: z.string().min(1).max(50_000),
+  profileVersionId: brandIdSchema.optional(),
 });
 export type SaveChannelVariantInput = z.infer<typeof saveChannelVariantSchema>;
 

@@ -58,6 +58,16 @@ export function exportPackage(input: { markdown: string; tables: readonly string
   return { markdown: input.markdown, tables: [...input.tables], droppedTables: 0 };
 }
 
+/** Code points, so a single emoji counts as one character. A null ceiling applies no limit. */
+export function characterCount(text: string) {
+  return Array.from(text).length;
+}
+
+export function exceedsPinnedCharacterLimit(body: string, maxCharacters: number | null) {
+  if (maxCharacters == null) return false;
+  return characterCount(body) > maxCharacters;
+}
+
 /** One fact expiry lists every affected page and opens a single deduped maintenance task. */
 export function impactSurface(input: {
   factId: string;

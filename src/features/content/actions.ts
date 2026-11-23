@@ -373,10 +373,12 @@ function channelCommand(formData: FormData) {
 export async function saveChannelVariantAction(formData: FormData) {
   const session = await requireSession();
   const base = channelCommand(formData);
+  const profileVersionId = String(formData.get("profileVersionId") ?? "");
   const parsed = saveChannelVariantSchema.safeParse({
     action: "save-channel-variant",
     ...base,
     bodyMarkdown: String(formData.get("bodyMarkdown") ?? ""),
+    ...(profileVersionId ? { profileVersionId } : {}),
   });
   if (!parsed.success) return { ok: false as const, error: "INVALID_INPUT" as const };
   const result = await saveChannelVariant(getConnection(), session.user.id, parsed.data);

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { executeFactCommand } from "../../src/features/brand-facts/service.ts";
 import { emptyFields } from "../../src/features/brand-facts/rules.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
+import { publishChannelProfile } from "../../src/features/channel-variants/commands.ts";
 import { variantNeedsOwnApproval, variantRejection } from "../../src/features/channel-variants/rules.ts";
 import {
   approveChannelVariant,
@@ -181,7 +182,18 @@ async function setup(t, kind) {
     [versionId],
   );
 
-  return { db, owner, outsider, brand, packageOptions, approvedVersion, count, approvals };
+  async function pin(channel) {
+    const published = await publishChannelProfile(db, owner, {
+      brandId: brand,
+      channelKey: channel,
+      maxCharacters: null,
+      note: "审批回归不设字数上限",
+    }, clock);
+    assert.equal(published.error, undefined);
+    return published.version.id;
+  }
+
+  return { db, owner, outsider, brand, packageOptions, approvedVersion, count, approvals, pin };
 }
 
 for (const kind of ["sqlite", "postgresql"]) {
@@ -190,7 +202,7 @@ for (const kind of ["sqlite", "postgresql"]) {
   });
 
   run("changed price cannot inherit the master approval", async (t, ctx) => {
-    const { db, owner, outsider, brand, packageOptions, approvedVersion, count, approvals } = ctx;
+    const { db, owner, outsider, brand, packageOptions, approvedVersion, count, approvals, pin } = ctx;
     const { versionId, body, approvalId } = await approvedVersion();
     assert.match(body, /100/);
     const changed = body.replace("100", "101");
@@ -207,6 +219,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       versionId,
       channel: "zhihu",
       bodyMarkdown: changed,
+      profileVersionId: await pin("zhihu"),
     }, clock);
     assert.equal(saved.error, undefined);
     assert.equal(saved.variant.needsOwnApproval, true);
@@ -238,6 +251,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       versionId,
       channel: "toutiao",
       bodyMarkdown: `${body}\n沿用主稿批准`,
+      profileVersionId: await pin("toutiao"),
     }, clock);
     assert.equal(phrase.variant.needsOwnApproval, true);
     assert.equal(phrase.variant.rejection, "body_diverged");
@@ -266,7 +280,7 @@ for (const kind of ["sqlite", "postgresql"]) {
   });
 
   run("same body with its own approval exports one package", async (t, ctx) => {
-    const { db, owner, brand, packageOptions, approvedVersion, count, approvals } = ctx;
+    const { db, owner, brand, packageOptions, approvedVersion, count, approvals, pin } = ctx;
     const { versionId, body, approvalId } = await approvedVersion();
     const before = await approvals(versionId);
     const packagesBefore = await count(
@@ -280,6 +294,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       versionId,
       channel: "zhihu",
       bodyMarkdown: body,
+      profileVersionId: await pin("zhihu"),
     }, clock);
     assert.equal(saved.error, undefined);
     assert.equal(saved.variant.needsOwnApproval, true);
@@ -312,15 +327,16 @@ for (const kind of ["sqlite", "postgresql"]) {
   });
 
   run("blocking one channel leaves the other approval unchanged", async (t, ctx) => {
-    const { db, owner, brand, approvedVersion } = ctx;
+    const { db, owner, brand, approvedVersion, pin } = ctx;
     const { versionId, body } = await approvedVersion();
-    const save = (channel) => saveChannelVariant(db, owner, {
+    const save = async (channel) => saveChannelVariant(db, owner, {
       action: "save-channel-variant",
       brandId: brand,
       operationId: randomUUID(),
       versionId,
       channel,
       bodyMarkdown: body,
+      profileVersionId: await pin(channel),
     }, clock);
     const first = await save("zhihu");
     const second = await save("baijiahao");
