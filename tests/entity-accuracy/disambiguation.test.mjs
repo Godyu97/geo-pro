@@ -122,8 +122,9 @@ async function seedObservation(db, brandId, ownerId, observationId, analysisId, 
     `INSERT INTO answer_observation (
       id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method, question_text, answer_text,
       fingerprint, captured_at, region, language, requested_network_mode, entity_version, citation_set_state,
-      evidence_state, locator_ref, collector_id, missing_reason, created_at
-    ) VALUES (?, ?, ?, NULL, NULL, 'consumer_ui', 'manual', ?, ?, ?, ?, 'CN', 'zh-CN', 'unknown', 1, 'complete', 'complete', NULL, NULL, NULL, ?)`,
+      evidence_state, locator_ref, collector_id, missing_reason, created_at,
+      target_region, observed_region, new_session, product_mode
+    ) VALUES (?, ?, ?, NULL, NULL, 'consumer_ui', 'manual', ?, ?, ?, ?, 'CN', 'zh-CN', 'unknown', 1, 'complete', 'complete', NULL, NULL, NULL, ?, 'CN', 'unknown', 'unknown', 'unknown')`,
     [observationId, brandId, ownerId, "夹具问题", answerText, fingerprint(observationId), time, time],
   );
   await queryWithParameters(
@@ -401,11 +402,13 @@ for (const kind of ["sqlite", "postgresql"]) {
             "question_text", "answer_text", "fingerprint", "captured_at", "region", "language",
             "requested_network_mode", "entity_version", "citation_set_state", "evidence_state",
             "locator_ref", "collector_id", "missing_reason", "created_at",
+            "target_region", "observed_region", "new_session", "product_mode",
           ],
           extraObservations.map((row) => [
             row.observationId, row.brandId, outsider, null, null, "consumer_ui", "manual",
             "夹具问题", answerText, fingerprint(row.observationId), time, "CN", "zh-CN",
             "unknown", 1, "complete", "complete", null, null, null, time,
+            "CN", "unknown", "unknown", "unknown",
           ]),
         );
         await insertChunk(

@@ -77,9 +77,9 @@ for (const kind of ["sqlite", "postgresql"]) {
     await sql(`INSERT INTO answer_observation
       (id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method, question_text, answer_text, fingerprint,
        captured_at, region, language, requested_network_mode, entity_version, citation_set_state, evidence_state,
-       locator_ref, collector_id, missing_reason, created_at)
+       locator_ref, collector_id, missing_reason, created_at, target_region, observed_region, new_session, product_mode)
       VALUES (?, ?, ?, NULL, NULL, 'model_api', 'official_api', '问题原文 🚀', '回答原文 🚀', ?, ?, 'CN', 'zh-CN',
-        'off', 1, 'missing', 'complete', NULL, NULL, NULL, ?)`,
+        'off', 1, 'missing', 'complete', NULL, NULL, NULL, ?, 'CN', 'unknown', 'unknown', 'unknown')`,
     [observationId, owner.brandId, owner.ownerId, fingerprint, time, time]);
     await sql(`INSERT INTO answer_citation
       (id, observation_id, brand_id, raw_url, normalized_url, citation_origin, position_label, ownership, page_status, created_at)

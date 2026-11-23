@@ -6,6 +6,52 @@ export const triStates = ["true", "false", "unknown"] as const;
 export const triStateSchema = z.enum(triStates);
 export type TriState = z.infer<typeof triStateSchema>;
 
+const regionCodePattern = /^[A-Za-z]{2}$/;
+
+export const observedRegionSchema = z.union([
+  z.literal("unknown"),
+  z.string().regex(regionCodePattern),
+]);
+
+function samplingTriState(value: string | null | undefined): TriState | null {
+  if (value === undefined || value === null) return "unknown";
+  if (value === "true" || value === "false" || value === "unknown") return value;
+  return null;
+}
+
+export function resolveSamplingConditions(input: {
+  region: string;
+  targetRegion?: string | null;
+  observedRegion?: string | null;
+  newSession?: string | null;
+  productMode?: string | null;
+}): {
+  region: string;
+  targetRegion: string;
+  observedRegion: string;
+  newSession: TriState;
+  productMode: TriState;
+} | null {
+  if (input.region.length !== 2) return null;
+  const requestedTarget = input.targetRegion ?? input.region;
+  if (requestedTarget.length !== 2 || requestedTarget.toUpperCase() !== input.region.toUpperCase()) return null;
+  const observedSource = input.observedRegion ?? "unknown";
+  if (observedSource.length === 0) return null;
+  const observedRegion = observedSource.toLowerCase() === "unknown" ? "unknown" : observedSource.toUpperCase();
+  if (observedRegion !== "unknown" && !/^[A-Z]{2}$/.test(observedRegion)) return null;
+  const newSession = samplingTriState(input.newSession);
+  const productMode = samplingTriState(input.productMode);
+  if (!newSession || !productMode) return null;
+  const region = input.region.toUpperCase();
+  return {
+    region,
+    targetRegion: region,
+    observedRegion,
+    newSession,
+    productMode,
+  };
+}
+
 export const evidenceStates = ["draft_evidence", "complete", "incomplete", "contested"] as const;
 export const citationSetStates = ["complete", "partial", "unsupported", "missing"] as const;
 export const citationOrigins = [
@@ -58,6 +104,10 @@ export const ingestAdoptedSchema = z.strictObject({
   evidenceSpan: z.string().max(2000).nullable().optional(),
   citations: z.array(citationInputSchema).max(50).optional(),
   citationSetState: z.enum(citationSetStates).optional(),
+  targetRegion: z.string().length(2).optional(),
+  observedRegion: observedRegionSchema.optional(),
+  newSession: triStateSchema.optional(),
+  productMode: triStateSchema.optional(),
 });
 export type IngestAdoptedInput = z.infer<typeof ingestAdoptedSchema>;
 
@@ -71,6 +121,10 @@ export const submitManualSchema = z.strictObject({
   region: z.string().length(2),
   language: z.string().min(2).max(40),
   requestedNetworkMode: z.enum(networkModes),
+  targetRegion: z.string().length(2).optional(),
+  observedRegion: observedRegionSchema.optional(),
+  newSession: triStateSchema.optional(),
+  productMode: triStateSchema.optional(),
   entityVersion: z.int().positive(),
   citationSetState: z.enum(citationSetStates),
   citations: z.array(citationInputSchema).max(50).default([]),

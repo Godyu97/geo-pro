@@ -50,6 +50,27 @@ export default async function EvidenceDetailPage({
         </div>
       </dl>
       <section className="space-y-2">
+        <h2 className="font-medium">{t("samplingConditions")}</h2>
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-muted-foreground">{t("targetRegion")}</dt>
+            <dd>{observation.targetRegion}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">{t("observedRegion")}</dt>
+            <dd>{observation.observedRegion === "unknown" ? t("observedRegionUnknown") : observation.observedRegion}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">{t("newSession")}</dt>
+            <dd>{label(observation.newSession)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">{t("productMode")}</dt>
+            <dd>{label(observation.productMode)}</dd>
+          </div>
+        </dl>
+      </section>
+      <section className="space-y-2">
         <h2 className="font-medium">{t("question")}</h2>
         <p className="wrap-anywhere text-sm">{observation.questionText}</p>
       </section>

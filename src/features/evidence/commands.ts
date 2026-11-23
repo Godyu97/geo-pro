@@ -11,6 +11,7 @@ import {
   type ReviseAnalysisInput,
   type SubmitManualInput,
   qualifiesForC,
+  resolveSamplingConditions,
 } from "./contracts.ts";
 import { EvidenceDao, type AnalysisRow, type CitationRow, type ObservationRow } from "./dao.ts";
 import { invalidateEvidenceOverview } from "./overview-cache.ts";
@@ -123,6 +124,15 @@ export async function ingestAdoptedObservation(
     const questionText = prompt?.content.questions.find((item) => item.id === adopted.questionId)?.text
       ?? adopted.questionId;
 
+    const conditions = resolveSamplingConditions({
+      region: adopted.region,
+      targetRegion: input.targetRegion,
+      observedRegion: input.observedRegion,
+      newSession: input.newSession,
+      productMode: input.productMode,
+    });
+    if (!conditions) return denied("INVALID_INPUT");
+
     const now = clock();
     const observationId = randomUUID();
     const citations = buildCitations(observationId, input.brandId, now, input.citations ?? []);
@@ -151,7 +161,11 @@ export async function ingestAdoptedObservation(
       answerText: adopted.rawText,
       fingerprint: fingerprintAnswer(questionText, adopted.rawText),
       capturedAt: now,
-      region: adopted.region,
+      region: conditions.region,
+      targetRegion: conditions.targetRegion,
+      observedRegion: conditions.observedRegion,
+      newSession: conditions.newSession,
+      productMode: conditions.productMode,
       language: adopted.language,
       requestedNetworkMode: adopted.requestedNetworkMode,
       entityVersion: adopted.entityVersion,
@@ -226,6 +240,15 @@ export async function submitManualEvidence(
       // drafts are allowed; callers may continue later
     }
 
+    const conditions = resolveSamplingConditions({
+      region: input.region,
+      targetRegion: input.targetRegion,
+      observedRegion: input.observedRegion,
+      newSession: input.newSession,
+      productMode: input.productMode,
+    });
+    if (!conditions) return denied("INVALID_INPUT");
+
     const now = clock();
     const observationId = randomUUID();
     const citations = evidenceState === "draft_evidence" && input.citationSetState === "missing"
@@ -254,7 +277,11 @@ export async function submitManualEvidence(
       answerText: input.answerText,
       fingerprint: fingerprintAnswer(input.questionText, input.answerText),
       capturedAt: now,
-      region: input.region,
+      region: conditions.region,
+      targetRegion: conditions.targetRegion,
+      observedRegion: conditions.observedRegion,
+      newSession: conditions.newSession,
+      productMode: conditions.productMode,
       language: input.language,
       requestedNetworkMode: input.requestedNetworkMode,
       entityVersion: input.entityVersion,

@@ -24,6 +24,10 @@ const observationRow = z.object({
   region: z.string(),
   language: z.string(),
   requestedNetworkMode: z.enum(networkModes),
+  targetRegion: z.string().length(2),
+  observedRegion: z.union([z.literal("unknown"), z.string().length(2)]),
+  newSession: triStateSchema,
+  productMode: triStateSchema,
   entityVersion: z.int().positive(),
   citationSetState: z.enum(citationSetStates),
   evidenceState: z.enum(evidenceStates),
@@ -86,7 +90,9 @@ const observationColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", sl
   source_mode AS "sourceMode", capture_method AS "captureMethod", question_text AS "questionText", answer_text AS "answerText",
   fingerprint, captured_at AS "capturedAt", region, language, requested_network_mode AS "requestedNetworkMode",
   entity_version AS "entityVersion", citation_set_state AS "citationSetState", evidence_state AS "evidenceState",
-  locator_ref AS "locatorRef", collector_id AS "collectorId", missing_reason AS "missingReason", created_at AS "createdAt"`;
+  locator_ref AS "locatorRef", collector_id AS "collectorId", missing_reason AS "missingReason", created_at AS "createdAt",
+  target_region AS "targetRegion", observed_region AS "observedRegion", new_session AS "newSession",
+  product_mode AS "productMode"`;
 
 const citationColumns = `id, observation_id AS "observationId", brand_id AS "brandId", raw_url AS "rawUrl",
   normalized_url AS "normalizedUrl", citation_origin AS "citationOrigin", position_label AS "positionLabel",
@@ -144,7 +150,9 @@ const scopedColumns = `o.id, o.brand_id AS "brandId", o.owner_id AS "ownerId", o
   o.source_mode AS "sourceMode", o.capture_method AS "captureMethod", o.question_text AS "questionText", o.answer_text AS "answerText",
   o.fingerprint, o.captured_at AS "capturedAt", o.region, o.language, o.requested_network_mode AS "requestedNetworkMode",
   o.entity_version AS "entityVersion", o.citation_set_state AS "citationSetState", o.evidence_state AS "evidenceState",
-  o.locator_ref AS "locatorRef", o.collector_id AS "collectorId", o.missing_reason AS "missingReason", o.created_at AS "createdAt"`;
+  o.locator_ref AS "locatorRef", o.collector_id AS "collectorId", o.missing_reason AS "missingReason", o.created_at AS "createdAt",
+  o.target_region AS "targetRegion", o.observed_region AS "observedRegion", o.new_session AS "newSession",
+  o.product_mode AS "productMode"`;
 
 function chunkIds(ids: string[]) {
   const unique = [...new Set(ids)];
@@ -286,13 +294,15 @@ export class EvidenceDao {
       `INSERT INTO answer_observation (
         id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method, question_text, answer_text,
         fingerprint, captured_at, region, language, requested_network_mode, entity_version, citation_set_state,
-        evidence_state, locator_ref, collector_id, missing_reason, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        evidence_state, locator_ref, collector_id, missing_reason, created_at,
+        target_region, observed_region, new_session, product_mode
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.id, row.brandId, row.ownerId, row.slotId, row.attemptId, row.sourceMode, row.captureMethod,
         row.questionText, row.answerText, row.fingerprint, row.capturedAt, row.region, row.language,
         row.requestedNetworkMode, row.entityVersion, row.citationSetState, row.evidenceState,
         row.locatorRef, row.collectorId, row.missingReason, row.createdAt,
+        row.targetRegion, row.observedRegion, row.newSession, row.productMode,
       ],
     );
   }

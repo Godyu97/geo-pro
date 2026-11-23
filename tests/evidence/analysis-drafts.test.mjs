@@ -243,10 +243,12 @@ for (const kind of ["sqlite", "postgresql"]) {
         await queryWithParameters(db, `INSERT INTO answer_observation (
           id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method, question_text, answer_text,
           fingerprint, captured_at, region, language, requested_network_mode, entity_version, citation_set_state,
-          evidence_state, locator_ref, collector_id, missing_reason, created_at
+          evidence_state, locator_ref, collector_id, missing_reason, created_at,
+          target_region, observed_region, new_session, product_mode
         ) SELECT seed.id, o.brand_id, o.owner_id, NULL, NULL, o.source_mode, o.capture_method, o.question_text, o.answer_text,
           o.fingerprint, o.captured_at, o.region, o.language, o.requested_network_mode, o.entity_version, o.citation_set_state,
-          o.evidence_state, o.locator_ref, o.collector_id, o.missing_reason, o.created_at
+          o.evidence_state, o.locator_ref, o.collector_id, o.missing_reason, o.created_at,
+          o.target_region, o.observed_region, o.new_session, o.product_mode
           FROM answer_observation o
           CROSS JOIN (SELECT ? AS id${chunk.slice(1).map(() => " UNION ALL SELECT ?").join("")}) seed
           WHERE o.id = ?`, [...chunk, observationId]);

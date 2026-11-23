@@ -140,13 +140,14 @@ for (const kind of ["sqlite", "postgresql"]) {
     const consumerIds = Array.from({ length: 40 }, () => randomUUID());
     const otherIds = Array.from({ length: 40 }, () => randomUUID());
     const observationRows = [
-      ...modelIds.map((id, index) => [id, brandId, ownerId, "model_api", "official_api", "合成问题", "合成回答", fingerprint, stamp(index), "CN", "zh-CN", "unknown", 1, "complete", "complete", stamp(index)]),
-      ...consumerIds.map((id, index) => [id, brandId, ownerId, "consumer_ui", "manual", "合成问题", "合成回答", fingerprint, stamp(300 + index), "CN", "zh-CN", "unknown", 1, "complete", "complete", stamp(300 + index)]),
-      ...otherIds.map((id, index) => [id, otherBrandId, otherOwnerId, "model_api", "official_api", "其他问题", "其他回答", fingerprint, stamp(400 + index), "CN", "zh-CN", "unknown", 1, "complete", "complete", stamp(400 + index)]),
+      ...modelIds.map((id, index) => [id, brandId, ownerId, "model_api", "official_api", "合成问题", "合成回答", fingerprint, stamp(index), "CN", "zh-CN", "unknown", 1, "complete", "complete", stamp(index), "CN", "unknown", "unknown", "unknown"]),
+      ...consumerIds.map((id, index) => [id, brandId, ownerId, "consumer_ui", "manual", "合成问题", "合成回答", fingerprint, stamp(300 + index), "CN", "zh-CN", "unknown", 1, "complete", "complete", stamp(300 + index), "CN", "unknown", "unknown", "unknown"]),
+      ...otherIds.map((id, index) => [id, otherBrandId, otherOwnerId, "model_api", "official_api", "其他问题", "其他回答", fingerprint, stamp(400 + index), "CN", "zh-CN", "unknown", 1, "complete", "complete", stamp(400 + index), "CN", "unknown", "unknown", "unknown"]),
     ];
     await insertRows(db, "answer_observation", [
       "id", "brand_id", "owner_id", "source_mode", "capture_method", "question_text", "answer_text", "fingerprint",
       "captured_at", "region", "language", "requested_network_mode", "entity_version", "citation_set_state", "evidence_state", "created_at",
+      "target_region", "observed_region", "new_session", "product_mode",
     ], observationRows);
     await insertRows(db, "answer_analysis_version", [
       "id", "observation_id", "brand_id", "version", "entity_version", "rule_version", "mentioned", "recommended", "official_site_cited", "status", "created_at",

@@ -25,6 +25,10 @@ export const answerObservation = pgTable("answer_observation", {
   collectorId: text("collector_id"),
   missingReason: text("missing_reason"),
   createdAt: text("created_at").notNull(),
+  targetRegion: text("target_region").notNull(),
+  observedRegion: text("observed_region").notNull().default("unknown"),
+  newSession: text("new_session").notNull().default("unknown"),
+  productMode: text("product_mode").notNull().default("unknown"),
 }, (table) => [
   foreignKey({ name: "answer_observation_slot_fk", columns: [table.slotId], foreignColumns: [monitoringSlot.id] }).onDelete("set null"),
   foreignKey({ name: "answer_observation_attempt_fk", columns: [table.attemptId], foreignColumns: [monitoringAttempt.id] }).onDelete("set null"),
@@ -38,6 +42,10 @@ export const answerObservation = pgTable("answer_observation", {
     and ${table.entityVersion} > 0 and length(${table.fingerprint}) = 64
     and length(${table.region}) = 2 and length(${table.language}) between 2 and 40
     and ${table.requestedNetworkMode} in ('on', 'off', 'unknown')
+    and length(${table.targetRegion}) = 2
+    and (${table.observedRegion} = 'unknown' or length(${table.observedRegion}) = 2)
+    and ${table.newSession} in ('true', 'false', 'unknown')
+    and ${table.productMode} in ('true', 'false', 'unknown')
     and (
       (${table.evidenceState} = 'draft_evidence')
       or (${table.evidenceState} in ('complete', 'incomplete', 'contested') and length(${table.answerText}) > 0)

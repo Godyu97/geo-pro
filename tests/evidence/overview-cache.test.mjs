@@ -148,11 +148,12 @@ async function seedTracked(db, ownerId, brandId, total) {
     await insertRows(db, `INSERT INTO answer_observation (
       id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method, question_text, answer_text,
       fingerprint, captured_at, region, language, requested_network_mode, entity_version, citation_set_state,
-      evidence_state, locator_ref, collector_id, missing_reason, created_at
+      evidence_state, locator_ref, collector_id, missing_reason, created_at,
+      target_region, observed_region, new_session, product_mode
     )`, slots.map((slot) => [
       slot.observationId, brandId, ownerId, slot.slotId, slot.attemptId, "consumer_ui", "manual",
       slot.question.text, "样本回答未点名品牌。", sha(slot.observationId), at(slot.index), "CN", "zh-CN", "unknown",
-      1, "complete", "complete", null, null, null, at(slot.index),
+      1, "complete", "complete", null, null, null, at(slot.index), "CN", "unknown", "unknown", "unknown",
     ]));
     await insertRows(db, `INSERT INTO answer_analysis_version (
       id, observation_id, brand_id, version, entity_version, rule_version, mentioned, recommended,

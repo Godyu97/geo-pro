@@ -675,6 +675,10 @@ CREATE TABLE `answer_observation` (
 	`collector_id` text,
 	`missing_reason` text,
 	`created_at` text NOT NULL,
+	`target_region` text NOT NULL,
+	`observed_region` text DEFAULT 'unknown' NOT NULL,
+	`new_session` text DEFAULT 'unknown' NOT NULL,
+	`product_mode` text DEFAULT 'unknown' NOT NULL,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`slot_id`) REFERENCES `monitoring_slot`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`attempt_id`) REFERENCES `monitoring_attempt`(`id`) ON UPDATE no action ON DELETE set null,
@@ -685,6 +689,10 @@ CREATE TABLE `answer_observation` (
     and "answer_observation"."entity_version" > 0 and length("answer_observation"."fingerprint") = 64
     and length("answer_observation"."region") = 2 and length("answer_observation"."language") between 2 and 40
     and "answer_observation"."requested_network_mode" in ('on', 'off', 'unknown')
+    and length("answer_observation"."target_region") = 2
+    and ("answer_observation"."observed_region" = 'unknown' or length("answer_observation"."observed_region") = 2)
+    and "answer_observation"."new_session" in ('true', 'false', 'unknown')
+    and "answer_observation"."product_mode" in ('true', 'false', 'unknown')
     and (
       ("answer_observation"."evidence_state" = 'draft_evidence')
       or ("answer_observation"."evidence_state" in ('complete', 'incomplete', 'contested') and length("answer_observation"."answer_text") > 0)
