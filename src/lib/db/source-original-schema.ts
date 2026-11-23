@@ -23,7 +23,7 @@ export const sourceOriginal = pgTable("source_original", {
   index("source_original_brand_idx").on(table.brandId, table.createdAt, table.id),
   check("source_original_state_check", sql`${table.status} in ('ready', 'partial', 'failed')
     and ${table.rightsStatus} in ('active', 'revoked', 'expired')
-    and (${table.reason} is null or ${table.reason} in ('encrypted', 'oversized', 'unrecognized', 'batch_limit', 'unavailable'))
+    and (${table.reason} is null or ${table.reason} in ('encrypted', 'oversized', 'unrecognized', 'batch_limit', 'unavailable', 'capacity'))
     and length(${table.fileName}) between 1 and 120
     and ${table.fileName} not like '%/%'
     and ${table.fileName} not like '%..%'

@@ -1684,6 +1684,7 @@
     "reasonUnrecognized": "This file could not be recognized. Use text, Markdown, PDF, or JSON.",
     "reasonBatchLimit": "A batch accepts at most 10 files. Put the extra files in the next batch.",
     "reasonUnavailable": "The original was not saved. Try again later.",
+    "reasonCapacity": "This brand has no room left for another original. Use a smaller file, or import again after the capacity changes. Saved originals stay in place.",
     "rightsActive": "Rights are active. Only authorized workspace members can read it.",
     "rightsRevoked": "Rights were revoked, so it cannot be downloaded again. The history remains.",
     "rightsExpired": "Rights have expired, so it cannot be downloaded again. The history remains.",

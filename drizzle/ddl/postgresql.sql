@@ -1336,6 +1336,12 @@ CREATE TABLE "stored_object" (
     and ("stored_object"."deleted_at" is null or length("stored_object"."deleted_at") between 20 and 40))
 );
 
+CREATE TABLE "brand_storage_limit" (
+	"brand_id" text PRIMARY KEY NOT NULL,
+	"byte_limit" integer NOT NULL,
+	CONSTRAINT "brand_storage_limit_bytes_check" CHECK ("brand_storage_limit"."byte_limit" between 1 and 2147483647)
+);
+
 CREATE TABLE "source_original" (
 	"id" text PRIMARY KEY NOT NULL,
 	"brand_id" text NOT NULL,
@@ -1350,7 +1356,7 @@ CREATE TABLE "source_original" (
 	"created_at" text NOT NULL,
 	CONSTRAINT "source_original_state_check" CHECK ("source_original"."status" in ('ready', 'partial', 'failed')
     and "source_original"."rights_status" in ('active', 'revoked', 'expired')
-    and ("source_original"."reason" is null or "source_original"."reason" in ('encrypted', 'oversized', 'unrecognized', 'batch_limit', 'unavailable'))
+    and ("source_original"."reason" is null or "source_original"."reason" in ('encrypted', 'oversized', 'unrecognized', 'batch_limit', 'unavailable', 'capacity'))
     and length("source_original"."file_name") between 1 and 120
     and "source_original"."file_name" not like '%/%'
     and "source_original"."file_name" not like '%..%'
@@ -2546,6 +2552,7 @@ ALTER TABLE "competitor_set" ADD CONSTRAINT "competitor_set_brand_id_brand_id_fk
 ALTER TABLE "research_brief" ADD CONSTRAINT "research_brief_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "source_inspection" ADD CONSTRAINT "source_inspection_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "source_inspection" ADD CONSTRAINT "source_inspection_citation_id_answer_citation_id_fk" FOREIGN KEY ("citation_id") REFERENCES "public"."answer_citation"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand_storage_limit" ADD CONSTRAINT "brand_storage_limit_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "source_original" ADD CONSTRAINT "source_original_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sampling_plan" ADD CONSTRAINT "sampling_plan_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sampling_slot" ADD CONSTRAINT "sampling_slot_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
@@ -2767,6 +2774,7 @@ CREATE INDEX "source_inspection_brand_idx" ON "source_inspection" USING btree ("
 CREATE UNIQUE INDEX "stored_object_key_uidx" ON "stored_object" USING btree ("object_key") WHERE "stored_object"."object_key" is not null;
 CREATE INDEX "stored_object_owner_idx" ON "stored_object" USING btree ("owner_id","brand_id","class","created_at","id");
 CREATE INDEX "stored_object_brand_idx" ON "stored_object" USING btree ("brand_id","created_at","id");
+CREATE INDEX "stored_object_brand_live_idx" ON "stored_object" USING btree ("brand_id") WHERE "stored_object"."status" in ('pending', 'ready') and "stored_object"."deleted_at" is null;
 CREATE UNIQUE INDEX "source_original_object_uidx" ON "source_original" USING btree ("stored_object_id") WHERE "source_original"."stored_object_id" is not null;
 CREATE INDEX "source_original_owner_idx" ON "source_original" USING btree ("owner_id","brand_id","created_at","id");
 CREATE INDEX "source_original_brand_idx" ON "source_original" USING btree ("brand_id","created_at","id");

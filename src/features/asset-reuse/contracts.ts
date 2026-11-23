@@ -2,7 +2,7 @@ import { z } from "zod";
 import { brandIdSchema } from "../brands/contracts.ts";
 
 export const SOURCE_STATUSES = ["ready", "partial", "failed"] as const;
-export const SOURCE_REASONS = ["encrypted", "oversized", "unrecognized", "batch_limit", "unavailable"] as const;
+export const SOURCE_REASONS = ["encrypted", "oversized", "unrecognized", "batch_limit", "unavailable", "capacity"] as const;
 export const SOURCE_RIGHTS = ["active", "revoked", "expired"] as const;
 
 export type SourceStatus = (typeof SOURCE_STATUSES)[number];

@@ -33,6 +33,7 @@ import { sourceOriginalMayDownload } from "../asset-reuse/dao.ts";
 import {
   claimMutableObject,
   insertPendingObject,
+  sourceOriginalWithinBrandLimit,
   listFailedObjectKeys,
   listStoredObjectsForOwner,
   loadOwnedObject,
@@ -53,7 +54,7 @@ export type ObjectStorageClient = {
   presignGet(input: PresignGetInput): Promise<{ ok: true; url: string; expiresInSeconds: number } | StorageFailure>;
 };
 
-export type StoredObjectFailureCode = "rejected" | "not-found" | "immutable" | "failed";
+export type StoredObjectFailureCode = "rejected" | "not-found" | "immutable" | "failed" | "capacity";
 export type StoredObjectFailure = { ok: false; code: StoredObjectFailureCode };
 
 export type ReadyStoredObject = {
@@ -247,7 +248,15 @@ export async function saveStoredObject(
       return failure("not-found");
     }
   } else {
-    await metadataWrite(db, options, (tx) => insertPendingObject(tx, pending));
+    const reserved = await metadataWrite(db, options, async (tx) => {
+      if (command.class === "source-original" && command.brandId) {
+        const fits = await sourceOriginalWithinBrandLimit(tx, command.brandId, body.byteLength);
+        if (!fits) return "capacity" as const;
+      }
+      await insertPendingObject(tx, pending);
+      return "ok" as const;
+    });
+    if (reserved === "capacity") return failure("capacity");
   }
 
   let written: WrittenObject | WriteFailure;

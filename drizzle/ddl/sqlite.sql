@@ -1561,6 +1561,14 @@ CREATE TABLE `stored_object` (
 CREATE UNIQUE INDEX `stored_object_key_uidx` ON `stored_object` (`object_key`) WHERE "stored_object"."object_key" is not null;
 CREATE INDEX `stored_object_owner_idx` ON `stored_object` (`owner_id`,`brand_id`,`class`,`created_at`,`id`);
 CREATE INDEX `stored_object_brand_idx` ON `stored_object` (`brand_id`,`created_at`,`id`);
+CREATE INDEX `stored_object_brand_live_idx` ON `stored_object` (`brand_id`) WHERE "stored_object"."status" in ('pending', 'ready') and "stored_object"."deleted_at" is null;
+CREATE TABLE `brand_storage_limit` (
+	`brand_id` text PRIMARY KEY NOT NULL,
+	`byte_limit` integer NOT NULL,
+	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "brand_storage_limit_bytes_check" CHECK("brand_storage_limit"."byte_limit" between 1 and 2147483647)
+);
+
 CREATE TABLE `source_original` (
 	`id` text PRIMARY KEY NOT NULL,
 	`brand_id` text NOT NULL,
@@ -1576,7 +1584,7 @@ CREATE TABLE `source_original` (
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "source_original_state_check" CHECK("source_original"."status" in ('ready', 'partial', 'failed')
     and "source_original"."rights_status" in ('active', 'revoked', 'expired')
-    and ("source_original"."reason" is null or "source_original"."reason" in ('encrypted', 'oversized', 'unrecognized', 'batch_limit', 'unavailable'))
+    and ("source_original"."reason" is null or "source_original"."reason" in ('encrypted', 'oversized', 'unrecognized', 'batch_limit', 'unavailable', 'capacity'))
     and length("source_original"."file_name") between 1 and 120
     and "source_original"."file_name" not like '%/%'
     and "source_original"."file_name" not like '%..%'

@@ -27,6 +27,7 @@ function reasonKey(reason: SourceReason) {
   if (reason === "oversized") return "reasonOversized" as const;
   if (reason === "unrecognized") return "reasonUnrecognized" as const;
   if (reason === "batch_limit") return "reasonBatchLimit" as const;
+  if (reason === "capacity") return "reasonCapacity" as const;
   return "reasonUnavailable" as const;
 }
 

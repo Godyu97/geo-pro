@@ -121,6 +121,53 @@ export async function loadBrandObjectsByIds(db: QueryConnection, ownerId: string
   return z.array(storedObjectRowSchema).parse(rows);
 }
 
+const maxBrandBytes = 2_147_483_647;
+
+function byteCount(value: unknown) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  return null;
+}
+
+export async function setBrandStorageLimit(db: QueryConnection, brandId: string, byteLimit: number) {
+  if (!brandIdSchema.safeParse(brandId).success) return false;
+  if (!Number.isSafeInteger(byteLimit) || byteLimit < 1 || byteLimit > maxBrandBytes) return false;
+  await queryWithParameters(
+    db,
+    `INSERT INTO brand_storage_limit (brand_id, byte_limit) VALUES (?, ?)
+     ON CONFLICT (brand_id) DO UPDATE SET byte_limit = excluded.byte_limit`,
+    [brandId, byteLimit],
+  );
+  return true;
+}
+
+// Pending and ready rows still occupy the brand. Failed and tombstoned rows do not.
+// A brand with no ceiling row is not capped here. Equality with the ceiling is allowed.
+export async function sourceOriginalWithinBrandLimit(db: QueryConnection, brandId: string, incomingBytes: number) {
+  if (!Number.isSafeInteger(incomingBytes) || incomingBytes < 1) return false;
+  const lock = db.kind === "postgresql" ? " FOR UPDATE" : "";
+  const [limit] = await queryWithParameters(
+    db,
+    `SELECT byte_limit AS "byteLimit" FROM brand_storage_limit WHERE brand_id = ?${lock}`,
+    [brandId],
+  );
+  if (!limit) return true;
+  const byteLimit = byteCount(limit.byteLimit);
+  if (byteLimit === null) return false;
+  const [sum] = await queryWithParameters(
+    db,
+    `SELECT coalesce(sum(byte_size), 0) AS used FROM stored_object
+     WHERE brand_id = ? AND status IN ('pending', 'ready') AND deleted_at IS NULL`,
+    [brandId],
+  );
+  const used = byteCount(sum?.used);
+  if (used === null || used > byteLimit) return false;
+  return incomingBytes <= byteLimit - used;
+}
+
 export async function insertPendingObject(db: QueryConnection, row: PendingObjectInsert) {
   await queryWithParameters(
     db,

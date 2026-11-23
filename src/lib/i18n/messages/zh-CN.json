@@ -1684,6 +1684,7 @@
     "reasonUnrecognized": "无法识别这个文件。请改用文本、Markdown、PDF 或 JSON。",
     "reasonBatchLimit": "每批最多 10 个文件。请把多出的文件放到下一批。",
     "reasonUnavailable": "原件没有保存成功。请稍后重试。",
+    "reasonCapacity": "这个品牌的资料容量已经用完。请缩小文件，或等容量调整后再导入。已经保存的原件会保留。",
     "rightsActive": "权利有效，仅工作区授权成员可以读取。",
     "rightsRevoked": "权利已撤销，不能再下载。历史记录仍保留。",
     "rightsExpired": "权利已到期，不能再下载。历史记录仍保留。",

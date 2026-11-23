@@ -24,6 +24,7 @@ export const storedObject = pgTable("stored_object", {
   uniqueIndex("stored_object_key_uidx").on(table.objectKey).where(sql`${table.objectKey} is not null`),
   index("stored_object_owner_idx").on(table.ownerId, table.brandId, table.class, table.createdAt, table.id),
   index("stored_object_brand_idx").on(table.brandId, table.createdAt, table.id),
+  index("stored_object_brand_live_idx").on(table.brandId).where(sql`${table.status} in ('pending', 'ready') and ${table.deletedAt} is null`),
   check("stored_object_check", sql`${table.class} in ('internal-material', 'authorized-media', 'delivery-package', 'report-snapshot', 'owned-export', 'publication-evidence', 'source-original')
     and ${table.visibility} in ('internal', 'public')
     and (${table.visibility} = 'internal' or ${table.class} = 'authorized-media')

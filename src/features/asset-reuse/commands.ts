@@ -115,7 +115,7 @@ export async function importSourceOriginals(
           if (saved.ok) await markObjectFailed(tx, saved.id, ownerId, "ready");
           storedObjectId = null;
           status = "failed";
-          reason = "unavailable";
+          reason = !saved.ok && saved.code === "capacity" ? "capacity" : "unavailable";
         } else {
           storedObjectId = saved.id;
         }
