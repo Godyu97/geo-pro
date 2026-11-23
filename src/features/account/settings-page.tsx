@@ -100,6 +100,10 @@ export default async function AccountSettingsPage() {
             <h2 id="external-connections-heading" className="font-medium">{t("externalConnections")}</h2>
             <Link href="/dashboard/settings/connections" prefetch={false} className="text-sm underline underline-offset-4">{t("openExternalConnections")}</Link>
           </section>
+          <section id="data-connections" aria-labelledby="data-connections-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
+            <h2 id="data-connections-heading" className="font-medium">{t("dataConnections")}</h2>
+            <Link href="/dashboard/settings/data-connections" prefetch={false} className="text-sm underline underline-offset-4">{t("openDataConnections")}</Link>
+          </section>
           <section id="notification-endpoints" aria-labelledby="notification-endpoints-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
             <h2 id="notification-endpoints-heading" className="font-medium">{t("notificationEndpoints")}</h2>
             <Link href="/dashboard/settings/notifications" prefetch={false} className="text-sm underline underline-offset-4">{t("openNotificationEndpoints")}</Link>

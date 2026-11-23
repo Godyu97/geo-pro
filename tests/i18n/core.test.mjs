@@ -77,6 +77,7 @@ test("login return targets preserve local filters and reject external or malform
   assert.equal(safeReturnTo("/dashboard/settings/team"), "/dashboard/settings/team");
   assert.equal(safeReturnTo("/dashboard/settings/approval-policy"), "/dashboard/settings/approval-policy");
   assert.equal(safeReturnTo("/dashboard/settings/connections"), "/dashboard/settings/connections");
+  assert.equal(safeReturnTo("/dashboard/settings/data-connections"), "/dashboard/settings/data-connections");
   assert.equal(safeReturnTo("/dashboard/settings/notifications"), "/dashboard/settings/notifications");
   assert.equal(safeReturnTo("/dashboard/settings/delegations"), "/dashboard/settings/delegations");
   assert.equal(safeReturnTo("/dashboard/commercial/orders"), "/dashboard/commercial/orders");

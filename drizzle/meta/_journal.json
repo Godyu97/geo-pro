@@ -386,6 +386,13 @@
       "when": 1795410013954,
       "tag": "0054_whitelabel_share",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1795410895805,
+      "tag": "0055_data_connection",
+      "breakpoints": true
     }
   ]
 }
