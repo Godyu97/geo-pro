@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { check, foreignKey, index, integer, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
+import { check, foreignKey, index, integer, pgTable, text, unique, uniqueIndex } from "drizzle-orm/pg-core";
+import { user } from "./auth-schema";
 import { brand } from "./brand-schema";
 
 export const monitoringRun = pgTable("monitoring_run", {
@@ -110,4 +111,59 @@ export const monitoringAttempt = pgTable("monitoring_attempt", {
       (${table.kind} = 'sampling' and ${table.ordinal} <= 3 and ${table.disposition} in ('pending', 'adopted', 'safe_failure', 'unknown', 'late'))
       or (${table.kind} = 'analysis' and ${table.disposition} = 'analysis_reuse' and ${table.costState} = 'none')
     )`),
+]);
+
+// One row per protocol version. Field changes insert a new version; frozen rows stay put.
+// search_required is the frozen requirement. It is not search_triggered and does not rewrite a run.
+export const samplingProtocol = pgTable("sampling_protocol", {
+  id: text("id").primaryKey(),
+  protocolId: text("protocol_id").notNull(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  version: integer("version").notNull(),
+  newSessionRequired: integer("new_session_required").notNull(),
+  searchRequired: integer("search_required").notNull(),
+  targetRegion: text("target_region").notNull(),
+  timezone: text("timezone").notNull(),
+  status: text("status").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  operationId: text("operation_id").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  unique("sampling_protocol_version_key").on(table.protocolId, table.version),
+  uniqueIndex("sampling_protocol_fingerprint_uidx").on(table.protocolId, table.fingerprint),
+  uniqueIndex("sampling_protocol_operation_uidx").on(table.brandId, table.operationId),
+  index("sampling_protocol_owner_idx").on(table.ownerId, table.createdAt, table.id),
+  index("sampling_protocol_family_idx").on(table.ownerId, table.protocolId, table.version),
+  check("sampling_protocol_state_check", sql`${table.version} > 0
+    and ${table.newSessionRequired} in (0, 1) and ${table.searchRequired} in (0, 1)
+    and ${table.status} in ('draft', 'frozen')
+    and length(${table.id}) = 36 and length(${table.protocolId}) = 36
+    and length(${table.brandId}) = 36 and length(${table.ownerId}) between 1 and 128
+    and length(${table.targetRegion}) = 2 and length(${table.timezone}) between 1 and 64
+    and length(${table.fingerprint}) = 64 and length(${table.operationId}) = 36
+    and length(${table.createdAt}) between 20 and 40`),
+]);
+
+// A run can cite one frozen protocol version. Runs created earlier can have no pin.
+export const runProtocolPin = pgTable("run_protocol_pin", {
+  runId: text("run_id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  protocolId: text("protocol_id").notNull(),
+  version: integer("version").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  foreignKey({ name: "run_protocol_pin_run_fk", columns: [table.runId], foreignColumns: [monitoringRun.id] }).onDelete("cascade"),
+  foreignKey({
+    name: "run_protocol_pin_protocol_fk",
+    columns: [table.protocolId, table.version],
+    foreignColumns: [samplingProtocol.protocolId, samplingProtocol.version],
+  }).onDelete("cascade"),
+  index("run_protocol_pin_protocol_idx").on(table.protocolId, table.version),
+  index("run_protocol_pin_owner_idx").on(table.ownerId, table.createdAt, table.runId),
+  check("run_protocol_pin_state_check", sql`${table.version} > 0
+    and length(${table.runId}) = 36 and length(${table.brandId}) = 36
+    and length(${table.ownerId}) between 1 and 128 and length(${table.protocolId}) = 36
+    and length(${table.createdAt}) between 20 and 40`),
 ]);

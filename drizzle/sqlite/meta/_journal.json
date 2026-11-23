@@ -449,6 +449,13 @@
       "when": 1795418788080,
       "tag": "0063_married_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1795420838004,
+      "tag": "0064_narrow_zodiak",
+      "breakpoints": true
     }
   ]
 }
