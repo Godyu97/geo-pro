@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
 import { MonitoringCapabilityPanel } from "@/features/capabilities/settings-panel";
-import { brandIntakeOrigin } from "@/features/brands/intake";
+import { brandIntakeDecision } from "@/features/brands/intake";
 
 export default async function DashboardPage() {
   // Each protected page checks the session, including RSC navigation requests.
@@ -17,10 +17,30 @@ export default async function DashboardPage() {
   const locale = await getLocale();
   const t = await getTranslator("dashboard");
   const brands = await getTranslator("brands");
-  const intake = brandIntakeOrigin(await headers());
+  const decision = brandIntakeDecision(await headers(), user.email);
+  const intake = decision.state === "open" ? decision.intake : null;
+  const brandDenied = decision.state === "denied";
   const brandFixture = intake?.mode === "fixture";
   const brandReal = intake?.mode === "real";
   const brandMock = intake?.mode === "mock";
+  let moduleStatus = t("unavailable");
+  let moduleDescription: string | null = null;
+  if (brandDenied) {
+    moduleStatus = brands("devDeniedStatus");
+    moduleDescription = brands("devActorDeniedDescription");
+  } else if (brandFixture) {
+    moduleStatus = brands("fixtureStatus");
+    moduleDescription = brands("pageDescription");
+  } else if (brandReal) {
+    moduleStatus = brands("realStatus");
+    moduleDescription = brands("realDescription");
+  } else if (brandMock) {
+    moduleStatus = brands("mockStatus");
+    moduleDescription = brands("mockDescription");
+  } else if (intake?.mode === "dev") {
+    moduleStatus = brands("devStatus");
+    moduleDescription = brands("devDescription");
+  }
   const moduleLinks = getModuleLinks(getMessages(locale).modules);
 
   return (
@@ -97,12 +117,12 @@ export default async function DashboardPage() {
                       <Icon className="size-5" aria-hidden="true" />
                     </span>
                     <Badge variant="outline" className="font-normal text-muted-foreground">
-                      {brandFixture ? brands("fixtureStatus") : brandReal ? brands("realStatus") : brandMock ? brands("mockStatus") : t("unavailable")}
+                      {moduleStatus}
                     </Badge>
                   </div>
                   <h3 className="font-medium">{title}</h3>
                   <p className="mt-2 min-h-14 text-sm leading-7 text-muted-foreground">
-                    {brandFixture ? brands("pageDescription") : brandReal ? brands("realDescription") : brandMock ? brands("mockDescription") : description}
+                    {moduleDescription ?? description}
                   </p>
                   {!brandEntry && <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">{empty}</p>}
                 </CardContent>

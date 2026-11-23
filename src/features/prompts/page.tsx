@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { brandIdSchema } from "@/features/brands/contracts";
-import { brandIntakeOrigin, brandMaterialOrigin } from "@/features/brands/intake";
+import { brandMaterialAccess } from "@/features/brands/intake";
 import { ApplyMockMaterialsButton } from "@/features/functional-mock/material-button";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
@@ -11,6 +11,15 @@ import { getLocale, getMessages } from "@/lib/i18n/server";
 import { workspaceParams } from "./params";
 import { promptUnavailable, readPromptWorkspace } from "./service";
 import { PromptWorkspaceView } from "./workspace";
+
+function materialNotice(material: ReturnType<typeof brandMaterialAccess>, messages: {
+  mock: string; dev: string; fixture: string; devActorDenied: string; closed: string;
+}) {
+  if (!material.ok) return material.error === "devActorDenied" ? messages.devActorDenied : messages.closed;
+  if (material.mode === "mock") return messages.mock;
+  if (material.mode === "dev") return messages.dev;
+  return messages.fixture;
+}
 
 export async function promptMetadata() {
   return { title: getMessages(await getLocale()).promptSets.title, robots: { index: false, follow: false } };
@@ -25,8 +34,8 @@ export async function PromptSetsPage({ params, searchParams }: {
   const messages = getMessages(locale).promptSets;
   const query = workspaceParams.safeParse(raw);
   if (!brandIdSchema.safeParse(id).success || !query.success) notFound();
-  const intake = brandIntakeOrigin(requestHeaders);
-  const enabled = Boolean(brandMaterialOrigin(requestHeaders));
+  const material = brandMaterialAccess(requestHeaders, user.email);
+  const enabled = material.ok;
   const href = `/dashboard/brands/${id}`;
   const result = enabled
     ? await Promise.resolve().then(() => readPromptWorkspace(getConnection(), { ownerId: user.id, brandId: id }, query.data)).catch(promptUnavailable)
@@ -38,8 +47,8 @@ export async function PromptSetsPage({ params, searchParams }: {
       <header className="space-y-2">
         <Button asChild variant="outline"><Link href={enabled ? href : "/dashboard/brands"} prefetch={false}>{messages.back}</Link></Button>
         <h1 className="text-2xl font-semibold">{messages.title}</h1>
-        <p className="text-sm text-muted-foreground">{intake?.mode === "mock" ? messages.mock : enabled ? messages.fixture : messages.closed}</p>
-        {intake?.mode === "mock" && (
+        <p className="text-sm text-muted-foreground">{materialNotice(material, messages)}</p>
+        {material.ok && material.mode === "mock" && (
           <ApplyMockMaterialsButton
             brandId={id}
             label={messages.applyMockMaterials}

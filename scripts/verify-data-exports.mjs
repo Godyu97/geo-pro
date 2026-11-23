@@ -198,6 +198,7 @@ async function verify(kind, enabled, storage) {
       ...process.env, ...fixture.env, BETTER_AUTH_URL: baseURL,
       BETTER_AUTH_SECRET: randomBytes(48).toString("base64url"), GEO_BRANDS_FIXTURE: enabled ? "1" : "",
       GEO_FUNCTIONAL_MOCK: "", GEO_BRAND_REAL_INTAKE: "",
+      GEO_BRAND_DEV_INTAKE: "", GEO_BRAND_DEV_INTAKE_DATABASE: "", GEO_BRAND_DEV_INTAKE_ACTORS: "",
       S3_ENDPOINT: storage.endpoint,
       S3_ENDPOINT_BROWSER: "",
       S3_REGION: "us-east-1",

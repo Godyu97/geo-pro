@@ -4,7 +4,7 @@ import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { brandIdSchema } from "@/features/brands/contracts";
-import { brandMaterialOrigin } from "@/features/brands/intake";
+import { brandMaterialAccess } from "@/features/brands/intake";
 import { executeFactCommand, factUnavailable, readFactWorkspace } from "./service";
 import { workspaceParams } from "./params";
 
@@ -18,9 +18,9 @@ async function access(request: Request, context: Context) {
   const session = await getSessionState();
   if (session.status === "anonymous") return json({ error: "signIn" }, 401);
   if (session.status !== "authenticated") return json(factUnavailable(), 503);
-  const origin = brandMaterialOrigin(request.headers);
-  if (!origin) return json({ error: "closed" }, 403);
-  if (request.method === "POST" && origin !== request.headers.get("origin")) return json({ error: "forbidden" }, 403);
+  const material = brandMaterialAccess(request.headers, session.session.user.email);
+  if (!material.ok) return json({ error: material.error }, 403);
+  if (request.method === "POST" && material.origin !== request.headers.get("origin")) return json({ error: "forbidden" }, 403);
   const id = brandIdSchema.safeParse((await context.params).id);
   if (!id.success) return json({ error: "notFound" }, 404);
   return { ownerId: session.session.user.id, brandId: id.data };

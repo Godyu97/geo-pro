@@ -8,14 +8,14 @@ import { getTranslator } from "@/lib/i18n/server";
 import { executeBrandCommand } from "./commands";
 import { brandCommandSchema, brandFieldNameSchema, brandIdSchema, brandVersionParam, type BrandErrorCode, type BrandFieldName } from "./contracts";
 import { brandErrorMessage } from "./error-messages";
-import { brandIntakeOrigin } from "./intake";
+import { brandIntakeDecision } from "./intake";
 import { brandUnavailable, readBrandData } from "./service";
 
 const responseHeaders = { "Cache-Control": "private, no-store", Vary: "Cookie, Accept-Language" };
 const readQuery = z.strictObject({ id: brandIdSchema, version: brandVersionParam.optional() });
 const errorStatuses: Record<BrandErrorCode, number> = {
   SESSION_REQUIRED: 401, SESSION_CHANGED: 409, NOT_FOUND: 404, LIMIT_REACHED: 409,
-  VERSION_CONFLICT: 409, OPERATION_CONFLICT: 409, INTAKE_CLOSED: 403, INVALID_INPUT: 400,
+  VERSION_CONFLICT: 409, OPERATION_CONFLICT: 409, INTAKE_CLOSED: 403, DEV_ACTOR_DENIED: 403, INVALID_INPUT: 400,
   FORBIDDEN: 403, SERVICE_UNAVAILABLE: 503,
   IDENTITY_UNVERIFIED: 403, REAUTH_REQUIRED: 403, RECOVERY_EXPIRED: 409,
 };
@@ -37,10 +37,18 @@ async function fail(code: BrandErrorCode, traceId?: string, fields?: BrandFieldN
   }, errorStatuses[code]);
 }
 
+function intakeGate(request: Request, email: string) {
+  const decision = brandIntakeDecision(request.headers, email);
+  if (decision.state === "closed") return fail("INTAKE_CLOSED");
+  if (decision.state === "denied") return fail("DEV_ACTOR_DENIED");
+  return decision.intake;
+}
+
 export async function readBrandResponse(request: Request) {
   const session = await getSessionState();
   if (session.status !== "authenticated") return fail(session.status === "anonymous" ? "SESSION_REQUIRED" : "SERVICE_UNAVAILABLE");
-  if (!brandIntakeOrigin(request.headers)) return fail("INTAKE_CLOSED");
+  const intake = await intakeGate(request, session.session.user.email);
+  if (intake instanceof Response) return intake;
 
   const params = new URL(request.url).searchParams;
   const query = readQuery.safeParse(Object.fromEntries(params));
@@ -54,8 +62,8 @@ export async function readBrandResponse(request: Request) {
 export async function writeBrandResponse(request: Request) {
   const session = await getSessionState();
   if (session.status !== "authenticated") return fail(session.status === "anonymous" ? "SESSION_REQUIRED" : "SERVICE_UNAVAILABLE");
-  const intake = brandIntakeOrigin(request.headers);
-  if (!intake) return fail("INTAKE_CLOSED");
+  const intake = await intakeGate(request, session.session.user.email);
+  if (intake instanceof Response) return intake;
   if (request.headers.get("origin") !== intake.origin) return fail("FORBIDDEN");
 
   const command = brandCommandSchema.safeParse(await readBoundedJson(request, 48 * 1024));

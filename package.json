@@ -23,6 +23,7 @@
     "verify:maintenance": "node --conditions=react-server scripts/verify-maintenance.mjs",
     "verify:brand-facts": "node --conditions=react-server scripts/verify-brand-facts.mjs",
     "verify:brands": "node --conditions=react-server scripts/verify-brands.mjs",
+    "verify:dev-brand-intake": "node --conditions=react-server scripts/verify-dev-brand-intake.mjs",
     "brands:purge": "node --conditions=react-server scripts/brand-purge.mjs",
     "brands:shorten-recovery": "node --conditions=react-server scripts/brand-deletion.mjs",
     "verify:data-exports": "node --conditions=react-server scripts/verify-data-exports.mjs",

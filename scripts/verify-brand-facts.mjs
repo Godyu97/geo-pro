@@ -166,7 +166,9 @@ async function verify(kind, browser, enabled) {
   const fixture = await testDatabase(kind);
   const env = { ...process.env, ...fixture.env, BETTER_AUTH_URL: baseURL,
     BETTER_AUTH_SECRET: randomBytes(48).toString("base64url"), GEO_BRANDS_FIXTURE: enabled ? "1" : "0",
-    GEO_FUNCTIONAL_MOCK: "", GEO_BRAND_REAL_INTAKE: "", GEO_ACCOUNT_EMAIL_FIXTURE: "0" };
+    GEO_FUNCTIONAL_MOCK: "", GEO_BRAND_REAL_INTAKE: "",
+    GEO_BRAND_DEV_INTAKE: "", GEO_BRAND_DEV_INTAKE_DATABASE: "", GEO_BRAND_DEV_INTAKE_ACTORS: "",
+    GEO_ACCOUNT_EMAIL_FIXTURE: "0" };
   const child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "localhost", "--port", "3118"], {
     env, stdio: ["ignore", "pipe", "pipe"],
   });

@@ -8,6 +8,7 @@ export const brandErrorMessage = {
   VERSION_CONFLICT: "versionConflict",
   OPERATION_CONFLICT: "operationConflict",
   INTAKE_CLOSED: "closedDescription",
+  DEV_ACTOR_DENIED: "devActorDenied",
   INVALID_INPUT: "invalidInput",
   FORBIDDEN: "forbidden",
   SERVICE_UNAVAILABLE: "unavailable",

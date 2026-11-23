@@ -128,7 +128,7 @@ export type BrandFieldName = z.infer<typeof brandFieldNameSchema>;
 
 export const brandErrorCodeSchema = z.enum([
   "SESSION_REQUIRED", "SESSION_CHANGED", "NOT_FOUND", "LIMIT_REACHED", "VERSION_CONFLICT", "OPERATION_CONFLICT",
-  "INTAKE_CLOSED", "INVALID_INPUT", "FORBIDDEN", "SERVICE_UNAVAILABLE",
+  "INTAKE_CLOSED", "DEV_ACTOR_DENIED", "INVALID_INPUT", "FORBIDDEN", "SERVICE_UNAVAILABLE",
   "IDENTITY_UNVERIFIED", "REAUTH_REQUIRED", "RECOVERY_EXPIRED",
 ]);
 export type BrandErrorCode = z.infer<typeof brandErrorCodeSchema>;

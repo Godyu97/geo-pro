@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { brandFieldsSchema } from "../../src/features/brands/contracts.ts";
-import { brandIntakeOrigin } from "../../src/features/brands/intake.ts";
+import { brandIntakeOrigin, brandMaterialAccess, devIntakeActorAllowed, explainDevIntake } from "../../src/features/brands/intake.ts";
 import { readPilotAdmission } from "../../src/features/brands/pilot-admission.ts";
 import { mockBrandFields } from "../../src/features/functional-mock/brand-profile.ts";
 
@@ -95,4 +95,58 @@ test("functional mock opens labeled brand writes without pilot admission", () =>
   const parsed = brandFieldsSchema.safeParse(mockBrandFields);
   assert.equal(parsed.success, true);
   assert.match(mockBrandFields.name, /FUNCTIONAL-MOCK/);
+});
+
+const devHeaders = {
+  get(name) {
+    if (name === "host") return "127.0.0.1:3121";
+    return null;
+  },
+};
+
+const devEnv = {
+  GEO_BRAND_DEV_INTAKE: "true",
+  GEO_BRAND_DEV_INTAKE_DATABASE: "geo-pro-dev-intake.sqlite",
+  GEO_BRAND_DEV_INTAKE_ACTORS: "Owner@Example.invalid, peer@example.invalid",
+  BETTER_AUTH_URL: "http://127.0.0.1:3121",
+  DATABASE_PROVIDER: "sqlite",
+  SQLITE_PATH: "/tmp/geo-pro-dev-intake.sqlite",
+};
+
+test("development intake opens only for the named database, host and allowlisted account", () => {
+  assert.equal(explainDevIntake(devHeaders, { ...devEnv, GEO_BRAND_DEV_INTAKE: "" }).status, "switch_missing");
+  assert.equal(brandIntakeOrigin(devHeaders, { ...devEnv, GEO_BRAND_DEV_INTAKE: "" }), null);
+
+  assert.equal(explainDevIntake(devHeaders, { ...devEnv, GEO_BRAND_DEV_INTAKE_DATABASE: "other.sqlite" }).status, "target_mismatch");
+  assert.equal(brandIntakeOrigin(devHeaders, { ...devEnv, GEO_BRAND_DEV_INTAKE_DATABASE: "other.sqlite" }), null);
+  assert.equal(explainDevIntake(devHeaders, { ...devEnv, SQLITE_PATH: "/tmp/other.sqlite" }).status, "target_mismatch");
+
+  assert.equal(explainDevIntake({ get: () => "evil.example" }, devEnv).status, "host_mismatch");
+  assert.equal(brandIntakeOrigin({ get: () => "evil.example" }, devEnv), null);
+
+  assert.equal(explainDevIntake(devHeaders, { ...devEnv, GEO_FUNCTIONAL_MOCK: "1" }).status, "lane_conflict");
+  assert.equal(brandIntakeOrigin(devHeaders, { ...devEnv, GEO_FUNCTIONAL_MOCK: "1" }), null);
+  assert.equal(readPilotAdmission(devEnv).realIntakeOpen, false);
+
+  assert.deepEqual(brandIntakeOrigin(devHeaders, devEnv), { mode: "dev", origin: "http://127.0.0.1:3121" });
+  assert.equal(devIntakeActorAllowed("owner@example.invalid", devEnv), true);
+  assert.equal(devIntakeActorAllowed("peer@example.invalid", devEnv), true);
+  assert.equal(devIntakeActorAllowed("outsider@example.invalid", devEnv), false);
+  assert.equal(devIntakeActorAllowed("owner@example.invalid", { ...devEnv, GEO_BRAND_DEV_INTAKE_ACTORS: "" }), false);
+
+  assert.deepEqual(brandMaterialAccess(devHeaders, "owner@example.invalid", devEnv), {
+    ok: true, origin: "http://127.0.0.1:3121", mode: "dev",
+  });
+  assert.deepEqual(brandMaterialAccess(devHeaders, "outsider@example.invalid", devEnv), {
+    ok: false, error: "devActorDenied",
+  });
+  assert.equal(brandMaterialAccess(devHeaders, "owner@example.invalid", attested).ok, false);
+
+  const fixtureEnv = {
+    ...devEnv,
+    GEO_BRANDS_FIXTURE: "1",
+    GEO_FUNCTIONAL_MOCK: "1",
+  };
+  assert.equal(brandIntakeOrigin(devHeaders, fixtureEnv).mode, "fixture");
+  assert.equal(brandMaterialAccess(devHeaders, "outsider@example.invalid", fixtureEnv).mode, "fixture");
 });

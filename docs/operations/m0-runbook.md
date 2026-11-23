@@ -21,6 +21,7 @@
 | `GEO_AUTH_MAIL_MOCK` | 开发阶段跳过外发 | 开发试点使用 `true`。生产开放及严格 `verify:account-email` 检查使用真实或隔离测试网关的约定配置 |
 | `GEO_AUTH_EMAIL_VERIFIED_MOCK` | 开发阶段把邮箱视为已验证 | 开发试点使用 `true`。严格恢复分支验证数据库里的 `email_verified` |
 | `GEO_BRANDS_FIXTURE` | 回环隔离品牌入口 | 只有值为 `1`、`BETTER_AUTH_URL` 为回环、Host 匹配且数据库主机也是回环时，品牌读写才打开。正式环境保持关闭，直到 #21 的开放检查完成 |
+| `GEO_BRAND_DEV_INTAKE` | 开发环境获准品牌入口 | 精确等于 `true`，且 `GEO_BRAND_DEV_INTAKE_DATABASE` 等于当前库名、主机匹配 `BETTER_AUTH_URL`、账号邮箱在 `GEO_BRAND_DEV_INTAKE_ACTORS` 中才可写。与 `GEO_FUNCTIONAL_MOCK=1` 同时设置时入口关闭。不记录五项正式开放条件 |
 | `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL` | 服务端 Responses API | 留空时不调用。它不代替官方采样通道 |
 | `GEO_OFFICIAL_SAMPLING_BASE_URL` | 官方采样地址 | 与下面三项同时具备才可能发起采样 |
 | `GEO_OFFICIAL_SAMPLING_API_KEY` | 官方采样凭据 | 只放服务器 |

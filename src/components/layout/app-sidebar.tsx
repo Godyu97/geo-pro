@@ -25,7 +25,20 @@ import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
 import { useLocale } from "@/lib/i18n/client";
 
-export function AppSidebar({ messages, modules, brandIntake }: { messages: Messages["dashboard"]; modules: Messages["modules"]; brandIntake: BrandIntakeMode | "closed" }) {
+const sidebarCopy = {
+  fixture: "sidebarFixture",
+  real: "sidebarReal",
+  mock: "sidebarMock",
+  dev: "sidebarDev",
+  "dev-denied": "sidebarDevDenied",
+  closed: "sidebarEmpty",
+} as const;
+
+export function AppSidebar({ messages, modules, brandIntake }: {
+  messages: Messages["dashboard"];
+  modules: Messages["modules"];
+  brandIntake: BrandIntakeMode | "closed" | "dev-denied";
+}) {
   const { locale, t: common } = useLocale();
   const t = createTranslator(locale, messages);
   const moduleLinks = getModuleLinks(modules);
@@ -121,7 +134,7 @@ export function AppSidebar({ messages, modules, brandIntake }: { messages: Messa
           <CircleHelp className="mb-2 size-4 text-primary" aria-hidden="true" />
           <p className="text-xs font-medium">{t("startingPoint")}</p>
           <p className="mt-1.5 text-xs leading-6 text-muted-foreground">
-            {t(brandIntake === "fixture" ? "sidebarFixture" : brandIntake === "real" ? "sidebarReal" : brandIntake === "mock" ? "sidebarMock" : "sidebarEmpty")}
+            {t(sidebarCopy[brandIntake])}
           </p>
         </div>
         <Link

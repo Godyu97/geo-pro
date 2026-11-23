@@ -109,6 +109,7 @@ async function verify(kind, enabled) {
     ...process.env, ...fixture.env, BETTER_AUTH_URL: baseURL,
     BETTER_AUTH_SECRET: randomBytes(48).toString("base64url"), GEO_BRANDS_FIXTURE: enabled ? "1" : "",
     GEO_FUNCTIONAL_MOCK: "", GEO_BRAND_REAL_INTAKE: "",
+    GEO_BRAND_DEV_INTAKE: "", GEO_BRAND_DEV_INTAKE_DATABASE: "", GEO_BRAND_DEV_INTAKE_ACTORS: "",
     GEO_AUTH_MAIL_MOCK: "false", GEO_AUTH_EMAIL_VERIFIED_MOCK: "false",
   };
   const child = spawn(process.execPath, [resolve("node_modules/next/dist/bin/next"), "start", "--hostname", "localhost", "--port", "3105"], {

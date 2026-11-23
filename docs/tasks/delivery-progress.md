@@ -6,7 +6,7 @@
 
 | 需求 | 已有软件 | 待核验或继续开发 |
 | --- | --- | --- |
-| T-M0-01 账号与品牌 | 双语入口、登录与找回、单负责人建档、草稿恢复、版本、导出、归档、冻结恢复及到期清除。见 [B04](B04-brand-onboarding.md)、[B06](B06-brand-deletion.md)、[B07](B07-brand-purge.md)、[B17](B17-account-email-recovery.md) | 受控开发环境真实资料入口、保留策略版本、正式品牌准入 |
+| T-M0-01 账号与品牌 | 双语入口、登录与找回、单负责人建档、草稿恢复、版本、导出、归档、冻结恢复及到期清除。开发库另有获准账号的真实资料入口，见 [B04](B04-brand-onboarding.md)、[B06](B06-brand-deletion.md)、[B07](B07-brand-purge.md)、[B17](B17-account-email-recovery.md)、[开发建档](M0-130-dev-brand-intake.md) | 保留策略版本、正式品牌准入 |
 | T-M0-02/03 品牌事实与题集 | 来源、补证、事实版本与审批、问题簇、题集冻结及 Responses API 题目候选。见 [事实](T-M0-02-brand-facts.md) 与 [题集](T-M0-03-prompt-sets.md) | 使用获准真实品牌的公开或获准资料验证建档到冻结路径 |
 | T-M0-04/05 通道与执行 | 能力台账、范围确认、冻结采样协议、槽位/预算/费用核对、隔离执行和真实官方 HTTP 适配器。见 [台账](B09-channel-capabilities.md)、[执行](M0-12-run-execution.md) 与 [官方适配器](M0-36-official-sampling-adapter.md)。开发库另有一条非联网官方 API verified 版本，见 [M0-31](M0-31-official-channel-verification.md) | 运行控制的执行入口当前只接功能 mock。消费者入口、联网触发和真实官方执行仍待核验 |
 | T-M0-06/07/08 证据、概览与诊断 | 人工存证、原文与独立判定、AI 判定草案、同口径题等权概览、Redis 缓存、优化任务和公开页面检查。见 [回答证据](M0-24-answer-evidence.md)、[概览](M0-25-evidence-overview.md)、[任务](M0-26-optimization-tasks.md) | 真实官方结果入证和下钻联验，区分目标与实际地区、请求联网与实际触发、自然与探索分母 |

@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
-import { brandIntakeOrigin } from "@/features/brands/intake";
+import { brandIntakeDecision, type BrandIntakeMode } from "@/features/brands/intake";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator("common");
@@ -31,7 +31,10 @@ export default async function DashboardLayout({
   const locale = await getLocale();
   const messages = getMessages(locale);
   const t = await getTranslator("common");
-  const brandIntake = brandIntakeOrigin(await headers())?.mode ?? "closed";
+  const decision = brandIntakeDecision(await headers(), user.email);
+  let brandIntake: BrandIntakeMode | "closed" | "dev-denied" = "closed";
+  if (decision.state === "denied") brandIntake = "dev-denied";
+  if (decision.state === "open") brandIntake = decision.intake.mode;
 
   return (
     <TooltipProvider>

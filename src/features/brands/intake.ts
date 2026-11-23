@@ -36,6 +36,8 @@ export function brandFixtureOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv
 
 export type BrandIntake = { mode: BrandIntakeMode; origin: string };
 
+const materialModes = new Set<BrandIntakeMode>(["fixture", "mock", "dev"]);
+
 /** Labeled stand-in writes. Host must match BETTER_AUTH_URL. This does not record pilot admission. */
 export function functionalMockOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv = process.env) {
   if (!functionalMockRequested(env)) return null;
@@ -44,21 +46,75 @@ export function functionalMockOrigin(headers: HeaderSource, env: NodeJS.ProcessE
   return app.origin;
 }
 
-/** Isolated loopback testing stays fixture. Real writes open only after every server attestation. */
+function configuredDatabaseName(env: NodeJS.ProcessEnv) {
+  const db = parseDatabaseConfig(env);
+  if (!db.success) return null;
+  if (db.data.DATABASE_PROVIDER === "sqlite") {
+    const name = db.data.SQLITE_PATH.split(/[/\\]/).pop();
+    return name || null;
+  }
+  const name = decodeURIComponent(new URL(db.data.DATABASE_URL).pathname.replace(/^\//, ""));
+  return name || null;
+}
+
+export type DevIntakeBlock = "switch_missing" | "target_mismatch" | "host_mismatch" | "lane_conflict" | "open";
+
+/** Why the development lane is closed. HTTP responses stay generic; this is for tests and operators. */
+export function explainDevIntake(headers: HeaderSource, env: NodeJS.ProcessEnv = process.env): { status: DevIntakeBlock; origin?: string } {
+  if (functionalMockRequested(env) && env.GEO_BRAND_DEV_INTAKE === "true") return { status: "lane_conflict" };
+  if (env.GEO_BRAND_DEV_INTAKE !== "true") return { status: "switch_missing" };
+  const expected = env.GEO_BRAND_DEV_INTAKE_DATABASE?.trim() ?? "";
+  const actual = configuredDatabaseName(env);
+  if (!expected || !actual || expected !== actual) return { status: "target_mismatch" };
+  const app = configuredOrigin(env);
+  if (!app || !hostMatches(headers, app)) return { status: "host_mismatch" };
+  return { status: "open", origin: app.origin };
+}
+
+export function devIntakeActorAllowed(email: string, env: NodeJS.ProcessEnv = process.env) {
+  const actors = (env.GEO_BRAND_DEV_INTAKE_ACTORS ?? "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  const normalized = email.trim().toLowerCase();
+  return actors.length > 0 && actors.includes(normalized);
+}
+
+/** Isolated loopback testing stays fixture. Production real writes stay on pilot attestation. */
 export function brandIntakeOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv = process.env): BrandIntake | null {
   const fixture = brandFixtureOrigin(headers, env);
   if (fixture) return { mode: "fixture", origin: fixture };
+  if (functionalMockRequested(env) && env.GEO_BRAND_DEV_INTAKE === "true") return null;
   const mock = functionalMockOrigin(headers, env);
   if (mock) return { mode: "mock", origin: mock };
-  if (!readPilotAdmission(env).realIntakeOpen) return null;
-  const app = configuredOrigin(env);
-  if (!app || !hostMatches(headers, app)) return null;
-  return { mode: "real", origin: app.origin };
+  if (readPilotAdmission(env).realIntakeOpen) {
+    const app = configuredOrigin(env);
+    if (!app || !hostMatches(headers, app)) return null;
+    return { mode: "real", origin: app.origin };
+  }
+  const dev = explainDevIntake(headers, env);
+  if (dev.status === "open" && dev.origin) return { mode: "dev", origin: dev.origin };
+  return null;
 }
 
-/** Fixture and functional-mock material editors. Real intake stays on its own gate. */
+export function brandIntakeDecision(headers: HeaderSource, email: string, env: NodeJS.ProcessEnv = process.env) {
+  const intake = brandIntakeOrigin(headers, env);
+  if (!intake) return { state: "closed" as const };
+  if (intake.mode === "dev" && !devIntakeActorAllowed(email, env)) return { state: "denied" as const, intake };
+  return { state: "open" as const, intake };
+}
+
+/** Fixture, functional mock, and authorized development material editors. Production real intake stays on its own gate. */
 export function brandMaterialOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv = process.env) {
   const intake = brandIntakeOrigin(headers, env);
-  if (intake?.mode === "fixture" || intake?.mode === "mock") return intake.origin;
+  if (intake && materialModes.has(intake.mode)) return intake.origin;
   return null;
+}
+
+export function brandMaterialAccess(headers: HeaderSource, email: string, env: NodeJS.ProcessEnv = process.env) {
+  const decision = brandIntakeDecision(headers, email, env);
+  if (decision.state === "closed") return { ok: false as const, error: "closed" as const };
+  if (!materialModes.has(decision.intake.mode)) return { ok: false as const, error: "closed" as const };
+  if (decision.state === "denied") return { ok: false as const, error: "devActorDenied" as const };
+  return { ok: true as const, origin: decision.intake.origin, mode: decision.intake.mode };
 }
