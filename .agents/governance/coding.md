@@ -13,6 +13,7 @@
 - **组件职责单一**：页面组合与数据获取在 Server Component 中完成，交互状态下沉到最小 Client Component。
 - **遵循项目 ESLint 规则**：遵守 `eslint-config-next/core-web-vitals` 与 `typescript` 规则（见 [eslint.config.mjs](../../eslint.config.mjs)）；避免在 `useEffect` 中同步调用 `setState`，避免禁用规则来掩盖问题。
 - **优先复用原生与现有 UI**：使用已安装的 shadcn/ui（`src/components/ui/`）、Lucide 图标与 Tailwind CSS；不引入冗余样式库或大型动画库。
+- **全站视觉一致性**。新增或改版页面先读取参考图和规范，复用现有主题与组件，根据具体用户任务设计页面。 [全站 UI 设计规范](../../docs/ui-design/README.md)
 - **双语言作为开发输入**：页面、文案、校验、图表、Metadata 和可访问性文本遵循 [Web 多语言规范](../../docs/architecture/i18n.md)，同步维护 `zh-CN` / `en` 消息与参数，默认 `zh-CN`；避免散落硬编码文案与语言分支。
 
 ## 异步与错误处理

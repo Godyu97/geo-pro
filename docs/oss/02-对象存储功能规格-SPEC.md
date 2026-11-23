@@ -1,6 +1,6 @@
 # 对象存储功能规格（SPEC）
 
-> 版本：1.0｜2026-11-21｜上级合同：[对象存储 PRD](01-对象存储需求-PRD.md)｜状态：规格，代码未接入。
+> 版本：1.0｜上级合同：[对象存储 PRD](01-对象存储需求-PRD.md)｜代码与验证范围见 [交付进度](../tasks/delivery-progress.md)。
 
 <a id="oss-spec"></a>
 
@@ -31,7 +31,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 
 function createClient(endpoint: string) {
   return new S3Client({
-    region: process.env.S3_REGION ?? "us-east-1",
+    region: required("S3_REGION"),
     endpoint,
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== "false",
     credentials: {
@@ -44,7 +44,7 @@ function createClient(endpoint: string) {
 
 约束：
 
-1. `S3_ENDPOINT` 缺失时，服务端客户端默认 `http://127.0.0.1:8333`。`S3_ENDPOINT_BROWSER` 缺失时，签发浏览器链接的函数直接失败，禁止用服务端回环地址顶替。
+1. 服务端客户端必须配置 `S3_ENDPOINT`、`S3_REGION`、桶和凭据。浏览器签名使用单独配置的 `S3_ENDPOINT_BROWSER`，缺失时签发失败。
 2. `S3_FORCE_PATH_STYLE` 只有精确等于 `false` 时才关闭路径风格。本地 SeaweedFS 保持开启；阿里云 OSS 设为 `false`。
 3. 区域参与 SigV4，但请求发往 `endpoint`。阿里云使用 OSS 地域标识，例如控制台给出的 `oss-cn-hangzhou`，由环境变量提供，源码不写死地域。
 4. 若所选 SDK 版本默认附加 `aws-chunked`、CRC32 或 `x-amz-checksum-*` 请求头，客户端必须关闭该默认行为。应用自己计算 SHA-256。上传使用普通 `PutObject` 字节体，保证 SeaweedFS 与阿里云 OSS 都能接受。
@@ -145,7 +145,8 @@ v1/{ownerId}/{scopeId}/{class}/{objectId}/{fileName}
 
 | 条件 | 结果 |
 | --- | --- |
-| 缺少密钥、桶名或浏览器端点 | 存储命令失败，配置缺失可被服务端日志识别；用户看到可重试的保存失败。首页、登录和与文件无关的页面仍可运行 |
+| 缺少服务端端点、区域、桶名或凭据 | 常规启动检查返回配置错误。独立调用存储命令时返回配置失败 |
+| 缺少浏览器端点 | 浏览器签发命令返回配置失败，应用内授权下载仍按现有服务端路径处理 |
 | 错误密钥 | 对用户为保存或下载失败。自动化测试可断言存储端拒绝，断言里不打印密钥 |
 | 端点不可达 | 命令失败且可重试。不得把 `pending` 显示成已保存 |
 | 字节或 SHA-256 不一致 | 对象不可下载，记录为 `failed` |
@@ -164,7 +165,7 @@ v1/{ownerId}/{scopeId}/{class}/{objectId}/{fileName}
 - 日志禁止打印密钥、预签名 URL 的签名参数和文件正文。
 - 下载响应使用 `private, no-store`。
 - 单测使用回环 HTTP mock 实现 S3 的 Put、Get、Head、Delete 和错误签名。mock 不访问 `127.0.0.1:8333`，也不访问阿里云。
-- 开发机可以另有一条显式、非 CI 的连通检查：用 `.env.local` 对本地桶做上传、列举、下载和 SHA-256 比对，并确认错误密钥被拒绝。该检查不得把样例对象留在桶里。
+- `pnpm env:check` 使用配置的开发桶上传、读回校验并删除一次性探针。清理失败时报告该探针的定位。浏览器预签名与下载在对应授权流程另行验证。
 
 <a id="oss-switch"></a>
 

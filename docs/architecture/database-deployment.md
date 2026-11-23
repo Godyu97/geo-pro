@@ -25,22 +25,23 @@ Drizzle Schema 是目标结构来源，按顺序审核过的 migration 是应用
 
 SQLite3 已提供独立生成、迁移、全量 DDL 与对照测试，不共用 PostgreSQL SQL。表精简和索引要求继续遵循 [数据访问与缓存工程约束](data-access.md)。
 
+<a id="database-setup"></a>
 ## 项目数据库快速部署
 
 正常运行 GeoPro 的新数据库和已有数据库，统一使用已审核的 migration 初始化/升级，这条路径同时维护 Drizzle 历史，后续可以继续增量迁移：
 
 ```bash
-# PostgreSQL 为默认；先安全配置目标开发环境 DATABASE_URL。
+# PostgreSQL。先配置现有开发库的 DATABASE_URL。
 pnpm db:migrate
 
 # SQLite 必须显式选择；文件父目录须存在，迁移命令可创建新文件。
 DATABASE_PROVIDER=sqlite SQLITE_PATH=/absolute/path/geo-pro-dev.sqlite pnpm db:migrate
 ```
 
-本地没有开发库时可使用仓库已有的可选 Compose：
+需单独建本机 PostgreSQL 时，Compose 的 `local-postgres` profile 可手动启用。在私有 Compose env 文件中设置 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 与仅绑定回环的 `GEO_POSTGRES_PORT`，应用的 `DATABASE_URL` 也须指向该实例。
 
 ```bash
-docker compose -p geo-pro-phase0 up -d
+docker compose --env-file /path/to/private-compose.env -p geo-pro-local --profile local-postgres up -d postgres
 pnpm db:migrate
 ```
 
@@ -62,7 +63,7 @@ SQLite 的全量文件同样只用于空库结构导入，并须在启用外键�
 
 ## 验证边界
 
-`pnpm db:ddl:check` 核对两份文件与 Schema 一致。`pnpm verify:dual-db` 默认使用本文件的 Compose 地址 `127.0.0.1:55432`，在随机隔离库中完成旧版本升级、重复迁移和全量 DDL 对照，再运行 M0 模块测试并拒绝跳过的 PostgreSQL 用例；其他回环库须显式设置 `GEO_DUAL_DB_URL`。`pnpm test:maintenance` 在临时 SQLite 文件及随机本地 PostgreSQL 隔离库中对照全量导入和 migration 的列、约束与索引，并覆盖旧认证数据升级、SQLite 外键与迁移校验和。`pnpm test:brands` 验证已有账号和维护授权记录的增量升级。`pnpm test:data-exports` 核验已有品牌数据升级和全量 DDL 对照。`pnpm test:quotas` 核验从 B05 升级后的品牌额度、并发和 DDL 对照。PostgreSQL 测试角色需要创建和清理本轮本地隔离库的权限。
+`pnpm db:ddl:check` 核对两份文件与 Schema 一致。`pnpm verify:dual-db` 从进程环境或 `.env.local` 读取显式的回环 PostgreSQL `GEO_DUAL_DB_URL`，用具备建库权限的测试角色创建并清理随机隔离库。它覆盖旧版本升级、重复迁移、全量 DDL 对照和 M0 模块，任一 PostgreSQL 用例跳过均导致失败。`pnpm test:maintenance` 对照临时 SQLite 及 PostgreSQL 的列、约束、索引及旧认证数据升级。品牌、本人数据导出和额度各有专项迁移验证。
 
 `pnpm verify:maintenance` 构建后使用 3103 端口和隔离库验证两种后端的 HTTP、受控 CLI 和 `pnpm verify:auth`。`pnpm verify:brands` 使用 3105 端口验证品牌接口及默认停收。`pnpm verify:data-exports` 使用 3106 端口验证会话、生成状态和下载。`pnpm verify:quotas` 使用 3107 端口验证双方言的维护接口、授权和中英文设置页。通用浏览器回归入口为 `pnpm test:e2e`（本地 PostgreSQL，3100 端口）。具体覆盖见 [B08](../tasks/B08-maintenance-access.md)、[B04](../tasks/B04-brand-onboarding.md)、[B05](../tasks/B05-owned-data-export.md)和 [B10](../tasks/B10-pilot-quotas.md)。
 

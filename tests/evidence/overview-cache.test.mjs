@@ -367,7 +367,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const purgedView = await readEvidenceOverview(db, ownerManual, scopeOf(manual), shared);
     assert.equal(purgedView.error, "NOT_FOUND");
 
-    const probeUrl = process.env.REDIS_URL || "redis://127.0.0.1:6379";
+    const probeUrl = process.env.REDIS_URL;
     const probe = openCache({ GEO_CACHE_DRIVER: "redis", REDIS_URL: probeUrl });
     const probed = await probe.get(`evidence-overview:probe:${randomUUID()}`);
     let redisShared = "unavailable";

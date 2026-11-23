@@ -5,12 +5,13 @@
 ## Step 1：Understand（理解需求）
 
 - 阅读用户任务书或指定的 Issue，明确目标、边界、非目标（Out-of-Scope）与验收标准。
-- 核对当前阶段边界：工程基线当前处于 **Phase 0**；未经授权不得推进 `docs/tasks/M0.md` 业务功能或宣称业务验收完成。
+- 核对 [交付进度](../../docs/tasks/delivery-progress.md) 和目标阶段任务。Agent 在开发环境执行软件验收与正式试点，阶段结果按对应门禁登记。
 
 ## Step 2：Discover（按需发现）
 
 - 遵循 [渐进式披露规范](progressive-disclosure.md)，按任务类型加载 L1 治理文档与 L2 相关文件（如 [项目上下文](../references/project-context.md)、目标源码或产品文档）。
 - 盘点现有能力、依赖版本、数据库/环境变量现状及未提交的本地改动，保护已有文件。
+- 开发联调先核对目标环境，再用 `pnpm env:check` 检查已有开发数据库、Redis 和 S3。双库隔离验证选择显式配置的 `GEO_DUAL_DB_URL`。 [开发环境](../../docs/architecture/overview.md#development-services)
 - 涉及 DAO、数据库适配、Schema/索引、SQL 或缓存时，加载 [数据访问与缓存工程约束](../../docs/architecture/data-access.md)，区分已确认要求和实际能力。
 
 ## Step 3：Plan（制定计划）
@@ -29,6 +30,8 @@
 ## Step 5：Verify（质量验证）
 
 - 按 [quality-gates.md](../governance/quality-gates.md) 执行实际可运行的检查（至少覆盖 `pnpm lint`、`pnpm typecheck`、`pnpm build`；认证/Schema 变更在条件允许时运行 `pnpm verify:auth`）。
+- 品牌管理和 AI 监测增量用获准真实输入及开发服务走查，记录数据来源、版本、运行范围与实际结果。自动化仍用隔离数据库和回环 mock。 [真实联调方法](../../docs/tasks/brand-monitoring-next.md#dev-live-data)
+- Agent 使用已明确的开发库自行准备和清理本轮测试账号与数据，必要时在隔离库演练迁移、恢复和清除。验收按实际证据填写，生产操作按单独的发布授权执行。 [验收流程](issue-lifecycle.md)
 - 严格区分**检查通过**、**检查失败**、**未配置**与**环境受阻**，禁止虚报结果或修改无关代码凑过检查。
 
 ## Step 6：Review（变更自审）

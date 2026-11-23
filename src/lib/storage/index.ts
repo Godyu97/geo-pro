@@ -2,8 +2,6 @@ import "server-only";
 
 export {
   DEFAULT_PRESIGN_SECONDS,
-  DEFAULT_S3_ENDPOINT,
-  DEFAULT_S3_REGION,
   MAX_OBJECT_BYTES,
   MAX_PRESIGN_SECONDS,
   parseStorageEnvironment,

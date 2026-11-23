@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { test } from "node:test";
 import { initialBrandFields } from "../../src/features/brands/contracts.ts";
@@ -138,11 +137,11 @@ function bind(kind, sql) {
   return sql.replaceAll("?", () => `$${++parameter}`);
 }
 
-function previousMigration(kind) {
-  const source = kind === "sqlite" ? "drizzle/sqlite/meta/_journal.json" : "drizzle/meta/_journal.json";
-  const journal = JSON.parse(readFileSync(source, "utf8"));
-  return journal.entries.at(-2).tag;
-}
+// Last migrations that still used step 3 for completed receipts.
+const beforeObjectPurge = {
+  sqlite: "0026_numerous_rictor",
+  postgresql: "0027_illegal_randall_flagg",
+};
 
 async function account(db) {
   const id = randomUUID();
@@ -180,7 +179,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const fixture = await testDatabase(kind, { migrateNow: false });
     t.after(() => fixture.cleanup());
     const db = fixture.connection;
-    await migrateThrough(db, previousMigration(kind));
+    await migrateThrough(db, beforeObjectPurge[kind]);
     const finished = randomUUID();
     const waiting = randomUUID();
     const ownerId = randomUUID();

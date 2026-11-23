@@ -1,8 +1,8 @@
 # GeoPro Agent 统一开发约定
 
-GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、PostgreSQL / Drizzle ORM 与 Better Auth 的 AI GEO 监测与优化平台。**已完成 `docs/CODEX_INIT.md` 的 Phase 0 及 T-M0-01 的 B01 双语言、B02 认证恢复、B03 可信官网、B04 品牌建档和 B05 本人数据导出子项。真实品牌资料收集仍待开放。产品 M0–M2 里程碑仍未完成，其他业务任务按授权与依赖推进。**
+GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、PostgreSQL / SQLite3、Drizzle ORM 与 Better Auth 的 AI GEO 监测与优化平台。Phase 0 已完成，M0 已有从品牌工作台到证据、内容交付和复测快照的软件路径，M1/M2 也已交付多项软件切片。正式品牌入口及 M0–M2 真实阶段验收仍待核验。按授权和软件依赖推进，当前状态以 [交付进度](docs/tasks/delivery-progress.md) 与阶段任务记录为准。
 
-已确认的工程目标包括 SQLite3/PostgreSQL DAO、memory/Redis 缓存（默认 Redis）、优先批量查询以避免 N+1 和大量串行 SQL、精简表结构、按查询路径审查索引以及随 Schema/migration 更新全量 DDL。**B08、B04 和 B05 分别实现双数据库认证与维护授权基础、品牌建档和本人数据导出 DAO。** [数据访问与缓存工程约束](docs/architecture/data-access.md) · [数据库部署说明](docs/architecture/database-deployment.md)。
+已交付的业务 DAO 按任务适配 SQLite3/PostgreSQL，证据概览和支持定位使用 Redis 或隔离测试的 memory 缓存。查询优先批量执行，按查询路径审查索引并随 Schema/migration 更新全量 DDL。 [数据访问与缓存工程约束](docs/architecture/data-access.md) · [数据库部署说明](docs/architecture/database-deployment.md)
 
 产品首期界面支持 `zh-CN` / `en`，默认 `zh-CN`；Web 开发从文案、校验、路由、SSR、格式化、布局与缓存设计双语言兼容。界面 locale 独立于业务采样语言、币种和统计时区。现有官网、账号与工作台壳层已接入双语言；后续业务页面继续按任务补齐。规范与验收见 [Web 多语言设计](docs/architecture/i18n.md)。
 
@@ -22,9 +22,11 @@ GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、P
 
 ## 开发阶段约定（长期与本地配置）
 
+- **显式服务配置**：开发和应用启动须指定数据库、Redis、S3 兼容文件存储与认证配置。复用可用的开发服务，`pnpm env:check` 核对实际连通与权限。仅双库隔离验证使用显式设置的 `GEO_DUAL_DB_URL`。 [环境准备](README.md#local-development)
 - **AI 接入规范（已就绪）**：所有 AI 模型接入均须支持 OpenAI **Responses API** 标准（`POST ${OPENAI_BASE_URL}/responses`），统一使用服务端模块 [src/lib/ai/responses.ts](src/lib/ai/responses.ts)；本地开发连接参数与模型名在 gitignored 的 `.env.local` 中通过 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`（及官方采样联调配置 `GEO_OFFICIAL_SAMPLING_*`）提供，可直接推进 AI 相关功能开发；严禁将真实密钥写入源码、`.env.example`、文档或 `NEXT_PUBLIC_*`，自动化单测须使用回环 mock。
 - **邮件功能长期 Mock（永远成功，暂不接入）**：项目已约定所有邮件发送与邮箱验证功能长期采用 Mock 永远成功策略，暂不接入真实邮件网关，**任何需求开发与 Issue 推进不得因缺少邮件网关或真实发信而阻塞**。本地与开发联调保持 `.env.local` 中 `GEO_AUTH_MAIL_MOCK=true`（跳过外发邮件网关与限流，直接 202 `accepted` 并记录安全 mock 日志）与 `GEO_AUTH_EMAIL_VERIFIED_MOCK=true`（已登录/存在的账号邮箱校验按已验证放行）；隔离安全测试脚本（如 `verify:account-email`、`verify:brands`、`test:monitoring`、`test:brands`）在显式设为 `false` 时继续验证严格契约。
-- **软件开发与外部试点门禁解耦**：真实试点走查、外部商业授权与阶段门禁（`T-M0-GATE` / `T-M1-GATE` / `T-M2-GATE`）只控制 `docs/tasks/M*.md` 中真实验收的勾选与生产对外开放，**不阻塞** M0/M1/M2 的软件层增量开发（双库表、迁移、DAO、API、双语页面、AI 能力、自动化测试）。运行 `pnpm env:check` 可一键核对本地开发条件。
+- **Agent 负责验收与正式试点**。所有 Issue 由 Agent 自行在已配置的开发环境运行检查、操作开发数据库并记录实际证据。具备授权数据与服务时，由 Agent 执行正式试点并核验 `T-M0-GATE` / `T-M1-GATE` / `T-M2-GATE`。缺少软件前置、授权数据、可用通道、可信费用上限或未到观察窗口时，记录影响的验收项，继续可独立完成的软件工作。生产开放按现有权限与发布约定执行。 [Issue 生命周期](.agents/workflows/issue-lifecycle.md)
+- **品牌与 AI 监测真实联调**：相关增量在开发环境用已授权的真实品牌输入、开发库和真实服务验证，单测仍用隔离库与回环 mock。记录运行条件、脱敏证据和实际结果。 [下一阶段计划](docs/tasks/brand-monitoring-next.md#dev-live-data)
 
 ## 治理与上下文路由（渐进式披露）
 

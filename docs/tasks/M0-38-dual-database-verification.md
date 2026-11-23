@@ -5,7 +5,7 @@ Issue [#38](https://github.com/Godyu97/geo-pro/issues/38)｜2026-11-20｜补齐�
 ## 范围与关键决定
 
 - 证据、优化、内容审批/发布核验和复测测试不再在缺少 `DATABASE_URL` 时跳过 PostgreSQL。缺少本地库时对应用例失败，避免只跑 SQLite 仍显示通过。
-- `pnpm verify:dual-db` 固定使用 Compose 的 `127.0.0.1:55432`，不读取 `.env.local` 里的其他数据库。需要另一个回环 PostgreSQL 时设置 `GEO_DUAL_DB_URL`。脚本创建并删除 `geo_b08_` 前缀的随机库。
+- 本轮使用 Compose 的 `127.0.0.1:55432`。复验时按现行 [验证边界](../architecture/database-deployment.md) 显式配置 `GEO_DUAL_DB_URL`，脚本在该实例创建并清理 `geo_b08_` 前缀的隔离库。
 - 升级基线取各自 journal 的第 5 条迁移（PostgreSQL `0004_mute_manta`，SQLite `0004_glamorous_zuras`），再执行完整 `pnpm db:migrate` 两次。空库全量迁移结果与 `drizzle/ddl/postgresql.sql`、`drizzle/ddl/sqlite.sql` 的结构一致。
 - 列表查询仍是每条路径 1 次 SQL。现有 owner/brand 索引在关闭 PostgreSQL 顺序扫描后都能被使用。280 条观察和 80 条快照的自然计划仍可能顺序扫描，与 [M0-35](M0-35-evidence-overview-cache.md) 对小表的判断一致，因此不新增索引。
 - PostgreSQL 17 在 `ANALYZE` 后，额度汇总对 `quota_reservation` 使用 `quota_reservation_brand_recent_idx`，而不一定使用主键。断言同时接受这两条已有索引。查询仍是 1 条，品牌过滤仍走 `brand_active_owner_uidx`。

@@ -71,23 +71,22 @@ function encode(parts: string[]) {
   return `*${parts.length}\r\n${parts.map((part) => `$${Buffer.byteLength(part)}\r\n${part}\r\n`).join("")}`;
 }
 
-function redisTarget(url: string) {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-  if (parsed.protocol !== "redis:") return null;
+function redisTarget(url: string | undefined) {
+  const parsed = URL.parse(url ?? "");
+  if (!parsed || parsed.protocol !== "redis:") return null;
   const port = parsed.port ? Number(parsed.port) : 6379;
   if (!Number.isInteger(port) || port < 1 || port > 65535 || !parsed.hostname) return null;
   const database = parsed.pathname.replace(/^\//, "");
-  return {
-    host: parsed.hostname,
-    port,
-    password: parsed.password ? decodeURIComponent(parsed.password) : "",
-    database: database && database !== "0" ? database : "",
-  };
+  try {
+    return {
+      host: parsed.hostname,
+      port,
+      password: decodeURIComponent(parsed.password),
+      database: database && database !== "0" ? database : "",
+    };
+  } catch {
+    return null;
+  }
 }
 
 function readReply(buffer: string): { value: string | null; rest: string } | null {
@@ -182,6 +181,10 @@ function redisCache(url: string | undefined): CacheStore {
 }
 
 const processMemory = memoryCache();
+
+export function isRedisCacheConfigured(env: NodeJS.ProcessEnv = process.env) {
+  return (env.GEO_CACHE_DRIVER ?? "redis") === "redis" && redisTarget(env.REDIS_URL) !== null;
+}
 
 // Default is Redis. The process memory store is used only when the caller
 // selects GEO_CACHE_DRIVER=memory on the process environment. A missing or

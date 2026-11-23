@@ -5,15 +5,15 @@ GeoPro 自主 Issue 串行开发编排脚本（v2 状态机版）。
 设计目标：稳定、持续、无死循环地推进足够数量的可验证软件需求开发。
 
 核心改进：
-1. 外层状态机管理队列：直接通过 `gh issue list` 过滤 `status:awaiting-pilot` / `status:blocked` / 本轮跳过表，
+1. 外层状态机管理队列：直接通过 `gh issue list` 过滤 `status:blocked` 和本轮跳过项，
    精确计算「可开发水位」；当可开发 Issue 数量低于 `--min-backlog` 时自动切入补货模式（默认每批 12 单，
-   最多补货 `--max-replenishes` 批），避免因遗留真人试点单占据 Open 队列而永远不补货或连续空转。
+   最多补货 `--max-replenishes` 批），软件开发与可执行的正式试点都进入队列。
 2. 客观进度核验：每轮前后比对 `git HEAD`、GitHub Open Issue 集合与 `loop-round:` 结构化结果；
-   未产生提交或被标为 `awaiting-pilot`/`blocked` 的 Issue 立即加入本轮跳过表，下一轮自动切换目标或补货。
+   无提交、无关单或被标为 `blocked` 的 Issue 加入本轮跳过表，下一轮切换目标或补货。
 3. 失败隔离与自愈：单轮超时/CLI 抖动清理整个进程组并可选隔离脏工作区（`--quarantine-dirty`），
    允许最多 `--max-consecutive-failures`（默认 3）次连续失败而不是一错即停。
 4. 开发环境预检与 Node 24 自动注入：启动前运行轻量预检（或 `--check-env` / `--dry-run`），
-   确保子进程使用 Node 24、PostgreSQL/Redis/AI Responses API/邮件长期 Mock 状态清晰透传。
+   核对 Node 24、显式配置的开发数据库、Redis、S3、AI Responses API 与邮件 Mock。
 """
 
 from __future__ import annotations
@@ -45,7 +45,6 @@ DEFAULT_MAX_CONSECUTIVE_NOOP = 2
 DEFAULT_MAX_SAME_ISSUE_ROUNDS = 3
 
 NON_ACTIONABLE_LABELS = {
-    "status:awaiting-pilot",
     "status:external-gate",
     "status:blocked",
     "needs:decision",
@@ -63,11 +62,12 @@ DEV_PROMPT_BODY = """# GEO Agent Issue 自主开发工作流（v2）
 ## 0. 硬性工作边界（不可违背）
 
 1. **禁止提问或等待确认**：遇到非阻塞不确定性，查仓库后做最小一致决策，把假设写进 Issue 评论。
-2. **一轮只推进一个 Issue 的一个可验证软件增量**：完成门禁验证、commit、push、评论后立刻结束进程。
+2. **一轮只处理一个 Issue**。完成一个可验证的软件增量或一项验收，写回实际证据后结束本轮。代码变更按授权 commit、push，纯验收记现有版本。
 3. **开发条件已就绪，禁止伪阻塞**：
    - **邮件相关功能长期 Mock 永远成功，暂不接入**：`.env.local` 已配置 `GEO_AUTH_MAIL_MOCK=true` 与 `GEO_AUTH_EMAIL_VERIFIED_MOCK=true`，**严禁**以「缺邮件网关 / 缺真实发信 / 缺邮箱验证」作为阻塞理由；隔离安全测试在显式关闭 mock 时继续验严格路径。
    - **AI / LLM 能力已就绪**：`.env.local` 已配置可用的 OpenAI Responses API（`OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` 及 `GEO_OFFICIAL_SAMPLING_*`），可直接开发 AI 相关功能；统一调用 `src/lib/ai/responses.ts`，单测用回环 mock，**严禁**泄露或硬编码任何密钥。
-   - **软件开发与真人试点门禁完全解耦**：`docs/tasks/M*.md` 未勾选、`T-M0-GATE`/`T-M1-GATE`/`T-M2-GATE` 未过、缺真人走查或付费审批，**只限制勾选真实验收与生产对外开放，绝不阻塞软件层（Schema/迁移/DDL/DAO/API/双语 UI/AI 能力/测试）开发**。
+   - **Agent 自行验收和执行正式试点**。使用已配置的开发数据库、浏览器、CLI 或 API 操作并核对结果。品牌和 AI 监测按 `docs/tasks/brand-monitoring-next.md` 使用获准真实输入、通道和可信预算，记录实际证据。隔离回归继续使用 fixture 和回环 mock。
+   - 阶段门禁、外部授权和自然观察窗口限制对应的真实验收与生产开放。其余软件与验收步骤按直接依赖继续。
    - 严禁伪造监测样本、趋势、客户评价或排名；隔离 fixture 必须显式标明。
 
 ## 1. 同步与工作区确认
@@ -80,12 +80,8 @@ DEV_PROMPT_BODY = """# GEO Agent Issue 自主开发工作流（v2）
 外层调度器已在顶部「运行时上下文」锁定了**首选目标 Issue**（及备选列表与排除列表）：
 
 1. 直接 `gh issue view <目标号> --comments` 查看正文、评论与既有提交。
-2. **仅当**该 Issue 满足以下任一条件时，才判定「无剩余软件增量」：
-   - 仓库代码与历史提交已经完整交付了该 Issue 的所有软件范围，仅剩真人现场走查、真实客户数据或外部商业签核 → 移除 `status:ready` / `status:in-progress`，加上 `status:awaiting-pilot` 标签（如不存在先跳过加标签并在评论写明），发表 `loop-round`（`result: awaiting-pilot`）后立即干净退出，**不要写无意义改动**。
-   - 存在真正无法绕过的软件前置缺失或文档硬冲突 → 标 `status:blocked` 并写明具体代码解除条件，发表 `loop-round`（`result: blocked`）后退出。
-3. 若该 Issue 仍有明确可写可测的软件增量（Schema/迁移/DAO/API/双语页面/AI 接入/缓存/测试），立即执行：
-   - 标记 `status:in-progress`（移除 `status:ready`）。
-   - 若评论显示已有部分提交，从 `remaining` 继续，绝不重复已推送工作。
+2. 可开发或可验收时标记 `status:in-progress`，从 `remaining` 继续。已有软件时直接由 Agent 跑验收或正式试点。
+3. 完成可独立执行的工作后，仍缺少直接软件依赖、可用环境、获准资源、可信预算、有效观察窗口或有契约冲突时，标记 `status:blocked`。记录已执行的检查及具体解除条件，在 `loop-round` 中使用 `result: blocked`。
 
 ## 3. 调研与最小垂直实现
 
@@ -112,23 +108,22 @@ DEV_PROMPT_BODY = """# GEO Agent Issue 自主开发工作流（v2）
 
 1. 核对 `git diff` 仅包含本轮增量，严禁包含 `.env.local` 或任何密钥。
 2. Conventional Commits 简体中文主题并带 Issue 号，例如：`feat(alerts): 落地质量告警双库 DAO 与站内通知页 (#74)`。
-3. 当前分支单 commit，推送前 `git pull --rebase origin <当前分支>`；若 rebase 变更影响代码先重跑核心门禁再 `git push`。
-4. 推送成功后立刻对本 Issue 发表评论（并在结束时在回复末尾原样输出该块，供外层状态机解析）：
+3. 有代码变更且已授权时按当前分支提交和推送，推送前 `git pull --rebase origin <当前分支>`；若 rebase 影响代码先重跑门禁。
+4. 执行结果写入 Issue 评论，纯验收记录所用 Git 版本、命令及脱敏证据。结束时在回复末尾输出该块，供外层状态机解析：
 
 ```text
 loop-round:
 issue: #<N>
-result: progressed | done | awaiting-pilot | blocked
+result: progressed | done | blocked
 commit: <7-40位sha 或 none>
 verified: <实际通过的命令列表>
 remaining: <剩余软件增量，无则写无>
-unblock: <仅 blocked/awaiting-pilot 时写明原因>
+unblock: <仅 blocked 时写明解除条件>
 ```
 
-- `done`：该 Issue 的**全部软件验收**均已验证落地 → 移除 `status:in-progress`/`status:ready`，加 `status:done` 并用 `gh issue close <N>` 关闭（真实验收勾选留给真人试点，不影响关闭软件开发 Issue）。
-- `progressed`：本轮已推送验证增量，但本 Issue 仍有后续软件验收未做完 → 保持 `status:in-progress` 与 Open，写清 `remaining` 供下一轮续作。
-- `awaiting-pilot`：软件增量已全部在 `main`，仅余真人试点/外部签核 → 标 `status:awaiting-pilot` 保持 Open，外层自动跳过不再选中。
-- `blocked`：确有软件前置缺失或文档硬冲突 → 标 `status:blocked` 并写清代码级解除条件。
+- `done`：Agent 取得本 Issue 全部适用验收证据 → 改标 `status:done` 并用 `gh issue close <N>` 关闭。前置满足后将明确关联的 `status:blocked` 工单改为 `status:ready`。
+- `progressed`：已推送可验证增量且仍有剩余任务 → 保持 `status:in-progress` 与 Open，记录 `remaining`。
+- `blocked`：存在具体前置缺口，且可独立执行的工作已完成 → 标 `status:blocked` 并记录解除条件。
 
 结束前用简体中文简短总结：模式、Issue、本轮增量、验证命令、commit/push 及上述 `loop-round:` 块。
 现在立即开始执行。"""
@@ -141,7 +136,7 @@ BACKLOG_REPLENISH_PROMPT_BODY = """# GEO Agent 增量需求补货工作流（v2�
 ## 0. 硬性边界
 
 1. **禁止提问**；先读 `AGENTS.md`，再按需读 `docs/` 与 `src/features/`。
-2. **禁止创建「纯真人试点/外部签核/真实发信验收」类无法编码的空壳 Issue**！每个新 Issue 都必须有明确可在 1–2 轮内完成的软件交付物（Schema/双库 DAO/API/双语页面/AI Responses API 能力/缓存/自动化测试）。
+2. 每个新 Issue 有实际软件交付物、可由 Agent 执行的验收步骤与证据要求。独立试点优先复用已存在的阶段验收 Issue。
 3. **长期约定**：
    - 邮件相关功能长期 Mock 永远成功、暂不接入，不拆邮件网关任务；
    - OpenAI Responses API（`src/lib/ai/responses.ts`）已配置可用，鼓励规划真实 AI 能力接入任务（单测用 loopback mock）；
@@ -150,39 +145,21 @@ BACKLOG_REPLENISH_PROMPT_BODY = """# GEO Agent 增量需求补货工作流（v2�
 
 ## 1. 证据扫描（快速聚焦）
 
-1. 读取 `docs/tasks/delivery-progress.md`、`docs/product-map.json`、`docs/tasks/continued-operations-rules.md`。
-2. 浏览 `src/features/` 与 `src/app/` 现有目录，识别「仅有 rules 纯函数、缺少双库表/DAO/API/双语 UI/E2E」的模块以及「尚未接入 `src/lib/ai/responses.ts` 的 AI 能力」。
-3. 运行 `gh issue list --state all --limit 100 --json number,title,state,labels` 避免与已有 Issue 重复范围。
+1. 读取 `docs/tasks/delivery-progress.md`、`docs/tasks/brand-monitoring-next.md` 与 `docs/product-map.json`。
+2. 核对相关的现有用例、持久化与调用入口，定位当前实际缺失的软件行为和验收证据。
+3. 查询 GitHub 的相关开放和已关闭 Issue，检查现有范围、后续依赖及已合入实现，避免重复创建。
 
 ## 2. 纵向切片与选品优先级（由高到低）
 
-优先把已有纯函数规则的域垂直打通为可运行、可访问、双库+双语的产品功能：
-
-1. **AI 核心能力接入（`src/lib/ai/responses.ts`）**：
-   - 问题簇 AI 辅助生成与去重建议（T-M0-03 / M1-06 增强）
-   - 回答原文 AI 辅助实体识别、提及/推荐/引用解析草案（T-M0-06 增强，人工可覆写）
-   - 基于证据的 AI 诊断建议与行动草案生成（T-M0-08 增强）
-   - 基于已批准事实的 AI 内容草稿生成与事实边界校验（T-M0-09 增强）
-   - 受控经营助理计划草案生成（T-M2-05，严格防提示词注入）
-2. **M1 持续经营全栈落地（把现有 rules 纯函数升级为双库表 + 迁移 + DDL + DAO + API + 双语 UI + 测试）**：
-   - 持续监测计划与预算调度（`sampling-plans`，对应 T-M1-01）
-   - 数据质量异常告警与站内通知中心（`quality-alerts`，对应 T-M1-01）
-   - 竞品份额与引用来源机会分析工作台（`competitor-share` / `source-opportunities`，对应 T-M1-02）
-   - 品牌实体消歧与事实纠错工作台（`entity-accuracy`，对应 T-M1-03）
-   - 资料批次导入、素材库与模板资产管理（`asset-reuse`，对应 T-M1-04）
-   - 多渠道内容变体与维护日历（`channel-variants`，对应 T-M1-05）
-   - 专业题集基线与 D+7/D+14 正式阶段复测工作台（`formal-retest`，对应 T-M1-06）
-   - 业务反馈与可观察线索导入分析页（`business-feedback`，对应 T-M1-07）
-   - 团队品牌成员权限与双人审核职责分离（`team-access`，对应 T-M1-08）
-3. **M2 软件层基础（在 M1 关键域已有 DAO/页面后排入）**：
-   - 消费者入口辅助采集存证工作台、受控外部发布/通知连接管理、代理商多品牌委托隔离、站点爬虫/业务连接器管理、本地门店与多模态事实核验。
+1. 优先补齐品牌建档、准备状态、官方执行、证据下钻和持续计划的真实开发链路。以计划中的关联 Issue 为索引，已有切片复用原工单。
+2. 其次补齐已授权 M0/M1/M2 任务中有明确用户行为、前置依赖和可核验结果的软件缺口。以当前源码和交付进度为依据。
 
 ## 3. Issue 规范与创建
 
 每个 Issue 必须：
 - 标题：`[M0|M1|M2][模块简称] <动词+具体软件交付对象>`
 - Labels：使用 `gh label list` 中已有标签，必须包含 `status:ready`、`milestone:M*`、`priority:P0|P1|P2`、`type:feature|foundation` 及最匹配的 `area:*`（不要新建无关标签）。
-- 正文结构：`业务背景` / `交付目标` / `软件实施范围`（3–6 条具体到表/DAO/API/双语页面/测试）/ `业务与安全规则` / `不包含（真实试点/邮件网关等明确排除）` / `软件验收标准`（全为可自动化验证项）/ `实施验证命令` / `需求依据`。
+- 正文包含业务背景、目标、实施范围、权限、前置依赖、Agent 验收步骤与验证命令。涉及数据库时写清开发库操作和核验结果，正式试点记录实测输入与证据。
 - 粒度：每单明确标注「建议 1–2 轮完成」，单轮可形成可测试提交，避免巨无霸 Issue。
 - 创建间隔：每次 `gh issue create` 之间停顿约 0.5–1 秒，避免触发 GitHub 二级速率限制。
 
@@ -475,9 +452,9 @@ def build_dev_prompt(
 - 当前轮次：第 {round_index} / {max_rounds} 轮 | 当前分支：`{branch}` | 本次运行已完成开发提交：{dev_commits}
 - **本轮锁定目标 Issue**：`#{target.number}` — {target.title}
   - 标签：{", ".join(target.labels) or "无"}
-- 队列后续候选（本轮不要顺带开发，仅在目标被确认为 awaiting-pilot/blocked 退出后由下一轮处理）：
+- 队列后续候选（下一轮处理）：
 {backup_lines}
-- **已排除 Issue（禁止再选、禁止翻回 ready）**：
+- **本轮已排除 Issue（满足明确前置后可重新进入队列）**：
 {excluded_lines}
 - 已核实就绪的本地环境：Node 24 + pnpm 12、PostgreSQL + SQLite 双库、Redis 缓存、OpenAI Responses API（`.env.local` 已就绪）、**邮件长期 Mock 永远成功**（`GEO_AUTH_MAIL_MOCK=true` / `GEO_AUTH_EMAIL_VERIFIED_MOCK=true`，永不阻塞）。
 
@@ -513,7 +490,7 @@ def build_backlog_prompt(
 - **`target_replenish_count`**：请新建 **{replenish_count}** 个可独立编码并自动化验证的 `status:ready` Issue。
 - 当前全部 Open Issue（去重参考）：
 {open_summary}
-- 其中已移出代码队列的非开发项（不要为这些真人试点项重复建单）：
+- 其中已因具体依赖或本轮跳过移出队列的项：
 {excluded_summary}
 - 已核实就绪的开发能力：PostgreSQL + SQLite 双库、Redis 缓存、OpenAI Responses API（`src/lib/ai/responses.ts` 已实测可用，可规划 AI 功能单）、邮件长期 Mock 永远成功（暂不接入邮件网关）。
 
@@ -1290,7 +1267,7 @@ def main() -> int:
                         skipped_issues[target_num] = (
                             f"已连续推进 {args.max_same_issue_rounds} 轮，自动轮换至下一个 Issue"
                         )
-            elif parsed.result in ("awaiting-pilot", "blocked"):
+            elif parsed.result == "blocked":
                 reason = parsed.unblock or f"Agent 报告 {parsed.result}"
                 skipped_issues[target_num] = reason
                 print(

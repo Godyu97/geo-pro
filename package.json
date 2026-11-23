@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node --conditions=react-server scripts/check-dev-env.mjs --config-only && next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node --conditions=react-server scripts/check-dev-env.mjs --config-only --production && next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "db:generate": "node --conditions=react-server scripts/database.mjs generate",

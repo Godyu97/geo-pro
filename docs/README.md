@@ -2,19 +2,23 @@
 
 > 版本：3.0｜2026-11-17｜范围：产品功能与业务合同｜状态：可作为新项目开发输入，外部能力与商业假设仍须验证。
 
-本目录可独立复制到一个新项目。当前产品开发级别是 **M0**；M1、M2 为已拆解的后续产品增量，不因为出现在文档中就默认同时开发。产品合同不指定编程语言、框架、数据库、组件库、任务系统、模型供应商或部署平台；当前仓库的工程决定另见下方工程接入说明。
+本目录可独立复制到一个新项目。当前优先跑通 M0 的真实闭环，各级别的软件增量按明确授权与代码依赖推进。产品合同保留对技术栈、组件库、任务系统、模型供应商与部署平台的选择空间。
 
 ## 当前仓库的需求与工程接入
 
-当前产品基线共 26 项功能需求（M0 12 项、M1 8 项、M2 6 项），由 [需求追溯矩阵](06-需求追溯矩阵.md) 与 `product-map.json` 连接规格、任务、依赖和验收。本仓库已完成 [Phase 0 工程初始化](tasks/phase-0.md) 与 T-M0-01 的 [B01 双语言](tasks/B01-i18n.md)、[B02 认证恢复](tasks/B02-auth-session.md)、[B03 可信官网](tasks/B03-marketing-entry.md)子项，尚无完整 M0 产品任务交付；其余任务仍按授权与依赖推进。
+当前产品基线共 26 项功能需求（M0 12 项、M1 8 项、M2 6 项）。[需求追溯矩阵](06-需求追溯矩阵.md) 与 [产品映射](product-map.json) 连接规格、任务、依赖和验收。[交付进度](tasks/delivery-progress.md) 对照当前代码和任务勾选，记录 M0 软件路径及 M1/M2 已交付切片；三个阶段的真实门禁仍待验收。
 
-[工程架构总览](architecture/overview.md) 记录现状与实施边界；[数据访问与缓存工程约束](architecture/data-access.md) 记录已确认的 SQLite3 / pg DAO、memory / Redis（默认）、批量 SQL 和精简表结构/索引要求。它们属于本仓库工程接入层，不改变产品对象、指标或阶段验收，也不代表这些适配已经完成。复制产品合同到其他项目时，工程接入决定须按该项目重新核对。
+[工程架构总览](architecture/overview.md) 记录现状与实施边界。[数据访问与缓存工程约束](architecture/data-access.md) 记录 SQLite3 / PostgreSQL DAO、Redis / memory 缓存、批量 SQL 和精简表结构与索引要求。显式配置及启动方法见 [开发服务](architecture/overview.md#development-services)。
 
-SQLite3/PostgreSQL 已覆盖账号、维护授权、品牌建档及本人数据导出。其余业务 DAO 与全部缓存仍待按任务实施，完整 M0 保持未完成。 [数据库部署说明](architecture/database-deployment.md) · [B08 维护授权](tasks/B08-maintenance-access.md) · [B04 品牌建档](tasks/B04-brand-onboarding.md) · [B05 本人数据导出](tasks/B05-owned-data-export.md)
+SQLite3/PostgreSQL 已覆盖账号、维护授权、品牌、监测证据、内容、报告等业务数据。证据概览和支持定位已接入 Redis 与显式选择的 memory 缓存。 [数据库部署说明](architecture/database-deployment.md)
 
-用户业务文件的存放合同见 [对象存储 PRD](oss/01-对象存储需求-PRD.md) 与 [对象存储 SPEC](oss/02-对象存储功能规格-SPEC.md)。本地 SeaweedFS 与阿里云 OSS 共用 S3 API；Next.js 服务端统一使用 `@aws-sdk/client-s3`。该合同不增加 26 项功能计数，代码尚未接入。
+用户业务文件已通过服务端 S3 客户端接入。SeaweedFS 与阿里云 OSS 共用配置契约，覆盖资料原件、内部附件、授权图片、交付包、报告、本人导出和核验截图。 [对象存储 PRD](oss/01-对象存储需求-PRD.md) · [对象存储 SPEC](oss/02-对象存储功能规格-SPEC.md)
+
+[品牌管理与 AI 品牌监测](tasks/brand-monitoring-next.md) 记录下一阶段的用户路径、开发库真实联调方式和 GitHub Issue 依赖。
 
 首期界面支持 `zh-CN` / `en`，默认 `zh-CN`；[公共多语言合同 ui-i18n-v1](04-产品功能规格-SPEC.md#interface-locales) 是 M0 起所有界面任务的共同输入，[Web 多语言规范](architecture/i18n.md) 与 [双语言兼容矩阵](08-验收场景与样例.md#i18n-checks) 定义设计和验收。它独立于采样语言、币种与统计时区，不增加 26 项功能的计数；现有官网、账号与工作台壳层已接入，后续业务页面随各任务交付。
+
+全站 UI 采用公共视觉合同 `ui-visual-v1`，覆盖现有和未来页面。新增或改版界面时，先读取参考图和组件复用约定，交付时按视觉验收清单走查。 [全站 UI 设计规范](ui-design/README.md) · [公共视觉合同](04-产品功能规格-SPEC.md#interface-visual-style) · [验收清单](08-验收场景与样例.md#ui-visual-checks)
 
 产品内 AI 的权限以 PRD/SPEC 为准，不能自行批准事实、内容或外部动作；执行开发任务的 Coding Agent 从根目录 `AGENTS.md` 按任务加载治理、工作流与项目事实，两种角色分别遵守各自边界。
 
@@ -42,11 +46,12 @@ SQLite3/PostgreSQL 已覆盖账号、维护授权、品牌建档及本人数据�
 
 ```text
 读取 docs/README.md、00-PRODUCT-INTENT.md、02 PRD、04 SPEC、07 指标合同。
-先确认用户已授权目标业务任务；授权后只实施 docs/tasks/M0.md 中依赖已满足的目标任务。
+先确认用户授权及代码依赖，按 docs/tasks/M*.md 实施目标任务的最小软件切片。
 再读取该任务指向的规格及验收，不从历史原型恢复已删除的需求。
+新增或修改界面时读取 docs/ui-design/README.md 及全站视觉验收清单。
 技术实现由新项目自行决定；先记录最小必要的实现决定，再开发。
 交付用户可观察行为、边界处理、实际验证结果和未验证外部能力。
-没有真实渠道时可完成本地契约与明确标注的演示，但不可标记 M0 上线验收通过。
+由 Agent 操作已配置的开发数据库，执行软件检查和正式试点。品牌及监测使用获准真实输入和服务，隔离结果与正式证据分别记录。
 不要将“修改已完成”“公开核验通过”“复测完成”“观察改善”合并为一个成功状态。
 ```
 
@@ -56,6 +61,6 @@ Intent 决定方向；PRD 决定范围；SPEC/指标合同决定精确行为；�
 
 当前产品正文及 `specs/`、`tasks/M0.md` 至 `tasks/M2.md`、`fixtures/`、`product-map.json` 属于产品执行基线；`CODEX_INIT.md`、`architecture/` 与 `tasks/phase-0.md` 分别承接仓库初始化范围、工程约束/现状及历史验收，不扩展业务授权。`archive/` 为原文快照，不参与开发。三个保留旧文件名的入口仅用于旧链接兼容。根目录旧 HTML 门户及原型不是本版需求源。
 
-本次只整理设计和开发输入，没有运行原型业务链路，没有证明任何消费者平台已接通、内容已发布或效果已提升。自包含指核心行为与样例已写入本文档包，不包含真实密钥、账户授权、客户材料和第三方 SDK。
+正式通道、内容公开核验与效果结论均由对应阶段的实测证据确认。受控证据与凭据保存在授权环境。
 
 文档检查：`python docs/tools/validate_docs.py`（仅标准库）。它检查链接、需求映射、依赖与机器样例，不代表业务实现已通过验收。

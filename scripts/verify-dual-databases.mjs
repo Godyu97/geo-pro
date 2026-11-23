@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
+import nextEnv from "@next/env";
 
-// Compose is the isolated target. A caller's .env.local database is not used.
-const databaseUrl = process.env.GEO_DUAL_DB_URL || "postgresql://geo:geo@127.0.0.1:55432/geo";
-const url = new URL(databaseUrl);
-if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
-  console.error("verify:dual-db only accepts a loopback PostgreSQL URL");
+nextEnv.loadEnvConfig(process.cwd(), true);
+const url = URL.parse(process.env.GEO_DUAL_DB_URL ?? "");
+if (!url || !["postgres:", "postgresql:"].includes(url.protocol)
+  || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
+  console.error("verify:dual-db requires GEO_DUAL_DB_URL to be a loopback PostgreSQL URL");
   process.exit(1);
 }
 

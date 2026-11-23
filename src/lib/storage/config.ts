@@ -2,8 +2,6 @@ import "server-only";
 
 import { z } from "zod";
 
-export const DEFAULT_S3_ENDPOINT = "http://127.0.0.1:8333";
-export const DEFAULT_S3_REGION = "us-east-1";
 export const DEFAULT_PRESIGN_SECONDS = 300;
 export const MAX_PRESIGN_SECONDS = 900;
 export const MAX_OBJECT_BYTES = 10 * 1024 * 1024;
@@ -46,9 +44,9 @@ export function parseStorageEnvironment(env: Record<string, string | undefined> 
   const browserRaw = trimToUndefined(env.S3_ENDPOINT_BROWSER);
   const browserEndpoint = browserRaw && isHttpEndpoint(browserRaw) ? browserRaw : undefined;
   const parsed = storageEnvironmentSchema.safeParse({
-    endpoint: trimToUndefined(env.S3_ENDPOINT) ?? DEFAULT_S3_ENDPOINT,
+    endpoint: trimToUndefined(env.S3_ENDPOINT),
     browserEndpoint,
-    region: trimToUndefined(env.S3_REGION) ?? DEFAULT_S3_REGION,
+    region: trimToUndefined(env.S3_REGION),
     bucket: trimToUndefined(env.S3_BUCKET),
     accessKeyId: trimToUndefined(env.S3_ACCESS_KEY_ID),
     secretAccessKey: trimToUndefined(env.S3_SECRET_ACCESS_KEY),

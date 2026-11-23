@@ -2,6 +2,8 @@
 
 执行日期：2026-11-17（Asia/Singapore）。范围：[CODEX_INIT](../CODEX_INIT.md)。仅工程基础，不等同产品 M0 完成。
 
+本文件记录 Phase 0 当时的环境与结果。现行应用启动和服务目标参见 [开发服务](../architecture/overview.md#development-services)。
+
 ## 仓库保护与范围处理
 
 - 原仓库只有 README、Git 配置、产品文档与已有 OpenSpec/Agent 技能，没有 `package.json` 或业务代码。在临时兄弟目录用 `create-next-app@16.4.6` 生成脚手架，再逐文件合并；跳过 README、`.gitignore`、模板图片和 `.git`，没有覆盖用户文件。
@@ -59,7 +61,7 @@ pnpm db:migrate
 pnpm dev
 ```
 
-可选 Compose 只绑定 `127.0.0.1:55432`，未使用已有 5432 数据库或其他容器。默认 `DATABASE_URL=postgresql://geo:geo@127.0.0.1:55432/geo`，`BETTER_AUTH_URL=http://localhost:3000`；密钥至少 32 字符，本轮本机随机生成且从未写入文档、源码或公开环境变量。`OPENAI_API_KEY`/`DEEPSEEK_API_KEY` 留空。
+当时的 Compose 验证实例绑定 `127.0.0.1:55432`，认证来源为 `http://localhost:3000`。本轮使用至少 32 字符的私有随机密钥。`OPENAI_API_KEY`/`DEEPSEEK_API_KEY` 留空。
 
 注册入口：[本地登录页](http://localhost:3000/login)中的“创建账号”。本地浏览器使用与 `BETTER_AUTH_URL` 相同的主机名。可选数据库可用 `docker compose -p geo-pro-phase0 stop` 停止，保留数据卷。
 

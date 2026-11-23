@@ -1,122 +1,45 @@
-# 项目事实上下文（Project Context）
+# 项目事实
 
-> 更新日期：2026-11-20｜事实来源：仓库实际配置文件与源码检查（非模板假设）。若技术栈、版本或目录发生实质变化，须同步更新本文件。
+2026-11-23。技术栈以 [package.json](../../package.json)、[锁文件](../../pnpm-lock.yaml) 与实际源码为准。产品范围和验收进度见 [交付进度](../../docs/tasks/delivery-progress.md)。
 
-## 1. 项目概览
+## 技术栈
 
-- **包名与版本**：`geo-pro` v`0.1.0`（`"private": true`，`"type": "module"`，见 [package.json](../../package.json)）
-- **定位**：GeoPro（AI GEO），面向中国大陆品牌经营者的品牌可见度监测与优化平台。
-- **当前实施阶段**：已完成 [Phase 0 工程初始化](../../docs/tasks/phase-0.md)，T-M0-01 的 [B01 双语言](../../docs/tasks/B01-i18n.md)、[B02 认证恢复](../../docs/tasks/B02-auth-session.md)、[B03 可信官网](../../docs/tasks/B03-marketing-entry.md)、[B04 品牌建档](../../docs/tasks/B04-brand-onboarding.md)、[B05 本人数据导出](../../docs/tasks/B05-owned-data-export.md)、[B06 品牌删除与恢复](../../docs/tasks/B06-brand-deletion.md)及 [B07 品牌清除](../../docs/tasks/B07-brand-purge.md)子项，以及 [B08 维护授权基础](../../docs/tasks/B08-maintenance-access.md)、[B09 通道能力台账](../../docs/tasks/B09-channel-capabilities.md)、[B10 试点额度](../../docs/tasks/B10-pilot-quotas.md)和 [B15 账户设置](../../docs/tasks/B15-account-settings.md)。产品 M0–M2 尚无完整里程碑交付。 [Issue #34](../../docs/tasks/M0-34-owned-export-and-purge.md) 已把已交付业务域纳入本人导出，并补齐优化任务清除顺序。 T-M0-04 真实通道核验仍未完成。
+| 类别 | 当前配置 |
+| --- | --- |
+| 工具链 | Node 24 LTS，`.node-version` 为 `24.22.0`；`pnpm@12.14.0`，唯一锁文件 `pnpm-lock.yaml` |
+| Web | `next@16.4.6` App Router，`react@19.3.0`，TypeScript `strict`，`@/*` 映射 `src/*` |
+| UI | Tailwind CSS 4、shadcn、Radix UI 与 Lucide，`zh-CN` 和 `en` 界面消息由服务端加载 |
+| 认证 | Better Auth `1.7.25` 和官方 Drizzle Adapter，服务端按请求校验会话、来源与资源归属 |
+| 数据库 | Drizzle ORM `0.45.4`，`postgres@4.1.1`，Node 24 内置 SQLite；SQL migration、日志、快照及全量 DDL 各维护两套 |
+| 缓存 | `src/lib/cache/store.ts` 为支持定位及证据概览提供 Redis 和显式 memory 适配 |
+| 文件 | `src/lib/storage/` 使用 AWS SDK v3 访问 S3，`src/features/stored-objects/` 管理授权、元数据与字节生命周期 |
+| AI | `src/lib/ai/responses.ts` 提供通用 Responses API；官方采样使用专用能力、价格和证据合同 |
+| 验证 | ESLint 9、`tsc --noEmit`、Next 构建、Node 原生测试及 Playwright |
 
-## 2. 技术栈与实际版本
+## 运行时入口
 
-| 类别 | 实际采用 | 说明与配置文件 |
-| --- | --- | --- |
-| 运行时 | Node.js `>=24 <25` | [.node-version](../../.node-version) 记录 `24.22.0` |
-| 包管理器 | `pnpm@12.14.0` | 唯一锁文件 `pnpm-lock.yaml`；`engines` 要求 `pnpm >=12 <13` |
-| Web 框架 | `next@16.4.6`（App Router） | [next.config.ts](../../next.config.ts) 配置 `agentRules: false` 与 `@tailwindcss/turbopack` |
-| UI 运行时 | `react@19.3.0` / `react-dom@19.3.0` | 默认 React Server Components |
-| 语言 | `typescript@^5`（锁文件 `5.9.3`） | [tsconfig.json](../../tsconfig.json) 启用 `strict: true`、`noEmit: true`、路径别名 `@/* -> ./src/*` |
-| 样式与组件 | `tailwindcss@4.3.3`、`shadcn@4.23.0`、`radix-ui@^1.8.1`、`lucide-react@^1.73.0` | [components.json](../../components.json)：`style: radix-nova`、`rsc: true`、`tsx: true`、`baseColor: neutral` |
-| 表单与校验 | `react-hook-form@^7.92.0`、`@hookform/resolvers@^7.0.6`、`zod@^4.6.7` | 用于登录注册表单与环境变量校验 |
-| 数据库与 ORM | PostgreSQL / Node 24 内置 SQLite + `drizzle-orm@0.45.4` + `postgres@4.1.1` + `drizzle-kit@0.31.11` | `DATABASE_PROVIDER` 默认 postgresql；SQLite 显式配置 `SQLITE_PATH`。双方言配置/迁移，SQLite 使用官方 Drizzle proxy，无新增依赖；可选本地 PG Compose |
-| 认证 | `better-auth@1.7.25` + `@better-auth/drizzle-adapter@1.7.25` | 同一 [CLI 配置](../../auth.schema.config.ts) 生成 `auth-schema.ts` / `auth-schema.sqlite.ts`；官方 adapter 的 pg/sqlite provider |
-| 代码检查 | `eslint@9.39.5` + `eslint-config-next@16.4.6` | [eslint.config.mjs](../../eslint.config.mjs) 采用 Flat Config（`nextVitals` + `nextTs`） |
-| 图表（预留） | `recharts@^3.10.1` | 仅安装依赖，当前无任何图表或模拟数据 |
-| 依赖安全策略 | [pnpm-workspace.yaml](../../pnpm-workspace.yaml) | 非 Monorepo；仅允许 `esbuild` 安装脚本，并通过 `overrides` 固定 `minimatch`（`11.0.1`）与间接 `esbuild`（`0.25.12`） |
+`pnpm dev` 与 `pnpm start` 先校验认证和显式的数据库、Redis、S3 配置。`pnpm env:check` 核验当前开发服务，按需用 `--probe-ai` 验证模型连通。`pnpm build` 可离线执行。开发邮件及邮箱校验使用长期 Mock。 [开发服务](../../docs/architecture/overview.md#development-services)
 
-## 3. 实际源码与目录结构
+- 公开路由在 `src/app/`，首页 `/` 根据服务端会话分流，`/login` 提供邮箱/密码入口，`/account-access` 处理验证和找回。`GET /api/health` 仅返回存活状态。
+- 工作台布局和各敏感页、Route Handler 分别验证会话。账号设置、本人导出和维护授权各自核对权限。维护支持只读脱敏故障元信息。 [维护说明](../../docs/architecture/maintenance-access.md)
+- `brands` 管理建档、实体版本、归档、冻结和恢复。`brand-facts` 与 `prompts` 使用现有隔离入口。正式建档使用试点准入证明。 [品牌联调计划](../../docs/tasks/brand-monitoring-next.md)
+- `monitoring` 与 `evidence` 管理台账、协议、预算与运行、官方端口、双轨证据和下钻。运行控制已接功能 mock，正式开发执行和证据联动见下一阶段计划。周期计划、站内告警、竞品与来源使用各自工作台页。
+- `content`、`optimization`、`reports` 分别管理诊断、独立审核、发布核验与报告。团队授权、外部连接、商业和助理采用各领域服务与独立授权校验。各已交付切片及验证缺口由 [交付进度](../../docs/tasks/delivery-progress.md) 维护。
+- `src/lib/` 封装数据库、Auth、AI、缓存、私有存储、公开页只读抓取与多语言。`drizzle/` 包含各方言 Schema 生成结果及 DDL。 [数据访问约束](../../docs/architecture/data-access.md) · [数据库部署](../../docs/architecture/database-deployment.md) · [多语言](../../docs/architecture/i18n.md)
 
-- `src/app/`：
-  - `layout.tsx`、`globals.css`、`error.tsx`、`global-error.tsx`、`not-found.tsx`；`src/proxy.ts` 处理请求路径和禁用公共缓存
-  - `(marketing)/page.tsx`：薄层导出公开中英文官网（`/`），按真实会话显示入口，并说明当前能力/试点限制
-  - `(auth)/login/page.tsx`：邮箱/密码注册与登录页（`/login`）
-  - `(auth)/account-access/`、`api/account-email/`：双语邮箱验证和密码找回；由 `src/features/account/email/` 管理限流、投递与确认。 [B17 记录](../../docs/tasks/B17-account-email-recovery.md)
-  - `(dashboard)/layout.tsx`、`(dashboard)/dashboard/page.tsx`、`error.tsx`、`loading.tsx`：受服务端会话保护的工作台（`/dashboard`）
-  - `api/auth/[...all]/route.ts`：Better Auth Next.js Handler（缺失配置时返回 503）
-  - `api/health/route.ts`：固定存活状态 JSON（`{ status: "ok", service: "geo-pro" }`）
-  - `(dashboard)/dashboard/maintenance/`、`api/maintenance/access/route.ts`：本人维护权限页面/接口，独立会话和服务端授权校验。`/dashboard/maintenance/support` 与 `api/maintenance/support` 按 `support.read` 返回运行、删除和通道元信息
-  - `api/maintenance/quotas/route.ts`：试点额度维护写入，复用 `quotas.manage`
-  - `api/maintenance/capabilities/`、`(dashboard)/dashboard/maintenance/capabilities/`、`(dashboard)/dashboard/monitoring/new/`：通道能力台账维护、用户范围与运行确认门禁。`/dashboard/monitoring/runs/<id>` 与 `api/monitoring/runs/` 登记 queued 运行和预算预留，不启动采样。官方 HTTP 适配器只在调用方显式传入已配置端口时采样，缺配置保持关闭。`/dashboard/monitoring/evidence/<id>` 与 `api/monitoring/answers/` 保存双轨原文证据与分析修订。`/dashboard/monitoring/overview`、`/dashboard/monitoring/answers` 与 `api/monitoring/overview` 提供同口径题等权概览与回答下钻
-  - `(dashboard)/dashboard/content/`、`api/content/`：问题驱动 Brief、小批次草稿与事实绑定（始终待审；隔离模板填充）
-  - `(dashboard)/dashboard/settings/`：本人账户设置，显示只读邮箱、编辑称呼、切换界面语言及管理当前会话
-  - `(dashboard)/dashboard/brands/`、`api/brands/`：单负责人品牌、草稿、历史版本、删除影响预览与冻结恢复。合成资料用于回环验收，常规入口暂停收集。品牌详情的事实与材料入口沿用该门禁。
-  - `api/data-exports/`：本人数据生成和受保护下载。设置页显示范围与最近一次结果，品牌导出遵循 B04 的开放条件
-- `src/components/`：
-  - `ui/`：已安装的 shadcn/ui 基础组件（button、card、input、badge、table、tabs、dialog、sidebar、skeleton、separator、dropdown-menu、form、label、sheet、tooltip）
-  - `layout/`：`app-sidebar.tsx`、`auth-form.tsx`、`brand-mark.tsx`、`module-links.ts`、`sign-out-button.tsx`、`session-monitor.tsx`；会话失效/身份切换时整页恢复，服务暂不可用提供重试。
-  - `charts/README.md`：仅边界说明，无图表实现
-- `src/features/` 包含官网 `marketing/`、维护授权 `maintenance/`、账户设置 `account/`、品牌建档 `brands/`、事实与补证 `brand-facts/`、购买问题簇 `prompts/`、本人导出 `data-exports/`、试点额度 `quotas/`、通道能力 `capabilities/`、监测登记 `monitoring/`、回答证据 `evidence/`、优化任务 `optimization/`、内容草稿 `content/`、支持定位 `support/` 和其余业务占位域。
-- `src/lib/`：`i18n/`、`auth/`、`db/`、`http/`、`cache/`、`ai/`。DB 包含双方言认证、维护、品牌、导出、额度、事实、题集、通道能力、监测运行、回答证据、优化任务与内容草稿 Schema、显式配置、连接和 SQLite 迁移。`cache/store.ts` 为支持元信息与证据概览聚合提供默认 Redis 与显式 memory。`http/public-page-fetch.ts` 仅在 `GEO_PUBLIC_PAGE_FETCH=true` 时做 SSRF 防护的公开页只读抓取，默认关闭，且不允许用该开关放行回环。`ai/responses.ts` 提供服务端 OpenAI Responses API 标准客户端（读取 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`）。`auth/verified-email.ts` 与 `account/email/delivery.ts` 支持由 `.env.local` 显式开关控制的开发期邮件/邮箱校验 mock（`GEO_AUTH_MAIL_MOCK` / `GEO_AUTH_EMAIL_VERIFIED_MOCK`）。
-- `src/hooks/use-mobile.ts`、`src/types/README.md`
-- `drizzle/`、`drizzle/sqlite/`：PostgreSQL 与 SQLite 独立迁移，覆盖认证及账号邮件限流、维护权限、品牌建档、本人导出、品牌清除、试点额度、品牌事实、通道能力、购买问题簇、监测运行、回答证据、优化任务和内容草稿。支持定位为 `monitoring_run.operation_id` 增加双方言索引。
-- `drizzle/ddl/postgresql.sql`、`sqlite.sql`：双方言全量 DDL；`scripts/export-ddl.mjs` 离线生成/只读检查，不含迁移历史或数据。
-- `scripts/verify-auth.mjs`：本地 HTTP + 所选后端的认证验证，临时账号清理；`verify-maintenance.mjs` 在双方言隔离库启动实际 Next 服务并运行维护/认证验证。
-- `scripts/maintenance-access.mjs`：仅受控服务器可执行的授权/撤销命令；无在线提权，详见 [维护说明](../../docs/architecture/maintenance-access.md)。
-- `docs/`：产品文档包（v3.0）、工程初始化任务书与 Phase 0 架构/任务记录。
-- `.agents/`：包含本轮接入的 `governance/`、`workflows/`、`references/`，以及仓库原有的 `skills/openspec-*`（保留不自动启用）。
-- `openspec/` 包含 `account-session`、`public-product-entry`、`maintenance-access`、`account-settings`、`brand-onboarding`、`owned-data-export`、`pilot-quotas`、`brand-facts`、`channel-capabilities`、`prompt-sets`、`monitoring-runs`、`answer-evidence`、`evidence-overview`、`optimization-tasks`、`content-drafts` 和 `support-recovery` 的能力规格及对应归档。按当前任务授权加载相关规格。
+## 命令与边界
 
-## 4. 可用命令与检查现状
+| 命令 | 用途 |
+| --- | --- |
+| `pnpm env:check` | 验证开发数据库的认证与品牌表，读写清理 Redis 和 S3 探针，检查 AI 与开发工具配置 |
+| `pnpm lint`、`pnpm typecheck`、`pnpm build` | 静态与构建门禁 |
+| `pnpm db:auth-schema`、`pnpm db:generate` | 按固定版本生成双方言认证 Schema、迁移文件与快照 |
+| `pnpm db:migrate` | 将已审核迁移应用到显式选择的库 |
+| `pnpm db:ddl`、`pnpm db:ddl:check` | 离线生成与检查双方言全量 DDL |
+| `pnpm verify:dual-db` | 指定 `GEO_DUAL_DB_URL`，创建和清理回环 PostgreSQL 隔离库，对照迁移结构并运行 M0 关键模块测试 |
+| `pnpm verify:auth`、`pnpm verify:brands` 等 | 实际 HTTP 或浏览器验证，使用各脚本规定的端口和测试环境 |
+| `pnpm test:storage`、`pnpm test:monitoring`、`pnpm test:evidence` 等 | 领域合同与隔离数据库、回环服务测试 |
+| `pnpm check:i18n`、`pnpm test:i18n`、`pnpm test:e2e` | 消息、基础多语言与隔离浏览器检查 |
+| `python docs/tools/validate_docs.py` | 文档链接、产品映射、验收 ID 和指标样例验证 |
 
-| 命令 | 底层动作 | 用途与前提 |
-| --- | --- | --- |
-| `pnpm dev` | `next dev` | 启动本地开发服务器 |
-| `pnpm build` | `next build` | 生产构建检查（不依赖数据库或 AI Key） |
-| `pnpm start` | `next start` | 启动生产构建产物 |
-| `pnpm lint` | `eslint` | 静态代码与 React/Next/TS 规则检查 |
-| `pnpm typecheck` | `tsc --noEmit` | TypeScript 严格类型检查 |
-| `pnpm db:auth-schema` | `scripts/database.mjs auth-schema` | 同版本官方 CLI 生成 pg/sqlite 两套认证 Schema |
-| `pnpm db:generate` | `scripts/database.mjs generate` | Drizzle Kit 生成双方言 migration，不依赖数据库 |
-| `pnpm db:migrate` | `scripts/database.mjs migrate` | 只迁移所选后端；PG Drizzle Kit，SQLite Drizzle journal + 原生事务 |
-| `pnpm db:ddl` | `node scripts/export-ddl.mjs` | 离线导出双方言全量 DDL |
-| `pnpm db:ddl:check` | `node scripts/export-ddl.mjs --check` | 只读比较 Schema 导出与快照；过期或缺失返回失败 |
-| `pnpm verify:auth` | `node --conditions=react-server scripts/verify-auth.mjs` | 本地应用 + 所选后端的认证与本人资料更新，需先迁移 |
-| `pnpm verify:account-email` | Node.js HTTP + Playwright | 构建后用 3117 端口、双方言隔离库、回环邮件接收器和 Chrome 验证账号邮件与品牌恢复 |
-| `pnpm maintenance:access` | `node --conditions=react-server scripts/maintenance-access.mjs` | 受控服务器授予/撤销单项维护权限 |
-| `pnpm test:maintenance` | Node.js 原生测试 | 双库 DAO/迁移/DDL/锁竞争/索引测试，需要本地 PG 隔离建库权限 |
-| `pnpm test:query-plans` | Node.js 原生测试 | 双方言旧版升级、重复迁移、全量 DDL 对照，以及证据/任务/内容/报告列表的代表性查询计划 |
-| `pnpm verify:dual-db` | `scripts/verify-dual-databases.mjs` | 默认连接 Compose `127.0.0.1:55432`，跑通上述对照和 M0 模块测试；任一 PostgreSQL 用例跳过即失败 |
-| `pnpm verify:maintenance` | Node.js HTTP/CLI 集成脚本 | 构建后，在 3103 端口、双方言隔离库验证维护和认证 |
-| `pnpm test:brand-facts` | Node.js 原生测试 | 双库迁移、事实版本、资格、撤销、权限和查询计划 |
-| `pnpm verify:brand-facts` | HTTP / Chrome | 生产构建后在 3118 端口使用双方言隔离库，含 `pnpm verify:auth` |
-| `pnpm test:prompts` | Node.js 原生测试 | 双库题集版本、重复题、引用、权限和查询计划 |
-| `pnpm test:monitoring` | Node.js 原生测试 | 双库排队、隔离执行、官方 HTTP loopback 契约、恢复、额度核对和查询计划 |
-| `pnpm test:evidence` | Node.js 原生测试 | 双库 Observation/Citation/AnalysisVersion、AC-M0-06/07 概览金样与归属隔离 |
-| `pnpm test:optimization` | Node.js 原生测试 | 优化任务诊断、去重、页面检查与归属隔离 |
-| `pnpm test:pages` | Node.js 原生测试 | 公开页 SSRF 防护、受控抓取关闭、跳转阻断和正文上限 |
-| `pnpm test:content` | Node.js 原生测试 | Brief 门禁、小批次草稿、失败重试、事实撤销阻塞与归属隔离 |
-| `pnpm test:support` | Node.js 原生测试 | 双库支持定位、权限、清除重试、缓存受阻与操作编号索引 |
-| `pnpm verify:prompts` | HTTP / Chrome | 生产构建后在 3119 端口使用双方言隔离库，含 `pnpm verify:auth` |
-| `pnpm test:brands` | Node.js 原生测试 | 品牌双库并发、版本、迁移、回滚、冻结及索引验证 |
-| `pnpm verify:brands` | Node.js HTTP 集成脚本 | 构建后，在 3105 端口及隔离库验证品牌接口、收集条件、删除与限期恢复 |
-| `pnpm brands:purge` | 受控服务端 CLI | 批量清除到期品牌、核对凭证及离线重放清除记录 |
-| `pnpm brands:shorten-recovery` | 受控服务端 CLI | 依据已核验的提前请求缩短冻结品牌的恢复期限 |
-| `pnpm test:data-exports` | Node.js 原生测试 | 导出双库升级、并发、回滚和查询验证 |
-| `pnpm verify:data-exports` | Node.js HTTP 集成脚本 | 构建后，在 3106 端口及隔离库验证导出授权和反馈 |
-| `pnpm test:quotas` | Node.js 原生测试 | 双库额度升级、授权、账本与并发 |
-| `pnpm verify:quotas` | Node.js HTTP + Playwright | 构建后在 3107 端口验证双方言会话、权限和额度页面 |
-| `pnpm test:capabilities` | Node.js 原生测试 | 双库通道台账升级、双轨版本、正式运行门禁与联网证据 |
-| `pnpm verify:capabilities` | Node.js HTTP + Playwright | 构建后在 3108 端口验证双方言会话、权限、设置范围与运行确认 |
-| `python docs/tools/validate_docs.py` | 标准库 Python 脚本 | 校验 `docs/` 产品文档链接、映射与指标样例 |
-
-- **测试现状**：已配置消息检查、Node 基础测试、维护、品牌、导出、额度、通道能力和支持定位双库专项及 Playwright。E2E 在 `.cache/i18n-app` 的生产副本核验官网、认证、壳层、维护权限、账户设置、品牌建档和本人导出，清理本轮测试账号。真实 Redis 多实例演练仍待接入。
-
-## 5. 已确认工程要求与适配差距
-
-完整约束与专项验收在 [数据访问与缓存工程约束](../../docs/architecture/data-access.md) 维护：DAO 适配 SQLite3 / PostgreSQL；cache 适配 memory / Redis（默认）；避免 N+1 和大量串行 SQL，优先批量操作；表结构精简并审查索引；全量 DDL 随 Schema/migration 更新。全量 DDL 生成、防漂移与快速部署流程见 [数据库部署说明](../../docs/architecture/database-deployment.md)。
-
-**当前事实**：认证、维护授权、品牌建档、本人导出、试点额度和通道能力台账适配 PostgreSQL/SQLite，保持独立 Schema、迁移与 DDL。原生 SQLite 外键、事务及 Auth provider 已实测。支持定位缓存已实现；其他业务缓存仍待实施。
-
-**多语言现状**：当前官网、账号入口、工作台壳层、维护权限、支持定位、账户设置、品牌建档、本人导出、试点额度和监测能力均提供 `zh-CN` / `en`。请求解析、Cookie 偏好、Metadata、消息和参数检查及浏览器 E2E 已接入。未来业务页面、图表及真实采样范围的语言隔离随业务任务验收。 [Web 多语言规范](../../docs/architecture/i18n.md)
-
-## 6. 尚未确定的重要技术决策
-
-以下决策在当前 Phase 0 刻意保持开放，待对应 M0–M2 任务启动时按实际需求再行确定：
-
-1. **业务数据模型设计**：事实版本、正式问题集、监测样本与证据对象的具体 Drizzle 表结构。
-2. **AI Provider 适配方案**：`src/lib/ai/` 的多模型调用接口、重试、限流与成本记录方式。
-3. **异步采样与任务恢复机制**：当出现长耗时采样的持久化任务表设计与后续是否拆分独立 Worker。
-4. **业务自动化测试**：已采用 Node.js 原生基础测试与 Playwright；业务用例、DAO 与渠道测试的覆盖方式随对应任务补齐。
-5. **剩余适配细节**：后续领域 DAO 的具体用例接口，以及 Redis 客户端、配置、TTL 与失效范围；SQLite 驱动和双方言 Schema/迁移已由 B08 确定，后端支持集合和 Redis 默认值不重新选型。
-6. **后续 i18n 扩展**：B01 已确定 JSON/Intl、原路径与 Cookie 偏好；新增业务领域按当前消息、SSR、格式化与测试边界扩展，不重新选择默认语言或改写业务 scope。
+精确命令与执行条件见 [质量门禁](../governance/quality-gates.md)。开发环境真实品牌与采样依 [联调计划](../../docs/tasks/brand-monitoring-next.md#dev-live-data) 留证。正式开放、真实通道和试点验收使用 [运行手册](../../docs/operations/m0-runbook.md) 与对应阶段记录。

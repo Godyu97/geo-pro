@@ -17,10 +17,11 @@ const fields = {
   aliases: [], region: "CN", language: "zh-CN", competitors: [], questions: [],
 };
 
-function previousTag(kind) {
-  const journal = JSON.parse(readFileSync(kind === "sqlite" ? "drizzle/sqlite/meta/_journal.json" : "drizzle/meta/_journal.json", "utf8"));
-  return journal.entries.at(-2).tag;
-}
+// Last migrations before observations recorded target and actual conditions separately.
+const beforeSamplingConditions = {
+  sqlite: "0064_narrow_zodiak",
+  postgresql: "0065_goofy_lorna_dane",
+};
 
 function fingerprint(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -118,7 +119,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const fixture = await testDatabase(kind, { migrateNow: false });
     t.after(() => fixture.cleanup());
     const db = fixture.connection;
-    await migrateThrough(db, previousTag(kind));
+    await migrateThrough(db, beforeSamplingConditions[kind]);
     const ownerId = await account(db);
     const brandId = await brandFor(db, ownerId);
     const observationId = randomUUID();

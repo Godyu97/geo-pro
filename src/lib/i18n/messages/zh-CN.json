@@ -1427,7 +1427,7 @@
     "mockGateMissOfficial": "官方回答少于 20",
     "mockGateMissConsumer": "消费者回答少于 6",
     "mockGateMissWalkthrough": "独立完成数少于 4",
-    "mockGateContract": "函数阈值保持不变。产品合同仍要求 5 名真实用户走查。本次不勾选 T-M0-GATE。"
+    "mockGateContract": "正式试点由 Agent 在开发环境完成五次独立走查，并记录实际证据。当前仅显示演示结果。"
   },
   "competitorAnalysis": {
     "title": "竞品与来源",

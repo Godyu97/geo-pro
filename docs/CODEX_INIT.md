@@ -1,5 +1,7 @@
 # GEO SaaS · Codex 工程初始化任务书
 
+> Phase 0 已完成。本文件保留初始化范围，现行服务配置见 [开发服务](architecture/overview.md#development-services)。
+>
 > 用途：将本文件放入仓库的 `docs/CODEX_INIT.md`，然后让 Codex 按本文件在当前仓库执行。
 > 目标：建立可运行、可继续由多个 Coding Agent 迭代的 Next.js 全栈 GEO SaaS 基础工程。
 > 范围：仅执行 Phase 0 工程初始化；**不实现 GEO 监测、AI 采集、竞品分析或优化算法**。
@@ -198,7 +200,7 @@ pnpm exec drizzle-kit migrate
 创建 `.env.example`（仅示例，**没有真实密钥**）：
 
 ```dotenv
-DATABASE_URL=postgresql://geo:geo@127.0.0.1:5432/geo
+DATABASE_URL=
 BETTER_AUTH_URL=http://localhost:3000
 BETTER_AUTH_SECRET=
 OPENAI_API_KEY=

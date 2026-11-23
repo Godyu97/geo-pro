@@ -19,6 +19,7 @@ function sha256(bytes) {
 
 function baseEnv(overrides = {}) {
   return {
+    S3_ENDPOINT: "http://127.0.0.1:1",
     S3_REGION: "us-east-1",
     S3_BUCKET: "app-files",
     S3_ACCESS_KEY_ID: "local-app",
@@ -162,15 +163,17 @@ function assertPlainPut(request, payload) {
   assert.equal(request.body.includes("aws-chunked"), false);
 }
 
-test("path style stays on unless S3_FORCE_PATH_STYLE is exactly false", () => {
+test("S3 endpoint and region are required, and path style is on unless explicitly disabled", () => {
   const base = baseEnv();
   const missing = parseStorageEnvironment({});
   assert.equal(missing.success, false);
+  assert.equal(parseStorageEnvironment(baseEnv({ S3_ENDPOINT: undefined })).success, false);
+  assert.equal(parseStorageEnvironment(baseEnv({ S3_REGION: " " })).success, false);
 
-  const defaults = parseStorageEnvironment(base);
+  const defaults = parseStorageEnvironment({ ...base, S3_FORCE_PATH_STYLE: undefined });
   assert.equal(defaults.success, true);
   if (!defaults.success) return;
-  assert.equal(defaults.data.endpoint, "http://127.0.0.1:8333");
+  assert.equal(defaults.data.endpoint, base.S3_ENDPOINT);
   assert.equal(defaults.data.region, "us-east-1");
   assert.equal(defaults.data.forcePathStyle, true);
   assert.equal(defaults.data.browserEndpoint, undefined);
