@@ -27,6 +27,12 @@ Agent 先核对现有实现、已交付范围及实测证据。适用验证完�
 
 ## 串行循环
 
-`scripts/run-issue-loop.py` 预检开发环境，并按状态选择可开发或可验收工单。`status:blocked` 及本轮跳过项移出当前队列，可执行的正式试点与软件任务使用同一队列。候选水位不足时按 `--min-backlog` 自动补货，创建前检查已有 Issue 和 `docs/tasks/`。
+`scripts/run-issue-loop.py` 逐页读取开放 Issue，只调度带 `status:ready` 或 `status:in-progress` 且无阻塞标签的工单。正式试点与软件任务使用同一队列。自动补货按 `--min-backlog` 触发，尝试次数受 `--max-replenishes` 限制。空批次或额度用完后，现有可执行工单仍可继续。补货前核对已有开放和已关闭工单、任务规格和实现，脚本只计入本轮创建、含回执标记且可开发的工单。
 
-轮与轮共享仓库、Git 历史、Issue 和 `loop-round` 结果。每轮处理一个可验证增量或一项验收。代码变更按授权提交与推送，纯验收可用现有 Git 版本和实际证据交付。队列使用提交或实际关单核对进展，超时、网络问题和无进展按现有轮换与失败隔离处理。
+每轮派发前快进同步 `origin/<分支>` 并记录基线。Agent 按授权处理一个可验证增量或一项验收，运行适用门禁并写入 Issue 评论。在最终 `loop-round` 中报告目标、结果、完整提交 SHA、实际检查、证据链接、剩余项和具体解除条件。脚本核对本轮新增评论及其中的回执标记与 Git 版本，开发提交另须存在于目标远端分支。`done` 须在 GitHub 上确认该目标以完成原因关闭。纯验收可以凭现有 Git 版本和新证据推进。
+
+实跑需要干净的工作树，同一个工作树一次只运行一个循环。未交付的本地修改默认保留并停止派发。显式传入 `--quarantine-dirty` 时，可将本轮残留的未提交修改保存到命名 stash。遇到未能核对的本轮 Git 提交时，保留现场并停止派发。每轮日志与 JSON 汇总保存在 `--log-dir`（默认 `tmp/`）。
+
+Agent 单轮默认不限时。收到 `Ctrl+C` 或 `SIGTERM` 时终止当前进程组并保留日志。显式传入 `--round-timeout <秒数>`（正数）可启用按时限中止，并按失败轮次处理。
+
+用 `python3 scripts/run-issue-loop.py --dry-run --skip-preflight` 查看当前队列决策，用 `python3 scripts/test-run-issue-loop.py` 在临时 Git 仓库中验证调度和回执逻辑。
