@@ -649,6 +649,7 @@ CREATE TABLE `sampling_protocol` (
 CREATE UNIQUE INDEX `sampling_protocol_fingerprint_uidx` ON `sampling_protocol` (`protocol_id`,`fingerprint`);
 CREATE UNIQUE INDEX `sampling_protocol_operation_uidx` ON `sampling_protocol` (`brand_id`,`operation_id`);
 CREATE INDEX `sampling_protocol_owner_idx` ON `sampling_protocol` (`owner_id`,`created_at`,`id`);
+CREATE INDEX `sampling_protocol_brand_frozen_idx` ON `sampling_protocol` (`owner_id`,`brand_id`,`created_at`,`id`) WHERE "sampling_protocol"."status" = 'frozen';
 CREATE INDEX `sampling_protocol_family_idx` ON `sampling_protocol` (`owner_id`,`protocol_id`,`version`);
 CREATE UNIQUE INDEX `sampling_protocol_version_key` ON `sampling_protocol` (`protocol_id`,`version`);
 CREATE TABLE `answer_analysis_draft` (

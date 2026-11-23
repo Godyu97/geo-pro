@@ -15,9 +15,9 @@
 | --- | --- |
 | 静态与构建 | `pnpm lint` 0 error，既有告警 `tests/competitors/briefs.test.mjs`。`pnpm typecheck`、`pnpm build` 通过。 |
 | 双语 | `pnpm check:i18n` 通过，2898 个键。 |
-| 结构 | `pnpm db:generate` 生成 `drizzle/0077_wooden_gorgon.sql` 与 `drizzle/sqlite/0076_reflective_ronan.sql`。`pnpm db:ddl` 后 `pnpm db:ddl:check` 双方言通过。`pnpm db:migrate` 已在回环开发 PostgreSQL 应用。 |
+| 结构 | 到期窗口迁移为 `drizzle/0077_wooden_gorgon.sql` 与 `drizzle/sqlite/0076_reflective_ronan.sql`。冻结协议部分索引迁移为 `drizzle/0078_oval_iron_monger.sql` 与 `drizzle/sqlite/0077_brave_captain_stacy.sql`。`pnpm db:ddl:check` 双方言通过。两份迁移都已在回环开发 PostgreSQL 应用。 |
 | 隔离行为 | `node --conditions=react-server --test tests/sampling-plans/*.test.mjs` 6 项通过，覆盖 SQLite 与 PostgreSQL。到期窗口覆盖未到期、重复执行不新增运行和费用、单轨预算暂停、通道失效只暂停自身、失败槽留在分母、覆盖不足不产生趋势、重复触发合并且确认后状态不变。查找计划使用 `sampling_due_run_owner_idx`。 |
-| 监测与证据 | `pnpm test:evidence` 19 项通过。`pnpm test:monitoring` 与串行重跑都有 1 项失败：未改动的 `sampling_protocol` 最新冻结版本查询在 `ANALYZE` 后走了 `sampling_protocol_operation_uidx`，断言仍要求 `sampling_protocol_owner_idx`。同文件的行为断言在该检查之前已经通过。单独重跑该测试曾通过一次。本轮没有修改采样协议表或这条查询。 |
+| 监测与证据 | 2026-11-24 首轮：`pnpm test:evidence` 19 项通过。`pnpm test:monitoring` 23 项中 1 项失败，最新冻结协议查询在 `ANALYZE` 后走了 `sampling_protocol_operation_uidx` 并排序。同日补上 `sampling_protocol_brand_frozen_idx` 后，`pnpm test:monitoring` 23 项通过，`pnpm test:evidence` 仍为 19 项通过。 |
 
 ## 开发库到期窗口
 
@@ -29,4 +29,14 @@
 
 本记录不勾选 T-M1-01，也不把 AC-M1-GATE 记为通过。第二个完整可比窗口和正式 10 题 × 2 轮仍待后续观察。
 
-页面点击、375/768/1440 视口未在浏览器中执行。当前会话没有浏览器工具。到期、暂停、重放、题单和提醒由双方言隔离测试覆盖；开发库由上述命令回读。
+页面点击、375/768/1440 视口未在浏览器中执行。到期、暂停、重放、题单和提醒由双方言隔离测试覆盖；开发库由上述命令回读。
+
+## 冻结协议查询计划
+
+2026-11-24。准备页读取某品牌最新冻结协议时，过滤负责人、品牌和 `status = 'frozen'`，并按创建时间与编号倒序取一行。负责人列表索引不含品牌和状态。隔离库插入大量其他品牌草稿并 `ANALYZE` 后，PostgreSQL 改走 `sampling_protocol_operation_uidx`，再对结果排序。`pnpm test:monitoring` 因此失败。
+
+双方言新增部分索引 `sampling_protocol_brand_frozen_idx`，列是 `owner_id, brand_id, created_at, id`，条件是 `status = 'frozen'`。迁移是 `drizzle/0078_oval_iron_monger.sql` 与 `drizzle/sqlite/0077_brave_captain_stacy.sql`。列表查询仍使用 `sampling_protocol_owner_idx`。
+
+隔离计划在 `ANALYZE` 之后使用该部分索引，PostgreSQL 计划没有排序，也没有顺序扫描。开发 PostgreSQL 已应用该迁移。对上一轮到期品牌重放同一条查询，计划同样使用该索引，没有排序或顺序扫描。到期行、费用和质量读数没有变化。
+
+本记录仍不勾选 T-M1-01，也不把 AC-M1-GATE 记为通过。第二个完整可比窗口和正式 10 题 × 2 轮仍待后续观察。

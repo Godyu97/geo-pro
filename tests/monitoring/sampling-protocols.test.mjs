@@ -183,6 +183,7 @@ for (const kind of ["sqlite", "postgresql"]) {
           "sampling_protocol_fingerprint_uidx",
           "sampling_protocol_operation_uidx",
           "sampling_protocol_owner_idx",
+          "sampling_protocol_brand_frozen_idx",
           "sampling_protocol_family_idx",
           "sampling_protocol_state_check",
           "run_protocol_pin_owner_idx",
@@ -416,7 +417,11 @@ for (const kind of ["sqlite", "postgresql"]) {
         assert.equal(readinessWatch.captured.length, 1);
         const readinessQuery = readinessWatch.captured[0];
         const readinessPlan = JSON.stringify(await queryWithParameters(db, explain + readinessQuery.sql, readinessQuery.values));
-        assert.match(readinessPlan, /sampling_protocol_owner_idx/);
+        assert.match(readinessPlan, /sampling_protocol_brand_frozen_idx/);
+        if (db.kind === "postgresql") {
+          assert.doesNotMatch(readinessPlan, /Seq Scan on sampling_protocol/);
+          assert.doesNotMatch(readinessPlan, /Sort/);
+        }
         const familyQuery = samplingProtocolFamilyQuery(owner, created.protocol.protocolId);
         const familyPlan = JSON.stringify(await queryWithParameters(db, explain + familyQuery.sql, familyQuery.values));
         assert.match(familyPlan, /sampling_protocol_(family_idx|version_key)/);

@@ -2859,6 +2859,7 @@ CREATE INDEX "run_protocol_pin_owner_idx" ON "run_protocol_pin" USING btree ("ow
 CREATE UNIQUE INDEX "sampling_protocol_fingerprint_uidx" ON "sampling_protocol" USING btree ("protocol_id","fingerprint");
 CREATE UNIQUE INDEX "sampling_protocol_operation_uidx" ON "sampling_protocol" USING btree ("brand_id","operation_id");
 CREATE INDEX "sampling_protocol_owner_idx" ON "sampling_protocol" USING btree ("owner_id","created_at","id");
+CREATE INDEX "sampling_protocol_brand_frozen_idx" ON "sampling_protocol" USING btree ("owner_id","brand_id","created_at","id") WHERE "sampling_protocol"."status" = 'frozen';
 CREATE INDEX "sampling_protocol_family_idx" ON "sampling_protocol" USING btree ("owner_id","protocol_id","version");
 CREATE INDEX "answer_analysis_draft_observation_idx" ON "answer_analysis_draft" USING btree ("observation_id","created_at");
 CREATE UNIQUE INDEX "answer_analysis_version_uidx" ON "answer_analysis_version" USING btree ("observation_id","version");

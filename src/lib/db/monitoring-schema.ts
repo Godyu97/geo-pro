@@ -135,6 +135,8 @@ export const samplingProtocol = pgTable("sampling_protocol", {
   uniqueIndex("sampling_protocol_fingerprint_uidx").on(table.protocolId, table.fingerprint),
   uniqueIndex("sampling_protocol_operation_uidx").on(table.brandId, table.operationId),
   index("sampling_protocol_owner_idx").on(table.ownerId, table.createdAt, table.id),
+  index("sampling_protocol_brand_frozen_idx").on(table.ownerId, table.brandId, table.createdAt, table.id)
+    .where(sql`${table.status} = 'frozen'`),
   index("sampling_protocol_family_idx").on(table.ownerId, table.protocolId, table.version),
   check("sampling_protocol_state_check", sql`${table.version} > 0
     and ${table.newSessionRequired} in (0, 1) and ${table.searchRequired} in (0, 1)

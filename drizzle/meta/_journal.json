@@ -547,6 +547,13 @@
       "when": 1795459780698,
       "tag": "0077_wooden_gorgon",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1795460960898,
+      "tag": "0078_oval_iron_monger",
+      "breakpoints": true
     }
   ]
 }

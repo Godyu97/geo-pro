@@ -1,0 +1,1 @@
+CREATE INDEX `sampling_protocol_brand_frozen_idx` ON `sampling_protocol` (`owner_id`,`brand_id`,`created_at`,`id`) WHERE "sampling_protocol"."status" = 'frozen';
