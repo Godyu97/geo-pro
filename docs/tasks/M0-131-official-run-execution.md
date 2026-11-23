@@ -18,6 +18,20 @@
 | 隔离行为 | 缺单价、未核验邮箱、无权限、通道降级和零预算都在外部调用前停止。并发领取、确认失败后的再次执行、超时未知回执和领取后崩溃的核对均有断言。 |
 | 开发环境 | `pnpm env:check` 14 项通过，官方采样配置已填写。品牌 `ef806b38-0b74-4420-aebd-701176444112` 为活跃状态，实体版本 2。最新冻结题集版本 2 有 3 道已确认自然发现题。通道 `c199cd39-6efc-42eb-9021-98fcc5f3bb05` 版本 2 为 verified，入口 `official-responses-dev`，模型 `deepseek-flash`，不要求联网，有效期至 `2026-12-23T09:49:33.365Z`。 |
 
-`pnpm db:migrate` 已在回环开发 PostgreSQL 应用本次迁移，`monitoring_attempt.receipt` 列存在。采样额度版本 1 的次数上限为 3、预算 60（CNY 最小单位），3 笔预留均已结算，合计上限 60。对应运行 `8e0515b5-77df-4dfd-93b0-5f73662bd852` 于 `2026-11-23T10:44:08.277Z` 完成：3 个槽位成功，3 次官方尝试费用已知，实际合计 3。该运行早于本次回执列，尝试回执为空。当前额度不能再接受一轮 3 题执行。
+`pnpm db:migrate` 已在回环开发 PostgreSQL 应用本次迁移，`monitoring_attempt.receipt` 列存在。采样额度版本 1 的次数上限为 3、预算 60（CNY 最小单位），3 笔预留均已结算，合计上限 60。对应运行 `8e0515b5-77df-4dfd-93b0-5f73662bd852` 于 `2026-11-23T10:44:08.277Z` 完成：3 个槽位成功，3 次官方尝试费用已知，实际合计 3。该运行早于本次回执列，尝试回执为空，不作为本路径的真实验收。
 
-本次未把该历史运行计作本路径的真实验收，也未勾选 T-M0-04/05 或阶段门禁。正式 10 题 × 2 轮仍由 [#31](https://github.com/Godyu97/geo-pro/issues/31) 跟踪，入证由 [#133](https://github.com/Godyu97/geo-pro/issues/133) 跟踪。
+## 开发库官方执行
+
+2026-11-23，核验版本见本轮 Issue 评论。维护账号 `FyL2jvY3fnhXKgQvKr276tCkrmp8o0fU` 经 `POST /api/maintenance/quotas` 把采样额度从版本 1 调到版本 2：次数 6、预算 120（CNY 最小单位），币种仍为 CNY，到期时间仍为 `2026-11-30T15:59:59.000Z`，原因 `budget-increase`。单槽上界 20，与 [M0-31](M0-31-official-channel-verification.md) 已复核的单次费用上界一致；单价表为 `deepseek-flash` 输入 100、输出 200 个最小单位 / 百万 token。
+
+品牌负责人在工作台登记运行 `db6cb290-ccec-4c6c-b63b-7fa3fab1d287`：题集版本 `c28837b0-99ae-4b55-a91f-6fa86b559616`（版本 2）的 3 道已确认自然发现题，通道版本 2，重复 1，请求联网 `off`，预估上限 60。登记时间 `2026-11-23T14:23:39.977Z`。随后在 Chrome 打开 `/dashboard/monitoring/runs/db6cb290-ccec-4c6c-b63b-7fa3fab1d287`，点击「执行官方采样」。页面显示「进度已更新。」，3 个槽位成功，各有一条官方回执和已知费用。再次点击后仍是这 3 条尝试，没有新增尝试，也没有未知计费。临时会话已删除。
+
+| 题 | 尝试 | 响应定位 | 费用 | 联网触发 | 引用 | 原文 SHA-256 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 公开资料不足时怎样判断一轮品牌监测是否还能开始 | `266a794a-23ce-453d-a684-b56696a044a8` | `cba1b790-32aa-4bba-8161-a1cf25e1aa76` | 1 | `not_triggered` | `complete`，0 个 URL | `f0334035f6f331eb1dff86f90a01d869095711f96ae597cd3b36934ec5845be9` |
+| 日常复盘 AI 回答时怎样核对引用是否来自公开页面 | `93587e4d-7791-460a-9f26-68dd9f101d2f` | `a24fdfd1-5463-4893-9547-ecdf7f9a6daa` | 1 | `not_triggered` | `complete`，0 个 URL | `75a2b6a21ab11197a8cd4400b4f44c0e0ceb2d0a47890001c0dcfdb49b7086a2` |
+| 预算有限时怎样判断一轮品牌监测是否足够 | `781a24d0-c73f-4586-a92f-40837e61bbf9` | `44c091ae-9fa8-443a-a370-44da2a4fba03` | 1 | `not_triggered` | `complete`，0 个 URL | `1db41243e9078a8be194afb37c10cce411502f765bd6af7dd74a3ac068f9fb2b` |
+
+三笔尝试的写入时间都是 `2026-11-23T14:24:23.720Z`，模型 `deepseek-flash`，处置 `adopted`，费用状态 `known`，原文留在开发库。本轮实际费用合计 3。额度账上 6 笔采样尝试均为已知费用，实际合计 6，没有待核对行；6 笔预留均已结算。
+
+本次不勾选 T-M0-04/05 或阶段门禁。正式 10 题 × 2 轮仍由 [#31](https://github.com/Godyu97/geo-pro/issues/31) 跟踪，入证由 [#133](https://github.com/Godyu97/geo-pro/issues/133) 跟踪。
