@@ -100,6 +100,7 @@ test("login return targets preserve local filters and reject external or malform
   assert.equal(safeReturnTo("/dashboard/reports/crawler-visits"), "/dashboard/reports/crawler-visits");
   assert.equal(safeReturnTo("/dashboard/brands/local-observations"), "/dashboard/brands/local-observations");
   assert.equal(safeReturnTo("/dashboard/brands/stores"), "/dashboard/brands/stores");
+  assert.equal(safeReturnTo("/dashboard/brands/industry-packs"), "/dashboard/brands/industry-packs");
   assert.equal(safeReturnTo("/dashboard/assistant"), "/dashboard/assistant");
   assert.equal(safeReturnTo("/dashboard/monitoring/runs/3160d7dc-1cae-4d26-8ce4-fd2b886c8192"), "/dashboard/monitoring/runs/3160d7dc-1cae-4d26-8ce4-fd2b886c8192");
   assert.equal(safeReturnTo("/dashboard/monitoring/runs/not-a-run"), "/dashboard");

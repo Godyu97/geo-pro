@@ -80,11 +80,20 @@ function BrandStoresLink({ t }: { t: Translate }) {
   );
 }
 
+function IndustryPacksLink({ t }: { t: Translate }) {
+  return (
+    <Link href="/dashboard/brands/industry-packs" prefetch={false} className="inline-block text-sm underline underline-offset-4">
+      {t("openIndustryPacks")}
+    </Link>
+  );
+}
+
 function BrandResourceLinks({ t }: { t: Translate }) {
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-2">
       <LocalObservationsLink t={t} />
       <BrandStoresLink t={t} />
+      <IndustryPacksLink t={t} />
     </div>
   );
 }
