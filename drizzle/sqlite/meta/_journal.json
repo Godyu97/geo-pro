@@ -519,6 +519,13 @@
       "when": 1795456127968,
       "tag": "0073_supreme_darkstar",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1795457085927,
+      "tag": "0074_brave_swarm",
+      "breakpoints": true
     }
   ]
 }

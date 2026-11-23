@@ -53,3 +53,12 @@ export type TeamListView = {
 };
 
 export type TeamLabel = { brandId: string; name: string };
+
+export type OwnerTransferView = {
+  id: string;
+  brandId: string;
+  fromUserId: string;
+  toUserId: string;
+  actorId: string;
+  createdAt: string;
+};

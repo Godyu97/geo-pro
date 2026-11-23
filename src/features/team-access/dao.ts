@@ -42,9 +42,19 @@ const countRow = z.object({
   others: z.coerce.number().int().nonnegative(),
 });
 
+const transferRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  fromUserId: z.string().min(1).max(128),
+  toUserId: z.string().min(1).max(128),
+  actorId: z.string().min(1).max(128),
+  createdAt: z.string().min(20).max(40),
+});
+
 export type TeamGrantRecord = z.infer<typeof grantRow>;
 export type TeamAccessRecord = z.infer<typeof accessRow>;
 export type TeamActionRecord = z.infer<typeof actionRow>;
+export type OwnerTransferRecord = z.infer<typeof transferRow>;
 
 const grantColumns = `id, user_id AS "userId", brand_id AS "brandId", role, active,
   expires_at AS "expiresAt", revoked_at AS "revokedAt"`;
@@ -61,6 +71,18 @@ export function validGrantQuery(userId: string, now: string) {
       WHERE b.owner_id = ? AND b.status = 'active' AND b.frozen_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM brand_member_grant g WHERE g.brand_id = b.id)`,
     values: [userId, now, userId] as QueryValue[],
+  };
+}
+
+export function ownerTransfersByBrandQuery(brandId: string) {
+  return {
+    sql: `SELECT id, brand_id AS "brandId", from_user_id AS "fromUserId", to_user_id AS "toUserId",
+        actor_id AS "actorId", created_at AS "createdAt"
+      FROM brand_owner_transfer
+      WHERE brand_id = ?
+      ORDER BY created_at, id
+      LIMIT ?`,
+    values: [brandId, teamListLimit] as QueryValue[],
   };
 }
 
@@ -232,6 +254,35 @@ export class TeamAccessDao {
     );
     const parsed = z.object({ attachment: z.string().min(16).max(64) }).safeParse(row);
     return parsed.success ? parsed.data.attachment : null;
+  }
+
+  async promoteMemberToOwner(id: string, now: string) {
+    const rows = await this.query(
+      `UPDATE brand_member_grant SET role = 'owner'
+       WHERE id = ? AND role = 'member' AND active = 1
+         AND (expires_at IS NULL OR expires_at > ?)
+       RETURNING id`,
+      [id, now],
+    );
+    return rows.length === 1;
+  }
+
+  async insertOwnerTransfer(row: { id: string; brandId: string; fromUserId: string; toUserId: string; actorId: string; createdAt: string }) {
+    await this.query(
+      `INSERT INTO brand_owner_transfer (id, brand_id, from_user_id, to_user_id, actor_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [row.id, row.brandId, row.fromUserId, row.toUserId, row.actorId, row.createdAt],
+    );
+  }
+
+  async ownerTransferById(id: string) {
+    const [row] = await this.query(
+      `SELECT id, brand_id AS "brandId", from_user_id AS "fromUserId", to_user_id AS "toUserId",
+        actor_id AS "actorId", created_at AS "createdAt"
+       FROM brand_owner_transfer WHERE id = ?`,
+      [id],
+    );
+    return row ? transferRow.parse(row) : null;
   }
 
   async stopAction(id: string) {

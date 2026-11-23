@@ -155,6 +155,12 @@ export function TeamPanel({ labels, workspace, messages }: {
                   <span>{labelFor(member.brandId)}</span>
                   <span className="text-muted-foreground">{member.role === "owner" ? t("roleOwner") : t("roleMember")}</span>
                   <span className="text-muted-foreground">{member.active === 1 ? t("active") : t("inactive")}</span>
+                  {member.role === "member" && member.active === 1 && (
+                    <Button type="button" variant="outline" disabled={pending !== null}
+                      onClick={() => send(`promote:${member.id}`, `/api/settings/team/grants/${member.id}/promote`, { method: "POST", body: "{}" }, t("promoted"))}>
+                      {pending === `promote:${member.id}` ? t("promoting") : t("promote")}
+                    </Button>
+                  )}
                   {canRevoke && member.active === 1 && (
                     <Button type="button" variant="outline" disabled={pending !== null}
                       onClick={() => send(member.id, `/api/settings/team/grants/${member.id}/revoke`, { method: "POST", body: "{}" }, t("revoked"))}>
@@ -204,10 +210,13 @@ export function TeamPanel({ labels, workspace, messages }: {
         </form>
       </section>
 
-      <form onSubmit={(event) => {
+      <form className="space-y-3" onSubmit={(event) => {
         event.preventDefault();
         void send("leave", "/api/settings/team/leave", { method: "POST", body: "{}" }, t("left"));
       }}>
+        {workspace.ownerBrandIds.some((brandId) => workspace.members.filter((row) => row.brandId === brandId && row.role === "owner" && row.active === 1).length < 2) && (
+          <p className="text-sm leading-6 text-muted-foreground">{t("lastOwner")}</p>
+        )}
         <Button type="submit" variant="outline" disabled={pending !== null}>{pending === "leave" ? t("leaving") : t("leave")}</Button>
       </form>
     </div>

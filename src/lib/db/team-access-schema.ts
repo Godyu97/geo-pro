@@ -40,3 +40,20 @@ export const queuedBrandAction = pgTable("queued_brand_action", {
     and length(${table.attachment}) between 16 and 64
     and length(${table.createdAt}) between 20 and 40`),
 ]);
+
+// One row per owner promotion. The grant role stays owner|member on brand_member_grant.
+export const brandOwnerTransfer = pgTable("brand_owner_transfer", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  fromUserId: text("from_user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  toUserId: text("to_user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  actorId: text("actor_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  index("brand_owner_transfer_brand_idx").on(table.brandId, table.createdAt, table.id),
+  check("brand_owner_transfer_state_check", sql`${table.fromUserId} <> ${table.toUserId}
+    and length(${table.fromUserId}) between 1 and 128
+    and length(${table.toUserId}) between 1 and 128
+    and length(${table.actorId}) between 1 and 128
+    and length(${table.createdAt}) between 20 and 40`),
+]);

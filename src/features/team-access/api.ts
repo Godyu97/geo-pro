@@ -13,6 +13,7 @@ import {
   grantBrandMember,
   leaveTeam,
   listTeamGrants,
+  promoteBrandMember,
   readGrantedBrand,
   revokeBrandGrant,
 } from "./commands.ts";
@@ -112,6 +113,24 @@ async function emptyCommand(request: Request) {
   const body = await readBoundedJson(request, 256);
   if (!body || typeof body !== "object" || Object.keys(body).length > 0) return { error: await failure("INVALID_INPUT") };
   return { ok: true as const };
+}
+
+export async function teamGrantPromoteResponse(request: Request, grantId: string) {
+  const gate = await requireSameOrigin(request);
+  if ("error" in gate) return gate.error;
+  const parsedId = brandIdSchema.safeParse(grantId);
+  if (!parsedId.success) return failure("INVALID_INPUT");
+  const gateBody = await emptyCommand(request);
+  if ("error" in gateBody) return gateBody.error;
+  try {
+    const result = await promoteBrandMember(getConnection(), gate.session.session.user.id, parsedId.data);
+    if ("error" in result && result.error) return failure(result.error);
+    return json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("team-grant-promote-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
 }
 
 export async function teamGrantRevokeResponse(request: Request, grantId: string) {

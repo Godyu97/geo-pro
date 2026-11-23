@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomBytes, randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
-import type { GrantInput, TeamGrantView, TeamListView } from "./contracts.ts";
+import type { GrantInput, OwnerTransferView, TeamGrantView, TeamListView } from "./contracts.ts";
 import { TeamAccessDao, type TeamGrantRecord } from "./dao.ts";
 import { batchExport, brandVisible, invitePreview, leaveWorkspace, revokedAction } from "./rules.ts";
 
@@ -116,6 +116,63 @@ export async function grantBrandMember(db: DatabaseConnection, actorId: string, 
     });
   } catch (error) {
     if (isUniqueViolation(error)) return { error: "CONFLICT" as const };
+    throw error;
+  }
+}
+
+function toTransferView(row: {
+  id: string;
+  brandId: string;
+  fromUserId: string;
+  toUserId: string;
+  actorId: string;
+  createdAt: string;
+}): OwnerTransferView {
+  return {
+    id: row.id,
+    brandId: row.brandId,
+    fromUserId: row.fromUserId,
+    toUserId: row.toUserId,
+    actorId: row.actorId,
+    createdAt: row.createdAt,
+  };
+}
+
+export async function promoteBrandMember(db: DatabaseConnection, actorId: string, grantId: string, now = clock()) {
+  try {
+    return await db.transaction(async (tx) => {
+      const dao = new TeamAccessDao(tx);
+      const grant = await dao.grantById(grantId);
+      if (!grant || grant.userId === actorId) return { error: "NOT_FOUND" as const };
+      const access = await dao.validAccess(actorId, now);
+      if (!access.some((row) => row.brandId === grant.brandId && row.role === "owner")) {
+        return { error: "NOT_FOUND" as const };
+      }
+      const brand = await dao.brandGate(grant.brandId);
+      if (!brand || brand.status !== "active" || brand.frozenAt) return { error: "NOT_FOUND" as const };
+      if (grant.role !== "member" || grant.active !== 1 || isExpired(grant.expiresAt, now)) {
+        return { error: "NOT_FOUND" as const };
+      }
+      if (!await dao.promoteMemberToOwner(grant.id, now)) return { error: "NOT_FOUND" as const };
+      const transferId = randomUUID();
+      await dao.insertOwnerTransfer({
+        id: transferId,
+        brandId: grant.brandId,
+        fromUserId: actorId,
+        toUserId: grant.userId,
+        actorId,
+        createdAt: now,
+      });
+      const saved = await dao.ownerTransferById(transferId);
+      const next = await dao.grantById(grant.id);
+      if (!saved || !next || next.role !== "owner") throw new Error("owner transfer readback failed");
+      return { grant: toGrantView(next), transfer: toTransferView(saved) };
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) return { error: "CONFLICT" as const };
+    if (error instanceof Error && error.message === "owner transfer readback failed") {
+      return { error: "SERVICE_UNAVAILABLE" as const };
+    }
     throw error;
   }
 }

@@ -1772,6 +1772,20 @@ CREATE TABLE "brand_member_grant" (
       or ("brand_member_grant"."active" = 0 and length("brand_member_grant"."revoked_at") between 20 and 40)))
 );
 
+CREATE TABLE "brand_owner_transfer" (
+	"id" text PRIMARY KEY NOT NULL,
+	"brand_id" text NOT NULL,
+	"from_user_id" text NOT NULL,
+	"to_user_id" text NOT NULL,
+	"actor_id" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "brand_owner_transfer_state_check" CHECK ("brand_owner_transfer"."from_user_id" <> "brand_owner_transfer"."to_user_id"
+    and length("brand_owner_transfer"."from_user_id") between 1 and 128
+    and length("brand_owner_transfer"."to_user_id") between 1 and 128
+    and length("brand_owner_transfer"."actor_id") between 1 and 128
+    and length("brand_owner_transfer"."created_at") between 20 and 40)
+);
+
 CREATE TABLE "queued_brand_action" (
 	"id" text PRIMARY KEY NOT NULL,
 	"grant_id" text NOT NULL,
@@ -2633,6 +2647,10 @@ ALTER TABLE "lead_validity_rule" ADD CONSTRAINT "lead_validity_rule_brand_id_bra
 ALTER TABLE "lead_question_suggestion" ADD CONSTRAINT "lead_question_suggestion_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_member_grant" ADD CONSTRAINT "brand_member_grant_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_member_grant" ADD CONSTRAINT "brand_member_grant_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand_owner_transfer" ADD CONSTRAINT "brand_owner_transfer_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand_owner_transfer" ADD CONSTRAINT "brand_owner_transfer_from_user_id_user_id_fk" FOREIGN KEY ("from_user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand_owner_transfer" ADD CONSTRAINT "brand_owner_transfer_to_user_id_user_id_fk" FOREIGN KEY ("to_user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand_owner_transfer" ADD CONSTRAINT "brand_owner_transfer_actor_id_user_id_fk" FOREIGN KEY ("actor_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "queued_brand_action" ADD CONSTRAINT "queued_brand_action_grant_id_brand_member_grant_id_fk" FOREIGN KEY ("grant_id") REFERENCES "public"."brand_member_grant"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "approval_attempt" ADD CONSTRAINT "approval_attempt_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "approval_policy" ADD CONSTRAINT "approval_policy_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
@@ -2864,6 +2882,7 @@ CREATE INDEX "lead_question_suggestion_owner_idx" ON "lead_question_suggestion" 
 CREATE UNIQUE INDEX "brand_member_grant_pair_uidx" ON "brand_member_grant" USING btree ("user_id","brand_id");
 CREATE INDEX "brand_member_grant_user_idx" ON "brand_member_grant" USING btree ("user_id","brand_id") WHERE "brand_member_grant"."active" = 1;
 CREATE INDEX "brand_member_grant_brand_idx" ON "brand_member_grant" USING btree ("brand_id","user_id");
+CREATE INDEX "brand_owner_transfer_brand_idx" ON "brand_owner_transfer" USING btree ("brand_id","created_at","id");
 CREATE INDEX "queued_brand_action_grant_idx" ON "queued_brand_action" USING btree ("grant_id","status");
 CREATE INDEX "approval_attempt_version_idx" ON "approval_attempt" USING btree ("brand_id","version_id","created_at","id");
 CREATE UNIQUE INDEX "approval_policy_brand_uidx" ON "approval_policy" USING btree ("brand_id");
