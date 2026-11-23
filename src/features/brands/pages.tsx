@@ -72,10 +72,27 @@ function LocalObservationsLink({ t }: { t: Translate }) {
   );
 }
 
+function BrandStoresLink({ t }: { t: Translate }) {
+  return (
+    <Link href="/dashboard/brands/stores" prefetch={false} className="inline-block text-sm underline underline-offset-4">
+      {t("openBrandStores")}
+    </Link>
+  );
+}
+
+function BrandResourceLinks({ t }: { t: Translate }) {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-2">
+      <LocalObservationsLink t={t} />
+      <BrandStoresLink t={t} />
+    </div>
+  );
+}
+
 function ClosedBrandIntake({ t, items }: { t: Translate; items: PilotAdmissionItem[] }) {
   return (
     <BrandFrame title={t("title")} back="/dashboard" backLabel={t("workspace")}>
-      <LocalObservationsLink t={t} />
+      <BrandResourceLinks t={t} />
       <section className="max-w-3xl space-y-2 rounded-xl border bg-card p-5">
         <h2 className="font-semibold">{t("closedTitle")}</h2>
         <p className="text-sm leading-6 text-muted-foreground">{t("closedDescription")}</p>
@@ -128,7 +145,7 @@ export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Q
   return (
     <BrandFrame title={t("title")} back="/dashboard" backLabel={t("workspace")}>
       <IntakeNotice t={t} mode={intake.mode} />
-      <LocalObservationsLink t={t} />
+      <BrandResourceLinks t={t} />
       {"unavailable" in result ? <BrandLoadFailure t={t} href="/dashboard/brands" /> : (
         <>
           <section aria-labelledby="brand-current" className="max-w-3xl rounded-xl border bg-card p-5 sm:p-6">

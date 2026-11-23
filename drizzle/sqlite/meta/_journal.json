@@ -414,6 +414,13 @@
       "when": 1795415355120,
       "tag": "0058_curved_mikhail_rasputin",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1795416119003,
+      "tag": "0059_sparkling_celestials",
+      "breakpoints": true
     }
   ]
 }
