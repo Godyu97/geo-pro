@@ -59,6 +59,9 @@ export function createOfficialSamplingPort(
     probe(channel, now) {
       return probeChannel(ready, channel, now);
     },
+    priced(model, currency) {
+      return Boolean(currency && currency === ready.priceTable.currency && ready.priceTable.models[model]);
+    },
     sample(input) {
       const channel = gateFromRequest(input);
       if (!channel || !input.now) return Promise.reject(new Error("REAL_CHANNEL_CLOSED"));

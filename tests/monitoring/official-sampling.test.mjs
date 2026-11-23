@@ -81,7 +81,7 @@ async function prepare(db, env, expiresAt) {
     expectedVersion: null, reason: "pilot-approval", countLimit: 40, budgetMinor: 50_000, currency: "CNY",
     expiresAt: "2026-12-19T06:00:00.000Z",
   }, clock)).status, "allowed");
-  return { owner, brand, channel };
+  return { owner, operator, brand, channel };
 }
 
 function questions() {
@@ -324,6 +324,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const wrapped = {
       label: "official_api",
       probe: (gate, now) => port.probe(gate, now),
+      priced: (model, currency) => port.priced(model, currency),
       sample: async (input) => {
         const sample = await port.sample(input);
         seen.push({ questionId: input.questionId, sample });
@@ -379,5 +380,212 @@ for (const kind of ["sqlite", "postgresql"]) {
     const reserved = await queryWithParameters(db, `SELECT s.id FROM monitoring_slot s JOIN quota_reservation r ON r.id = s.reservation_id
       WHERE s.run_id = ? AND s.status = 'reconciliation_required' AND r.state = 'reserved'`, [accepted.id]);
     assert.equal(reserved.length, 6);
+  });
+
+  test(`${kind}: official execution claims before the call and recovers unknown cost`, async (t) => {
+    const fixture = await testDatabase(kind, { migrateNow: false });
+    t.after(() => fixture.cleanup());
+    const db = fixture.connection;
+    const { owner, operator, brand, channel } = await prepare(db, fixture.env, "2026-12-19T06:00:00.000Z");
+    const outsider = await account(db, false);
+    const content = {
+      clusters: [{ id: randomUUID(), audience: "购买者", intent: "比较使用条件", primaryPage: "", conversionAction: "" }],
+      questions: ["HOLD 冻结题一", "SAFE 冻结题二", "LATE 冻结题三"].map((text) => ({
+        id: randomUUID(), clusterId: randomUUID(), text, source: "manual", sourceNote: "", type: "discovery", stage: "awareness",
+        region: "CN", language: "zh-CN", status: "confirmed", acceptSimilar: false, primary: true,
+      })),
+    };
+    content.questions.forEach((question, index) => {
+      if (index > 0) question.clusterId = content.questions[0].clusterId;
+    });
+    content.clusters[0].id = content.questions[0].clusterId;
+    async function acceptSmall() {
+      const setId = randomUUID();
+      await new PromptDao(db, brand).insertSet({
+        id: setId, setId, version: 1, entityVersion: 1, region: "CN", language: "zh-CN", createdAt: time, content,
+      });
+      const preview = await previewMonitoringRun(db, owner, {
+        action: "preview", brandId: brand, track: "model_api", promptSetId: setId, repeats: 1,
+        requestedNetworkMode: "off", channelIds: [channel.channelId], ceiling: { currency: "CNY", upperMinor: 100 },
+      }, secret, clock);
+      assert.equal(preview.error, undefined, preview.error);
+      const accepted = await acceptMonitoringRun(db, owner, {
+        action: "accept", ...preview.snapshot, token: preview.token, operationId: randomUUID(),
+      }, secret, clock);
+      assert.equal(accepted.error, undefined, accepted.error);
+      return accepted;
+    }
+    const server = await listen((req, res, body) => {
+      const text = String(body?.input ?? "");
+      if (text.startsWith("SAFE")) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "unavailable" } }));
+        return;
+      }
+      if (text.startsWith("LATE")) return;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(payload(text.slice(0, 4), {
+        network_trigger: "not_triggered", citations: [{ url: "https://example.com/hold", title: "公开说明" }],
+      }, { id: "resp-hold" })));
+    });
+    t.after(() => server.close());
+    const port = createOfficialSamplingPort({
+      baseUrl: server.baseUrl, apiKey, productEntry: "official-responses", priceTable, timeoutMs: 200,
+    });
+    const accepted = await acceptSmall();
+    const unpriced = createOfficialSamplingPort({
+      baseUrl: server.baseUrl, apiKey, productEntry: "official-responses",
+      priceTable: { currency: "CNY", models: { "other-model": { inputMinorPerMillion: 1, outputMinorPerMillion: 1 } } },
+      timeoutMs: 200,
+    });
+    const missingPrice = await executeMonitoringRun(db, owner, accepted.id, unpriced, clock);
+    assert.equal(missingPrice.error, "NO_TRUSTED_CEILING");
+    assert.equal(server.requests.length, 0);
+    const denied = await executeMonitoringRun(db, outsider, accepted.id, port, clock);
+    assert.equal(denied.error, "NOT_FOUND");
+    assert.equal(server.requests.length, 0);
+    const previousMail = process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK;
+    process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK = "false";
+    try {
+      await queryWithParameters(db, 'UPDATE "user" SET email_verified = ? WHERE id = ?', [db.kind === "sqlite" ? 0 : false, owner]);
+      const unverified = await executeMonitoringRun(db, owner, accepted.id, port, clock);
+      assert.equal(unverified.error, "EMAIL_UNVERIFIED");
+    } finally {
+      if (previousMail === undefined) delete process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK;
+      else process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK = previousMail;
+      await queryWithParameters(db, 'UPDATE "user" SET email_verified = ? WHERE id = ?', [db.kind === "sqlite" ? 1 : true, owner]);
+    }
+    assert.equal(server.requests.length, 0);
+    const [beforeClaim] = await queryWithParameters(db, "SELECT COUNT(*) AS count FROM monitoring_attempt WHERE run_id = ?", [accepted.id]);
+    assert.equal(Number(beforeClaim.count), 0);
+
+    const crashedRun = await acceptSmall();
+    await assert.rejects(() => executeMonitoringRun(db, owner, crashedRun.id, port, clock, { crashAfterClaim: true }), /official-claim-crash/);
+    assert.equal(server.requests.length, 0);
+    const claimed = await queryWithParameters(db, `SELECT a.disposition, a.cost_state AS "costState", s.question_id AS "questionId", s.status, r.state
+      FROM monitoring_attempt a
+      JOIN monitoring_slot s ON s.id = a.slot_id
+      JOIN quota_reservation r ON r.id = s.reservation_id
+      WHERE a.run_id = ?`, [crashedRun.id]);
+    assert.equal(claimed.length, 1);
+    assert.equal(claimed[0].disposition, "pending");
+    assert.equal(claimed[0].costState, "pending");
+    assert.equal(claimed[0].status, "running");
+    assert.equal(claimed[0].state, "reserved");
+    const crashedQuestion = content.questions.find((question) => question.id === claimed[0].questionId).text;
+    const lateClock = () => new Date(Date.parse(time) + 120_000).toISOString();
+    const recovered = await executeMonitoringRun(db, owner, crashedRun.id, port, lateClock);
+    assert.equal(recovered.error, undefined, recovered.error);
+    assert.equal(server.requests.some((item) => item.body?.input === crashedQuestion), false);
+    const reconciled = recovered.slots.find((slot) => slot.questionId === claimed[0].questionId);
+    assert.equal(reconciled.status, "reconciliation_required");
+    const [stillReserved] = await queryWithParameters(db, "SELECT state FROM quota_reservation WHERE id = ?", [reconciled.reservationId]);
+    assert.equal(stillReserved.state, "reserved");
+
+    const live = await acceptSmall();
+    let release;
+    let opened;
+    const hold = new Promise((resolve) => { release = resolve; });
+    const gate = new Promise((resolve) => { opened = resolve; });
+    let blocked = true;
+    let blockedText = "";
+    let blockedSamples = 0;
+    const blocking = {
+      ...port,
+      async sample(input) {
+        if (blocked) {
+          blocked = false;
+          blockedText = input.questionText;
+          opened();
+          await hold;
+        }
+        if (input.questionText === blockedText) blockedSamples += 1;
+        return port.sample(input);
+      },
+    };
+    const liveMark = server.requests.length;
+    const first = executeMonitoringRun(db, owner, live.id, blocking, clock);
+    await gate;
+    const second = await executeMonitoringRun(db, owner, live.id, blocking, clock);
+    release();
+    const finished = await first;
+    assert.equal(finished.error, undefined, finished.error);
+    assert.equal(second.error, undefined, second.error);
+    assert.equal(blockedSamples, 1, JSON.stringify(server.requests.slice(liveMark).map((item) => item.body?.input)));
+    const succeeded = finished.slots.filter((slot) => slot.status === "succeeded");
+    assert.ok(succeeded.length >= 1);
+    const adopted = finished.attempts.find((attempt) => attempt.disposition === "adopted" && attempt.rawText);
+    assert.ok(adopted.receipt);
+    const receipt = JSON.parse(adopted.receipt);
+    assert.equal(receipt.responseId, "resp-hold");
+    assert.equal(receipt.citationSetState, "complete");
+    assert.equal(receipt.citations[0].url, "https://example.com/hold");
+    assert.equal(receipt.networkTrigger, "not_triggered");
+    assert.equal(server.requests.every((item) => item.body.model === "fixture-model" && item.body.store === false && !("brand" in item.body)), true);
+
+    const retried = await acceptSmall();
+    const mark = server.requests.length;
+    const once = await executeMonitoringRun(db, owner, retried.id, port, clock);
+    assert.equal(once.error, undefined, once.error);
+    const again = await executeMonitoringRun(db, owner, retried.id, port, clock);
+    assert.equal(again.error, undefined, again.error);
+    const byInput = (prefix) => server.requests.slice(mark).filter((item) => String(item.body?.input ?? "").startsWith(prefix));
+    assert.equal(byInput("SAFE").length, 4);
+    assert.equal(byInput("LATE").length, 1);
+    const safeSlot = again.slots.find((slot) => content.questions.find((question) => question.id === slot.questionId)?.text.startsWith("SAFE"));
+    const lateSlot = again.slots.find((slot) => content.questions.find((question) => question.id === slot.questionId)?.text.startsWith("LATE"));
+    assert.equal(safeSlot.status, "queued");
+    assert.equal(lateSlot.status, "reconciliation_required");
+    const [lateReservation] = await queryWithParameters(db, "SELECT state FROM quota_reservation WHERE id = ?", [lateSlot.reservationId]);
+    assert.equal(lateReservation.state, "reserved");
+
+    const tight = await acceptSmall();
+    const raced = await acceptSmall();
+    const closedRun = await acceptSmall();
+    const sampleCounts = new Map();
+    const racing = {
+      ...port,
+      async sample(input) {
+        sampleCounts.set(input.questionText, (sampleCounts.get(input.questionText) ?? 0) + 1);
+        return port.sample(input);
+      },
+    };
+    const [left, right] = await Promise.all([
+      executeMonitoringRun(db, owner, raced.id, racing, clock),
+      executeMonitoringRun(db, owner, raced.id, racing, clock),
+    ]);
+    assert.equal(left.error, undefined, left.error);
+    assert.equal(right.error, undefined, right.error);
+    for (const question of content.questions) {
+      const seen = sampleCounts.get(question.text) ?? 0;
+      if (question.text.startsWith("SAFE")) assert.ok(seen === 1 || seen === 2, String(seen));
+      else assert.equal(seen, 1, question.text);
+    }
+
+    assert.equal((await updateQuota(db, operator, {
+      action: "set", actorId: operator, brandId: brand, kind: "sampling", operationId: randomUUID(),
+      expectedVersion: 1, reason: "budget-decrease", countLimit: 40, budgetMinor: 0, currency: "CNY",
+      expiresAt: "2026-12-19T06:00:00.000Z",
+    }, clock)).status, "allowed");
+    const tightMark = server.requests.length;
+    const paused = await executeMonitoringRun(db, owner, tight.id, port, clock);
+    assert.equal(paused.error, undefined, paused.error);
+    assert.equal(paused.pausedForBudget, true);
+    assert.equal(server.requests.length, tightMark);
+    const [tightAttempts] = await queryWithParameters(db, "SELECT COUNT(*) AS count FROM monitoring_attempt WHERE run_id = ?", [tight.id]);
+    assert.equal(Number(tightAttempts.count), 0);
+    assert.equal(paused.slots.every((slot) => slot.status === "paused"), true);
+
+    const recorded = await recordCapability(db, operator, capability(operator, {
+      expectedVersion: 2, channelId: channel.channelId, reason: "significant-change", status: "degraded",
+      verifiedAt: null, expiresAt: null, publicVisible: 0,
+    }), clock);
+    assert.equal(recorded.status, "allowed");
+    const degradedMark = server.requests.length;
+    const degraded = await executeMonitoringRun(db, owner, closedRun.id, port, clock);
+    assert.equal(degraded.error, "CHANNEL_UNVERIFIED");
+    assert.equal(server.requests.length, degradedMark);
+    const [degradedAttempts] = await queryWithParameters(db, "SELECT COUNT(*) AS count FROM monitoring_attempt WHERE run_id = ?", [closedRun.id]);
+    assert.equal(Number(degradedAttempts.count), 0);
   });
 }

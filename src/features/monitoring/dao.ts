@@ -66,6 +66,7 @@ const attemptRow = z.object({
   costState: z.enum(["none", "pending", "known", "unknown"]),
   quotaAttemptId: brandIdSchema.nullable(),
   late: flag,
+  receipt: z.string().min(2).max(8000).nullable(),
   createdAt: z.iso.datetime({ precision: 3 }),
 });
 
@@ -85,7 +86,7 @@ const slotColumns = `id, run_id AS "runId", brand_id AS "brandId", question_id A
   reservation_id AS "reservationId", status, adopted_attempt_id AS "adoptedAttemptId", late, created_at AS "createdAt"`;
 const attemptColumns = `id, slot_id AS "slotId", run_id AS "runId", brand_id AS "brandId", kind, ordinal, transport,
   synthetic, disposition, raw_text AS "rawText", currency, upper_minor AS "upperMinor", actual_minor AS "actualMinor",
-  cost_state AS "costState", quota_attempt_id AS "quotaAttemptId", late, created_at AS "createdAt"`;
+  cost_state AS "costState", quota_attempt_id AS "quotaAttemptId", late, receipt, created_at AS "createdAt"`;
 
 export class MonitoringDao {
   private readonly connection: QueryConnection;
@@ -168,17 +169,17 @@ export class MonitoringDao {
   async insertAttempt(row: MonitoringAttemptRow) {
     await this.query(`INSERT INTO monitoring_attempt
       (id, slot_id, run_id, brand_id, kind, ordinal, transport, synthetic, disposition, raw_text, currency,
-       upper_minor, actual_minor, cost_state, quota_attempt_id, late, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       upper_minor, actual_minor, cost_state, quota_attempt_id, late, receipt, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [row.id, row.slotId, row.runId, row.brandId, row.kind, row.ordinal, row.transport, row.synthetic,
       row.disposition, row.rawText, row.currency, row.upperMinor, row.actualMinor, row.costState,
-      row.quotaAttemptId, row.late, row.createdAt]);
+      row.quotaAttemptId, row.late, row.receipt, row.createdAt]);
   }
 
-  async updateAttempt(row: Pick<MonitoringAttemptRow, "id" | "disposition" | "rawText" | "actualMinor" | "costState" | "late">) {
+  async updateAttempt(row: Pick<MonitoringAttemptRow, "id" | "disposition" | "rawText" | "actualMinor" | "costState" | "late"> & { receipt?: string | null }) {
     await this.query(`UPDATE monitoring_attempt
-      SET disposition = ?, raw_text = ?, actual_minor = ?, cost_state = ?, late = ? WHERE id = ?`,
-    [row.disposition, row.rawText, row.actualMinor, row.costState, row.late, row.id]);
+      SET disposition = ?, raw_text = ?, actual_minor = ?, cost_state = ?, late = ?, receipt = COALESCE(?, receipt) WHERE id = ?`,
+    [row.disposition, row.rawText, row.actualMinor, row.costState, row.late, row.receipt ?? null, row.id]);
   }
 
   async setRun(runId: string, status: MonitoringRunRow["status"], samplingComplete: 0 | 1) {

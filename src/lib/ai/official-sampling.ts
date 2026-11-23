@@ -13,6 +13,7 @@ export type OfficialCitation = {
 
 type OfficialSampleBase = {
   synthetic: false;
+  responseId: string | null;
   modelVersion: string | null;
   networkTrigger: OfficialNetworkTrigger;
   citations: OfficialCitation[];
@@ -166,6 +167,7 @@ export function unknownOfficialSample(rawText: string | null = null, modelVersio
   return {
     disposition: "unknown",
     synthetic: false,
+    responseId: null,
     rawText: rawText && rawText.length <= MAX_TEXT ? rawText : null,
     modelVersion,
     networkTrigger: "unknown",
@@ -181,6 +183,7 @@ export function safeFailureOfficialSample(): OfficialSample {
   return {
     disposition: "safe_failure",
     synthetic: false,
+    responseId: null,
     rawText: null,
     modelVersion: null,
     networkTrigger: "unknown",
@@ -328,6 +331,7 @@ export function interpretOfficialPayload(input: {
   const payload = parsed.data;
   if (payload.error && input.httpStatus >= 400 && !input.accepted) return safeFailureOfficialSample();
   const text = responseText(payload);
+  const responseId = responseLocator(payload.id);
   const modelVersion = payload.model?.trim() || input.requestedModel;
   const priced = payload.model === undefined || payload.model === input.requestedModel ? input.requestedModel : null;
   const amount = priced ? priceMinor(payload.usage, priced, input.priceTable) : null;
@@ -339,6 +343,7 @@ export function interpretOfficialPayload(input: {
     return {
       disposition: "adopted",
       synthetic: false,
+      responseId,
       rawText: text,
       actualMinor: amount,
       currency: input.priceTable.currency,
@@ -352,9 +357,52 @@ export function interpretOfficialPayload(input: {
   if (!text && !input.accepted && !payload.usage && input.httpStatus >= 400) return safeFailureOfficialSample();
   return {
     ...unknownOfficialSample(text, modelVersion),
+    responseId,
     networkTrigger: trigger,
     ...citations,
   };
+}
+
+export const officialReceiptSchema = z.strictObject({
+  responseId: z.string().min(1).max(200).nullable(),
+  modelVersion: z.string().min(1).max(80).nullable(),
+  networkTrigger: z.enum(officialNetworkTriggers),
+  citationSetState: z.enum(officialCitationStates),
+  citations: z.array(z.strictObject({
+    url: z.string().min(1).max(2000),
+    title: z.string().min(1).max(200).nullable(),
+    position: z.int().positive().max(50),
+  })).max(40),
+});
+
+export function parseOfficialReceipt(value: string | null) {
+  if (!value) return null;
+  try {
+    const parsed = officialReceiptSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+export function serializeOfficialReceipt(sample: Pick<OfficialSample, "responseId" | "modelVersion" | "networkTrigger" | "citationSetState" | "citations">) {
+  const body = {
+    responseId: sample.responseId,
+    modelVersion: sample.modelVersion,
+    networkTrigger: sample.networkTrigger,
+    citationSetState: sample.citationSetState,
+    citations: sample.citations.slice(0, 40),
+  };
+  let text = JSON.stringify(body);
+  if (text.length > 8000) text = JSON.stringify({ ...body, citations: [] });
+  if (text.length > 8000 || !officialReceiptSchema.safeParse(JSON.parse(text)).success) return null;
+  return text;
+}
+
+function responseLocator(value: string | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.length > 200) return null;
+  return trimmed;
 }
 
 export function payloadAccepted(payload: unknown) {

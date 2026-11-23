@@ -12,11 +12,13 @@ export function RunControls({
   messages,
   succeededSlots,
   unknownAttempts,
+  official = false,
 }: {
   runId: string;
   messages: Copy;
   succeededSlots: Array<{ id: string; questionText: string }>;
   unknownAttempts: Array<{ id: string; questionText: string }>;
+  official?: boolean;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -45,6 +47,7 @@ export function RunControls({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
+        {official && <Button type="button" disabled={pending} onClick={() => send({ action: "execute" })}>{messages.executeOfficial}</Button>}
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "pause" })}>{messages.pause}</Button>
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "continue" })}>{messages.continue}</Button>
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "cancel" })}>{messages.cancel}</Button>

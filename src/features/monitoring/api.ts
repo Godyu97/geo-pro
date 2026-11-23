@@ -8,7 +8,8 @@ import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { acceptMonitoringRun, previewMonitoringRun, readMonitoringRun } from "./commands";
 import { acceptRequestSchema, monitoringErrors, previewRequestSchema, runControlSchema, type MonitoringError } from "./contracts";
-import { cancelMonitoringRun, continueMonitoringRun, pauseMonitoringRun, reconcileMonitoringCost, redoMonitoringAnalysis } from "./execution";
+import { cancelMonitoringRun, continueMonitoringRun, executeMonitoringRun, pauseMonitoringRun, reconcileMonitoringCost, redoMonitoringAnalysis } from "./execution";
+import { officialSamplingPortFromEnv } from "./official-port";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { executeFunctionalMockRun } from "@/features/functional-mock/apply-run";
 
@@ -81,6 +82,8 @@ export async function monitoringRunControlResponse(request: Request, runId: stri
             ? brandIntakeOrigin(request.headers)?.mode === "mock"
               ? await executeFunctionalMockRun(connection, ownerId, runId)
               : { error: "REAL_CHANNEL_CLOSED" as const, next: "await-channel" as const }
+            : command.data.action === "execute"
+              ? await executeMonitoringRun(connection, ownerId, runId, officialSamplingPortFromEnv())
             : command.data.action === "redo-analysis" ? await redoMonitoringAnalysis(connection, ownerId, runId, command.data.slotId)
               : await reconcileMonitoringCost(connection, ownerId, runId, command.data.attemptId, command.data.actualMinor);
     if ("error" in result) return failure(result.error, undefined, result.next);

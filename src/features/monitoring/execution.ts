@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { queryWithParameters, type DatabaseConnection, type TransactionConnection } from "../../lib/db/connection.ts";
-import { officialNetworkFacts, unknownOfficialSample } from "../../lib/ai/official-sampling.ts";
+import { officialNetworkFacts, serializeOfficialReceipt, unknownOfficialSample } from "../../lib/ai/official-sampling.ts";
 import { CapabilityDao } from "../capabilities/dao.ts";
 import { formalRunEligibility } from "../capabilities/rules.ts";
 import { QuotaDao } from "../quotas/dao.ts";
@@ -124,7 +124,7 @@ async function applySample(
   if (canAdopt(sample, run) && sample.disposition === "adopted") {
     await monitoring.updateAttempt({
       id: attempt.id, disposition: "adopted", rawText: sample.rawText, actualMinor: paid ? sample.actualMinor : null,
-      costState: paid ? "known" : "none", late: 0,
+      costState: paid ? "known" : "none", late: 0, receipt: sampleReceipt(sample),
     });
     if (paid && slot.reservationId) {
       await quota.updateAttempt(attemptScope(run.brandId, slot.reservationId, attempt.id), sample.actualMinor, time);
@@ -140,7 +140,7 @@ async function applySample(
   if (sample.disposition === "safe_failure") {
     await monitoring.updateAttempt({
       id: attempt.id, disposition: "safe_failure", rawText: null, actualMinor: paid ? 0 : null,
-      costState: paid ? "known" : "none", late: 0,
+      costState: paid ? "known" : "none", late: 0, receipt: sampleReceipt(sample),
     });
     if (paid && slot.reservationId) {
       await quota.updateAttempt(attemptScope(run.brandId, slot.reservationId, attempt.id), 0, time);
@@ -155,6 +155,7 @@ async function applySample(
     : sample.rawText;
   await monitoring.updateAttempt({
     id: attempt.id, disposition: "unknown", rawText, actualMinor: null, costState: paid ? "unknown" : "none", late: 0,
+    receipt: sampleReceipt(sample),
   });
   if (paid && slot.reservationId) {
     await quota.updateAttempt(attemptScope(run.brandId, slot.reservationId, attempt.id), null, time);
@@ -186,14 +187,58 @@ async function ownedRun(connection: DatabaseConnection, ownerId: string, runId: 
   }
 }
 
+function sampleReceipt(sample: IsolatedSample | OfficialSample) {
+  if (sample.synthetic) return null;
+  return serializeOfficialReceipt(sample);
+}
+
+const claimLeaseMs = 120_000;
+
+function attemptAge(createdAt: string, time: string) {
+  const age = Date.parse(time) - Date.parse(createdAt);
+  return Number.isFinite(age) ? age : claimLeaseMs;
+}
+
+async function withLockedRun<T>(
+  connection: DatabaseConnection,
+  ownerId: string,
+  runId: string,
+  work: (
+    transaction: TransactionConnection,
+    monitoring: MonitoringDao,
+    quota: QuotaDao,
+    run: MonitoringRunRow,
+  ) => Promise<T | Denied>,
+): Promise<T | Denied> {
+  try {
+    return await connection.transaction(async (transaction) => {
+      const monitoring = new MonitoringDao(transaction);
+      const quota = new QuotaDao(transaction);
+      const run = await monitoring.runForOwner(ownerId, runId);
+      if (!run) return denied("NOT_FOUND");
+      const brand = await quota.lockBrand(run.brandId, ownerId);
+      if (!brand) return denied("NOT_FOUND");
+      if (brand !== "active") return denied("NOT_ENTITLED");
+      return work(transaction, monitoring, quota, run);
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.message === "forced-rollback" || error.message === "official-claim-crash")) throw error;
+    console.error("monitoring-execution-failed", { name: error instanceof Error ? error.name : "unknown" });
+    return denied("SERVICE_UNAVAILABLE");
+  }
+}
+
 export async function executeMonitoringRun(
   connection: DatabaseConnection,
   ownerId: string,
   runId: string,
   transport: IsolatedTransport | OfficialSamplingPort,
   now = () => new Date().toISOString(),
-  options: { failBeforeCommit?: boolean } = {},
+  options: { failBeforeCommit?: boolean; crashAfterClaim?: boolean } = {},
 ) {
+  if (transport.label === "official_api") {
+    return executeOfficialMonitoringRun(connection, ownerId, runId, transport, now, options);
+  }
   const time = now();
   return ownedRun(connection, ownerId, runId, async (transaction, monitoring, quota, run) => {
     if (run.status === "cancelled") return persist(monitoring, ownerId, run.id, true);
@@ -207,32 +252,6 @@ export async function executeMonitoringRun(
     const capabilityDao = new CapabilityDao(transaction);
     const channels = await capabilityDao.latestByIds([...new Set(slots.map((slot) => slot.channelId))]);
     const channelById = new Map(channels.map((channel) => [channel.channelId, channel]));
-    const official = transport.label === "official_api";
-    if (official) {
-      const pinned = slots.every((slot) => channelById.get(slot.channelId)?.version === slot.channelVersion);
-      if (!pinned || channels.length === 0) {
-        await monitoring.pauseQueued(run.id);
-        await persist(monitoring, ownerId, run.id, false);
-        return denied("CHANNEL_UNVERIFIED", "verify-channel");
-      }
-      for (const channel of channels) {
-        const decision = transport.probe({
-          channelId: channel.channelId,
-          kind: channel.kind,
-          status: channel.status,
-          productEntry: channel.productEntry,
-          modelVersion: channel.modelVersion,
-          verifiedAt: channel.verifiedAt,
-          expiresAt: channel.expiresAt,
-        }, time);
-        if (!decision.open && decision.code === "CHANNEL_UNVERIFIED") {
-          await monitoring.pauseQueued(run.id);
-          await persist(monitoring, ownerId, run.id, false);
-          return denied("CHANNEL_UNVERIFIED", "verify-channel");
-        }
-        if (!decision.open) return denied("REAL_CHANNEL_CLOSED", "await-channel");
-      }
-    }
     if (run.track === "model_api" && !(await monitoring.emailVerified(ownerId))) {
       await monitoring.pauseQueued(run.id);
       await persist(monitoring, ownerId, run.id, false);
@@ -245,12 +264,6 @@ export async function executeMonitoringRun(
       return denied(run.upperMinor === null ? "NO_TRUSTED_CEILING" : "NOT_ENTITLED", run.upperMinor === null ? "confirm-ceiling" : "request-quota");
     }
     const usage = run.track === "model_api" ? await monitoring.samplingUsage(run.brandId) : null;
-    const questionText = new Map<string, string>();
-    if (official) {
-      const prompt = await new PromptDao(transaction, run.brandId).version(run.promptSetId);
-      if (!prompt) return denied("NOT_READY");
-      for (const question of prompt.content.questions) questionText.set(question.id, question.text);
-    }
     let pausedForBudget = false;
     for (const slot of slots) {
       if (["succeeded", "failed", "cancelled", "reconciliation_required"].includes(slot.status)) continue;
@@ -305,14 +318,14 @@ export async function executeMonitoringRun(
       }
       const attempt: MonitoringAttemptRow = {
         id: attemptId, slotId: slot.id, runId: run.id, brandId: run.brandId, kind: "sampling", ordinal: sampling.length + 1,
-        transport: official ? "official_api" : "isolated", synthetic: official ? 0 : 1, disposition: "pending", rawText: null, currency: run.currency,
+        transport: "isolated", synthetic: 1, disposition: "pending", rawText: null, currency: run.currency,
         upperMinor: paid ? upper : null, actualMinor: null, costState: paid ? "pending" : "none",
-        quotaAttemptId: paid ? attemptId : null, late: 0, createdAt: time,
+        quotaAttemptId: paid ? attemptId : null, late: 0, receipt: null, createdAt: time,
       };
       await monitoring.insertAttempt(attempt);
       const request: SamplingRequest = {
         slotId: slot.id, questionId: slot.questionId, channelId: slot.channelId, ordinal: attempt.ordinal,
-        questionText: questionText.get(slot.questionId), requestedNetworkMode: run.requestedNetworkMode,
+        requestedNetworkMode: run.requestedNetworkMode,
         upperMinor: run.upperMinor, currency: run.currency, now: time,
         capability: channel ? {
           channelId: channel.channelId, version: channel.version, kind: channel.kind, status: channel.status,
@@ -321,27 +334,224 @@ export async function executeMonitoringRun(
           verifiedAt: channel.verifiedAt, expiresAt: channel.expiresAt,
         } : undefined,
       };
-      let sample: IsolatedSample | OfficialSample;
+      let sample: IsolatedSample;
       try {
         sample = await transport.sample(request);
       } catch {
-        sample = official ? unknownOfficialSample() : { disposition: "unknown", synthetic: true };
-      }
-      if (official ? sample.synthetic : !sample.synthetic) {
-        sample = official ? unknownOfficialSample() : { disposition: "unknown", synthetic: true };
+        sample = { disposition: "unknown", synthetic: true };
       }
       await applySample(monitoring, quota, run, slot, attempt, sample, time, usage);
-      if (!sample.synthetic && sample.disposition !== "safe_failure") {
-        const facts = officialNetworkFacts(sample.networkTrigger, channel.searchRequired === 1 ? 1 : 0);
-        await capabilityDao.insertAnswerNetwork({
-          id: randomUUID(), brandId: run.brandId, channelId: slot.channelId, channelVersion: slot.channelVersion,
-          requestedNetworkMode: run.requestedNetworkMode, ...facts, createdAt: time,
-        }, ownerId);
-      }
     }
     if (options.failBeforeCommit) throw new Error("forced-rollback");
     return persist(monitoring, ownerId, run.id, false, pausedForBudget);
   });
+}
+
+const terminalSlot = new Set(["succeeded", "failed", "cancelled", "reconciliation_required"]);
+
+function channelGate(channel: {
+  channelId: string;
+  kind: string;
+  status: string;
+  productEntry: string;
+  modelVersion: string;
+  verifiedAt: string | null;
+  expiresAt: string | null;
+}) {
+  return {
+    channelId: channel.channelId,
+    kind: channel.kind,
+    status: channel.status,
+    productEntry: channel.productEntry,
+    modelVersion: channel.modelVersion,
+    verifiedAt: channel.verifiedAt,
+    expiresAt: channel.expiresAt,
+  };
+}
+
+async function executeOfficialMonitoringRun(
+  connection: DatabaseConnection,
+  ownerId: string,
+  runId: string,
+  transport: OfficialSamplingPort,
+  now: () => string,
+  options: { crashAfterClaim?: boolean },
+) {
+  const time = now();
+  const opened = await withLockedRun(connection, ownerId, runId, async (transaction, monitoring, quota, run) => {
+    if (run.status === "cancelled") return { kind: "result" as const, result: await persist(monitoring, ownerId, run.id, true) };
+    const slots = await monitoring.slots([run.id]);
+    const channels = await new CapabilityDao(transaction).latestByIds([...new Set(slots.map((slot) => slot.channelId))]);
+    const channelById = new Map(channels.map((channel) => [channel.channelId, channel]));
+    const pinned = slots.every((slot) => channelById.get(slot.channelId)?.version === slot.channelVersion);
+    if (!pinned || channels.length === 0) {
+      await monitoring.pauseQueued(run.id);
+      await persist(monitoring, ownerId, run.id, false);
+      return { kind: "result" as const, result: denied("CHANNEL_UNVERIFIED", "verify-channel") };
+    }
+    for (const channel of channels) {
+      const decision = transport.probe(channelGate(channel), time);
+      if (!decision.open && decision.code === "CHANNEL_UNVERIFIED") {
+        await monitoring.pauseQueued(run.id);
+        await persist(monitoring, ownerId, run.id, false);
+        return { kind: "result" as const, result: denied("CHANNEL_UNVERIFIED", "verify-channel") };
+      }
+      if (!decision.open) return { kind: "result" as const, result: denied("REAL_CHANNEL_CLOSED", "await-channel") };
+      if (run.track === "model_api" && !transport.priced(channel.modelVersion, run.currency)) {
+        await monitoring.pauseQueued(run.id);
+        await persist(monitoring, ownerId, run.id, false);
+        return { kind: "result" as const, result: denied("NO_TRUSTED_CEILING", "confirm-ceiling") };
+      }
+    }
+    if (run.track === "model_api" && !(await monitoring.emailVerified(ownerId))) {
+      await monitoring.pauseQueued(run.id);
+      await persist(monitoring, ownerId, run.id, false);
+      return { kind: "result" as const, result: denied("EMAIL_UNVERIFIED", "verify-email") };
+    }
+    const grant = run.track === "model_api" ? await quota.grant(run.brandId, "sampling") : null;
+    if (run.track === "model_api" && (!grant || grantState(grant, time) !== "active" || grant.currency !== run.currency || run.upperMinor === null)) {
+      await monitoring.pauseQueued(run.id);
+      await persist(monitoring, ownerId, run.id, false);
+      return { kind: "result" as const, result: denied(run.upperMinor === null ? "NO_TRUSTED_CEILING" : "NOT_ENTITLED", run.upperMinor === null ? "confirm-ceiling" : "request-quota") };
+    }
+    const prompt = await new PromptDao(transaction, run.brandId).version(run.promptSetId);
+    if (!prompt || slots.some((slot) => !prompt.content.questions.some((question) => question.id === slot.questionId && question.text.trim()))) {
+      return { kind: "result" as const, result: denied("NOT_READY") };
+    }
+    return { kind: "ready" as const };
+  });
+  if (!opened || "error" in opened) return opened;
+  if (opened.kind === "result") return opened.result;
+
+  const touched = new Set<string>();
+  for (;;) {
+    const step = await withLockedRun(connection, ownerId, runId, async (transaction, monitoring, quota, run) => {
+      if (run.status === "cancelled") return { kind: "done" as const, result: await persist(monitoring, ownerId, run.id, true) };
+      const slots = await monitoring.slots([run.id]);
+      const grouped = new Map<string, MonitoringAttemptRow[]>();
+      for (const attempt of await monitoring.attempts([run.id])) {
+        const list = grouped.get(attempt.slotId) ?? [];
+        list.push(attempt);
+        grouped.set(attempt.slotId, list);
+      }
+      const channels = await new CapabilityDao(transaction).latestByIds([...new Set(slots.map((slot) => slot.channelId))]);
+      const channelById = new Map(channels.map((channel) => [channel.channelId, channel]));
+      const grant = run.track === "model_api" ? await quota.grant(run.brandId, "sampling") : null;
+      const usage = run.track === "model_api" ? await monitoring.samplingUsage(run.brandId) : null;
+      const prompt = await new PromptDao(transaction, run.brandId).version(run.promptSetId);
+      const questionText = new Map(prompt?.content.questions.map((question) => [question.id, question.text.trim()]) ?? []);
+      for (const slot of slots) {
+        if (terminalSlot.has(slot.status) || touched.has(slot.id)) continue;
+        const sampling = (grouped.get(slot.id) ?? []).filter((attempt) => attempt.kind === "sampling");
+        const pending = sampling.find((attempt) => attempt.disposition === "pending");
+        const blocked = sampling.some((attempt) => attempt.disposition === "unknown" || attempt.disposition === "late");
+        if (pending && !blocked && attemptAge(pending.createdAt, time) < claimLeaseMs) continue;
+        if (pending || blocked) {
+          if (pending && slot.reservationId) {
+            await monitoring.updateAttempt({
+              id: pending.id, disposition: "unknown", rawText: pending.rawText, actualMinor: null, costState: "unknown", late: pending.late,
+            });
+            await quota.updateAttempt(attemptScope(run.brandId, slot.reservationId, pending.id), null, time);
+          }
+          await monitoring.setSlot(slot.id, "reconciliation_required", null, slot.late);
+          await persist(monitoring, ownerId, run.id, false);
+          return { kind: "reconciled" as const };
+        }
+        if (sampling.length >= 3) {
+          if (slot.reservationId) {
+            const totals = await quota.attemptTotals(reservationScope(run.brandId, slot.reservationId));
+            if (totals.unresolved === 0) await quota.finalize(reservationScope(run.brandId, slot.reservationId), "released", time);
+          }
+          await monitoring.setSlot(slot.id, "failed", null, slot.late);
+          await persist(monitoring, ownerId, run.id, false);
+          return { kind: "reconciled" as const };
+        }
+        const channel = channelById.get(slot.channelId);
+        if (!channel || channel.version !== slot.channelVersion || channel.kind !== run.track || formalRunEligibility(channel, time) !== "eligible") {
+          await monitoring.pauseQueued(run.id);
+          await persist(monitoring, ownerId, run.id, false);
+          return { kind: "done" as const, result: denied("CHANNEL_UNVERIFIED", "verify-channel") };
+        }
+        if (run.track === "model_api" && !transport.priced(channel.modelVersion, run.currency)) {
+          await monitoring.pauseQueued(run.id);
+          await persist(monitoring, ownerId, run.id, false);
+          return { kind: "done" as const, result: denied("NO_TRUSTED_CEILING", "confirm-ceiling") };
+        }
+        const text = questionText.get(slot.questionId);
+        if (!text) return { kind: "done" as const, result: denied("NOT_READY") };
+        const upper = run.upperMinor ?? 0;
+        if (run.track === "model_api" && sampling.length === 0 && grant && usage
+          && (usage.startedReservations + 1 > grant.countLimit || usage.knownActual + usage.pendingUpper + upper > grant.budgetMinor)) {
+          await monitoring.pauseQueued(run.id);
+          return { kind: "done" as const, result: await persist(monitoring, ownerId, run.id, false, true) };
+        }
+        const attemptId = randomUUID();
+        const paid = Boolean(slot.reservationId && run.currency);
+        if (paid && slot.reservationId && run.currency) {
+          const started = await startQuota(quota, run.brandId, slot.reservationId, attemptId, upper, run.currency, time);
+          if (started === "unresolved") {
+            await monitoring.setSlot(slot.id, "reconciliation_required", null, slot.late);
+            await persist(monitoring, ownerId, run.id, false);
+            return { kind: "reconciled" as const };
+          }
+          if (started !== "applied") {
+            await monitoring.pauseQueued(run.id);
+            return { kind: "done" as const, result: await persist(monitoring, ownerId, run.id, false, true) };
+          }
+        }
+        const attempt: MonitoringAttemptRow = {
+          id: attemptId, slotId: slot.id, runId: run.id, brandId: run.brandId, kind: "sampling", ordinal: sampling.length + 1,
+          transport: "official_api", synthetic: 0, disposition: "pending", rawText: null, currency: run.currency,
+          upperMinor: paid ? upper : null, actualMinor: null, costState: paid ? "pending" : "none",
+          quotaAttemptId: paid ? attemptId : null, late: 0, receipt: null, createdAt: time,
+        };
+        await monitoring.insertAttempt(attempt);
+        await monitoring.setSlot(slot.id, "running", null, slot.late);
+        await persist(monitoring, ownerId, run.id, false);
+        const request: SamplingRequest = {
+          slotId: slot.id, questionId: slot.questionId, channelId: slot.channelId, ordinal: attempt.ordinal,
+          questionText: text, requestedNetworkMode: run.requestedNetworkMode,
+          upperMinor: run.upperMinor, currency: run.currency, now: time,
+          capability: {
+            channelId: channel.channelId, version: channel.version, kind: channel.kind, status: channel.status,
+            productEntry: channel.productEntry, modelVersion: channel.modelVersion,
+            citationCapability: channel.citationCapability, searchRequired: channel.searchRequired === 1 ? 1 : 0,
+            verifiedAt: channel.verifiedAt, expiresAt: channel.expiresAt,
+          },
+        };
+        return { kind: "claimed" as const, attempt, slot, searchRequired: channel.searchRequired === 1 ? 1 as const : 0 as const, request };
+      }
+      return { kind: "done" as const, result: await persist(monitoring, ownerId, run.id, false) };
+    });
+    if (!step || "error" in step) return step;
+    if (step.kind === "reconciled") continue;
+    if (step.kind === "done") return step.result;
+    touched.add(step.slot.id);
+    if (options.crashAfterClaim) throw new Error("official-claim-crash");
+    let sample: OfficialSample;
+    try {
+      const value = await transport.sample(step.request);
+      sample = value.synthetic ? unknownOfficialSample() : value;
+    } catch {
+      sample = unknownOfficialSample();
+    }
+    const written = await withLockedRun(connection, ownerId, runId, async (transaction, monitoring, quota, run) => {
+      const current = (await monitoring.attempts([run.id])).find((item) => item.id === step.attempt.id);
+      const slot = (await monitoring.slots([run.id])).find((item) => item.id === step.slot.id);
+      if (!current || !slot) return denied("NOT_FOUND");
+      if (current.costState === "known" && current.disposition !== "pending") return persist(monitoring, ownerId, run.id, true);
+      await applySample(monitoring, quota, run, slot, current, sample, time, null);
+      if (sample.disposition !== "safe_failure") {
+        const facts = officialNetworkFacts(sample.networkTrigger, step.searchRequired);
+        await new CapabilityDao(transaction).insertAnswerNetwork({
+          id: randomUUID(), brandId: run.brandId, channelId: slot.channelId, channelVersion: slot.channelVersion,
+          requestedNetworkMode: run.requestedNetworkMode, ...facts, createdAt: time,
+        }, ownerId);
+      }
+      return persist(monitoring, ownerId, run.id, false);
+    });
+    if (!written || "error" in written) return written;
+  }
 }
 
 export async function pauseMonitoringRun(connection: DatabaseConnection, ownerId: string, runId: string) {
@@ -397,7 +607,7 @@ export async function redoMonitoringAnalysis(connection: DatabaseConnection, own
     await monitoring.insertAttempt({
       id: randomUUID(), slotId: slot.id, runId: run.id, brandId: run.brandId, kind: "analysis", ordinal: analyses.length + 1,
       transport: adopted.transport, synthetic: adopted.synthetic, disposition: "analysis_reuse", rawText: adopted.rawText,
-      currency: null, upperMinor: null, actualMinor: null, costState: "none", quotaAttemptId: null, late: 0, createdAt: now(),
+      currency: null, upperMinor: null, actualMinor: null, costState: "none", quotaAttemptId: null, late: 0, receipt: null, createdAt: now(),
     });
     return persist(monitoring, ownerId, run.id, false);
   });

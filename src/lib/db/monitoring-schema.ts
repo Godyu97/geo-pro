@@ -92,6 +92,7 @@ export const monitoringAttempt = pgTable("monitoring_attempt", {
   quotaAttemptId: text("quota_attempt_id"),
   late: integer("late").notNull().default(0),
   createdAt: text("created_at").notNull(),
+  receipt: text("receipt"),
 }, (table) => [
   foreignKey({ name: "monitoring_attempt_slot_fk", columns: [table.slotId], foreignColumns: [monitoringSlot.id] }).onDelete("cascade"),
   uniqueIndex("monitoring_attempt_ordinal_uidx").on(table.slotId, table.kind, table.ordinal),

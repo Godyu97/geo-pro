@@ -11,6 +11,7 @@ import { IngestEvidenceButton } from "../evidence/ingest-button";
 import { EvidenceDao } from "../evidence/dao";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockEvidenceButton, ExecuteMockRunButton } from "@/features/functional-mock/run-buttons";
+import { parseOfficialReceipt } from "@/lib/ai/official-sampling";
 import { formatMinorUnits } from "./format";
 import { RunControls } from "./run-controls";
 import { readOwnedRun } from "./service";
@@ -117,8 +118,14 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
         pending: formatNumber(locale, counts.pending), waiting: formatNumber(locale, counts.waiting),
         cancelled: formatNumber(locale, counts.cancelled),
       })}</p>
-      <p className="text-sm text-muted-foreground">{t("realChannelClosed")}</p>
-      <p className="text-sm text-muted-foreground">{t("isolatedNote")}</p>
+      {result.track === "model_api" && !mockRun ? (
+        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("executeOfficialNote")}</p>
+      ) : result.track === "consumer_ui" ? (
+        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("consumerManualNote")}</p>
+      ) : (
+        <p className="text-sm text-muted-foreground">{t("realChannelClosed")}</p>
+      )}
+      {result.track !== "model_api" && <p className="text-sm text-muted-foreground">{t("isolatedNote")}</p>}
       {mockRun && (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">{t("executeMockNote")}</p>
@@ -191,15 +198,31 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
                   </td>
                   <td className="py-2 wrap-anywhere">
                     {attempts.length === 0 && t("noAttempts")}
-                    {attempts.map((attempt) => (
-                      <div key={attempt.id} className="mb-2">
-                        <p>{t("attemptLabel", { ordinal: formatNumber(locale, attempt.ordinal) })}</p>
-                        {attempt.synthetic === 1 && <p>{t("syntheticResult")}</p>}
-                        {attempt.late === 1 && <p>{t("lateResult")}</p>}
-                        <p>{attempt.actualMinor === null || !result.currency ? attempt.costState === "none" ? t("costNone") : t("actualUnknown") : t("costKnown", { amount: formatMinorUnits(locale, attempt.actualMinor, result.currency) })}</p>
-                        {attempt.rawText && <p>{t("rawLabel")}: {attempt.rawText}</p>}
-                      </div>
-                    ))}
+                    {attempts.map((attempt) => {
+                      const receipt = parseOfficialReceipt(attempt.receipt);
+                      const citationLabel = {
+                        complete: "citationComplete", partial: "citationPartial", missing: "citationMissing", unsupported: "citationUnsupported",
+                      } as const;
+                      const triggerLabel = {
+                        triggered: "networkTriggerTriggered", not_triggered: "networkTriggerNotTriggered", unknown: "networkTriggerUnknown",
+                      } as const;
+                      return (
+                        <div key={attempt.id} className="mb-2">
+                          <p>{t("attemptLabel", { ordinal: formatNumber(locale, attempt.ordinal) })}</p>
+                          {attempt.synthetic === 1 && <p>{t("syntheticResult")}</p>}
+                          {attempt.transport === "official_api" && <p>{t("officialAttempt")}</p>}
+                          {attempt.late === 1 && <p>{t("lateResult")}</p>}
+                          <p>{attempt.actualMinor === null || !result.currency ? attempt.costState === "none" ? t("costNone") : t("actualUnknown") : t("costKnown", { amount: formatMinorUnits(locale, attempt.actualMinor, result.currency) })}</p>
+                          {receipt?.responseId && <p className="break-all">{t("responseLocator", { id: receipt.responseId })}</p>}
+                          {receipt && <p>{t(triggerLabel[receipt.networkTrigger])}</p>}
+                          {receipt && <p>{t("citationState", { state: t(citationLabel[receipt.citationSetState]) })}</p>}
+                          {receipt?.citations.map((citation) => (
+                            <p key={`${attempt.id}-${citation.position}`} className="break-all">{t("citationLink", { position: formatNumber(locale, citation.position), url: citation.url })}</p>
+                          ))}
+                          {attempt.rawText && <p>{t("rawLabel")}: {attempt.rawText}</p>}
+                        </div>
+                      );
+                    })}
                     {slot.status === "succeeded" && (
                       evidenceBySlot.get(slot.id)
                         ? <Link className="text-sm underline underline-offset-4" href={`/dashboard/monitoring/evidence/${evidenceBySlot.get(slot.id)}`} prefetch={false}>{te("openEvidence")}</Link>
@@ -228,6 +251,7 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
           id: attempt.id,
           questionText: result.slots.find((slot) => slot.id === attempt.slotId)?.questionText ?? attempt.slotId,
         }))}
+        official={result.track === "model_api" && !mockRun}
       />
       <Link className="inline-block text-sm underline underline-offset-4" href="/dashboard/monitoring/new" prefetch={false}>{t("back")}</Link>
     </div>

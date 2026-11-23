@@ -80,6 +80,7 @@ export const runControlSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("continue") }),
   z.strictObject({ action: z.literal("cancel") }),
   z.strictObject({ action: z.literal("execute-mock") }),
+  z.strictObject({ action: z.literal("execute") }),
   z.strictObject({ action: z.literal("redo-analysis"), slotId: brandIdSchema }),
   z.strictObject({
     action: z.literal("reconcile"),

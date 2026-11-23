@@ -468,6 +468,7 @@ CREATE TABLE `monitoring_attempt` (
 	`quota_attempt_id` text,
 	`late` integer DEFAULT 0 NOT NULL,
 	`created_at` text NOT NULL,
+	`receipt` text,
 	FOREIGN KEY (`slot_id`) REFERENCES `monitoring_slot`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "monitoring_attempt_state_check" CHECK("monitoring_attempt"."ordinal" between 1 and 20 and "monitoring_attempt"."synthetic" in (0, 1) and "monitoring_attempt"."late" in (0, 1)
     and "monitoring_attempt"."transport" in ('isolated', 'official_api')

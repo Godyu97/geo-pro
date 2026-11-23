@@ -470,6 +470,13 @@
       "when": 1795423250319,
       "tag": "0066_busy_aaron_stack",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1795437980344,
+      "tag": "0067_chief_queen_noir",
+      "breakpoints": true
     }
   ]
 }

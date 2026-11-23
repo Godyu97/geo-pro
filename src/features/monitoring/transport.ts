@@ -49,6 +49,7 @@ export type OfficialProbe =
 export type OfficialSamplingPort = {
   label: "official_api";
   probe(channel: OfficialChannelGate, now: string): OfficialProbe;
+  priced(model: string, currency: string | null): boolean;
   sample(input: SamplingRequest): Promise<OfficialSample>;
 };
 
@@ -57,6 +58,9 @@ export function closedOfficialPort(): OfficialSamplingPort {
     label: "official_api",
     probe() {
       return { open: false, code: "REAL_CHANNEL_CLOSED" };
+    },
+    priced() {
+      return false;
     },
     sample() {
       return Promise.reject(new Error("REAL_CHANNEL_CLOSED"));
