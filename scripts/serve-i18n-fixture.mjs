@@ -22,7 +22,7 @@ const probes = {
   loading: 'export default async function Probe() { await new Promise(resolve => setTimeout(resolve, 1500)); return <p>Ready</p>; }',
   unavailable: `import { AuthForm } from "@/components/layout/auth-form";
 import { getLocale, getMessages } from "@/lib/i18n/server";
-export default async function Probe() { const locale = await getLocale(); return <main id="main-content"><AuthForm initialMode="login" configured={false} messages={getMessages(locale).auth} returnTo="/dashboard" /></main>; }`,
+export default async function Probe() { const locale = await getLocale(); return <main id="main-content"><AuthForm configured={false} messages={getMessages(locale).auth} returnTo="/dashboard" /></main>; }`,
   fatal: 'export default function Probe() { return null; }',
 };
 for (const [name, source] of Object.entries(probes)) {

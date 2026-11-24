@@ -4,7 +4,7 @@ import { useState } from "react";
 import { LoaderCircle, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { authClient } from "@/lib/auth/client";
+import { signOutTo } from "@/lib/auth/client";
 import { safeReturnTo } from "@/lib/auth/return-to";
 import { useLocale } from "@/lib/i18n/client";
 
@@ -17,19 +17,9 @@ export function SignOutButton({ returnTo, label }: { returnTo?: string; label?: 
     setPending(true);
     setError(false);
 
-    try {
-      // This document is replaced on success. Suppress the SDK signal so its
-      // anonymous-session notification cannot race the explicit sign-out URL.
-      const result = await authClient.signOut({ fetchOptions: { disableSignal: true } });
-      if (result.error) {
-        setError(true);
-        return;
-      }
-      const target = returnTo ? "/login?" + new URLSearchParams({ returnTo: safeReturnTo(returnTo) }) : "/login";
-      window.location.replace(target);
-    } catch {
+    const target = returnTo ? "/login?" + new URLSearchParams({ returnTo: safeReturnTo(returnTo) }) : "/login";
+    if (!await signOutTo(target)) {
       setError(true);
-    } finally {
       setPending(false);
     }
   }

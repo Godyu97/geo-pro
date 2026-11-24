@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
 import postgres from "postgres";
 import { registerTestAccount } from "./auth-helpers";
+import { publishedRetentionVersion } from "./retention-version";
 
 const baseURL = "http://localhost:3100";
 const brandName = "北岸设备";
@@ -107,6 +108,7 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
   let outsiderId = "";
   let channelIds: string[] = [];
   try {
+    const policyVersion = publishedRetentionVersion();
     const registered = await registerTestAccount(context, { name: "北岸验收", email, password });
     expect(registered.status()).toBe(200);
     userId = (await registered.json()).user.id;
@@ -120,7 +122,7 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     await page.getByRole("button", { name: "下一步", exact: true }).click();
     await page.getByLabel("竞品", { exact: true }).fill("远帆设备");
     await page.getByRole("button", { name: "下一步", exact: true }).click();
-    await page.getByRole("checkbox", { name: /我接受保留策略版本/ }).check();
+    await page.getByRole("checkbox", { name: `我接受保留策略版本 ${policyVersion}`, exact: true }).check();
     await page.getByRole("button", { name: "保存品牌", exact: true }).click();
     await expect(page.getByRole("heading", { name: brandName, exact: true })).toBeVisible();
     await expect(page.getByText("本地验收 · 合成资料", { exact: true })).toBeVisible();
@@ -137,7 +139,11 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
       }
     }
 
-    await page.goto(`/dashboard/brands/${brandId}/questions`);
+    const sidebar = page.getByRole("navigation", { name: "工作台导航" });
+    const questionsLink = sidebar.getByRole("link", { name: "提示词问题库", exact: true });
+    await questionsLink.click();
+    await expect(page).toHaveURL(`/dashboard/brands/${brandId}/questions`);
+    await expect(questionsLink).toHaveAttribute("aria-current", "page");
     await page.getByLabel("问题簇 1 受众", { exact: true }).fill("连锁门店设备负责人");
     await page.getByLabel("问题簇 1 意图", { exact: true }).fill("比较巡检与报修条件");
     await page.getByLabel("主页面（可待补）", { exact: true }).fill(`${website}/faq`);
@@ -425,7 +431,10 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     });
     expect(report.status()).toBe(200);
     expect((await report.json()).loopCompleted).toBe(true);
-    await page.goto(`/dashboard/reports?brandId=${brandId}`);
+    const reportsLink = sidebar.getByRole("link", { name: "复测与报告", exact: true });
+    await reportsLink.click();
+    await expect(page).toHaveURL("/dashboard/reports");
+    await expect(reportsLink).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("diagnostic")).toBeVisible();
     await expect(page.getByRole("navigation", { name: "相关入口" })).toBeVisible();
     await expect(page.getByText("闭环 是")).toBeVisible();
@@ -454,7 +463,7 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
       `/dashboard/monitoring/runs/${runId}`,
       "/dashboard/monitoring/overview",
       "/dashboard/content",
-      `/dashboard/reports?brandId=${brandId}`,
+      "/dashboard/reports",
     ];
     for (const locale of ["zh-CN", "en"] as const) {
       await context.addCookies([{ name: "geo-locale", value: locale, url: baseURL }]);
@@ -462,13 +471,6 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
       expect(await probe.text()).toContain(`<html lang="${locale}"`);
       for (const width of [375, 768, 1440]) {
         await page.setViewportSize({ width, height: 900 });
-        if (width === 375) {
-          await page.goto("/dashboard/reports");
-          await expect(page.getByRole("heading", { name: locale === "en" ? "Retest & reports" : "复测与报告" })).toBeVisible();
-          await expect(page.getByRole("link", { name: locale === "en" ? "Go to brands" : "前往品牌资料" })).toBeVisible();
-          await expect(page.locator("main")).toHaveCount(1);
-          await expectNoOverflow(page);
-        }
         for (const path of paths) {
           await page.goto(path);
           await expect(page.locator("html")).toHaveAttribute("lang", locale);

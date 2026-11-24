@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getAuthEnvironment } from "@/lib/auth/env";
 import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { acceptMonitoringRun, previewMonitoringRun, readMonitoringRun } from "./commands";
@@ -28,14 +29,14 @@ async function failure(code: MonitoringError, traceId?: string, next?: string | 
   );
 }
 
-async function requireSameOrigin(request: Request) {
+async function requireTrustedOrigin(request: Request) {
   const session = await getSessionState();
   if (session.status !== "authenticated") {
     return { error: await failure(session.status === "anonymous" ? "SESSION_REQUIRED" : "SERVICE_UNAVAILABLE") };
   }
   try {
     const origin = new URL(getAuthEnvironment().BETTER_AUTH_URL).origin;
-    if (request.headers.get("origin") !== origin) return { error: await failure("FORBIDDEN") };
+    if (!isAllowedApiOrigin(request, origin)) return { error: await failure("FORBIDDEN") };
     return { session, secret: getAuthEnvironment().BETTER_AUTH_SECRET };
   } catch {
     return { error: await failure("SERVICE_UNAVAILABLE", randomUUID()) };
@@ -43,7 +44,7 @@ async function requireSameOrigin(request: Request) {
 }
 
 export async function monitoringRunResponse(request: Request) {
-  const gate = await requireSameOrigin(request);
+  const gate = await requireTrustedOrigin(request);
   if ("error" in gate) return gate.error;
   try {
     const body = await readBoundedJson(request, 8192);
@@ -67,7 +68,7 @@ export async function monitoringRunResponse(request: Request) {
 }
 
 export async function monitoringRunControlResponse(request: Request, runId: string) {
-  const gate = await requireSameOrigin(request);
+  const gate = await requireTrustedOrigin(request);
   if ("error" in gate) return gate.error;
   try {
     const body = await readBoundedJson(request, 8192);
@@ -96,7 +97,7 @@ export async function monitoringRunControlResponse(request: Request, runId: stri
 }
 
 export async function monitoringRunReadResponse(request: Request, runId: string) {
-  const gate = await requireSameOrigin(request);
+  const gate = await requireTrustedOrigin(request);
   if ("error" in gate) return gate.error;
   if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
   const result = await readMonitoringRun(getConnection(), gate.session.session.user.id, runId);

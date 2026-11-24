@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
-import { authClient } from "@/lib/auth/client";
+import { authClient, pendingSignOut } from "@/lib/auth/client";
 import { loginPath } from "@/lib/auth/return-to";
 import { useLocale } from "@/lib/i18n/client";
 
@@ -34,15 +34,25 @@ export function SessionMonitor({ userId }: { userId: string }) {
 
   useEffect(() => {
     if (isPending) return;
-    if ((!data && !error) || error?.status === 401) {
-      window.location.replace(loginPath(
-        `${window.location.pathname}${window.location.search}${window.location.hash}`,
-        "session-required",
-      ));
-    } else if (data && data.user.id !== userId) {
-      // Another tab changed identity: discard the previous user's server UI.
-      window.location.reload();
-    }
+    const expired = (!data && !error) || error?.status === 401;
+    const changed = Boolean(data && data.user.id !== userId);
+    if (!expired && !changed) return;
+
+    let current = true;
+    // A focus or cross-tab check can complete while the sign-out response is in flight.
+    void Promise.resolve(pendingSignOut()).then((signedOut) => {
+      if (!current || signedOut) return;
+      if (expired) {
+        window.location.replace(loginPath(
+          `${window.location.pathname}${window.location.search}${window.location.hash}`,
+          "session-required",
+        ));
+      } else {
+        // Identity changed in another tab. Discard this document's server UI.
+        window.location.reload();
+      }
+    });
+    return () => { current = false; };
   }, [data, error, isPending, userId]);
 
   if (!error || error.status === 401) return null;

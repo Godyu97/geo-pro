@@ -2,6 +2,7 @@ import "server-only";
 
 import { getConnection } from "@/lib/db/connection";
 import { requireSession } from "@/lib/auth/session";
+import { allowsOptionalApiOrigin } from "@/lib/http/web-cors";
 import { getTranslator } from "@/lib/i18n/server";
 import {
   confirmActionDraft,
@@ -24,16 +25,6 @@ import {
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie, Accept-Language" };
 
-function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-  try {
-    return new URL(origin).origin === new URL(request.url).origin;
-  } catch {
-    return false;
-  }
-}
-
 async function errorResponse(code: OptimizationError, status = optimizationErrors[code]) {
   const t = await getTranslator("optimization");
   return Response.json({
@@ -46,7 +37,7 @@ async function errorResponse(code: OptimizationError, status = optimizationError
 }
 
 export async function optimizationListResponse(request: Request) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
 
@@ -65,7 +56,7 @@ export async function optimizationListResponse(request: Request) {
 }
 
 export async function optimizationDetailResponse(request: Request, taskId: string) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
 
@@ -75,7 +66,7 @@ export async function optimizationDetailResponse(request: Request, taskId: strin
 }
 
 export async function optimizationWriteResponse(request: Request) {
-  if (!sameOrigin(request) || request.method !== "POST") return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request) || request.method !== "POST") return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
 

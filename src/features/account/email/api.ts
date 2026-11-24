@@ -6,6 +6,7 @@ import { getAuthEnvironment, isAuthConfigured } from "@/lib/auth/env";
 import { isTrustedAppOrigin } from "@/lib/auth/origin";
 import { getConnection } from "@/lib/db/connection";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
+import { getWebCorsConfig } from "@/lib/http/web-cors";
 import { getLocale } from "@/lib/i18n/server";
 import { emailConfirm, emailRequest, type EmailOutcome } from "./contracts";
 import { reserveMailRequest } from "./dao";
@@ -22,7 +23,7 @@ export async function accountEmailResponse(request: Request) {
   if (!isAuthConfigured()) return respond("unavailable", 503);
   const auth = getAuthEnvironment();
   const origin = new URL(auth.BETTER_AUTH_URL).origin;
-  if (!isTrustedAppOrigin(auth.BETTER_AUTH_URL, request)) return respond("invalidInput", 403);
+  if (!isTrustedAppOrigin(auth.BETTER_AUTH_URL, request, getWebCorsConfig().origins)) return respond("invalidInput", 403);
 
   const body = await readBoundedJson(request, 12 * 1024);
   const mail = emailRequest.safeParse(body);

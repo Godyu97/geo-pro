@@ -29,6 +29,12 @@ pnpm dev
 
 用 `BETTER_AUTH_URL` 对应的主机访问 `/`、`/login` 和 `/dashboard`。`/api/health` 仅用于存活检查。开发期真实数据联调见 [品牌管理与 AI 品牌监测计划](docs/tasks/brand-monitoring-next.md)，正式开放条件见 [M0 运行手册](docs/operations/m0-runbook.md)。
 
+### Web API 跨域
+
+独立前端调用 GeoPro 的 `/api/*` 时，在 GeoPro 服务端设置 `GEO_WEB_ALLOWED_ORIGINS` 并重启。例如 API 运行于 `http://localhost:3000`，前端运行于 `http://localhost:3001`，则填 `http://localhost:3001`。多个来源用逗号分隔，逐一填写可信前端的协议、域名及非默认端口。默认留空。
+
+前端调用登录和需要会话的接口时，为 `fetch` 设置 `credentials: "include"`。同站子域或同一主机的不同端口可以沿用默认 Cookie 策略。前端和 API 分属不同站点且依赖 Cookie 时，API 须使用 HTTPS，并设置 `GEO_WEB_CROSS_SITE_COOKIES=true`。实际能否保存和发送 Cookie 取决于浏览器的第三方 Cookie 策略。
+
 ## 质量检查
 
 ```bash

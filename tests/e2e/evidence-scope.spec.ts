@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { registerTestAccount } from "./auth-helpers";
+import { publishedRetentionVersion } from "./retention-version";
 
 const baseURL = "http://localhost:3100";
 const day = "2026-11-20T08:00:00.000Z";
@@ -105,6 +106,7 @@ test("evidence scope stays on overview, answers and detail in both locales", asy
     officialLater: randomUUID(),
   };
   try {
+    const policyVersion = publishedRetentionVersion();
     const registered = await registerTestAccount(context, { name: "范围验收", email, password });
     expect(registered.status()).toBe(200);
     userId = (await registered.json()).user.id as string;
@@ -118,7 +120,7 @@ test("evidence scope stays on overview, answers and detail in both locales", asy
     await page.getByRole("button", { name: "下一步", exact: true }).click();
     await page.getByLabel("竞品", { exact: true }).fill("对照品牌");
     await page.getByRole("button", { name: "下一步", exact: true }).click();
-    await page.getByRole("checkbox", { name: /我接受保留策略版本/ }).check();
+    await page.getByRole("checkbox", { name: `我接受保留策略版本 ${policyVersion}`, exact: true }).check();
     await page.getByRole("button", { name: "保存品牌", exact: true }).click();
     await expect(page.getByRole("heading", { name: "范围样本品牌", exact: true })).toBeVisible();
     const brandId = page.url().match(/\/brands\/([0-9a-f-]{36})/)?.[1];

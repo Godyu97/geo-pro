@@ -1,8 +1,8 @@
-import { ArrowDown, Leaf, ShieldCheck } from "lucide-react";
+import { ArrowDown, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { headers } from "next/headers";
 
-import { getModuleLinks } from "@/components/layout/module-links";
+import { getModuleLinks, workspaceEntryHrefs } from "@/components/layout/module-links";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,7 +11,6 @@ import { requireSession } from "@/lib/auth/session";
 import { MonitoringCapabilityPanel } from "@/features/capabilities/settings-panel";
 import { brandIntakeDecision } from "@/features/brands/intake";
 import { WorkspaceHomePanel } from "@/features/evidence/workspace-home-panel.tsx";
-import { workspaceEntryHrefs } from "@/features/evidence/workspace-home.ts";
 
 export default async function DashboardPage() {
   // Each protected page checks the session, including RSC navigation requests.
@@ -25,23 +24,22 @@ export default async function DashboardPage() {
   const brandFixture = intake?.mode === "fixture";
   const brandReal = intake?.mode === "real";
   const brandMock = intake?.mode === "mock";
-  let moduleStatus = t("unavailable");
-  let moduleDescription: string | null = null;
+  let brandStatus = t("unavailable");
+  let brandDescription: string | null = null;
   if (brandDenied) {
-    moduleStatus = brands("devDeniedStatus");
-    moduleDescription = brands("devActorDeniedDescription");
+    brandStatus = brands("devDeniedStatus");
+    brandDescription = brands("devActorDeniedDescription");
   } else if (brandFixture) {
-    moduleStatus = brands("fixtureStatus");
-    moduleDescription = brands("pageDescription");
+    brandStatus = brands("fixtureStatus");
   } else if (brandReal) {
-    moduleStatus = brands("realStatus");
-    moduleDescription = brands("realDescription");
+    brandStatus = brands("realStatus");
+    brandDescription = brands("realDescription");
   } else if (brandMock) {
-    moduleStatus = brands("mockStatus");
-    moduleDescription = brands("mockDescription");
+    brandStatus = brands("mockStatus");
+    brandDescription = brands("mockDescription");
   } else if (intake?.mode === "dev") {
-    moduleStatus = brands("devStatus");
-    moduleDescription = brands("devDescription");
+    brandStatus = brands("devStatus");
+    brandDescription = brands("devDescription");
   }
   const moduleLinks = getModuleLinks(getMessages(locale).modules);
 
@@ -75,19 +73,11 @@ export default async function DashboardPage() {
         <MonitoringCapabilityPanel locale={locale} />
       </section>
       <section id="modules" aria-labelledby="modules-title">
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <h2 id="modules-title" className="text-lg font-semibold">
-            {t("workspaceModules")}
-          </h2>
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Leaf className="size-3.5 text-primary" aria-hidden="true" />
-            {t("improving")}
-          </span>
-        </div>
+        <h2 id="modules-title" className="mb-5 text-lg font-semibold">
+          {t("workspaceModules")}
+        </h2>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {moduleLinks.map(({ id, title, icon: Icon, description, empty }) => {
-            const brandEntry = id === "brands" && Boolean(intake);
-            const href = moduleHref(id);
+          {moduleLinks.map(({ id, title, icon: Icon, description }) => {
             return (
               <Card key={id} id={id} className="scroll-mt-6 shadow-none">
                 <CardContent className="p-6">
@@ -95,21 +85,17 @@ export default async function DashboardPage() {
                     <span className="flex size-10 items-center justify-center rounded-xl bg-secondary text-primary">
                       <Icon className="size-5" aria-hidden="true" />
                     </span>
-                    <Badge variant="outline" className="font-normal text-muted-foreground">
-                      {moduleStatus}
-                    </Badge>
+                    {id === "brands" && (
+                      <Badge variant="outline" className="font-normal text-muted-foreground">{brandStatus}</Badge>
+                    )}
                   </div>
                   <h3 className="font-medium">{title}</h3>
                   <p className="mt-2 min-h-14 text-sm leading-7 text-muted-foreground">
-                    {moduleDescription ?? description}
+                    {id === "brands" ? brandDescription ?? description : description}
                   </p>
-                  {href ? (
-                    <Link href={href} prefetch={false} className="mt-5 inline-flex border-t pt-4 text-sm font-medium underline-offset-4 hover:underline">
-                      {t("openEntry", { title })}
-                    </Link>
-                  ) : !brandEntry ? (
-                    <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">{empty}</p>
-                  ) : null}
+                  <Link href={workspaceEntryHrefs[id]} prefetch={false} className="mt-5 inline-flex border-t pt-4 text-sm font-medium underline-offset-4 hover:underline">
+                    {t("openEntry", { title })}
+                  </Link>
                 </CardContent>
               </Card>
             );
@@ -118,17 +104,4 @@ export default async function DashboardPage() {
       </section>
     </div>
   );
-}
-
-function moduleHref(id: string) {
-  switch (id) {
-    case "brands":
-    case "monitoring":
-    case "optimization":
-    case "content":
-    case "reports":
-      return workspaceEntryHrefs[id];
-    default:
-      return null;
-  }
 }

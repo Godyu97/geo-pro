@@ -2,6 +2,7 @@ import "server-only";
 
 import { getConnection } from "@/lib/db/connection";
 import { requireSession } from "@/lib/auth/session";
+import { allowsOptionalApiOrigin } from "@/lib/http/web-cors";
 import { getTranslator } from "@/lib/i18n/server";
 import {
   generateReport,
@@ -20,16 +21,6 @@ import {
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie, Accept-Language" };
 
-function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-  try {
-    return new URL(origin).origin === new URL(request.url).origin;
-  } catch {
-    return false;
-  }
-}
-
 async function errorResponse(code: ReportError, status = reportErrors[code]) {
   const t = await getTranslator("reports");
   return Response.json({
@@ -42,7 +33,7 @@ async function errorResponse(code: ReportError, status = reportErrors[code]) {
 }
 
 export async function reportsListResponse(request: Request) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
 
@@ -56,7 +47,7 @@ export async function reportsListResponse(request: Request) {
 }
 
 export async function reportsWriteResponse(request: Request) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
 
@@ -82,7 +73,7 @@ export async function reportsWriteResponse(request: Request) {
 }
 
 export async function reportSnapshotResponse(request: Request, snapshotId: string, format: "json" | "html" = "json") {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
 

@@ -3,6 +3,7 @@ import "server-only";
 import { z } from "zod";
 import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { executeBrandCommand } from "./commands";
@@ -65,7 +66,7 @@ export async function writeBrandResponse(request: Request) {
   if (session.status !== "authenticated") return fail(session.status === "anonymous" ? "SESSION_REQUIRED" : "SERVICE_UNAVAILABLE");
   const intake = await intakeGate(request, session.session.user.email);
   if (intake instanceof Response) return intake;
-  if (request.headers.get("origin") !== intake.origin) return fail("FORBIDDEN");
+  if (!isAllowedApiOrigin(request, intake.origin)) return fail("FORBIDDEN");
 
   const command = brandCommandSchema.safeParse(await readBoundedJson(request, 48 * 1024));
   if (!command.success) {

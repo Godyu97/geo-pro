@@ -4,6 +4,7 @@ import { setTimeout } from "node:timers/promises";
 import nextEnv from "@next/env";
 import { parseDatabaseConfig } from "../src/lib/db/config.ts";
 import { openConnection } from "../src/lib/db/connection.ts";
+import { getWebCorsConfig } from "../src/lib/http/web-cors.ts";
 import { MaintenanceDao } from "../src/features/maintenance/dao.ts";
 
 nextEnv.loadEnvConfig(process.cwd());
@@ -80,6 +81,66 @@ async function expectRejectedSession(cookie) {
     method: "POST", cookie, body: { name: "MUST_NOT_BE_WRITTEN" },
   });
   assert.equal(write.status, 401, "无效会话不能绕过界面直接写入");
+}
+
+async function verifyWebCors(origin, cookie, crossSiteCookies) {
+  const untrusted = "https://untrusted.example.invalid";
+  const preflight = (requestOrigin, method, headers = "content-type") => request("/api/auth/update-user", {
+    method: "OPTIONS",
+    origin: requestOrigin,
+    headers: { "Access-Control-Request-Method": method, "Access-Control-Request-Headers": headers },
+  });
+  const allowed = await preflight(origin, "POST", "content-type, x-geo-profile-user");
+  assert.equal(allowed.status, 204);
+  assert.equal(allowed.headers.get("access-control-allow-origin"), origin);
+  assert.equal(allowed.headers.get("access-control-allow-credentials"), "true");
+  assert.match(allowed.headers.get("vary") ?? "", /\bAccess-Control-Request-Headers\b/i);
+  for (const denied of [
+    await preflight(untrusted, "POST"),
+    await preflight(origin, "DELETE"),
+    await preflight(origin, "POST", "x-unlisted"),
+  ]) {
+    assert.equal(denied.status, 403);
+    assert.equal(denied.headers.has("access-control-allow-origin"), false);
+  }
+
+  const authSession = await request("/api/auth/get-session", { origin, cookie });
+  assert.equal(authSession.headers.get("access-control-allow-origin"), origin);
+  assert.equal((await authSession.json()).user?.id, createdUserId);
+  const update = await request("/api/auth/update-user", {
+    method: "POST",
+    origin,
+    cookie,
+    headers: { "x-geo-profile-user": createdUserId },
+    body: { name: "Phase 0 验证" },
+  });
+  assert.equal(update.status, 200);
+  assert.equal(update.headers.get("access-control-allow-origin"), origin);
+
+  const overview = await request("/api/monitoring/overview", { origin, cookie });
+  assert.equal(overview.status, 400, "可信来源应通过业务来源校验，到达参数校验");
+  assert.equal(overview.headers.get("access-control-allow-origin"), origin);
+  assert.match(overview.headers.get("vary") ?? "", /\bOrigin\b/i);
+  assert.match(overview.headers.get("vary") ?? "", /\bAccept-Language\b/i);
+  const write = await request("/api/monitoring/runs", { method: "POST", origin, cookie, body: {} });
+  assert.equal(write.status, 400, "可信来源应通过业务写入的严格来源校验");
+  assert.equal(write.headers.get("access-control-allow-origin"), origin);
+  const anonymous = await request("/api/monitoring/overview", { origin });
+  assert.equal(anonymous.status, 401);
+  assert.equal(anonymous.headers.get("access-control-allow-origin"), origin);
+  const rejected = await request("/api/monitoring/overview", { origin: untrusted, cookie });
+  assert.equal(rejected.status, 403);
+  assert.equal(rejected.headers.has("access-control-allow-origin"), false);
+  if (crossSiteCookies) {
+    const rejectedForm = await request("/api/health", {
+      method: "POST", origin: untrusted, headers: { "sec-fetch-site": "cross-site" },
+    });
+    assert.equal(rejectedForm.status, 403);
+  }
+
+  const page = await request("/login", { origin });
+  assert.equal(page.headers.has("access-control-allow-origin"), false);
+  console.log("PASS: Web API 跨域预检、带会话读写、错误响应和来源隔离");
 }
 
 try {
@@ -172,6 +233,15 @@ try {
     (await request("/dashboard", { cookie: loginCookie })).status,
     200,
   );
+  const { origins, crossSiteCookies } = getWebCorsConfig();
+  const frontendOrigin = [...origins].find((origin) => origin !== baseURL.origin);
+  if (frontendOrigin) {
+    if (crossSiteCookies) {
+      assert.ok(signIn.headers.getSetCookie().some((value) =>
+        /session_token=.*;.*\bSameSite=None\b/i.test(value) && /;\s*Secure\b/i.test(value)));
+    }
+    await verifyWebCors(frontendOrigin, loginCookie, crossSiteCookies);
+  }
 
   const returnTarget = "/dashboard?filter=%E5%93%81%E7%89%8C#monitoring";
   const alreadySignedIn = await request(`/login?mode=signup&returnTo=${encodeURIComponent(returnTarget)}`, { cookie: loginCookie });

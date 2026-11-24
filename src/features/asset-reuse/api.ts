@@ -2,21 +2,12 @@ import "server-only";
 
 import { getConnection } from "@/lib/db/connection";
 import { requireSession } from "@/lib/auth/session";
+import { allowsOptionalApiOrigin } from "@/lib/http/web-cors";
 import { getTranslator } from "@/lib/i18n/server";
 import { readSourceOriginal } from "./commands.ts";
 import { sourceErrors, type SourceError } from "./contracts.ts";
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie, Accept-Language" };
-
-function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-  try {
-    return new URL(origin).origin === new URL(request.url).origin;
-  } catch {
-    return false;
-  }
-}
 
 async function errorResponse(code: SourceError) {
   const t = await getTranslator("sources");
@@ -37,7 +28,7 @@ function attachmentName(fileName: string) {
 }
 
 export async function sourceOriginalResponse(request: Request, brandId: string, id: string) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
   const loaded = await readSourceOriginal(getConnection(), session.user.id, { brandId, id });

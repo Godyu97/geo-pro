@@ -365,7 +365,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
   const languageName = new Intl.DisplayNames(locale, { type: "language" }).of(language);
   const rows = [
     { title: t("fieldDescription"), values: [description] },
-    { title: t("fieldWebsite"), values: [website || t("websiteNotApplicable")] },
+    { title: t("fieldWebsite"), values: website ? [website] : [] },
     { title: t("fieldAliases"), values: aliases },
     { title: t("fieldRegion"), values: [regionName + " (" + region + ")"] },
     { title: t("fieldLanguage"), values: [languageName + " (" + language + ")"] },

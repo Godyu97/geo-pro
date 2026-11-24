@@ -3,7 +3,17 @@ import {
 } from "lucide-react";
 import type { Messages } from "@/lib/i18n/server";
 
-// Navigation metadata only. No business data or routes are implied.
+export const workspaceEntryHrefs = {
+  brands: "/dashboard/brands",
+  monitoring: "/dashboard/monitoring/overview",
+  prompts: "/dashboard/brands/questions",
+  citations: "/dashboard/monitoring/answers",
+  competitors: "/dashboard/monitoring/competitors",
+  optimization: "/dashboard/optimization",
+  content: "/dashboard/content",
+  reports: "/dashboard/reports",
+} as const;
+
 export function getModuleLinks(messages: Messages["modules"]) {
   return [
     {
@@ -11,56 +21,48 @@ export function getModuleLinks(messages: Messages["modules"]) {
       icon: Building2,
       title: messages.brandsTitle,
       description: messages.brandsDescription,
-      empty: messages.brandsEmpty,
     },
     {
       id: "monitoring",
       icon: Radar,
       title: messages.monitoringTitle,
       description: messages.monitoringDescription,
-      empty: messages.monitoringEmpty,
     },
     {
       id: "prompts",
       icon: MessagesSquare,
       title: messages.promptsTitle,
       description: messages.promptsDescription,
-      empty: messages.promptsEmpty,
     },
     {
       id: "citations",
       icon: Link2,
       title: messages.citationsTitle,
       description: messages.citationsDescription,
-      empty: messages.citationsEmpty,
     },
     {
       id: "competitors",
       icon: UsersRound,
       title: messages.competitorsTitle,
       description: messages.competitorsDescription,
-      empty: messages.competitorsEmpty,
     },
     {
       id: "optimization",
       icon: WandSparkles,
       title: messages.optimizationTitle,
       description: messages.optimizationDescription,
-      empty: messages.optimizationEmpty,
     },
     {
       id: "content",
       icon: FilePenLine,
       title: messages.contentTitle,
       description: messages.contentDescription,
-      empty: messages.contentEmpty,
     },
     {
       id: "reports",
       icon: ChartNoAxesCombined,
       title: messages.reportsTitle,
       description: messages.reportsDescription,
-      empty: messages.reportsEmpty,
     },
   ] as const;
 }

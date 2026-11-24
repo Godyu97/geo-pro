@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { EvidenceDao } from "../../src/features/evidence/dao.ts";
 import { readEvidenceOverview } from "../../src/features/evidence/overview-commands.ts";
-import { readWorkspaceHome, workspaceEntryHrefs } from "../../src/features/evidence/workspace-home.ts";
+import { readWorkspaceHome } from "../../src/features/evidence/workspace-home.ts";
 import { analysisRuleVersion, fingerprintAnswer } from "../../src/features/evidence/rules.ts";
 import { functionalMockMarker } from "../../src/features/functional-mock/mode.ts";
 import { OptimizationDao } from "../../src/features/optimization/dao.ts";
@@ -21,16 +21,6 @@ const fields = {
   aliases: ["乙"], region: "CN", language: "zh-CN", competitors: [], questions: [],
 };
 const internalCodes = ["todo", "doing", "blocked", "implemented", "retest_pending", "closed", "dismissed", "urgent", "normal"];
-
-test("workspace entries stay on the existing brand, overview, optimization, content, and report routes", () => {
-  assert.deepEqual(workspaceEntryHrefs, {
-    brands: "/dashboard/brands",
-    monitoring: "/dashboard/monitoring/overview",
-    optimization: "/dashboard/optimization",
-    content: "/dashboard/content",
-    reports: "/dashboard/reports",
-  });
-});
 
 test("task labels in zh-CN and en are not internal status codes", () => {
   const tasks = [

@@ -92,12 +92,7 @@ export async function BrandMonitoringReadiness({
       <p className="leading-6 text-muted-foreground">{t("readinessDescription")}</p>
       {!historical && <p>{t("readinessEntity", { version: formatNumber(locale, brand.version) })}</p>}
       {report.officialCitation === "not-applicable" && <p>{t("websiteNotApplicable")}</p>}
-      {historical && (
-        <p>
-          {t("readinessHistorical")}{" "}
-          <Link className="underline underline-offset-4" href={`/dashboard/brands/${brand.id}`} prefetch={false}>{t("currentVersion")}</Link>
-        </p>
-      )}
+      {historical && <p>{t("readinessHistorical")}</p>}
       <p>{t("readinessNatural", {
         natural: formatNumber(locale, promptSet?.naturalCount ?? 0),
         required: formatNumber(locale, minimumNaturalQuestions),

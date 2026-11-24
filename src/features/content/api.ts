@@ -2,6 +2,7 @@ import "server-only";
 
 import { getConnection } from "@/lib/db/connection";
 import { requireSession } from "@/lib/auth/session";
+import { allowsOptionalApiOrigin } from "@/lib/http/web-cors";
 import { getTranslator } from "@/lib/i18n/server";
 import {
   approveContent,
@@ -51,16 +52,6 @@ import {
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie, Accept-Language" };
 
-function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-  try {
-    return new URL(origin).origin === new URL(request.url).origin;
-  } catch {
-    return false;
-  }
-}
-
 async function errorResponse(
   code: ContentError,
   status = contentErrors[code],
@@ -80,7 +71,7 @@ async function errorResponse(
 }
 
 export async function contentListResponse(request: Request) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
 
@@ -94,7 +85,7 @@ export async function contentListResponse(request: Request) {
 }
 
 export async function contentBriefResponse(request: Request, briefId: string) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
   const result = await readBriefDetail(getConnection(), session.user.id, briefId);
@@ -103,7 +94,7 @@ export async function contentBriefResponse(request: Request, briefId: string) {
 }
 
 export async function contentBatchResponse(request: Request, batchId: string) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
   const result = await readBatch(getConnection(), session.user.id, batchId);
@@ -112,7 +103,7 @@ export async function contentBatchResponse(request: Request, batchId: string) {
 }
 
 export async function contentVersionResponse(request: Request, versionId: string) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
   const result = await readContentVersion(getConnection(), session.user.id, versionId);
@@ -121,7 +112,7 @@ export async function contentVersionResponse(request: Request, versionId: string
 }
 
 export async function channelVariantsResponse(request: Request, versionId: string) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
   const result = await readChannelVariants(getConnection(), session.user.id, versionId);
@@ -130,7 +121,7 @@ export async function channelVariantsResponse(request: Request, versionId: strin
 }
 
 export async function channelVariantResponse(request: Request, variantId: string) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
   const result = await readChannelVariant(getConnection(), session.user.id, variantId);
@@ -141,7 +132,7 @@ export async function channelVariantResponse(request: Request, variantId: string
 const packageFiles = new Set<string>(PACKAGE_FILE_NAMES);
 
 export async function contentPublicationResponse(request: Request, publicationId: string) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
   const evidenceId = new URL(request.url).searchParams.get("evidence");
@@ -168,7 +159,7 @@ export async function contentPublicationResponse(request: Request, publicationId
 }
 
 export async function contentPackageResponse(request: Request, packageId: string) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
   const result = await readDeliveryPackage(getConnection(), session.user.id, packageId);
@@ -198,7 +189,7 @@ async function respond(result: object) {
 }
 
 export async function contentCalendarResponse(request: Request) {
-  if (!sameOrigin(request)) return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
   const entries = [...new URL(request.url).searchParams.entries()];
@@ -210,7 +201,7 @@ export async function contentCalendarResponse(request: Request) {
 }
 
 export async function contentMaintenanceResponse(request: Request) {
-  if (!sameOrigin(request) || request.method !== "POST") return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request) || request.method !== "POST") return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
   let body: unknown;
@@ -230,7 +221,7 @@ export async function contentMaintenanceResponse(request: Request) {
 }
 
 export async function contentWriteResponse(request: Request) {
-  if (!sameOrigin(request) || request.method !== "POST") return errorResponse("FORBIDDEN");
+  if (!allowsOptionalApiOrigin(request) || request.method !== "POST") return errorResponse("FORBIDDEN");
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
 

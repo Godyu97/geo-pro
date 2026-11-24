@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, LoaderCircle } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -32,8 +32,6 @@ import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
 import { useLocale } from "@/lib/i18n/client";
 
-type AuthMode = "login" | "signup";
-
 const errorKeys: Record<string, keyof Messages["auth"]> = {
   INVALID_EMAIL_OR_PASSWORD: "invalidCredentials",
   INVALID_EMAIL: "emailInvalid",
@@ -42,6 +40,7 @@ const errorKeys: Record<string, keyof Messages["auth"]> = {
   PASSWORD_TOO_SHORT: "passwordMin",
   PASSWORD_TOO_LONG: "passwordMax",
   TOO_MANY_REQUESTS: "tooManyRequests",
+  INVALID_ORIGIN: "originUnavailable",
 };
 
 function AuthFormMessage({ messages }: { messages: Messages["auth"] }) {
@@ -56,13 +55,11 @@ function AuthFormMessage({ messages }: { messages: Messages["auth"] }) {
 }
 
 export function AuthForm({
-  initialMode,
   configured,
   unavailable = false,
   messages,
   returnTo,
 }: {
-  initialMode: AuthMode;
   configured: boolean;
   unavailable?: boolean;
   messages: Messages["auth"];
@@ -70,7 +67,7 @@ export function AuthForm({
 }) {
   const { locale } = useLocale();
   const t = createTranslator(locale, messages);
-  const [mode, setMode] = useState<AuthMode>(initialMode);
+  const mode = useSearchParams().get("mode") === "signup" ? "signup" : "login";
   const [error, setError] = useState<keyof Messages["auth"] | null>(null);
   const router = useRouter();
   const form = useForm<AuthFormValues>({
@@ -120,11 +117,15 @@ export function AuthForm({
     <Tabs
       value={mode}
       onValueChange={(value) => {
-        if (value === "login" || value === "signup") {
-          setMode(value);
-          setError(null);
-          form.clearErrors();
-        }
+        if (value !== "login" && value !== "signup") return;
+        const target = new URL(window.location.href);
+        const currentMode = target.searchParams.get("mode") === "signup" ? "signup" : "login";
+        if (value === currentMode) return;
+        if (value === "signup") target.searchParams.set("mode", value);
+        else target.searchParams.delete("mode");
+        window.history.pushState(null, "", target);
+        setError(null);
+        form.clearErrors();
       }}
     >
       <TabsList className="mb-5 h-10 w-full" aria-label={t("operations")}>

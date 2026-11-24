@@ -4,7 +4,10 @@ export type WorkspaceSectionId =
   | "maintenance"
   | "settings"
   | "brands"
+  | "prompts"
   | "monitoring"
+  | "citations"
+  | "competitors"
   | "optimization"
   | "content"
   | "reports"
@@ -17,6 +20,9 @@ const prefixes: Array<[WorkspaceSectionId, string]> = [
   ["orders", "/dashboard/commercial/orders"],
   ["deliveries", "/dashboard/commercial/deliveries"],
   ["entitlements", "/dashboard/commercial/entitlements"],
+  ["prompts", "/dashboard/brands/questions"],
+  ["citations", "/dashboard/monitoring/answers"],
+  ["competitors", "/dashboard/monitoring/competitors"],
   ["brands", "/dashboard/brands"],
   ["monitoring", "/dashboard/monitoring"],
   ["optimization", "/dashboard/optimization"],
@@ -36,6 +42,7 @@ export function normalizeWorkspacePath(pathname: string) {
 
 export function resolveWorkspaceSection(pathname: string): WorkspaceSectionId {
   const path = normalizeWorkspacePath(pathname);
+  if (/^\/dashboard\/brands\/[^/]+\/questions$/.test(path)) return "prompts";
   for (const [id, prefix] of prefixes) {
     if (path === prefix || path.startsWith(`${prefix}/`)) return id;
   }

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getAuthEnvironment } from "@/lib/auth/env";
 import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { brandFixtureOrigin } from "@/features/brands/intake";
@@ -36,7 +37,7 @@ export async function prepareExportResponse(request: Request) {
   if (session.status !== "authenticated") return failure(session.status === "anonymous" ? "SESSION_REQUIRED" : "SERVICE_UNAVAILABLE");
   try {
     const origin = new URL(getAuthEnvironment().BETTER_AUTH_URL).origin;
-    if (request.headers.get("origin") !== origin) return failure("FORBIDDEN");
+    if (!isAllowedApiOrigin(request, origin)) return failure("FORBIDDEN");
 
     const result = exportRequestSchema.safeParse(await readBoundedJson(request, 2048));
     if (!result.success) return failure("INVALID_INPUT");

@@ -21,9 +21,9 @@ export const dynamic = "force-dynamic";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ mode?: string; returnTo?: string; reason?: string }>;
+  searchParams: Promise<{ returnTo?: string; reason?: string }>;
 }) {
-  const { mode, returnTo, reason } = await searchParams;
+  const { returnTo, reason } = await searchParams;
   const target = safeReturnTo(returnTo);
   const state = await getSessionState();
   if (state.status === "authenticated") redirect(target);
@@ -77,8 +77,6 @@ export default async function LoginPage({
               </p>
             )}
             <AuthForm
-              key={mode === "signup" ? "signup" : "login"}
-              initialMode={mode === "signup" ? "signup" : "login"}
               configured={state.status !== "not-configured"}
               unavailable={state.status === "unavailable"}
               messages={getMessages(locale).auth}

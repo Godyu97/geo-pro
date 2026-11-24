@@ -2,6 +2,7 @@ import "server-only";
 
 import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { brandIdSchema } from "@/features/brands/contracts";
 import { brandMaterialAccess } from "@/features/brands/intake";
@@ -20,7 +21,7 @@ async function access(request: Request, context: Context) {
   if (session.status !== "authenticated") return json(factUnavailable(), 503);
   const material = brandMaterialAccess(request.headers, session.session.user.email);
   if (!material.ok) return json({ error: material.error }, 403);
-  if (request.method === "POST" && material.origin !== request.headers.get("origin")) return json({ error: "forbidden" }, 403);
+  if (request.method === "POST" && !isAllowedApiOrigin(request, material.origin)) return json({ error: "forbidden" }, 403);
   const id = brandIdSchema.safeParse((await context.params).id);
   if (!id.success) return json({ error: "notFound" }, 404);
   return { ownerId: session.session.user.id, brandId: id.data };

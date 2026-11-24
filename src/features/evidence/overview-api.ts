@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getAuthEnvironment } from "@/lib/auth/env";
 import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { allowsOptionalApiOrigin } from "@/lib/http/web-cors";
 import { getTranslator } from "@/lib/i18n/server";
 import { evidenceErrors, type EvidenceError } from "./contracts";
 import { readEvidenceOverview } from "./overview-commands";
@@ -31,7 +32,7 @@ export async function evidenceOverviewResponse(request: Request) {
   }
   try {
     const origin = new URL(getAuthEnvironment().BETTER_AUTH_URL).origin;
-    if (request.headers.get("origin") && request.headers.get("origin") !== origin) {
+    if (!allowsOptionalApiOrigin(request, origin)) {
       return failure("FORBIDDEN");
     }
     const url = new URL(request.url);

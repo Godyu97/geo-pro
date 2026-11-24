@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getAuthEnvironment } from "@/lib/auth/env";
 import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts.ts";
@@ -37,14 +38,14 @@ async function failure(kind: Kind, code: EntityCorrectionError, traceId?: string
   );
 }
 
-async function requireSameOrigin(request: Request, kind: Kind) {
+async function requireTrustedOrigin(request: Request, kind: Kind) {
   const session = await getSessionState();
   if (session.status !== "authenticated") {
     return { error: await failure(kind, session.status === "anonymous" ? "SESSION_REQUIRED" : "SERVICE_UNAVAILABLE") };
   }
   try {
     const origin = new URL(getAuthEnvironment().BETTER_AUTH_URL).origin;
-    if (request.headers.get("origin") !== origin) return { error: await failure(kind, "FORBIDDEN") };
+    if (!isAllowedApiOrigin(request, origin)) return { error: await failure(kind, "FORBIDDEN") };
     return { session };
   } catch {
     return { error: await failure(kind, "SERVICE_UNAVAILABLE", randomUUID()) };
@@ -58,7 +59,7 @@ function json(body: unknown) {
 type Context = { params: Promise<{ id: string }> };
 
 export async function postEntityDisambiguation(request: Request, context: Context) {
-  const gate = await requireSameOrigin(request, "disambiguation");
+  const gate = await requireTrustedOrigin(request, "disambiguation");
   if ("error" in gate) return gate.error;
   const brandId = brandIdSchema.safeParse((await context.params).id);
   if (!brandId.success) return failure("disambiguation", "NOT_FOUND");
@@ -89,7 +90,7 @@ export async function postEntityDisambiguation(request: Request, context: Contex
 }
 
 export async function postEntityCorrection(request: Request, context: Context) {
-  const gate = await requireSameOrigin(request, "correction");
+  const gate = await requireTrustedOrigin(request, "correction");
   if ("error" in gate) return gate.error;
   const brandId = brandIdSchema.safeParse((await context.params).id);
   if (!brandId.success) return failure("correction", "NOT_FOUND");

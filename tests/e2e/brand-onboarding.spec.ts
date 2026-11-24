@@ -54,7 +54,8 @@ const copy = {
     next: "下一步", back: "上一步", scope: "关注范围", region: "目标地区", language: "业务语言",
     interfaceLanguage: "界面语言", questions: "客户可能会问什么？", create: "保存品牌", save: "保存草稿", saved: "草稿已保存。",
     loading: "正在载入品牌资料…", unavailable: "暂时无法处理品牌资料。请稍后重试。", noWebsite: "未登记官网。官网引用不适用。",
-    noChannels: "目前没有可用通道，无法启动监测。", signOut: "退出登录", email: "邮箱", password: "密码", signIn: "登录并进入工作台",
+    noChannels: "当前没有可登记的正式通道。去查看监测能力。", signOut: "退出登录", email: "邮箱", password: "密码", signIn: "登录并进入工作台",
+    acceptRetention: "我接受保留策略版本",
   },
   en: {
     brandWorkspace: "Brand workspace", start: "Set up a brand or resume a draft", title: "Set up a brand", name: "Brand name", business: "One-sentence business description", site: "Website",
@@ -62,7 +63,8 @@ const copy = {
     next: "Next", back: "Back", scope: "Focus area", region: "Target region", language: "Business language",
     interfaceLanguage: "Interface language", questions: "What might customers ask?", create: "Save brand", save: "Save draft", saved: "Draft saved.",
     loading: "Loading brand details…", unavailable: "We couldn’t process the brand details. Try again shortly.", noWebsite: "No website registered. Website citations do not apply.",
-    noChannels: "No monitoring channels are available.", signOut: "Sign out", email: "Email", password: "Password", signIn: "Sign in and open workspace",
+    noChannels: "No formal channel is available to register. Review monitoring capabilities.", signOut: "Sign out", email: "Email", password: "Password", signIn: "Sign in and open workspace",
+    acceptRetention: "I accept retention policy version",
   },
 } as const;
 
@@ -81,6 +83,7 @@ for (const locale of ["zh-CN", "en"] as const) {
 
   for (const width of [375, 768, 1440]) {
     test(`${locale} brand setup, validation and language changes at ${width}px`, async ({ page, context, accounts }) => {
+      const policyVersion = publishedRetentionVersion();
       await accounts.create(context);
       await page.setViewportSize({ width, height: 900 });
       await context.addCookies([{ name: "geo-locale", value: locale, url: baseURL }]);
@@ -131,10 +134,11 @@ for (const locale of ["zh-CN", "en"] as const) {
       await button(page, translated.next).click();
       await button(page, translated.next).click();
       await label(page, translated.questions).fill("What might a synthetic visitor ask?");
+      await page.getByRole("checkbox", { name: `${translated.acceptRetention} ${policyVersion}`, exact: true }).check();
       await button(page, translated.create).click();
       await expect(page.getByRole("heading", { name: synthetic, exact: true })).toBeVisible();
       await expect(page.getByText(translated.noWebsite, { exact: true })).toBeVisible();
-      await expect(page.getByText(translated.noChannels, { exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: translated.noChannels, exact: true })).toHaveAttribute("href", "/dashboard/settings#monitoring-capabilities");
       await expect(page.getByText("What might a synthetic visitor ask?", { exact: true })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await expectTextContrast(page);

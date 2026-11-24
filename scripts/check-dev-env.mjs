@@ -10,6 +10,7 @@ import { createAiResponse, parseAiEnvironment } from "../src/lib/ai/responses.ts
 import { isEmailVerificationMocked, isMailMockEnabled } from "../src/lib/auth/verified-email.ts";
 import { isRedisCacheConfigured, openCache } from "../src/lib/cache/store.ts";
 import { parseDatabaseConfig } from "../src/lib/db/config.ts";
+import { getWebCorsConfig } from "../src/lib/http/web-cors.ts";
 import { createObjectStorage, parseStorageEnvironment } from "../src/lib/storage/index.ts";
 
 const args = new Set(process.argv.slice(2));
@@ -41,6 +42,8 @@ function commandOutput(cmd, cmdArgs) {
 
 const checks = [
   configuration("auth-config", authConfigured, "configured", "Set BETTER_AUTH_URL and BETTER_AUTH_SECRET"),
+  configuration("web-cors-config", getWebCorsConfig(env).valid, "valid",
+    "Use exact HTTP(S) origins in GEO_WEB_ALLOWED_ORIGINS. Cross-site cookies require an allowlist and HTTPS BETTER_AUTH_URL."),
   configuration("database-config", database.success,
     database.success ? database.data.DATABASE_PROVIDER : "",
     "Set DATABASE_URL for PostgreSQL or DATABASE_PROVIDER=sqlite and SQLITE_PATH"),

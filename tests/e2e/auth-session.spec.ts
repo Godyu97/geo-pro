@@ -46,6 +46,37 @@ async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
+test("explicit sign-out keeps its destination when a session check sees the revocation first", async ({ page, context, account }) => {
+  await localeCookie(context, "en");
+  const initialCheck = page.waitForResponse((response) => response.url().includes("/api/auth/get-session"));
+  const target = "/dashboard?source=sign-out";
+  await page.goto(target);
+  expect((await (await initialCheck).json()).user.id).toBe(account.id);
+
+  const revoked = Promise.withResolvers<number>();
+  const release = Promise.withResolvers<void>();
+  await page.route("**/api/auth/sign-out", async (route) => {
+    const response = await route.fetch();
+    revoked.resolve(response.status());
+    await release.promise;
+    await route.fulfill({ response });
+  });
+
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  try {
+    expect(await revoked.promise).toBe(200);
+    const checked = await focusSession(page);
+    expect(await checked.json()).toBeNull();
+    const recoveredEarly = await page.waitForURL(/reason=session-required/, { timeout: 500 })
+      .then(() => true, () => false);
+    expect(recoveredEarly).toBe(false);
+    await expect(page).toHaveURL(baseURL + target);
+  } finally {
+    release.resolve();
+  }
+  await expect(page).toHaveURL(baseURL + "/login");
+});
+
 for (const locale of ["zh-CN", "en"] as const) {
   const english = locale === "en";
   for (const width of [375, 768, 1440]) {

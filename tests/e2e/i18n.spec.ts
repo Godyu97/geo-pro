@@ -115,11 +115,16 @@ test("failed language updates and unknown auth errors are localized and safe; IM
   let submitted = 0;
   await page.route("**/api/auth/sign-up/email", async (route) => {
     submitted++;
-    await route.fulfill({ status: 503, json: { code: "UNKNOWN_CODE", message: "PRIVATE_INTERNAL_ERROR" } });
+    await route.fulfill(submitted === 1
+      ? { status: 403, json: { code: "INVALID_ORIGIN" } }
+      : { status: 503, json: { code: "UNKNOWN_CODE", message: "PRIVATE_INTERNAL_ERROR" } });
   });
   await page.getByLabel("Name", { exact: true }).dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true, bubbles: true, cancelable: true });
   expect(submitted).toBe(0);
-  await page.getByRole("button", { name: "Create account and open workspace" }).click();
+  const submit = page.getByRole("button", { name: "Create account and open workspace" });
+  await submit.click();
+  await expect(page.getByRole("alert").filter({ hasText: "Account actions are unavailable at this address." })).toBeVisible();
+  await submit.click();
   await expect(page.getByRole("alert").filter({ hasText: "Authentication is temporarily unavailable" })).toHaveText("Authentication is temporarily unavailable. Please try again later.");
   await expect(page.getByText("PRIVATE_INTERNAL_ERROR")).toHaveCount(0);
   await page.route("**/login*", (route) => route.request().headers()["next-action"] ? route.abort() : route.continue());
@@ -188,7 +193,19 @@ for (const locale of ["zh-CN", "en"] as const) {
     try {
       await page.goto("/dashboard?filter=保留#monitoring");
       await expect(page).toHaveURL(/\/login\?returnTo=/);
-      await page.getByRole("tab", { name: locale === "en" ? "Create account" : "创建账号", exact: true }).click();
+      const signupTab = page.getByRole("tab", { name: locale === "en" ? "Create account" : "创建账号", exact: true });
+      const loginTab = page.getByRole("tab", { name: locale === "en" ? "Sign in" : "登录", exact: true });
+      const loginURL = new URL(page.url());
+      await signupTab.click();
+      const signupURL = new URL(loginURL);
+      signupURL.searchParams.set("mode", "signup");
+      await expect(page).toHaveURL(signupURL.href);
+      await page.goBack();
+      await expect(loginTab).toHaveAttribute("aria-selected", "true");
+      await page.goForward();
+      await expect(signupTab).toHaveAttribute("aria-selected", "true");
+      await page.reload();
+      await expect(signupTab).toHaveAttribute("aria-selected", "true");
       await page.getByLabel(locale === "en" ? "Name" : "称呼", { exact: true }).fill("品牌🚀 Account É");
       await page.getByLabel(locale === "en" ? "Email" : "邮箱", { exact: true }).fill(email);
       await page.getByLabel(locale === "en" ? "Password" : "密码", { exact: true }).fill(password);

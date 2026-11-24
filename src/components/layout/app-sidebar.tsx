@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { ArrowUpRight, ClipboardList, LayoutDashboard, CircleHelp, Settings, ShieldCheck } from "lucide-react";
 
 import { BrandMark } from "@/components/layout/brand-mark";
-import { getModuleLinks } from "@/components/layout/module-links";
+import { getModuleLinks, workspaceEntryHrefs } from "@/components/layout/module-links";
 import { isWorkspaceSectionActive } from "@/components/layout/workspace-section";
 import {
   Sidebar,
@@ -110,20 +110,19 @@ export function AppSidebar({ messages, modules, brandIntake }: {
             <SidebarGroupContent>
               <SidebarMenu>
                 {moduleLinks.map(({ id, title, icon: Icon }) => {
-                  const brandEntry = id === "brands" && brandIntake !== "closed";
                   const active = sectionActive(id);
                   return (
                     <SidebarMenuItem key={id}>
                       <SidebarMenuButton asChild isActive={active} className="h-auto min-h-10 rounded-lg py-2">
-                        <a
-                          href={brandEntry ? "/dashboard/brands" : pathname === "/dashboard" ? `#${id}` : `/dashboard#${id}`}
+                        <Link
+                          href={workspaceEntryHrefs[id]}
+                          prefetch={false}
                           aria-current={active ? "page" : undefined}
                           onClick={() => setOpenMobile(false)}
                         >
                           <Icon aria-hidden="true" />
                           <span className="min-w-0 flex-1 whitespace-normal break-words">{title}</span>
-                          {!brandEntry && <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{t("notOpen")}</span>}
-                        </a>
+                        </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );

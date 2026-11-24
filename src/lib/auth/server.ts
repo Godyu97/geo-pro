@@ -11,6 +11,7 @@ import { getAuthEnvironment } from "@/lib/auth/env";
 import { authOptions } from "@/lib/auth/options";
 import { trustedAppOrigins } from "@/lib/auth/origin";
 import { getDatabase, withAuthDatabaseTransaction } from "@/lib/db";
+import { getWebCorsConfig } from "@/lib/http/web-cors";
 
 type UserKey = { id: string } | { email: string };
 type LockUser = (key: UserKey) => Promise<void>;
@@ -18,6 +19,7 @@ type LockUser = (key: UserKey) => Promise<void>;
 function createAuth(scopedDatabase?: ReturnType<typeof getDatabase>, lockUser?: LockUser) {
   const environment = getAuthEnvironment();
   const { database, provider, schema } = scopedDatabase ?? getDatabase();
+  const webCors = getWebCorsConfig();
 
   return betterAuth({
     ...authOptions,
@@ -44,7 +46,8 @@ function createAuth(scopedDatabase?: ReturnType<typeof getDatabase>, lockUser?: 
     database: drizzleAdapter(database, { provider, schema }),
     baseURL: environment.BETTER_AUTH_URL,
     secret: environment.BETTER_AUTH_SECRET,
-    trustedOrigins: (request) => trustedAppOrigins(environment.BETTER_AUTH_URL, request),
+    trustedOrigins: (request) => trustedAppOrigins(environment.BETTER_AUTH_URL, request, webCors.origins),
+    ...(webCors.crossSiteCookies ? { advanced: { defaultCookieAttributes: { sameSite: "none", secure: true } } } : {}),
   });
 }
 

@@ -1,12 +1,13 @@
 import Link from "next/link";
 
+import { workspaceEntryHrefs } from "@/components/layout/module-links";
 import { Button } from "@/components/ui/button";
 import { getConnection } from "@/lib/db/connection";
 import { formatNumber, formatPercent } from "@/lib/i18n/format";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { TaskSummaryList } from "../optimization/task-summary.tsx";
 import { MetricCard } from "./metric-card.tsx";
-import { readWorkspaceHome, workspaceEntryHrefs } from "./workspace-home.ts";
+import { readWorkspaceHome } from "./workspace-home.ts";
 
 const entryOrder = ["brands", "monitoring", "optimization", "content", "reports"] as const;
 
@@ -158,7 +159,7 @@ function EntryNav({
   openLabel,
 }: {
   label: string;
-  entries: Array<{ id: string; href: string }>;
+  entries: Array<{ id: (typeof entryOrder)[number]; href: string }>;
   titleFor: (id: (typeof entryOrder)[number]) => string;
   openLabel: (title: string) => string;
 }) {
@@ -166,7 +167,7 @@ function EntryNav({
     <nav aria-label={label}>
       <ul className="flex flex-wrap gap-2">
         {entries.map((entry) => {
-          const title = titleFor(entry.id as (typeof entryOrder)[number]);
+          const title = titleFor(entry.id);
           return (
             <li key={entry.id}>
               <Button asChild variant="outline">

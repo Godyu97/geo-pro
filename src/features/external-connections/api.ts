@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getAuthEnvironment } from "@/lib/auth/env";
 import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts.ts";
@@ -37,14 +38,14 @@ async function failure(code: ExternalConnectionError, traceId?: string) {
   );
 }
 
-async function requireSameOrigin(request: Request) {
+async function requireTrustedOrigin(request: Request) {
   const session = await getSessionState();
   if (session.status !== "authenticated") {
     return { error: await failure(session.status === "anonymous" ? "SESSION_REQUIRED" : "SERVICE_UNAVAILABLE") };
   }
   try {
     const origin = new URL(getAuthEnvironment().BETTER_AUTH_URL).origin;
-    if (request.headers.get("origin") !== origin) return { error: await failure("FORBIDDEN") };
+    if (!isAllowedApiOrigin(request, origin)) return { error: await failure("FORBIDDEN") };
     return { session };
   } catch {
     return { error: await failure("SERVICE_UNAVAILABLE", randomUUID()) };
@@ -56,7 +57,7 @@ function json(body: unknown) {
 }
 
 export async function connectionWriteResponse(request: Request) {
-  const gate = await requireSameOrigin(request);
+  const gate = await requireTrustedOrigin(request);
   if ("error" in gate) return gate.error;
   try {
     if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
@@ -80,7 +81,7 @@ export async function connectionWriteResponse(request: Request) {
 }
 
 export async function connectionActionResponse(request: Request, connectionId: string) {
-  const gate = await requireSameOrigin(request);
+  const gate = await requireTrustedOrigin(request);
   if ("error" in gate) return gate.error;
   const id = brandIdSchema.safeParse(connectionId);
   if (!id.success) return failure("INVALID_INPUT");
@@ -100,7 +101,7 @@ export async function connectionActionResponse(request: Request, connectionId: s
 }
 
 export async function connectionRetryResponse(request: Request, connectionId: string, actionId: string) {
-  const gate = await requireSameOrigin(request);
+  const gate = await requireTrustedOrigin(request);
   if ("error" in gate) return gate.error;
   const connection = brandIdSchema.safeParse(connectionId);
   const action = brandIdSchema.safeParse(actionId);

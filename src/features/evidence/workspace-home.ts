@@ -8,14 +8,6 @@ import type { EvidenceError } from "./contracts.ts";
 import { readEvidenceOverview } from "./overview-commands.ts";
 import type { OverviewPayload } from "./overview-cache.ts";
 
-export const workspaceEntryHrefs = {
-  brands: "/dashboard/brands",
-  monitoring: "/dashboard/monitoring/overview",
-  optimization: "/dashboard/optimization",
-  content: "/dashboard/content",
-  reports: "/dashboard/reports",
-} as const;
-
 export type WorkspaceHome =
   | { state: "no-brand" }
   | { state: "unavailable"; error: EvidenceError }

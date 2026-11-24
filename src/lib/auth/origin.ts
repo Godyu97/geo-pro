@@ -1,17 +1,17 @@
 const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-export function trustedAppOrigins(configuredBaseUrl: string, request?: Request): string[] {
+export function trustedAppOrigins(configuredBaseUrl: string, request?: Request, webOrigins: Iterable<string> = []): string[] {
   const configured = new URL(configuredBaseUrl);
-  const origins = [configured.origin];
+  const origins = new Set([configured.origin, ...webOrigins]);
 
   if (!request || !loopbackHosts.has(configured.hostname)) {
-    return origins;
+    return [...origins];
   }
 
   const host = request.headers.get("host");
   const forwardedHost = request.headers.get("x-forwarded-host");
   if (!host || (forwardedHost !== null && forwardedHost !== host)) {
-    return origins;
+    return [...origins];
   }
 
   const candidate = URL.parse(`${configured.protocol}//${host}`);
@@ -21,15 +21,14 @@ export function trustedAppOrigins(configuredBaseUrl: string, request?: Request):
     && !candidate.password
     && candidate.host === host
     && loopbackHosts.has(candidate.hostname)
-    && candidate.origin !== configured.origin
   ) {
-    origins.push(candidate.origin);
+    origins.add(candidate.origin);
   }
 
-  return origins;
+  return [...origins];
 }
 
-export function isTrustedAppOrigin(configuredBaseUrl: string, request: Request): boolean {
+export function isTrustedAppOrigin(configuredBaseUrl: string, request: Request, webOrigins?: Iterable<string>): boolean {
   const origin = request.headers.get("origin");
-  return Boolean(origin && trustedAppOrigins(configuredBaseUrl, request).includes(origin));
+  return Boolean(origin && trustedAppOrigins(configuredBaseUrl, request, webOrigins).includes(origin));
 }

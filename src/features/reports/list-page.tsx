@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
@@ -75,11 +74,12 @@ export default async function ReportsListPage({
 }: {
   searchParams: Promise<{ brandId?: string }>;
 }) {
-  const session = await requireSession().catch(() => null);
-  if (!session) redirect("/login");
+  const session = await requireSession();
   const t = await getTranslator("reports");
   const params = await searchParams;
-  const brandId = params.brandId;
+  const connection = getConnection();
+  const requestedBrand = typeof params.brandId === "string" ? params.brandId : undefined;
+  const brandId = requestedBrand || (await new BrandDao(connection).active(session.user.id))?.id;
   const related = relatedLinks(t);
   const brandsAction = (
     <Button asChild>
@@ -99,20 +99,7 @@ export default async function ReportsListPage({
     );
   }
 
-  const brand = await new BrandDao(getConnection()).owned(session.user.id, brandId);
-  if (!brand) {
-    return (
-      <ReportCanvas
-        title={t("title")}
-        summary={<p role="alert" className="max-w-2xl text-sm leading-7">{t("NOT_FOUND")}</p>}
-        primary={brandsAction}
-        relatedLabel={t("relatedEntries")}
-        related={related}
-      />
-    );
-  }
-
-  const result = await listReports(getConnection(), session.user.id, brandId);
+  const result = await listReports(connection, session.user.id, brandId);
   const mockLane = brandIntakeOrigin(await headers())?.mode === "mock";
   const mockGate = m0StageGate({
     realBrand: false,
@@ -132,6 +119,7 @@ export default async function ReportsListPage({
       <ReportCanvas
         title={t("title")}
         summary={<p role="alert" className="max-w-2xl text-sm leading-7">{t(code)}</p>}
+        primary={code === "NOT_FOUND" ? brandsAction : undefined}
         relatedLabel={t("relatedEntries")}
         related={related}
       />
