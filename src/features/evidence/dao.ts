@@ -258,6 +258,28 @@ export function adoptedPromptQuery(brandId: string, ownerId: string, slotIds: st
   };
 }
 
+const answerListContextRow = z.object({
+  observationId: brandIdSchema,
+  answerText: z.string(),
+  questionId: brandIdSchema.nullable(),
+  promptSetId: brandIdSchema.nullable(),
+});
+
+export function answerListContextQuery(ownerId: string, brandId: string, observationIds: readonly string[]) {
+  return {
+    sql: `SELECT o.id AS "observationId", o.answer_text AS "answerText",
+            CASE WHEN s.brand_id = o.brand_id THEN s.question_id ELSE NULL END AS "questionId",
+            CASE WHEN s.brand_id = o.brand_id AND r.brand_id = o.brand_id AND r.owner_id = o.owner_id
+              THEN r.prompt_set_id ELSE NULL END AS "promptSetId"
+          FROM answer_observation o
+          LEFT JOIN monitoring_slot s ON s.id = o.slot_id
+          LEFT JOIN monitoring_run r ON r.id = s.run_id
+          WHERE o.owner_id = ? AND o.brand_id = ? AND o.id IN (${observationIds.map(() => "?").join(", ")})
+          ORDER BY o.id ASC`,
+    values: [ownerId, brandId, ...observationIds] as QueryValue[],
+  };
+}
+
 export function overviewPlanLinkQuery(ownerId: string, brandId: string) {
   return {
     sql: `SELECT d.slot_id AS "planSlotId", d.monitoring_run_id AS "runId",
@@ -665,5 +687,15 @@ export class EvidenceDao {
       channelId: typeof row.channelId === "string" && row.channelId.length > 0 ? row.channelId : null,
       channelVersion: row.channelVersion == null ? null : z.coerce.number().int().positive().parse(row.channelVersion),
     }));
+  }
+
+  async listAnswerContexts(ownerId: string, brandId: string, observationIds: readonly string[]) {
+    const found = new Map<string, z.infer<typeof answerListContextRow>>();
+    for (const ids of chunkIds([...observationIds])) {
+      const built = answerListContextQuery(ownerId, brandId, ids);
+      const rows = await this.query(built.sql, built.values);
+      for (const row of z.array(answerListContextRow).parse(rows)) found.set(row.observationId, row);
+    }
+    return found;
   }
 }

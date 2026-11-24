@@ -3,12 +3,20 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
-import { formatCount } from "@/lib/i18n/format";
+import { formatCount, formatNumber } from "@/lib/i18n/format";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockEvidenceButton } from "@/features/functional-mock/run-buttons";
 import { BrandDao } from "../brands/dao";
 import { Button } from "@/components/ui/button";
+import {
+  answerListFilterActive,
+  answerListFiltersFromSearch,
+  answerListPath,
+  clusterOptions,
+  filterAnswerList,
+} from "./answer-list";
+import { answerListRows, readAnswerListContext } from "./answer-list-context";
 import { readEvidenceOverview } from "./overview-commands";
 import { overviewScopeFromSearch, overviewScopePath } from "./overview-contracts";
 import { OverviewScopeForm } from "./scope-form";
@@ -130,6 +138,26 @@ export default async function EvidenceAnswersPage({
     );
   }
 
+  const filters = answerListFiltersFromSearch(params);
+  const scopePath = overviewScopePath("/dashboard/monitoring/answers", parsed.data);
+  if (!filters.success) {
+    return (
+      <AnswerCanvas
+        title={title}
+        summary={<p role="alert" className="max-w-2xl break-words text-sm leading-7">{t("invalidListFilters")}</p>}
+        primary={(
+          <Button asChild variant="outline" className={actionClass}>
+            <Link href={scopePath} prefetch={false}>{t("clearListFilters")}</Link>
+          </Button>
+        )}
+        relatedLabel={t("relatedEntries")}
+        related={brandRelated}
+      >
+        <OverviewScopeForm scope={parsed.data} t={t} />
+      </AnswerCanvas>
+    );
+  }
+
   const overview = await readEvidenceOverview(connection, session.user.id, parsed.data);
   if ("error" in overview) {
     return (
@@ -143,11 +171,33 @@ export default async function EvidenceAnswersPage({
     );
   }
 
-  const overviewHref = overviewScopePath("/dashboard/monitoring/overview", parsed.data);
-  const answerCount = formatCount(locale, overview.answers.length, {
-    one: messages.answerCountOne,
-    other: messages.answerCountOther,
+  const listContext = await readAnswerListContext(
+    connection,
+    session.user.id,
+    parsed.data.brandId,
+    overview.answers.map((answer) => answer.observationId),
+  );
+  const details = answerListRows(overview.answers, listContext);
+  const rows = overview.answers.map((answer) => {
+    const detail = details.get(answer.observationId);
+    return {
+      ...answer,
+      answerText: detail?.answerText ?? "",
+      clusterId: detail?.cluster?.id ?? null,
+      cluster: detail?.cluster ?? null,
+    };
   });
+  const visible = filterAnswerList(rows, filters.data);
+  const clusters = clusterOptions(
+    rows.flatMap((row) => row.cluster ? [row.cluster] : []),
+    filters.data.cluster,
+    (index) => t("clusterUnnamed", { index: formatNumber(locale, index) }),
+  );
+  const overviewHref = overviewScopePath("/dashboard/monitoring/overview", parsed.data);
+  const listFiltered = answerListFilterActive(filters.data);
+  const answerCount = formatCount(locale, visible.length, listFiltered
+    ? { one: messages.listResultCountOne, other: messages.listResultCountOther }
+    : { one: messages.answerCountOne, other: messages.answerCountOther });
 
   return (
     <AnswerCanvas
@@ -164,8 +214,33 @@ export default async function EvidenceAnswersPage({
         competitorsHref: `/dashboard/monitoring/competitors${brandQuery}`,
       })}
     >
-      <OverviewScopeForm scope={parsed.data} t={t} />
+      <OverviewScopeForm
+        scope={parsed.data}
+        t={t}
+        list={{
+          filter: filters.data,
+          clusters,
+          labels: {
+            keyword: t("keyword"),
+            keywordHint: t("keywordHint"),
+            cluster: t("cluster"),
+            clusterAny: t("clusterAny"),
+            mentioned: te("mentioned"),
+            recommended: te("recommended"),
+            officialSiteCited: te("officialSiteCited"),
+            any: t("scopeAny"),
+            yes: te("true"),
+            no: te("false"),
+            unknown: te("unknown"),
+          },
+        }}
+      />
       <p className="break-words text-sm text-muted-foreground">{answerCount}</p>
+      {listFiltered ? (
+        <Button asChild variant="outline" className={actionClass}>
+          <Link href={scopePath} prefetch={false}>{t("clearListFilters")}</Link>
+        </Button>
+      ) : null}
       {mockLane && (
         <div className="min-w-0 space-y-2">
           <p className="max-w-2xl break-words text-sm leading-7 text-muted-foreground">{te("mockEvidenceNote")}</p>
@@ -181,10 +256,12 @@ export default async function EvidenceAnswersPage({
 
       {overview.answers.length === 0 ? (
         <p className={emptyClass}>{t("emptyAnswers")}</p>
+      ) : visible.length === 0 ? (
+        <p className={emptyClass}>{t("noMatch")}</p>
       ) : (
         <ul className="min-w-0 space-y-3">
-          {overview.answers.map((answer) => (
-            <li key={answer.observationId} className={itemClass}>
+          {visible.map((answer) => (
+            <li key={answer.observationId} id={`answer-${answer.observationId}`} className={itemClass}>
               <p className="text-sm font-medium break-words wrap-anywhere">{answer.questionText}</p>
               <dl className="mt-3 grid min-w-0 gap-2 text-xs text-muted-foreground sm:grid-cols-3">
                 <div className="min-w-0">
@@ -202,7 +279,7 @@ export default async function EvidenceAnswersPage({
               </dl>
               <div className="mt-4">
                 <Button asChild className={actionClass}>
-                  <Link href={overviewScopePath(`/dashboard/monitoring/evidence/${answer.observationId}`, parsed.data)} prefetch={false}>
+                  <Link href={answerListPath(`/dashboard/monitoring/evidence/${answer.observationId}`, parsed.data, filters.data)} prefetch={false}>
                     {te("openEvidence")}
                   </Link>
                 </Button>

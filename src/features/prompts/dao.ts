@@ -189,11 +189,66 @@ export class PromptDao {
     rows.flatMap((row) => [row.id, this.brandId, ownerId, row.promptSetId, row.modelName, JSON.stringify(row.candidate), row.createdAt]));
   }
 
+  async clusterSources(ids: string[]) {
+    const found = new Map<string, PromptClusterSource>();
+    const unique = [...new Set(ids)];
+    for (let index = 0; index < unique.length; index += 100) {
+      const part = unique.slice(index, index + 100);
+      if (!part.length) continue;
+      const rows = await this.query(
+        `SELECT id, content FROM prompt_set WHERE brand_id = ? AND id IN (${part.map(() => "?").join(", ")})`,
+        [this.brandId, ...part],
+      );
+      for (const row of z.array(z.object({ id: brandIdSchema, content: z.string() })).parse(rows)) {
+        const source = parseClusterSource(row);
+        if (source) found.set(row.id, source);
+      }
+    }
+    return found;
+  }
+
+  async latestClusterSource() {
+    const [row] = await this.query(
+      `SELECT id, content FROM prompt_set WHERE brand_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [this.brandId],
+    );
+    if (!row) return null;
+    return parseClusterSource(z.object({ id: brandIdSchema, content: z.string() }).parse(row));
+  }
+
   async markSuggestion(ownerId: string, id: string, status: "accepted" | "dismissed") {
     const rows = await this.query(`UPDATE prompt_ai_suggestion SET status = ?
       WHERE brand_id = ? AND owner_id = ? AND id = ? AND status = 'draft' RETURNING id`,
     [status, this.brandId, ownerId, id]);
     return rows.length === 1;
+  }
+}
+
+export type PromptClusterSource = {
+  id: string;
+  questions: Array<{ id: string; text: string; clusterId: string }>;
+  clusters: Array<{ id: string; audience: string; intent: string }>;
+};
+
+function parseClusterSource(row: { id: string; content: string }): PromptClusterSource | null {
+  try {
+    const content = draftContent.safeParse(JSON.parse(row.content));
+    if (!content.success) return null;
+    return {
+      id: row.id,
+      questions: content.data.questions.map((question) => ({
+        id: question.id,
+        text: question.text,
+        clusterId: question.clusterId,
+      })),
+      clusters: content.data.clusters.map((cluster) => ({
+        id: cluster.id,
+        audience: cluster.audience,
+        intent: cluster.intent,
+      })),
+    };
+  } catch {
+    return null;
   }
 }
 

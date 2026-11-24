@@ -10,6 +10,7 @@ import { generateOptimizationAction } from "../optimization/actions";
 import { ActionDraftPanel } from "../optimization/draft-panel";
 import { AnalysisDraftPanel } from "./analysis-draft-form";
 import { readObservation } from "./commands";
+import { answerListFiltersFromSearch, answerListPath } from "./answer-list";
 import { overviewScopeForReturn, overviewScopePath } from "./overview-contracts";
 import { ReviseAnalysisForm } from "./revise-form";
 
@@ -52,7 +53,10 @@ export default async function EvidenceDetailPage({
     brandId: observation.brandId,
     sourceMode: observation.sourceMode,
   });
-  const answersHref = overviewScopePath("/dashboard/monitoring/answers", preserved);
+  const parsedFilters = answerListFiltersFromSearch(query);
+  const answersHref = `${parsedFilters.success
+    ? answerListPath("/dashboard/monitoring/answers", preserved, parsedFilters.data)
+    : overviewScopePath("/dashboard/monitoring/answers", preserved)}#answer-${observation.id}`;
   const overviewHref = overviewScopePath("/dashboard/monitoring/overview", preserved);
   const costText = capture.costState === "known" && capture.actualMinor !== null && capture.currency
     ? t("costKnown", { amount: formatMinorUnits(locale, capture.actualMinor, capture.currency) })

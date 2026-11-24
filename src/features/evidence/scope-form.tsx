@@ -1,4 +1,6 @@
 import { Button } from "@/components/ui/button";
+import type { AnswerListFilter } from "./answer-list";
+import { KeywordField } from "./keyword-field";
 import type { OverviewScope } from "./overview-contracts";
 
 type ScopeTranslator = (key:
@@ -20,12 +22,58 @@ type ScopeTranslator = (key:
 
 const fieldClass = "h-10 w-full min-w-0 rounded-md border bg-background px-3 sm:w-auto";
 
+export type AnswerListForm = {
+  filter: AnswerListFilter;
+  clusters: ReadonlyArray<{ id: string; label: string }>;
+  labels: {
+    keyword: string;
+    keywordHint: string;
+    cluster: string;
+    clusterAny: string;
+    mentioned: string;
+    recommended: string;
+    officialSiteCited: string;
+    any: string;
+    yes: string;
+    no: string;
+    unknown: string;
+  };
+};
+
+function JudgmentField({
+  id,
+  name,
+  label,
+  value,
+  labels,
+}: {
+  id: string;
+  name: string;
+  label: string;
+  value: string;
+  labels: Pick<AnswerListForm["labels"], "any" | "yes" | "no" | "unknown">;
+}) {
+  return (
+    <label className="min-w-0 max-w-full break-words text-sm" htmlFor={id}>
+      <span className="mb-1 block text-muted-foreground">{label}</span>
+      <select id={id} name={name} key={value || "any"} defaultValue={value} className={fieldClass}>
+        <option value="">{labels.any}</option>
+        <option value="true">{labels.yes}</option>
+        <option value="false">{labels.no}</option>
+        <option value="unknown">{labels.unknown}</option>
+      </select>
+    </label>
+  );
+}
+
 export function OverviewScopeForm({
   scope,
   t,
+  list,
 }: {
   scope: Pick<OverviewScope, "brandId" | "sourceMode" | "region" | "requestedNetworkMode" | "from" | "to">;
   t: ScopeTranslator;
+  list?: AnswerListForm;
 }) {
   return (
     <form className="flex min-w-0 max-w-full flex-wrap items-end gap-3 rounded-2xl border bg-secondary/40 p-4" method="get">
@@ -95,9 +143,37 @@ export function OverviewScopeForm({
           className={`${fieldClass} sm:w-72`}
         />
       </label>
+      {list ? (
+        <>
+          <label className="min-w-0 max-w-full break-words text-sm sm:max-w-xs" htmlFor="answer-keyword">
+            <span className="mb-1 block text-muted-foreground">{list.labels.keyword}</span>
+            <KeywordField
+              key={list.filter.q ?? ""}
+              id="answer-keyword"
+              name="q"
+              defaultValue={list.filter.q ?? ""}
+              hintId="answer-keyword-hint"
+              className={`${fieldClass} sm:w-64`}
+            />
+          </label>
+          <label className="min-w-0 max-w-full break-words text-sm" htmlFor="answer-cluster">
+            <span className="mb-1 block text-muted-foreground">{list.labels.cluster}</span>
+            <select id="answer-cluster" name="cluster" key={list.filter.cluster ?? "all"} defaultValue={list.filter.cluster ?? ""} className={`${fieldClass} sm:max-w-xs`}>
+              <option value="">{list.labels.clusterAny}</option>
+              {list.clusters.map((cluster) => (
+                <option key={cluster.id} value={cluster.id}>{cluster.label}</option>
+              ))}
+            </select>
+          </label>
+          <JudgmentField id="answer-mentioned" name="mentioned" label={list.labels.mentioned} value={list.filter.mentioned ?? ""} labels={list.labels} />
+          <JudgmentField id="answer-recommended" name="recommended" label={list.labels.recommended} value={list.filter.recommended ?? ""} labels={list.labels} />
+          <JudgmentField id="answer-cited" name="officialSiteCited" label={list.labels.officialSiteCited} value={list.filter.officialSiteCited ?? ""} labels={list.labels} />
+        </>
+      ) : null}
       <div className="flex items-end">
         <Button type="submit" variant="outline" className="h-auto max-w-full whitespace-normal">{t("applyFilters")}</Button>
       </div>
+      {list ? <p id="answer-keyword-hint" className="basis-full break-words text-xs leading-5 text-muted-foreground">{list.labels.keywordHint}</p> : null}
       <p id="overview-region-hint" className="basis-full break-words text-xs leading-5 text-muted-foreground">{t("regionHint")}</p>
       <p id="overview-time-hint" className="basis-full break-words text-xs leading-5 text-muted-foreground">{t("timeHint")}</p>
     </form>
