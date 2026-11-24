@@ -61,6 +61,20 @@ test("content entry keeps the task and related actions in the workspace canvas",
   assert.doesNotMatch(content, /gaps=/);
 });
 
+test("competitor analysis keeps the task, share table and recovery in the workspace canvas", () => {
+  const page = read("../../src/features/competitors/page.tsx");
+  assert.doesNotMatch(page, /<main\b/);
+  assert.match(page, /aria-label=\{relatedLabel\}/);
+  assert.match(page, /relatedEntries/);
+  assert.match(page, /currentBrand/);
+  assert.match(page, /shareRegion/);
+  assert.match(page, /overflow-x-auto/);
+  assert.match(page, /\[overflow-wrap:anywhere\]/);
+  assert.match(page, /whitespace-normal/);
+  assert.match(page, /unorderedCount > 0 && !workspace\.rank\.ranked/);
+  assert.match(page, /saveSet/);
+});
+
 test("report entry stays inside the workspace canvas", () => {
   const reports = read("../../src/features/reports/list-page.tsx");
   assert.doesNotMatch(reports, /<main\b/);
