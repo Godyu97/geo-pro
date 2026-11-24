@@ -242,6 +242,26 @@ await writeFile(leadQualityCommands, leadQualitySource.replace(leadQualityList, 
     throw new Error("Private lead quality fixture failure");
   }`));
 
+const leadSuggestionCommands = path.join(fixture, "src/features/business-feedback/suggestion-commands.ts");
+const leadSuggestionSource = await readFile(leadSuggestionCommands, "utf8");
+const leadSuggestionList = "export async function listLeadSuggestions(db: DatabaseConnection, ownerId: string, brandId: string) {";
+const leadSuggestionEnv = "  const env = options.env ?? process.env;";
+assert.ok(leadSuggestionSource.includes(leadSuggestionList) && leadSuggestionSource.includes(leadSuggestionEnv));
+await writeFile(leadSuggestionCommands, leadSuggestionSource
+  .replace(leadSuggestionList, leadSuggestionList + '\n' + [
+    '  const probe = (await (await import("next/headers")).cookies()).get("geo-lead-suggestions-read")?.value;',
+    '  if (probe === "unavailable") throw new Error("Private lead suggestions fixture failure");',
+    '  if (probe === "not-found") return failed("NOT_FOUND");',
+  ].join("\n"))
+  .replace(leadSuggestionEnv, [
+    '  const port = Number((await (await import("next/headers")).cookies()).get("geo-lead-suggestions-mock-port")?.value);',
+    '  const env = Number.isSafeInteger(port) && port > 0 && port < 65536 ? {',
+    '    OPENAI_BASE_URL: "http://127.0.0.1:" + port + "/v1",',
+    '    OPENAI_API_KEY: "fixture-only",',
+    '    OPENAI_MODEL: "lead-suggestions-fixture",',
+    '  } : {};',
+  ].join("\n")));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
