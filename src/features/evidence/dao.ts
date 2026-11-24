@@ -127,6 +127,12 @@ const overviewContextSchema = z.object({
   tasks: sqlCount,
   taskAt: sqlText,
   taskStamp: sqlCount,
+  slots: sqlCount,
+  slotAt: sqlText,
+  slotStamp: sqlCount,
+  citations: sqlCount,
+  citationAt: sqlText,
+  capabilityAt: sqlText,
 });
 
 const nullableMinor = z.preprocess(
@@ -184,7 +190,8 @@ const scopedColumns = `o.id, o.brand_id AS "brandId", o.owner_id AS "ownerId", o
   o.entity_version AS "entityVersion", o.citation_set_state AS "citationSetState", o.evidence_state AS "evidenceState",
   o.locator_ref AS "locatorRef", o.collector_id AS "collectorId", o.missing_reason AS "missingReason", o.created_at AS "createdAt",
   o.target_region AS "targetRegion", o.observed_region AS "observedRegion", o.new_session AS "newSession",
-  o.product_mode AS "productMode", o.network_trigger AS "networkTrigger"`;
+  o.product_mode AS "productMode", o.network_trigger AS "networkTrigger",
+  s.run_id AS "runId", s.channel_id AS "channelId", s.channel_version AS "channelVersion"`;
 
 function chunkIds(ids: string[]) {
   const unique = [...new Set(ids)];
@@ -248,6 +255,50 @@ export function adoptedPromptQuery(brandId: string, ownerId: string, slotIds: st
        WHERE a.brand_id = ? AND a.disposition = 'adopted' AND r.owner_id = ?
          AND a.slot_id IN (${slotIds.map(() => "?").join(", ")})`,
     values: [brandId, ownerId, ...slotIds],
+  };
+}
+
+export function overviewPlanLinkQuery(ownerId: string, brandId: string) {
+  return {
+    sql: `SELECT d.slot_id AS "planSlotId", d.monitoring_run_id AS "runId",
+            r.region AS "region", r.requested_network_mode AS "requestedNetworkMode",
+            p.search_required AS "searchRequired", p.new_session_required AS "newSessionRequired"
+          FROM sampling_due_run d
+          LEFT JOIN monitoring_run r ON r.id = d.monitoring_run_id AND r.owner_id = d.owner_id
+          LEFT JOIN run_protocol_pin pin ON pin.run_id = r.id
+          LEFT JOIN sampling_protocol p ON p.protocol_id = pin.protocol_id AND p.version = pin.version
+          WHERE d.owner_id = ? AND d.brand_id = ?
+          ORDER BY d.slot_id ASC, d.id ASC`,
+    values: [ownerId, brandId] as QueryValue[],
+  };
+}
+
+export function citationOwnershipQuery(brandId: string, observationIds: readonly string[]) {
+  return {
+    sql: `SELECT observation_id AS "observationId", ownership
+          FROM answer_citation
+          WHERE brand_id = ? AND observation_id IN (${observationIds.map(() => "?").join(", ")})
+          ORDER BY observation_id ASC, id ASC`,
+    values: [brandId, ...observationIds] as QueryValue[],
+  };
+}
+
+export function channelKindQuery(channelIds: readonly string[]) {
+  return {
+    sql: `SELECT id, kind FROM capability_channel
+          WHERE id IN (${channelIds.map(() => "?").join(", ")})
+          ORDER BY id ASC`,
+    values: [...channelIds] as QueryValue[],
+  };
+}
+
+export function capabilityExpiryQuery(channelIds: readonly string[]) {
+  return {
+    sql: `SELECT channel_id AS "channelId", version, expires_at AS "expiresAt"
+          FROM capability_version
+          WHERE channel_id IN (${channelIds.map(() => "?").join(", ")})
+          ORDER BY channel_id ASC, version ASC`,
+    values: [...channelIds] as QueryValue[],
   };
 }
 
@@ -476,7 +527,15 @@ export class EvidenceDao {
               (SELECT COUNT(*) FROM optimization_task t WHERE t.brand_id = b.id AND t.owner_id = b.owner_id) AS "tasks",
               (SELECT COALESCE(MAX(t.updated_at), '') FROM optimization_task t WHERE t.brand_id = b.id AND t.owner_id = b.owner_id) AS "taskAt",
               (SELECT COALESCE(SUM(length(t.status) * 1000 + COALESCE(t.manual_rank, 0)), 0)
-                 FROM optimization_task t WHERE t.brand_id = b.id AND t.owner_id = b.owner_id) AS "taskStamp"
+                 FROM optimization_task t WHERE t.brand_id = b.id AND t.owner_id = b.owner_id) AS "taskStamp",
+              (SELECT COUNT(*) FROM sampling_slot s WHERE s.brand_id = b.id AND s.owner_id = b.owner_id) AS "slots",
+              (SELECT COALESCE(MAX(s.at), '') FROM sampling_slot s WHERE s.brand_id = b.id AND s.owner_id = b.owner_id) AS "slotAt",
+              (SELECT COALESCE(SUM(CASE s.status
+                 WHEN 'scheduled' THEN 1 WHEN 'completed' THEN 2 WHEN 'failed' THEN 4 WHEN 'paused' THEN 8 ELSE 16 END), 0)
+                 FROM sampling_slot s WHERE s.brand_id = b.id AND s.owner_id = b.owner_id) AS "slotStamp",
+              (SELECT COUNT(*) FROM answer_citation c WHERE c.brand_id = b.id) AS "citations",
+              (SELECT COALESCE(MAX(c.created_at), '') FROM answer_citation c WHERE c.brand_id = b.id) AS "citationAt",
+              (SELECT COALESCE(MAX(v.changed_at), '') FROM capability_version v) AS "capabilityAt"
        FROM brand b
        LEFT JOIN brand_version v ON v.brand_id = b.id AND v.version = b.entity_version
        WHERE b.owner_id = ? AND b.id = ? AND b.frozen_at IS NULL`,
@@ -503,6 +562,12 @@ export class EvidenceDao {
       parsed.tasks,
       parsed.taskAt,
       parsed.taskStamp,
+      parsed.slots,
+      parsed.slotAt,
+      parsed.slotStamp,
+      parsed.citations,
+      parsed.citationAt,
+      parsed.capabilityAt,
     ].join("|");
     return {
       name: parsed.name ?? brandId,
@@ -511,6 +576,65 @@ export class EvidenceDao {
       revision: parsed.revision,
       token,
     };
+  }
+
+  async overviewPlanLinks(ownerId: string, brandId: string) {
+    const built = overviewPlanLinkQuery(ownerId, brandId);
+    const rows = await this.query(built.sql, built.values);
+    return z.array(z.object({
+      planSlotId: brandIdSchema,
+      runId: brandIdSchema.nullable(),
+      region: z.string().nullable(),
+      requestedNetworkMode: z.enum(networkModes).nullable(),
+      searchRequired: z.union([z.coerce.number(), z.null()]).transform((value) => value === 1),
+      newSessionRequired: z.union([z.coerce.number(), z.null()]).transform((value) => value === 1),
+    })).parse(rows);
+  }
+
+  async citationOwnership(brandId: string, observationIds: readonly string[]) {
+    const owned = new Map<string, string[]>();
+    for (const ids of chunkIds([...observationIds])) {
+      const built = citationOwnershipQuery(brandId, ids);
+      const rows = await this.query(built.sql, built.values);
+      for (const row of z.array(z.object({
+        observationId: brandIdSchema,
+        ownership: z.enum(ownershipStates),
+      })).parse(rows)) {
+        const list = owned.get(row.observationId) ?? [];
+        list.push(row.ownership);
+        owned.set(row.observationId, list);
+      }
+    }
+    return owned;
+  }
+
+  async channelKinds(channelIds: readonly string[]) {
+    if (channelIds.length === 0) return new Map<string, string>();
+    const built = channelKindQuery(channelIds);
+    const rows = await this.query(built.sql, built.values);
+    const kinds = new Map<string, string>();
+    for (const row of z.array(z.object({
+      id: z.string().min(1).max(64),
+      kind: z.enum(["consumer_ui", "model_api", "custom_pipeline"]),
+    })).parse(rows)) {
+      kinds.set(row.id, row.kind);
+    }
+    return kinds;
+  }
+
+  async capabilityExpiries(channelIds: readonly string[]) {
+    const expiry = new Map<string, string | null>();
+    if (channelIds.length === 0) return expiry;
+    const built = capabilityExpiryQuery(channelIds);
+    const rows = await this.query(built.sql, built.values);
+    for (const row of z.array(z.object({
+      channelId: z.string().min(1).max(64),
+      version: z.coerce.number().int().positive(),
+      expiresAt: z.string().nullable(),
+    })).parse(rows)) {
+      expiry.set(row.channelId, row.expiresAt);
+    }
+    return expiry;
   }
 
   async adoptedPromptRefs(ownerId: string, brandId: string, slotIds: string[]) {
@@ -537,6 +661,9 @@ export class EvidenceDao {
       recommended: row.recommended == null ? null : triStateSchema.parse(row.recommended),
       officialSiteCited: row.officialSiteCited == null ? null : triStateSchema.parse(row.officialSiteCited),
       analysisVersion: row.analysisVersion == null ? null : z.coerce.number().int().positive().parse(row.analysisVersion),
+      runId: row.runId == null ? null : brandIdSchema.parse(row.runId),
+      channelId: typeof row.channelId === "string" && row.channelId.length > 0 ? row.channelId : null,
+      channelVersion: row.channelVersion == null ? null : z.coerce.number().int().positive().parse(row.channelVersion),
     }));
   }
 }

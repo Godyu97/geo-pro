@@ -8,10 +8,17 @@ import { listPrioritizedTasks } from "../optimization/commands.ts";
 import { functionalMockMarker } from "../functional-mock/mode.ts";
 import { PromptDao } from "../prompts/dao.ts";
 import { questionType } from "../prompts/contracts.ts";
+import { SamplingPlanDao } from "../sampling-plans/dao.ts";
 import type { EvidenceError } from "./contracts.ts";
 import { EvidenceDao } from "./dao.ts";
 import {
   aggregateOverviewMetrics,
+  capabilityIsExpired,
+  latestCompleteCapture,
+  ownedPageJudgement,
+  summarizeCoverage,
+  type CoverageAnswer,
+  type CoveragePlanSlot,
   type OverviewSample,
   type QuestionType,
 } from "./metrics.ts";
@@ -45,6 +52,7 @@ export async function readEvidenceOverview(
   ownerId: string,
   scope: OverviewScope,
   cache: CacheStore = openCache(),
+  now: () => string = () => new Date().toISOString(),
 ): Promise<OverviewPayload | Failure> {
   const dao = new EvidenceDao(db);
   const context = await dao.overviewReadContext(ownerId, scope.brandId);
@@ -77,13 +85,45 @@ export async function readEvidenceOverview(
   });
 
   const slotIds = rows.flatMap((row) => row.questionId && row.observation.slotId ? [row.observation.slotId] : []);
-  const refs = slotIds.length ? await dao.adoptedPromptRefs(ownerId, scope.brandId, slotIds) : new Map();
+  const observationIds = rows.map((row) => row.observation.id);
+  const plans = new SamplingPlanDao(db);
+  const [refs, ownership, planRows, links] = await Promise.all([
+    slotIds.length ? dao.adoptedPromptRefs(ownerId, scope.brandId, slotIds) : new Map(),
+    observationIds.length ? dao.citationOwnership(scope.brandId, observationIds) : new Map<string, string[]>(),
+    plans.plansForBrand(scope.brandId, ownerId),
+    dao.overviewPlanLinks(ownerId, scope.brandId),
+  ]);
+  const latestPlan = new Map<string, { version: number; phase: string }>();
+  for (const plan of planRows) {
+    const current = latestPlan.get(plan.id);
+    if (!current || plan.version > current.version) latestPlan.set(plan.id, { version: plan.version, phase: plan.phase });
+  }
+  const planIds = [...latestPlan.entries()].filter(([, plan]) => plan.phase !== "draft").map(([id]) => id);
+  const planSlots = planIds.length ? await plans.slotsForPlans(ownerId, planIds) : [];
+  const channelIds = [...new Set([
+    ...planSlots.map((slot) => slot.channelId),
+    ...rows.flatMap((row) => row.channelId ? [row.channelId] : []),
+  ])];
+  const [channelKinds, expiries] = await Promise.all([
+    dao.channelKinds(channelIds),
+    dao.capabilityExpiries(channelIds),
+  ]);
+  const linksByRun = new Map<string, (typeof links)[number]>();
+  const linksBySlot = new Map<string, (typeof links)[number][]>();
+  for (const link of links) {
+    if (link.runId && !linksByRun.has(link.runId)) linksByRun.set(link.runId, link);
+    const list = linksBySlot.get(link.planSlotId) ?? [];
+    list.push(link);
+    linksBySlot.set(link.planSlotId, list);
+  }
   const promptIds = [...new Set([...refs.values()].map((item) => item.promptSetId))];
   const promptTypes = promptIds.length
     ? await new PromptDao(db, scope.brandId).questionTypes(promptIds)
     : new Map<string, Map<string, QuestionType>>();
   const typeByQuestionId = new Map<string, QuestionType>();
   const samples: OverviewSample[] = [];
+  const coverageAnswers: CoverageAnswer[] = [];
+  const captured: Array<{ capturedAt: string; evidenceState: string }> = [];
 
   for (const row of rows) {
     if (row.observation.answerText.includes(functionalMockMarker)) continue;
@@ -106,6 +146,22 @@ export async function readEvidenceOverview(
     if (type === "exploration") continue;
     if (type === "unknown") type = "discovery";
 
+    const link = row.runId ? linksByRun.get(row.runId) : undefined;
+    const ownedPageCited = ownedPageJudgement(
+      row.observation.citationSetState,
+      ownership.get(row.observation.id) ?? [],
+    );
+    captured.push({ capturedAt: row.observation.capturedAt, evidenceState: row.observation.evidenceState });
+    coverageAnswers.push({
+      planSlotId: link?.planSlotId ?? null,
+      evidenceState: row.observation.evidenceState,
+      citationSetState: row.observation.citationSetState,
+      requestedNetworkMode: row.observation.requestedNetworkMode,
+      networkTrigger: row.observation.networkTrigger,
+      newSession: row.observation.newSession,
+      searchRequired: link?.searchRequired ?? false,
+      newSessionRequired: link?.newSessionRequired ?? false,
+    });
     samples.push({
       observationId: row.observation.id,
       questionKey: questionKeyOf(row.questionId, row.observation.questionText),
@@ -120,10 +176,50 @@ export async function readEvidenceOverview(
       mentioned: row.mentioned ?? "unknown",
       recommended: row.recommended ?? "unknown",
       officialSiteCited: row.officialSiteCited ?? "unknown",
+      ownedPageCited,
       hasOfficialWebsite,
     });
   }
 
+  const coverageSlots: CoveragePlanSlot[] = [];
+  const watchedChannels: string[] = [];
+  for (const slot of planSlots) {
+    const kind = channelKinds.get(slot.channelId);
+    if (kind !== "model_api" && kind !== "consumer_ui") continue;
+    if (kind === scope.sourceMode) watchedChannels.push(slot.channelId);
+    const related = linksBySlot.get(slot.id) ?? [];
+    coverageSlots.push({
+      id: slot.id,
+      at: slot.at,
+      status: slot.status,
+      sourceMode: kind,
+      regions: related.flatMap((item) => item.region ? [item.region] : []),
+      networks: related.flatMap((item) => item.requestedNetworkMode ? [item.requestedNetworkMode] : []),
+    });
+  }
+  for (const row of rows) {
+    if (row.channelId) watchedChannels.push(row.channelId);
+  }
+  const capturedNow = now();
+  const coverage = summarizeCoverage({
+    slots: coverageSlots,
+    answers: coverageAnswers,
+    scope: {
+      sourceMode: scope.sourceMode,
+      region: scope.region,
+      requestedNetworkMode: scope.requestedNetworkMode,
+      from: scope.from,
+      to: scope.to,
+    },
+    now: capturedNow,
+  });
+  const collection = {
+    lastCapturedAt: latestCompleteCapture(captured),
+    capabilityExpired: capabilityIsExpired(
+      [...new Set(watchedChannels)].map((channelId) => expiries.get(channelId) ?? null),
+      capturedNow,
+    ),
+  };
   const metrics = aggregateOverviewMetrics(samples);
   const answers = samples
     .filter((item) => item.evidenceState === "complete" || item.evidenceState === "contested")
@@ -177,6 +273,8 @@ export async function readEvidenceOverview(
       hasOfficialWebsite,
     },
     ...metrics,
+    coverage,
+    collection,
     answers,
     suggestions,
     activeTasks,

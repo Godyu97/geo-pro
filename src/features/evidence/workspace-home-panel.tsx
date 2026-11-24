@@ -3,10 +3,11 @@ import Link from "next/link";
 import { workspaceEntryHrefs } from "@/components/layout/module-links";
 import { Button } from "@/components/ui/button";
 import { getConnection } from "@/lib/db/connection";
-import { formatNumber, formatPercent } from "@/lib/i18n/format";
+import { formatDateTime, formatNumber, formatPercent } from "@/lib/i18n/format";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { TaskSummaryList } from "../optimization/task-summary.tsx";
-import { MetricCard } from "./metric-card.tsx";
+import { CollectionLine, CoverageCard, MetricCard } from "./metric-card.tsx";
+import type { RateBreakdown } from "./metrics.ts";
 import { readWorkspaceHome } from "./workspace-home.ts";
 
 const entryOrder = ["brands", "monitoring", "optimization", "content", "reports"] as const;
@@ -56,6 +57,7 @@ export async function WorkspaceHomePanel({ ownerId }: { ownerId: string }) {
     ["mentionRate", view.metrics.mentioned] as const,
     ["recommendRate", view.metrics.recommended] as const,
     ["officialCiteRate", view.metrics.officialSiteCited] as const,
+    ["ownedCiteRate", view.metrics.ownedPageCited] as const,
   ];
 
   return (
@@ -73,6 +75,13 @@ export async function WorkspaceHomePanel({ ownerId }: { ownerId: string }) {
         />
       </div>
 
+      <CollectionLine
+        capture={view.collection.lastCapturedAt
+          ? overview("lastCapture", { time: formatDateTime(locale, new Date(view.collection.lastCapturedAt)) })
+          : overview("noCapture")}
+        expired={view.collection.capabilityExpired ? overview("capabilityExpired") : null}
+      />
+
       {view.smallSample ? (
         <p className="rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground" role="status">
           {overview("smallSample")}
@@ -81,29 +90,63 @@ export async function WorkspaceHomePanel({ ownerId }: { ownerId: string }) {
 
       <div className="space-y-3">
         <h3 className="text-base font-semibold">{dashboard("metricsTitle")}</h3>
-        <div className="grid gap-4 lg:grid-cols-3">
-          {metrics.map(([key, metric]) => (
-            <MetricCard
-              key={key}
-              title={overview(key)}
-              metric={metric}
-              locale={locale}
-              equalWeightHint={overview("equalWeightHint", {
-                covered: formatNumber(locale, metric.coveredQuestions),
-                fixed: formatNumber(locale, metric.fixedQuestions),
+        <div className="grid gap-4 lg:grid-cols-4">
+          <CoverageCard
+            title={overview("coverageTitle")}
+            validText={view.coverage.status === "na"
+              ? (view.coverage.reason === "no-due-slots" ? overview("coverageNotDue") : overview("coverageNoPlan"))
+              : overview("coverageValid", {
+                rate: formatRate(locale, view.coverage.validRate),
+                valid: formatNumber(locale, view.coverage.valid),
+                planned: formatNumber(locale, view.coverage.planned),
               })}
-              pooledHint={overview("pooledHint", {
-                rate: formatRate(locale, metric.pooled.rate),
-                num: formatNumber(locale, metric.pooled.numerator),
-                den: formatNumber(locale, metric.pooled.denominator),
-              })}
-              unknownRatioLabel={overview("unknownRatio", {
-                ratio: formatRate(locale, metric.unknownRatio),
-              })}
-              metricNa={overview("metricNa")}
-              officialNa={overview("officialNa")}
-            />
-          ))}
+            eligibleText={view.coverage.status === "ready"
+              ? overview("coverageEligible", {
+                rate: formatRate(locale, view.coverage.eligibleRate),
+                eligible: formatNumber(locale, view.coverage.eligible),
+                planned: formatNumber(locale, view.coverage.planned),
+              })
+              : null}
+            counts={view.coverage.status === "ready"
+              ? overview("coverageCounts", {
+                valid: formatNumber(locale, view.coverage.valid),
+                failed: formatNumber(locale, view.coverage.failed),
+                pending: formatNumber(locale, view.coverage.pending),
+                paused: formatNumber(locale, view.coverage.paused),
+              })
+              : null}
+            network={view.coverage.status === "ready"
+              ? overview("coverageNetworkUnknown", { count: formatNumber(locale, view.coverage.networkUnknown) })
+              : null}
+          />
+          {metrics.map(([key, metric]) => {
+            const labels = homeMetricLabels(overview, locale, metric);
+            return (
+              <MetricCard
+                key={key}
+                title={overview(key)}
+                metric={metric}
+                locale={locale}
+                equalWeightHint={overview("equalWeightHint", {
+                  covered: formatNumber(locale, metric.coveredQuestions),
+                  fixed: formatNumber(locale, metric.fixedQuestions),
+                })}
+                pooledHint={overview("pooledHint", {
+                  rate: formatRate(locale, metric.pooled.rate),
+                  num: formatNumber(locale, metric.pooled.numerator),
+                  den: formatNumber(locale, metric.pooled.denominator),
+                })}
+                unknownRatioLabel={overview("unknownRatio", {
+                  ratio: formatRate(locale, metric.unknownRatio),
+                })}
+                judgedLabel={labels.judgedLabel}
+                citationLabel={labels.citationLabel}
+                metricNa={overview("metricNa")}
+                officialNa={overview("officialNa")}
+                ownedNa={overview("ownedNa")}
+              />
+            );
+          })}
         </div>
       </div>
 
@@ -129,6 +172,27 @@ export async function WorkspaceHomePanel({ ownerId }: { ownerId: string }) {
       </div>
     </section>
   );
+}
+
+function homeMetricLabels(
+  overview: Awaited<ReturnType<typeof getTranslator<"evidenceOverview">>>,
+  locale: "zh-CN" | "en",
+  metric: RateBreakdown,
+) {
+  const judgedLabel = metric.consideredCount > 0
+    ? overview("judgedDenominator", {
+      judged: formatNumber(locale, metric.judgedCount),
+      considered: formatNumber(locale, metric.consideredCount),
+    })
+    : null;
+  const citationLabel = metric.citationComplete != null && metric.consideredCount > 0
+    ? overview("citationCoverage", {
+      complete: formatNumber(locale, metric.citationComplete),
+      eligible: formatNumber(locale, metric.consideredCount),
+      judged: formatNumber(locale, metric.citationJudged ?? 0),
+    })
+    : null;
+  return { judgedLabel, citationLabel };
 }
 
 function moduleTitleKey(id: (typeof entryOrder)[number]) {

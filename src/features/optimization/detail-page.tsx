@@ -2,11 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
-import { getTranslator } from "@/lib/i18n/server";
+import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { updateOptimizationAction } from "./actions";
 import { readTaskDetail } from "./commands";
+import { taskDisplayLabels, taskStatusOptions } from "./task-labels.ts";
 
 export async function generateMetadata() {
   const t = await getTranslator("optimization");
@@ -20,11 +21,14 @@ export default async function OptimizationDetailPage({
 }) {
   const session = await requireSession();
   const { taskId } = await params;
+  const locale = await getLocale();
+  const messages = getMessages(locale).evidenceOverview;
   const t = await getTranslator("optimization");
   const detail = await readTaskDetail(getConnection(), session.user.id, taskId);
   if ("error" in detail) notFound();
 
   const { task, findings, checks } = detail;
+  const labels = taskDisplayLabels(messages, task);
 
   return (
     <div className="space-y-8">
@@ -39,8 +43,8 @@ export default async function OptimizationDetailPage({
           <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{task.targetPage}</p>
         </div>
         <div className="flex gap-2">
-          <Badge variant="outline">{task.priorityBucket}</Badge>
-          <Badge variant="secondary">{task.status}</Badge>
+          <Badge variant="outline">{labels.priority}</Badge>
+          <Badge variant="secondary">{labels.status}</Badge>
         </div>
       </div>
 
@@ -90,8 +94,8 @@ export default async function OptimizationDetailPage({
           <label className="block text-sm">
             <span className="mb-1 block text-muted-foreground">{t("status")}</span>
             <select name="status" defaultValue={task.status} className="h-10 rounded-md border bg-background px-3">
-              {["todo", "doing", "blocked", "implemented", "retest_pending", "closed", "dismissed"].map((status) => (
-                <option key={status} value={status}>{status}</option>
+              {taskStatusOptions(messages).map((status) => (
+                <option key={status.value} value={status.value}>{status.label}</option>
               ))}
             </select>
           </label>

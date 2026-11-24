@@ -2,13 +2,14 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
-import { formatNumber, formatPercent } from "@/lib/i18n/format";
+import { formatDateTime, formatNumber, formatPercent } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "../brands/dao";
 import { Button } from "@/components/ui/button";
 import { TaskSummaryList } from "../optimization/task-summary.tsx";
-import { MetricCard } from "./metric-card.tsx";
+import { CollectionLine, CoverageCard, MetricCard } from "./metric-card.tsx";
+import type { RateBreakdown } from "./metrics.ts";
 import { readEvidenceOverview } from "./overview-commands";
 import { overviewScopeFromSearch, overviewScopePath } from "./overview-contracts";
 import { OverviewScopeForm } from "./scope-form";
@@ -16,6 +17,27 @@ import { OverviewScopeForm } from "./scope-form";
 function formatRate(locale: Locale, value: number | null) {
   if (value == null) return "N/A";
   return formatPercent(locale, value);
+}
+
+function metricLabels(
+  t: Awaited<ReturnType<typeof getTranslator<"evidenceOverview">>>,
+  locale: Locale,
+  metric: RateBreakdown,
+) {
+  const judgedLabel = metric.consideredCount > 0
+    ? t("judgedDenominator", {
+      judged: formatNumber(locale, metric.judgedCount),
+      considered: formatNumber(locale, metric.consideredCount),
+    })
+    : null;
+  const citationLabel = metric.citationComplete != null && metric.consideredCount > 0
+    ? t("citationCoverage", {
+      complete: formatNumber(locale, metric.citationComplete),
+      eligible: formatNumber(locale, metric.consideredCount),
+      judged: formatNumber(locale, metric.citationJudged ?? 0),
+    })
+    : null;
+  return { judgedLabel, citationLabel };
 }
 
 const actionClass = "h-auto max-w-full whitespace-normal text-left";
@@ -165,6 +187,13 @@ export default async function EvidenceOverviewPage({
     >
       <OverviewScopeForm scope={parsed.data} t={t} />
 
+      <CollectionLine
+        capture={overview.collection.lastCapturedAt
+          ? t("lastCapture", { time: formatDateTime(locale, new Date(overview.collection.lastCapturedAt)) })
+          : t("noCapture")}
+        expired={overview.collection.capabilityExpired ? t("capabilityExpired") : null}
+      />
+
       {overview.smallSample ? (
         <p className="break-words rounded-xl border border-dashed bg-card px-4 py-3 text-sm leading-6 text-muted-foreground" role="status">
           {t("smallSample")}
@@ -191,33 +220,68 @@ export default async function EvidenceOverviewPage({
         </section>
       ) : (
         <>
-          <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+          <div className="grid min-w-0 gap-4 lg:grid-cols-4">
+            <CoverageCard
+              title={t("coverageTitle")}
+              validText={overview.coverage.status === "na"
+                ? (overview.coverage.reason === "no-due-slots" ? t("coverageNotDue") : t("coverageNoPlan"))
+                : t("coverageValid", {
+                  rate: formatRate(locale, overview.coverage.validRate),
+                  valid: formatNumber(locale, overview.coverage.valid),
+                  planned: formatNumber(locale, overview.coverage.planned),
+                })}
+              eligibleText={overview.coverage.status === "ready"
+                ? t("coverageEligible", {
+                  rate: formatRate(locale, overview.coverage.eligibleRate),
+                  eligible: formatNumber(locale, overview.coverage.eligible),
+                  planned: formatNumber(locale, overview.coverage.planned),
+                })
+                : null}
+              counts={overview.coverage.status === "ready"
+                ? t("coverageCounts", {
+                  valid: formatNumber(locale, overview.coverage.valid),
+                  failed: formatNumber(locale, overview.coverage.failed),
+                  pending: formatNumber(locale, overview.coverage.pending),
+                  paused: formatNumber(locale, overview.coverage.paused),
+                })
+                : null}
+              network={overview.coverage.status === "ready"
+                ? t("coverageNetworkUnknown", { count: formatNumber(locale, overview.coverage.networkUnknown) })
+                : null}
+            />
             {([
               ["mentionRate", overview.metrics.mentioned] as const,
               ["recommendRate", overview.metrics.recommended] as const,
               ["officialCiteRate", overview.metrics.officialSiteCited] as const,
-            ]).map(([key, metric]) => (
-              <MetricCard
-                key={key}
-                title={t(key)}
-                metric={metric}
-                locale={locale}
-                equalWeightHint={t("equalWeightHint", {
-                  covered: formatNumber(locale, metric.coveredQuestions),
-                  fixed: formatNumber(locale, metric.fixedQuestions),
-                })}
-                pooledHint={t("pooledHint", {
-                  rate: formatRate(locale, metric.pooled.rate),
-                  num: formatNumber(locale, metric.pooled.numerator),
-                  den: formatNumber(locale, metric.pooled.denominator),
-                })}
-                unknownRatioLabel={t("unknownRatio", {
-                  ratio: formatRate(locale, metric.unknownRatio),
-                })}
-                metricNa={t("metricNa")}
-                officialNa={t("officialNa")}
-              />
-            ))}
+              ["ownedCiteRate", overview.metrics.ownedPageCited] as const,
+            ]).map(([key, metric]) => {
+              const labels = metricLabels(t, locale, metric);
+              return (
+                <MetricCard
+                  key={key}
+                  title={t(key)}
+                  metric={metric}
+                  locale={locale}
+                  equalWeightHint={t("equalWeightHint", {
+                    covered: formatNumber(locale, metric.coveredQuestions),
+                    fixed: formatNumber(locale, metric.fixedQuestions),
+                  })}
+                  pooledHint={t("pooledHint", {
+                    rate: formatRate(locale, metric.pooled.rate),
+                    num: formatNumber(locale, metric.pooled.numerator),
+                    den: formatNumber(locale, metric.pooled.denominator),
+                  })}
+                  unknownRatioLabel={t("unknownRatio", {
+                    ratio: formatRate(locale, metric.unknownRatio),
+                  })}
+                  judgedLabel={labels.judgedLabel}
+                  citationLabel={labels.citationLabel}
+                  metricNa={t("metricNa")}
+                  officialNa={t("officialNa")}
+                  ownedNa={t("ownedNa")}
+                />
+              );
+            })}
           </div>
 
           <section className="min-w-0 space-y-3">

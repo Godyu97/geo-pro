@@ -9,6 +9,7 @@ import { listActionDrafts } from "./action-drafts";
 import { checkPagesAction } from "./actions";
 import { listPrioritizedTasks } from "./commands";
 import { ActionDraftPanel } from "./draft-panel";
+import { taskDisplayLabels } from "./task-labels.ts";
 
 export async function generateMetadata() {
   const t = await getTranslator("optimization");
@@ -23,6 +24,7 @@ export default async function OptimizationListPage({
   const session = await requireSession();
   const params = await searchParams;
   const locale = await getLocale();
+  const messages = getMessages(locale);
   const t = await getTranslator("optimization");
   const connection = getConnection();
   const brands = new BrandDao(connection);
@@ -65,7 +67,7 @@ export default async function OptimizationListPage({
           locale={locale}
           brandId={brandId}
           drafts={drafts.drafts}
-          messages={getMessages(locale).optimization}
+          messages={messages.optimization}
         />
       )}
 
@@ -108,28 +110,31 @@ export default async function OptimizationListPage({
           </p>
         ) : (
           <ul className="space-y-3">
-            {listed.tasks.map((task) => (
-              <li key={task.id} className="rounded-2xl border px-4 py-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <Link
-                      href={`/dashboard/optimization/${task.id}`}
-                      prefetch={false}
-                      className="font-medium underline-offset-4 hover:underline"
-                    >
-                      {task.title}
-                    </Link>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {task.targetPage} · {task.gapType}
-                    </p>
+            {listed.tasks.map((task) => {
+              const labels = taskDisplayLabels(messages.evidenceOverview, task);
+              return (
+                <li key={task.id} className="rounded-2xl border px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <Link
+                        href={`/dashboard/optimization/${task.id}`}
+                        prefetch={false}
+                        className="font-medium underline-offset-4 hover:underline"
+                      >
+                        {task.title}
+                      </Link>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {task.targetPage} · {task.gapType}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Badge variant="outline">{labels.priority}</Badge>
+                      <Badge variant="secondary">{labels.status}</Badge>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Badge variant="outline">{task.priorityBucket}</Badge>
-                    <Badge variant="secondary">{task.status}</Badge>
-                  </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

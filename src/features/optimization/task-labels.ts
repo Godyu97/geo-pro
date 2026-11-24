@@ -28,3 +28,10 @@ export function taskDisplayLabels(
     status: messages[statusKeys[task.status]],
   };
 }
+
+export function taskStatusOptions(messages: TaskLabelMessages) {
+  return (Object.keys(statusKeys) as TaskStatus[]).map((status) => ({
+    value: status,
+    label: messages[statusKeys[status]],
+  }));
+}

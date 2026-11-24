@@ -9,7 +9,7 @@ import { sourceModes, triStateSchema } from "./contracts.ts";
 import { analysisRuleVersion } from "./rules.ts";
 import type { OverviewScope } from "./overview-contracts.ts";
 
-export const overviewRuleVersion = "s-m0-07-v1";
+export const overviewRuleVersion = "s-m0-07-v2";
 export const overviewCacheTtlSeconds = 60;
 const chunkChars = 3500;
 const indexLimit = 30;
@@ -26,6 +26,10 @@ const rateSchema = z.object({
   coveredQuestions: z.number(),
   fixedQuestions: z.number(),
   unknownRatio: z.number().nullable(),
+  judgedCount: z.number(),
+  consideredCount: z.number(),
+  citationComplete: z.number().nullable(),
+  citationJudged: z.number().nullable(),
   perQuestion: z.array(z.object({
     questionKey: z.string(),
     questionText: z.string(),
@@ -56,6 +60,24 @@ export const overviewPayloadSchema = z.object({
     mentioned: rateSchema,
     recommended: rateSchema,
     officialSiteCited: rateSchema,
+    ownedPageCited: rateSchema,
+  }),
+  coverage: z.object({
+    status: z.enum(["ready", "na"]),
+    reason: z.enum(["no-frozen-plan-slots", "no-due-slots"]).nullable(),
+    planned: z.number(),
+    valid: z.number(),
+    eligible: z.number(),
+    failed: z.number(),
+    paused: z.number(),
+    pending: z.number(),
+    networkUnknown: z.number(),
+    validRate: z.number().nullable(),
+    eligibleRate: z.number().nullable(),
+  }),
+  collection: z.object({
+    lastCapturedAt: z.string().nullable(),
+    capabilityExpired: z.boolean(),
   }),
   sampleIds: z.array(z.string()),
   answers: z.array(z.object({
@@ -120,7 +142,7 @@ export function overviewCacheIdentity(input: {
 }) {
   return digest([
     "evidence-overview",
-    "target-region-v2",
+    "coverage-v1",
     input.ownerId,
     input.brandId,
     input.scope.sourceMode,

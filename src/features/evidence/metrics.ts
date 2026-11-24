@@ -2,8 +2,11 @@ import type { z } from "zod";
 import { primaryTypes, questionType } from "../prompts/contracts.ts";
 import type { TriState } from "./contracts.ts";
 
-export type MetricKind = "mentioned" | "recommended" | "officialSiteCited";
+export type MetricKind = "mentioned" | "recommended" | "officialSiteCited" | "ownedPageCited";
 export type QuestionType = z.infer<typeof questionType> | "unknown";
+export type PlanSlotStatus = "scheduled" | "completed" | "failed" | "paused";
+type NetworkMode = "on" | "off" | "unknown";
+type NetworkTrigger = "triggered" | "not_triggered" | "unknown";
 
 export type OverviewSample = {
   observationId: string;
@@ -12,13 +15,14 @@ export type OverviewSample = {
   questionType: QuestionType;
   sourceMode: "model_api" | "consumer_ui";
   region: string;
-  requestedNetworkMode: "on" | "off" | "unknown";
+  requestedNetworkMode: NetworkMode;
   capturedAt: string;
   evidenceState: "draft_evidence" | "complete" | "incomplete" | "contested";
   citationSetState: "complete" | "partial" | "unsupported" | "missing";
   mentioned: TriState;
   recommended: TriState;
   officialSiteCited: TriState;
+  ownedPageCited: TriState;
   hasOfficialWebsite: boolean;
 };
 
@@ -30,6 +34,10 @@ export type RateBreakdown = {
   coveredQuestions: number;
   fixedQuestions: number;
   unknownRatio: number | null;
+  judgedCount: number;
+  consideredCount: number;
+  citationComplete: number | null;
+  citationJudged: number | null;
   perQuestion: Array<{
     questionKey: string;
     questionText: string;
@@ -51,9 +59,21 @@ export type OverviewMetrics = {
 };
 
 const PRIMARY = primaryTypes;
+const OWNED = new Set(["owned_domain", "owned_account"]);
 
 function labelOf(sample: OverviewSample, kind: MetricKind): TriState {
   return sample[kind];
+}
+
+/** Owned-page judgement uses stored citation ownership only. Unknown ownership stays unknown. */
+export function ownedPageJudgement(
+  citationSetState: OverviewSample["citationSetState"],
+  ownerships: readonly string[],
+): TriState {
+  if (citationSetState !== "complete") return "unknown";
+  if (ownerships.some((item) => OWNED.has(item))) return "true";
+  if (ownerships.some((item) => item === "unknown")) return "unknown";
+  return "false";
 }
 
 function isEligible(sample: OverviewSample) {
@@ -70,24 +90,44 @@ function rate(numerator: number, denominator: number): number | null {
   return numerator / denominator;
 }
 
+function blankRate(
+  reason: string,
+  fixedQuestions: number,
+  consideredCount: number,
+  citationComplete: number | null,
+): RateBreakdown {
+  return {
+    status: "na",
+    reason,
+    equalWeight: null,
+    pooled: { numerator: 0, denominator: 0, rate: null },
+    coveredQuestions: 0,
+    fixedQuestions,
+    unknownRatio: null,
+    judgedCount: 0,
+    consideredCount,
+    citationComplete,
+    citationJudged: citationComplete == null ? null : 0,
+    perQuestion: [],
+  };
+}
+
 function buildMetric(samples: OverviewSample[], kind: MetricKind): RateBreakdown {
-  if (kind === "officialSiteCited" && samples.every((item) => !item.hasOfficialWebsite)) {
-    return {
-      status: "na",
-      reason: "official-website-not-applicable",
-      equalWeight: null,
-      pooled: { numerator: 0, denominator: 0, rate: null },
-      coveredQuestions: 0,
-      fixedQuestions: 0,
-      unknownRatio: null,
-      perQuestion: [],
-    };
+  const cites = kind === "officialSiteCited" || kind === "ownedPageCited";
+  const population = kind === "officialSiteCited"
+    ? samples.filter((item) => item.hasOfficialWebsite)
+    : samples;
+  const consideredCount = population.length;
+  const citationComplete = population.filter((item) => item.citationSetState === "complete").length;
+  const citationFields = cites ? citationComplete : null;
+
+  if (kind === "officialSiteCited" && population.length === 0) {
+    return blankRate("official-website-not-applicable", 0, 0, 0);
   }
 
   const byQuestion = new Map<string, OverviewSample[]>();
-  for (const sample of samples) {
-    if (kind === "officialSiteCited" && !sample.hasOfficialWebsite) continue;
-    if (kind === "officialSiteCited" && sample.citationSetState !== "complete") continue;
+  for (const sample of population) {
+    if (cites && sample.citationSetState !== "complete") continue;
     const list = byQuestion.get(sample.questionKey) ?? [];
     list.push(sample);
     byQuestion.set(sample.questionKey, list);
@@ -138,16 +178,28 @@ function buildMetric(samples: OverviewSample[], kind: MetricKind): RateBreakdown
 
   perQuestion.sort((a, b) => a.questionKey.localeCompare(b.questionKey));
 
+  const unknownRatio = judgedSlots + unknownSlots > 0 ? unknownSlots / (judgedSlots + unknownSlots) : null;
+  const shared = {
+    judgedCount: judgedSlots,
+    consideredCount,
+    citationComplete: citationFields,
+    citationJudged: cites ? judgedSlots : null,
+    perQuestion,
+  };
+
   if (equalCount === 0) {
+    const reason = kind === "ownedPageCited" && citationComplete > 0 && judgedSlots === 0
+      ? "no-judgable-owned-citations"
+      : judgedSlots + unknownSlots === 0 ? "no-eligible-samples" : "no-judgable-samples";
     return {
       status: "na",
-      reason: judgedSlots + unknownSlots === 0 ? "no-eligible-samples" : "no-judgable-samples",
+      reason,
       equalWeight: null,
       pooled: { numerator: 0, denominator: 0, rate: null },
       coveredQuestions: 0,
       fixedQuestions: byQuestion.size,
-      unknownRatio: judgedSlots + unknownSlots > 0 ? unknownSlots / (judgedSlots + unknownSlots) : null,
-      perQuestion,
+      unknownRatio,
+      ...shared,
     };
   }
 
@@ -158,8 +210,8 @@ function buildMetric(samples: OverviewSample[], kind: MetricKind): RateBreakdown
     pooled: { numerator: pooledNum, denominator: pooledDen, rate: rate(pooledNum, pooledDen) },
     coveredQuestions: equalCount,
     fixedQuestions: byQuestion.size,
-    unknownRatio: judgedSlots + unknownSlots > 0 ? unknownSlots / (judgedSlots + unknownSlots) : null,
-    perQuestion,
+    unknownRatio,
+    ...shared,
   };
 }
 
@@ -170,6 +222,7 @@ export function aggregateOverviewMetrics(samples: OverviewSample[]): OverviewMet
     mentioned: buildMetric(primary, "mentioned"),
     recommended: buildMetric(primary, "recommended"),
     officialSiteCited: buildMetric(primary, "officialSiteCited"),
+    ownedPageCited: buildMetric(primary, "ownedPageCited"),
   } satisfies Record<MetricKind, RateBreakdown>;
 
   const sampleIds = primary.map((item) => item.observationId);
@@ -187,6 +240,175 @@ export function aggregateOverviewMetrics(samples: OverviewSample[]): OverviewMet
     metrics,
     sampleIds,
   };
+}
+
+export type CoveragePlanSlot = {
+  id: string;
+  at: string;
+  status: PlanSlotStatus;
+  sourceMode: "model_api" | "consumer_ui";
+  regions: readonly string[];
+  networks: readonly NetworkMode[];
+};
+
+export type CoverageAnswer = {
+  planSlotId: string | null;
+  evidenceState: OverviewSample["evidenceState"];
+  citationSetState: OverviewSample["citationSetState"];
+  requestedNetworkMode: NetworkMode;
+  networkTrigger: NetworkTrigger;
+  newSession: TriState;
+  searchRequired: boolean;
+  newSessionRequired: boolean;
+};
+
+export type CoverageSummary = {
+  status: "ready" | "na";
+  reason: "no-frozen-plan-slots" | "no-due-slots" | null;
+  planned: number;
+  valid: number;
+  eligible: number;
+  failed: number;
+  paused: number;
+  pending: number;
+  networkUnknown: number;
+  validRate: number | null;
+  eligibleRate: number | null;
+};
+
+function emptyCoverage(reason: CoverageSummary["reason"]): CoverageSummary {
+  return {
+    status: "na",
+    reason,
+    planned: 0,
+    valid: 0,
+    eligible: 0,
+    failed: 0,
+    paused: 0,
+    pending: 0,
+    networkUnknown: 0,
+    validRate: null,
+    eligibleRate: null,
+  };
+}
+
+function answerQuality(answer: CoverageAnswer) {
+  const evidenceOk = answer.evidenceState === "complete" || answer.evidenceState === "contested";
+  if (!evidenceOk) return { qualified: false, valid: false, networkUnknown: false };
+  const networkRequired = answer.searchRequired || answer.requestedNetworkMode === "on";
+  if (networkRequired && answer.networkTrigger === "unknown") {
+    return { qualified: false, valid: false, networkUnknown: true };
+  }
+  const networkOk = !networkRequired || answer.networkTrigger === "triggered";
+  const sessionOk = !answer.newSessionRequired || answer.newSession === "true";
+  const sourcesOk = answer.citationSetState === "complete";
+  if (!networkOk || !sessionOk || !sourcesOk) return { qualified: false, valid: false, networkUnknown: false };
+  return { qualified: true, valid: true, networkUnknown: false };
+}
+
+function slotInScope(
+  slot: CoveragePlanSlot,
+  scope: {
+    sourceMode: "model_api" | "consumer_ui";
+    region?: string;
+    requestedNetworkMode?: NetworkMode;
+    from?: string;
+    to?: string;
+  },
+) {
+  if (slot.sourceMode !== scope.sourceMode) return false;
+  if (scope.region && !slot.regions.includes(scope.region)) return false;
+  if (scope.requestedNetworkMode && !slot.networks.includes(scope.requestedNetworkMode)) return false;
+  if (scope.from && slot.at < scope.from) return false;
+  if (scope.to && slot.at > scope.to) return false;
+  return true;
+}
+
+/** P counts due frozen plan slots. Failed and paused stay in the denominator; future slots do not. */
+export function summarizeCoverage(input: {
+  slots: readonly CoveragePlanSlot[];
+  answers: readonly CoverageAnswer[];
+  scope: {
+    sourceMode: "model_api" | "consumer_ui";
+    region?: string;
+    requestedNetworkMode?: NetworkMode;
+    from?: string;
+    to?: string;
+  };
+  now: string;
+}): CoverageSummary {
+  const inScope = input.slots.filter((slot) => slotInScope(slot, input.scope));
+  if (inScope.length === 0) return emptyCoverage("no-frozen-plan-slots");
+  const due = inScope.filter((slot) => slot.at <= input.now);
+  if (due.length === 0) return emptyCoverage("no-due-slots");
+
+  const bySlot = new Map<string, CoverageAnswer[]>();
+  for (const answer of input.answers) {
+    if (!answer.planSlotId) continue;
+    const list = bySlot.get(answer.planSlotId) ?? [];
+    list.push(answer);
+    bySlot.set(answer.planSlotId, list);
+  }
+
+  let valid = 0;
+  let eligible = 0;
+  let failed = 0;
+  let paused = 0;
+  let pending = 0;
+  let networkUnknown = 0;
+  for (const slot of due) {
+    if (slot.status === "failed") {
+      failed += 1;
+      continue;
+    }
+    if (slot.status === "paused") {
+      paused += 1;
+      continue;
+    }
+    if (slot.status === "scheduled") {
+      pending += 1;
+      continue;
+    }
+    const qualities = (bySlot.get(slot.id) ?? []).map(answerQuality);
+    const qualified = qualities.some((item) => item.qualified);
+    const slotValid = qualities.some((item) => item.valid);
+    if (qualified) {
+      eligible += 1;
+      valid += 1;
+      continue;
+    }
+    pending += 1;
+    if (slotValid) valid += 1;
+    if (qualities.some((item) => item.networkUnknown)) networkUnknown += 1;
+  }
+
+  const planned = due.length;
+  return {
+    status: "ready",
+    reason: null,
+    planned,
+    valid,
+    eligible,
+    failed,
+    paused,
+    pending,
+    networkUnknown,
+    validRate: rate(valid, planned),
+    eligibleRate: rate(eligible, planned),
+  };
+}
+
+export function latestCompleteCapture(samples: readonly { capturedAt: string; evidenceState: string }[]) {
+  let latest: string | null = null;
+  for (const sample of samples) {
+    if (sample.evidenceState !== "complete") continue;
+    if (!latest || sample.capturedAt > latest) latest = sample.capturedAt;
+  }
+  return latest;
+}
+
+export function capabilityIsExpired(expiresAt: readonly (string | null)[], now: string) {
+  return expiresAt.some((value) => value !== null && value <= now);
 }
 
 export function filterSamplesByScope(
