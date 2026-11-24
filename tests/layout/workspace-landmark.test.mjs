@@ -114,6 +114,22 @@ test("content version keeps the next review action and recovery in the workspace
   assert.match(version, /whitespace-normal/);
 });
 
+test("content calendar keeps the next maintenance action and recovery in the workspace canvas", () => {
+  const calendar = read("../../src/features/content/calendar-page.tsx");
+  assert.doesNotMatch(calendar, /<main\b/);
+  assert.match(calendar, /calendarTaskPlanned/);
+  assert.match(calendar, /calendarTaskBlocked/);
+  assert.match(calendar, /calendarTaskEmpty/);
+  assert.match(calendar, /calendarUnavailable/);
+  assert.match(calendar, /relatedEntries/);
+  assert.match(calendar, /calendarOpenPlanned/);
+  assert.match(calendar, /calendarOpenBlocked/);
+  assert.match(calendar, /overflow-x-auto/);
+  assert.match(calendar, /\[overflow-wrap:anywhere\]/);
+  assert.match(calendar, /whitespace-normal/);
+  assert.match(calendar, /whitespace-nowrap/);
+});
+
 test("content publication keeps the next check and recovery in the workspace canvas", () => {
   const publication = read("../../src/features/content/publication-page.tsx");
   assert.doesNotMatch(publication, /<main\b/);

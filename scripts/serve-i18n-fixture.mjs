@@ -143,6 +143,24 @@ await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(v
   }
   const dao = new ContentDao(db);`));
 
+const calendarService = path.join(fixture, "src/features/content/maintenance.ts");
+const calendarRead = `export async function readContentCalendar(
+  db: DatabaseConnection,
+  ownerId: string,
+  query: CalendarQuery,
+) {
+  if (!await ownedBrand(db, ownerId, query.brandId)) return denied("NOT_FOUND");`;
+assert.ok((await readFile(calendarService, "utf8")).includes(calendarRead));
+await writeFile(calendarService, (await readFile(calendarService, "utf8")).replace(calendarRead, `export async function readContentCalendar(
+  db: DatabaseConnection,
+  ownerId: string,
+  query: CalendarQuery,
+) {
+  if ((await (await import("next/headers")).cookies()).get("geo-content-calendar-unavailable")?.value === "1") {
+    throw new Error("Private content calendar fixture failure");
+  }
+  if (!await ownedBrand(db, ownerId, query.brandId)) return denied("NOT_FOUND");`));
+
 const publicationRead = `export async function readPublication(
   db: DatabaseConnection,
   ownerId: string,
