@@ -50,8 +50,16 @@ elif sys.argv[1] == "create-chat":
     sys.exit(0)
 
 prompt = sys.argv[-1]
+assert "启动者已运行交付模式，明确授权本轮" in prompt
+is_backlog = "最多新建 Issue：" in prompt
+if is_backlog:
+    limit = re.search(r"最多新建 Issue：(\d+)", prompt)[1]
+    assert f"新建至多 {limit} 个符合条件的 status:ready Issue" in prompt
+else:
+    assert f"可在目标 Issue #{issue_number} 发布验收评论" in prompt
+    assert "普通推送至 origin/main" in prompt
 with (control / "rounds").open("a") as rounds:
-    rounds.write(("backlog" if "最多新建 Issue：" in prompt else "dev") + "\n")
+    rounds.write(("backlog" if is_backlog else "dev") + "\n")
 (control / "agent.pid").write_text(str(os.getpid()))
 print("null", flush=True)
 if scenario == "slow":
@@ -84,7 +92,7 @@ def git(*args):
 
 marker = re.search(r"<!-- geopro-loop:[0-9a-f]+ -->", prompt)[0]
 reply = "已执行本轮检查。详情见工单评论。"
-if "最多新建 Issue：" in prompt:
+if is_backlog:
     if scenario in {"backlog-created", "backlog-foreign", "backlog-reopened", "backlog-over-limit"}:
         opened = {
             "number": 132, "title": "fixture issue", "labels": [{"name": "status:ready"}],
@@ -212,10 +220,12 @@ class IssueLoopTest(unittest.TestCase):
         self.assertEqual(summary["dev_commits"], 1)
         self.assertEqual(summary["rounds"][0]["after_head"], self.git("rev-parse", "origin/main"))
 
-    def test_default_codex_dispatch_records_session_and_reply(self):
+    def test_default_codex_dispatch_uses_full_access_and_records_reply(self):
         self.run_loop("pushed", "--target-dev-commits", "1", agent=None)
         self.assertEqual(json.loads((self.root / "codex-args.json").read_text()), [
-            "exec", "--json", "--model", "gpt-6.2-sol", "-c", 'model_reasoning_effort="high"',
+            "exec", "--json", "--model", "gpt-6.2-sol",
+            "--sandbox", "danger-full-access", "-c", 'approval_policy="never"',
+            "-c", 'model_reasoning_effort="high"',
         ])
         summary = self.summary()
         self.assertEqual(summary["agent"], "codex")
@@ -224,6 +234,11 @@ class IssueLoopTest(unittest.TestCase):
         self.assertEqual(result["session_id"], "test-codex-session")
         self.assertEqual(result["outcome"], "progressed")
         self.assertEqual(result["result_text"], "已执行本轮检查。详情见工单评论。")
+
+    def test_dry_run_plans_without_dispatch(self):
+        proc = self.run_loop("pushed", "--dry-run", agent=None)
+        self.assertIn("第 1 轮计划 dev，目标 #131", proc.stdout)
+        self.assertFalse((self.root / "rounds").exists())
 
     def test_codex_turn_failed_is_not_accepted_even_with_zero_exit(self):
         self.run_loop("codex-failed", agent="codex", expected_exit=1)

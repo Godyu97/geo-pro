@@ -64,7 +64,7 @@ DEV_PROMPT_BODY = f"""# GeoPro 单 Issue 开发与验收
 
 ## 拆出可验证的实现增量
 
-- 沿现有剩余项选择一个可独立验收的纵向增量。明确入口、角色、输入与状态、用户能观察到的结果、依赖及本轮范围边界。优先实现能解锁后续用户动作的行为，或处理该路径已有的高风险状态。可执行且有写入授权时更新为 status:in-progress。
+- 沿现有剩余项选择一个可独立验收的纵向增量。明确入口、角色、输入与状态、用户能观察到的结果、依赖及本轮范围边界。优先实现能解锁后续用户动作的行为，或处理该路径已有的高风险状态。确认开工时将目标更新为 status:in-progress。
 - 把适用 AC 写成可执行场景。给定角色、数据或版本和前置条件，执行动作，核对可见状态、持久化结果或证据定位。覆盖成功和相关的拒绝、未知、失败恢复或重试。跨层改动沿入口接到真实服务或等效隔离路径。例如受控采样可先交付一个槽位从已确认预算到可查回执或待核对的路径，并验证重试不会重复计费。
 - 在现有入口、领域服务、数据层和适配器中复用最小实现。按改动核对状态迁移、兼容数据、事务边界、权限、幂等与并发、日志和故障恢复。数据库、缓存、双语、视觉及 Responses API 按对应工程规范执行。
 
@@ -73,13 +73,13 @@ DEV_PROMPT_BODY = f"""# GeoPro 单 Issue 开发与验收
 - 按 .agents/workflows/issue-lifecycle.md 和 .agents/governance/quality-gates.md 运行适用门禁。需要改动时先复现缺口，再实现和验证。代码或配置变更运行 pnpm lint、pnpm typecheck、pnpm build，并按改动运行领域测试、双语、DDL 或文档检查。自动测试使用隔离数据和回环 mock。邮件按长期 Mock 策略执行，严格安全路径按约定切换。
 - 逐项对照本轮 AC 及实际观测，分开记录工程检查、隔离回归、获准真实开发联调和正式阶段验收。品牌和监测联调按 docs/tasks/brand-monitoring-next.md 核对测试角色、服务、授权、版本、窗口和费用。只有真实条件和证据满足时才认定对应阶段门禁通过。缺前置时完成可独立软件增量和检查，并记录未验证项及解除条件。
 - 门禁失败先定位并修复本轮相关原因。记录每项的实际命令、结果状态（通过、失败、未配置或环境受阻）和脱敏证据。工具故障或验证失败记 failed，保存实际错误和可重试条件。门禁与指标合同按原口径执行。
-- 提交前审查改动和测试结果。只在得到明确授权后提交、推送以及写 GitHub，代码提交主题末尾加 (#目标编号)。如果远端推进而需要 rebase，重审合并结果并重新跑受影响的门禁。保持线性历史。不得 force push、推送未验证的变更或处理用户已有修改。
+- 提交前审查改动和测试结果。在运行上下文的明确授权内，适用门禁通过后提交本轮增量并推送，代码提交主题末尾加 (#目标编号)。如果远端推进而需要 rebase，重审合并结果并重新跑受影响的门禁。保持线性历史。不得 force push、推送未验证的变更或处理用户已有修改。
 
 ## 回写和回执
 
-- 交付已推送的增量或可独立复查的纯验收证据时，在目标 Issue 新发一条评论，逐字放入本轮标记及实际核验版本的完整 SHA。写清交付范围、对应需求/AC、验证命令与结果、证据和剩余工作。
-- 还有具体步骤时保持目标开放，在评论写清下一步的前置和核验方法。全部适用验收已通过时，发布验收评论后更新为 status:done 并以 completed 原因关闭。经授权可将前置已实证满足的关联工单更新为 status:ready。
-- 缺少具体前置且本轮无交付时，记录已执行的检查和可验证的解除条件，经授权后更新阻塞状态。运行或门禁失败时保留未提交工作并说明问题。目标已关闭或退出可执行队列时跳过。
+- 在目标 Issue 新发一条验收评论，逐字放入本轮标记及实际核验版本的完整 SHA。开发轮使用包含本轮增量的已推送提交。纯验收轮使用实际通过本轮验收的现有提交，且工作树干净。写清交付范围、对应需求/AC、验证命令与结果、证据和剩余工作。
+- 还有具体步骤时保持目标开放，在评论写清下一步的前置和核验方法。全部适用验收已通过时，发布验收评论后更新为 status:done 并以 completed 原因关闭。
+- 缺少具体前置且本轮无交付时，记录已执行的检查和可验证的解除条件，更新目标的阻塞状态。运行或门禁失败时保留未提交工作并说明问题。目标已关闭或退出可执行队列时跳过。
 - 最终回复用普通文本记录实际工作、证据和剩余事项。
 """
 
@@ -371,6 +371,8 @@ def build_dev_prompt(
 同步基线：{base_head}
 Issue 评论回执标记（逐字放入评论）：{receipt_marker}
 
+启动者已运行交付模式，明确授权本轮执行以下操作。可在目标 Issue #{target.number} 发布验收评论并按约定更新其状态，全部验收通过才可关闭。适用门禁通过后，可提交本轮增量并普通推送至 origin/{branch}。在此授权范围内直接执行交付。部署、其他 Issue 的写入和其他分支的推送需要单独授权。
+
 """ + DEV_PROMPT_BODY
 
 
@@ -380,6 +382,8 @@ def build_backlog_prompt(replenish_count: int, open_issue_count: int, receipt_ma
 最多新建 Issue：{replenish_count}
 当前开放 Issue 总数：{open_issue_count}
 新 Issue 正文回执标记（逐字放入正文）：{receipt_marker}
+
+启动者已运行交付模式，明确授权本轮在当前仓库新建至多 {replenish_count} 个符合条件的 status:ready Issue。在此范围内直接执行。编辑已有工单、提交、推送和部署需要单独授权。
 
 """ + BACKLOG_REPLENISH_PROMPT_BODY
 
@@ -553,6 +557,7 @@ def run_round(
     if agent == "codex":
         cmd = [
             agent_bin, "exec", "--json", "--model", model,
+            "--sandbox", "danger-full-access", "-c", 'approval_policy="never"',
             "-c", f"model_reasoning_effort={json.dumps(reasoning_effort)}",
         ]
     else:
@@ -683,7 +688,8 @@ def parse_skip_issues(raw: str | None) -> dict[int, str]:
 def parse_args() -> argparse.Namespace:
     default_workspace = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(
-        description="GeoPro 自主 Issue 串行开发编排脚本（外层状态机 + 水位自动补货 + 进度核验）"
+        description="GeoPro 自主 Issue 串行开发编排脚本（外层状态机 + 水位自动补货 + 进度核验）",
+        epilog="直接运行即授权 Agent 执行所选模式的 Git 和 GitHub 交付。仅查看队列请用 --dry-run。",
     )
     parser.add_argument(
         "--max-rounds",
