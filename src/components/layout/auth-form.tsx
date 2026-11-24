@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, LoaderCircle } from "lucide-react";
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { accountAccessPath } from "@/features/account/email/contracts";
 import { authClient } from "@/lib/auth/client";
 import { safeReturnTo } from "@/lib/auth/return-to";
 import {
@@ -42,6 +44,33 @@ const errorKeys: Record<string, keyof Messages["auth"]> = {
   TOO_MANY_REQUESTS: "tooManyRequests",
   INVALID_ORIGIN: "originUnavailable",
 };
+
+function loginReturnTo(returnTo: string, fragment: string) {
+  const target = new URL(safeReturnTo(returnTo), window.location.origin);
+  if (!target.hash) target.hash = fragment;
+  return safeReturnTo(`${target.pathname}${target.search}${target.hash}`);
+}
+
+function subscribeToHashChange(update: () => void) {
+  window.addEventListener("hashchange", update);
+  return () => window.removeEventListener("hashchange", update);
+}
+
+export function LoginRecoveryLink({ returnTo, resumeFragment, children }: {
+  returnTo: string;
+  resumeFragment: boolean;
+  children: string;
+}) {
+  // The browser inherits the protected page fragment after an HTTP redirect.
+  const fragment = useSyncExternalStore(subscribeToHashChange, () => window.location.hash, () => "");
+  const target = resumeFragment && fragment ? loginReturnTo(returnTo, fragment) : returnTo;
+  return (
+    <Link href={accountAccessPath("forgot", target)} prefetch={false}
+      className="mt-5 block text-center text-sm underline underline-offset-4">
+      {children}
+    </Link>
+  );
+}
 
 function AuthFormMessage({ messages }: { messages: Messages["auth"] }) {
   const { error } = useFormField();
@@ -104,10 +133,7 @@ export function AuthForm({
       }
 
       // Replace the document to clear credentials and private router caches.
-      // A fragment inherited by an HTTP login redirect is only a page location.
-      const target = new URL(safeReturnTo(returnTo), window.location.origin);
-      if (!target.hash) target.hash = window.location.hash;
-      window.location.replace(safeReturnTo(`${target.pathname}${target.search}${target.hash}`));
+      window.location.replace(loginReturnTo(returnTo, window.location.hash));
     } catch {
       setError("networkError");
     }

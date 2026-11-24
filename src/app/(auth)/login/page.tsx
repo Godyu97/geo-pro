@@ -3,11 +3,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft, Fingerprint } from "lucide-react";
 
-import { AuthForm } from "@/components/layout/auth-form";
+import { AuthForm, LoginRecoveryLink } from "@/components/layout/auth-form";
 import { BrandMark } from "@/components/layout/brand-mark";
 import { Card, CardContent } from "@/components/ui/card";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
-import { accountAccessPath } from "@/features/account/email/contracts";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { getSessionState } from "@/lib/auth/session";
 import { safeReturnTo } from "@/lib/auth/return-to";
@@ -82,10 +81,9 @@ export default async function LoginPage({
               messages={getMessages(locale).auth}
               returnTo={target}
             />
-            <Link href={accountAccessPath("forgot", target)} prefetch={false}
-              className="mt-5 block text-center text-sm underline underline-offset-4">
+            <LoginRecoveryLink returnTo={target} resumeFragment={reason === "session-required"}>
               {email("forgotTitle")}
-            </Link>
+            </LoginRecoveryLink>
             <p className="mt-6 text-center text-xs leading-6 text-muted-foreground">
               {t("emailNotice")}
             </p>

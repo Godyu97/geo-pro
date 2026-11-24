@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { mkdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
@@ -102,8 +103,7 @@ function ask(kind, email, options = {}) {
   return request(mailPath, { ip: source(), ...options, data: { action: "request", kind, email, returnTo: options.returnTo } });
 }
 
-async function link(kind, actor, options) {
-  const { traceId } = await outcome(await ask(kind, actor.email, options), 202, "accepted");
+async function receivedLink(traceId, kind, actor) {
   const mail = await waitFor(() => inbox.get(traceId));
   assert.equal(mail.to === actor.email, true, "Link recipient is the intended account");
   const landing = new URL(mail.text.split("\n").at(-1));
@@ -111,6 +111,11 @@ async function link(kind, actor, options) {
   assert.equal(landing.searchParams.has("token"), false);
   assert.match(mail.text, kind === "verify" ? /24/ : /one hour|一小时/);
   return { landing, token: new URLSearchParams(landing.hash.slice(1)).get("token") };
+}
+
+async function link(kind, actor, options) {
+  const { traceId } = await outcome(await ask(kind, actor.email, options), 202, "accepted");
+  return receivedLink(traceId, kind, actor);
 }
 
 function confirm(action, token, actor, newPassword = password()) {
@@ -313,6 +318,8 @@ async function verifyHTTP(fixture, logs) {
 }
 
 async function verifyBrowser() {
+  const screenshots = resolve(".cache/account-email-results");
+  await mkdir(screenshots, { recursive: true });
   const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || "chrome" });
   try {
     for (const locale of ["zh-CN", "en"]) {
@@ -323,18 +330,42 @@ async function verifyBrowser() {
         await context.addCookies([{ name: "geo-locale", value: locale, url: base }]);
         const page = await context.newPage();
         const target = "/dashboard/settings?tab=security#security";
+        const loginButton = page.getByRole("button", { name: en ? "Sign in and open workspace" : "登录并进入工作台" });
+        const forgotTitle = en ? "Forgot your password?" : "忘记密码？";
+        const forgot = page.getByRole("link", { name: forgotTitle });
+        const forgotHeading = page.getByRole("heading", { name: forgotTitle });
+        const forgotHref = "/account-access?" + new URLSearchParams({ mode: "forgot", returnTo: target });
+        const email = page.getByLabel(en ? "Email" : "邮箱", { exact: true });
+        const requestButton = page.getByRole("button", { name: en ? "Request email link" : "申请邮件链接" });
+        const emailValidation = en ? "Enter a valid email address" : "请输入有效的邮箱地址";
         phase = `${locale}: bilingual email forms at 375, 768 and 1440 pixels`;
         const verification = await link("verify", actor, { locale, returnTo: target });
         const reset = await link("reset", actor, { locale, returnTo: target });
         for (const width of [1440, 768, 375]) {
           phase = `${locale}: password request at ${width}px`;
           await page.setViewportSize({ width, height: 900 });
-          await page.goto("/login?" + new URLSearchParams({ returnTo: target }));
-          await page.getByRole("link", { name: en ? "Forgot your password?" : "忘记密码？" }).press("Enter");
-          await expect(page.getByRole("heading", { name: en ? "Forgot your password?" : "忘记密码？" })).toBeVisible();
-          await page.getByRole("button", { name: en ? "Request email link" : "申请邮件链接" }).press("Enter");
-          await expect(page.getByText(en ? "Enter a valid email address" : "请输入有效的邮箱地址", { exact: true })).toBeVisible();
+          await page.goto(target);
+          await page.waitForURL(url => url.pathname === "/login" && url.hash === "#security");
+          await expect(page.locator("html")).toHaveAttribute("lang", locale);
+          await loginButton.press("Enter");
+          await expect(email).toHaveAttribute("aria-invalid", "true");
+          await expect(email).toBeFocused();
+          await expect(email).toHaveAccessibleDescription(new RegExp(emailValidation));
           assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+          if (width === 375) await page.screenshot({ path: resolve(screenshots, `${locale}-login-validation.png`), fullPage: true });
+          await page.keyboard.press("Tab");
+          await page.keyboard.press("Tab");
+          await page.keyboard.press("Tab");
+          await expect(forgot).toBeFocused();
+          await expect(forgot).toHaveAttribute("href", forgotHref);
+          await forgot.press("Enter");
+          await expect(forgotHeading).toBeVisible();
+          assert.equal(new URL(page.url()).searchParams.get("returnTo"), target, "Recovery preserves the protected page anchor");
+          await requestButton.press("Enter");
+          await expect(email).toBeFocused();
+          await expect(email).toHaveAccessibleDescription(emailValidation);
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+          if (width === 375) await page.screenshot({ path: resolve(screenshots, `${locale}-recovery-validation.png`), fullPage: true });
           phase = `${locale}: verification link at ${width}px`;
           await page.goto(verification.landing.href);
           await expect(page.getByRole("button", { name: en ? "Confirm email" : "确认邮箱" })).toBeVisible();
@@ -344,15 +375,26 @@ async function verifyBrowser() {
           await expect(page.getByLabel(en ? "New password" : "新密码")).toBeVisible();
           assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
         }
-        phase = `${locale}: email request, language change, confirmation and safe return`;
-        const requestMail = async (mode, address) => {
-          await page.goto("/account-access?" + new URLSearchParams({ mode, returnTo: target }));
-          await page.getByLabel(en ? "Email" : "邮箱", { exact: true }).fill(address);
-          await page.getByRole("button", { name: en ? "Request email link" : "申请邮件链接" }).press("Enter");
+        const requestMail = async () => {
+          await email.fill(actor.email);
+          const submitted = page.waitForResponse(response => response.url().endsWith(mailPath) && response.request().method() === "POST");
+          await requestButton.press("Enter");
+          const response = await submitted;
+          assert.equal(response.status(), 202, "Account form request accepted");
           await expect(page.getByRole("status")).toContainText(en ? "Request received" : "请求已受理");
+          return (await response.json()).traceId;
         };
-        await requestMail("verify", actor.email);
-        await requestMail("forgot", actor.email);
+        phase = `${locale}: email verification request`;
+        await page.goto("/account-access?" + new URLSearchParams({ mode: "verify", returnTo: target }));
+        await requestMail();
+        phase = `${locale}: password recovery request from the protected page`;
+        await page.goto(target);
+        await expect(forgot).toHaveAttribute("href", forgotHref);
+        await forgot.press("Enter");
+        await expect(forgotHeading).toBeVisible();
+        const recovery = await receivedLink(await requestMail(), "reset", actor);
+        assert.equal(recovery.landing.searchParams.get("returnTo"), target, "Recovery email retains the protected page anchor");
+        phase = `${locale}: verification, language switch and one-time confirmation`;
         await page.goto(verification.landing.href);
         const switcher = page.getByRole("combobox");
         await switcher.selectOption(en ? "zh-CN" : "en");
@@ -365,7 +407,8 @@ async function verifyBrowser() {
         await page.goto(verification.landing.href);
         await page.getByRole("button", { name: en ? "Confirm email" : "确认邮箱" }).press("Enter");
         await expect(page.getByRole("status")).toContainText(en ? "This link is invalid" : "此链接无效");
-        await page.goto(reset.landing.href);
+        phase = `${locale}: reset password from the recovery email`;
+        await page.goto(recovery.landing.href);
         const resetButton = page.getByRole("button", { name: en ? "Update password" : "更新密码" });
         await resetButton.press("Enter");
         await expect(page.getByText(en ? "Use at least 8 characters for your password" : "密码至少需要 8 个字符", { exact: true })).toBeVisible();
@@ -377,21 +420,29 @@ async function verifyBrowser() {
         await page.getByRole("link", { name: en ? "Continue to sign in" : "继续登录" }).press("Enter");
         await page.waitForURL(url => url.pathname === "/login");
         assert.equal(new URL(page.url()).searchParams.get("returnTo"), target);
-        await page.getByLabel(en ? "Email" : "邮箱", { exact: true }).fill(actor.email);
-        await page.getByLabel(en ? "Password" : "密码", { exact: true }).fill(newPassword);
-        const button = page.getByRole("button", { name: en ? "Sign in and open workspace" : "登录并进入工作台" });
+        const passwordInput = page.getByLabel(en ? "Password" : "密码", { exact: true });
+        await email.fill(actor.email);
         const submitLogin = async () => {
           const result = page.waitForResponse((response) =>
             response.url().endsWith("/api/auth/sign-in/email") && response.request().method() === "POST"
           );
-          await button.press("Enter");
+          await loginButton.press("Enter");
           return result;
         };
-        let signedIn = await submitLogin();
-        if (signedIn.status() === 429) {
-          await waitForAuthWindow(signedIn.headers()["x-retry-after"]);
-          signedIn = await submitLogin();
-        }
+        const signIn = async (value) => {
+          await passwordInput.fill(value);
+          let response = await submitLogin();
+          if (response.status() === 429) {
+            await waitForAuthWindow(response.headers()["x-retry-after"]);
+            response = await submitLogin();
+          }
+          return response;
+        };
+        phase = `${locale}: old password rejected and new password restores the protected page`;
+        assert.equal((await signIn(actor.original)).status(), 401, "Browser rejects the old password");
+        await expect(page.locator("form").filter({ has: loginButton }).getByRole("alert")).toHaveText(en
+          ? "The email or password is incorrect. Please check and try again." : "邮箱或密码不正确，请检查后重试。");
+        const signedIn = await signIn(newPassword);
         assert.equal(signedIn.status(), 200, "Browser login with the new password");
         await expect(page.getByRole("heading", { name: en ? "Account settings" : "账户设置", exact: true })).toBeVisible();
         assert.equal(new URL(page.url()).search + new URL(page.url()).hash, "?tab=security#security");
