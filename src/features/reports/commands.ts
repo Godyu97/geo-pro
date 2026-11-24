@@ -14,6 +14,15 @@ import type {
   ReviseReportInput,
 } from "./contracts.ts";
 import { ReportDao, type ReportSnapshotRow } from "./dao.ts";
+import {
+  snapshotCostSchema,
+  snapshotLaborSchema,
+  summarizeCostGroups,
+  unrecordedLabor,
+  type CostWindows,
+  type SnapshotCost,
+  type SnapshotLabor,
+} from "./cost.ts";
 import { compareWindows, computeD7DueAt, resolveLoopGate } from "./rules.ts";
 import { buildSnapshotDocument, fingerprintBytes, renderSnapshotHtml } from "./snapshot.ts";
 
@@ -96,6 +105,11 @@ async function storeSnapshotPair(
 
 function inlineSnapshot(row: ReportSnapshotRow) {
   return row.htmlObjectId === null && row.jsonObjectId === null;
+}
+
+async function loadWindowCost(db: QueryConnection, brandId: string, windows: CostWindows) {
+  const groups = await new ReportDao(db).samplingCostGroups(brandId, windows);
+  return { cost: summarizeCostGroups(groups), labor: unrecordedLabor };
 }
 
 type StoredSnapshotBody = { ok: true; html: string; json: string } | { ok: false; error: ReportError };
@@ -301,6 +315,10 @@ export async function generateReport(
       }
       : null,
     createdAt: now,
+    ...(await loadWindowCost(db, input.brandId, {
+      before: { start: input.before.start, endExclusive: input.before.endExclusive },
+      after: { start: input.after.start, endExclusive: input.after.endExclusive },
+    })),
   });
   const jsonText = JSON.stringify(document);
   const htmlText = renderSnapshotHtml(document);
@@ -389,6 +407,10 @@ export async function reviseReport(
     createdAt: now,
     predecessorId: previous.id,
     limitations: input.note ? [input.note] : undefined,
+    ...(await loadWindowCost(db, input.brandId, {
+      before: { start: input.before.start, endExclusive: input.before.endExclusive },
+      after: { start: input.after.start, endExclusive: input.after.endExclusive },
+    })),
   });
   const jsonText = JSON.stringify(document);
   const htmlText = renderSnapshotHtml(document);
@@ -453,4 +475,81 @@ export async function listReports(db: QueryConnection, ownerId: string, brandId:
     dao.listTodos(ownerId, brandId, limit),
   ]);
   return { retests, snapshots, todos };
+}
+
+export type SnapshotCostView =
+  | { state: "ready"; cost: SnapshotCost; labor: SnapshotLabor }
+  | { state: "absent" }
+  | { state: "unavailable" };
+
+export function parseSnapshotCost(json: string): SnapshotCostView {
+  try {
+    const parsed = JSON.parse(json) as { cost?: unknown; labor?: unknown };
+    const cost = snapshotCostSchema.safeParse(parsed?.cost);
+    const labor = snapshotLaborSchema.safeParse(parsed?.labor);
+    if (!cost.success || !labor.success) return { state: "absent" };
+    return { state: "ready", cost: cost.data, labor: labor.data };
+  } catch {
+    return { state: "unavailable" };
+  }
+}
+
+/** Read frozen cost and labor from snapshot bytes. A miss is not rewritten as zero. */
+export async function snapshotCostViews(
+  db: QueryConnection,
+  ownerId: string,
+  snapshots: readonly ReportSnapshotRow[],
+  options: SnapshotStorageOptions = {},
+): Promise<Map<string, SnapshotCostView>> {
+  const views = new Map<string, SnapshotCostView>();
+  const stored: ReportSnapshotRow[] = [];
+  for (const snapshot of snapshots) {
+    if (inlineSnapshot(snapshot)) views.set(snapshot.id, parseSnapshotCost(snapshot.jsonBytes));
+    else stored.push(snapshot);
+  }
+  if (!stored.length) return views;
+
+  const storage = options.storage ?? createObjectStorage(options.env ? { env: options.env } : {});
+  const byBrand = new Map<string, ReportSnapshotRow[]>();
+  for (const snapshot of stored) {
+    const rows = byBrand.get(snapshot.brandId) ?? [];
+    rows.push(snapshot);
+    byBrand.set(snapshot.brandId, rows);
+  }
+
+  for (const [brandId, rows] of byBrand) {
+    const ids = rows.flatMap((row) => row.jsonObjectId ? [row.jsonObjectId] : []);
+    let objects: Awaited<ReturnType<typeof loadBrandObjectsByIds>>;
+    try {
+      objects = await loadBrandObjectsByIds(db, ownerId, brandId, ids);
+    } catch {
+      for (const row of rows) views.set(row.id, { state: "unavailable" });
+      continue;
+    }
+    const byId = new Map(objects.map((row) => [row.id, row]));
+    await Promise.all(rows.map(async (snapshot) => {
+      const row = snapshot.jsonObjectId ? byId.get(snapshot.jsonObjectId) : undefined;
+      if (!row || row.status !== "ready" || row.class !== "report-snapshot" || row.fileName !== reportJsonName
+        || row.sha256 !== snapshot.jsonSha256 || !row.objectKey) {
+        views.set(snapshot.id, { state: "unavailable" });
+        return;
+      }
+      try {
+        const loaded = await storage.getObject({ key: row.objectKey });
+        if (!loaded.ok || loaded.sha256 !== snapshot.jsonSha256) {
+          views.set(snapshot.id, { state: "unavailable" });
+          return;
+        }
+        const text = new TextDecoder().decode(loaded.body);
+        if (fingerprintBytes(text) !== snapshot.jsonSha256) {
+          views.set(snapshot.id, { state: "unavailable" });
+          return;
+        }
+        views.set(snapshot.id, parseSnapshotCost(text));
+      } catch {
+        views.set(snapshot.id, { state: "unavailable" });
+      }
+    }));
+  }
+  return views;
 }

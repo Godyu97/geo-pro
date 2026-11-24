@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { isLocale } from "../../lib/i18n/locale.ts";
+import { presentSnapshotCost } from "./cost-copy.ts";
+import type { SnapshotCost, SnapshotLabor } from "./cost.ts";
 import type { ComparisonResult } from "./rules.ts";
 
 export type SnapshotPayloadInput = {
@@ -26,6 +29,8 @@ export type SnapshotPayloadInput = {
   predecessorId?: string | null;
   limitations?: string[];
   nextAction?: string;
+  cost: SnapshotCost;
+  labor: SnapshotLabor;
 };
 
 export function buildSnapshotDocument(input: SnapshotPayloadInput) {
@@ -83,6 +88,8 @@ export function buildSnapshotDocument(input: SnapshotPayloadInput) {
       causality: input.comparison.causality,
     },
     publication: input.publication,
+    cost: input.cost,
+    labor: input.labor,
     limitations,
     next_action: input.nextAction
       ?? (input.loopCompleted ? "按探索结论安排下一轮动作，不把观察写成因果" : "完成发布核验后再申请经营闭环报告"),
@@ -98,6 +105,9 @@ export function renderSnapshotHtml(document: ReturnType<typeof buildSnapshotDocu
   const excluded = document.excluded_queries.map((item) => (
     `<li>${escape(item.queryId)} (${escape(item.reason)})</li>`
   )).join("");
+  const locale = isLocale(document.locale) ? document.locale : "zh-CN";
+  const cost = presentSnapshotCost(locale, document.cost, document.labor);
+  const reason = cost.reason ? `<p>${escape(cost.reason)}</p>` : "";
   return `<!doctype html>
 <html lang="${escape(document.locale)}">
 <head><meta charset="utf-8"/><title>Report ${escape(document.report_id)}</title></head>
@@ -109,6 +119,14 @@ export function renderSnapshotHtml(document: ReturnType<typeof buildSnapshotDocu
   <p>Common questions: ${document.summary.common_query_count} / frozen ${document.summary.frozen_query_count}</p>
   <table><thead><tr><th>Query</th><th>Version</th><th>Before</th><th>After</th></tr></thead><tbody>${rows}</tbody></table>
   <h2>Excluded</h2><ul>${excluded || "<li>none</li>"}</ul>
+  <section id="snapshot-cost">
+    <h2>${escape(cost.heading)}</h2>
+    <p>${escape(cost.known)}</p>
+    <p>${escape(cost.pending)}</p>
+    ${reason}
+    <p>${escape(cost.labor)}</p>
+    <p>${escape(cost.laborReason)}</p>
+  </section>
   <h2>Limitations</h2><ul>${document.limitations.map((item) => `<li>${escape(item)}</li>`).join("")}</ul>
   <p>Next: ${escape(document.next_action)}</p>
 </body>

@@ -447,11 +447,20 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     expect(Buffer.compare(await firstJson.body(), await secondJson.body())).toBe(0);
     const snapshot = await firstJson.json();
     expect(JSON.stringify(snapshot)).toContain(brandName);
+    expect(snapshot.cost).toEqual({ status: "not_applicable", reason: "no_sampling_cost" });
+    expect(snapshot.labor).toEqual({ status: "not_applicable", reason: "unrecorded" });
+    await expect(page.getByText("已知费用 N/A").first()).toBeVisible();
+    await expect(page.getByText("待核对费用 N/A").first()).toBeVisible();
+    await expect(page.getByText("窗口内没有可关联的采样费用").first()).toBeVisible();
+    await expect(page.getByText("人工工时 N/A").first()).toBeVisible();
+    await expect(page.getByText("未记录人工工时").first()).toBeVisible();
     await context.addCookies([{ name: "geo-locale", value: "en", url: baseURL }]);
     const englishJson = await page.request.get(jsonHref!);
     expect(Buffer.compare(await firstJson.body(), await englishJson.body())).toBe(0);
     const html = await (await page.request.get(htmlHref!)).text();
     expect(html).toContain(brandName);
+    expect(html).toContain("未记录人工工时");
+    expect(html).not.toContain("unrecorded");
     await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: baseURL }]);
 
     await page.goto("/dashboard/settings");
@@ -483,6 +492,12 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
             await expect(page.locator("main")).toHaveCount(1);
             await expect(page.getByRole("navigation", { name: locale === "en" ? "Related entries" : "相关入口" })).toBeVisible();
             await expect(page.getByText(locale === "en" ? "loop yes" : "闭环 是")).toBeVisible();
+            await expect(page.getByText(locale === "en" ? "Known cost N/A" : "已知费用 N/A").first()).toBeVisible();
+            await expect(page.getByText(locale === "en" ? "Cost pending reconciliation N/A" : "待核对费用 N/A").first()).toBeVisible();
+            await expect(page.getByText(locale === "en" ? "No sampling cost can be associated in this window" : "窗口内没有可关联的采样费用").first()).toBeVisible();
+            await expect(page.getByText(locale === "en" ? "Labor hours were not recorded" : "未记录人工工时").first()).toBeVisible();
+            await expect(page.getByText("0 分")).toHaveCount(0);
+            await expect(page.getByText("0 minor")).toHaveCount(0);
             if (width === 375) {
               const entry = page.getByRole("link", { name: locale === "en" ? "Open the observation plan" : "打开观察计划" });
               await entry.focus();

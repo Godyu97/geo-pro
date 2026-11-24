@@ -4,12 +4,14 @@ import { headers } from "next/headers";
 
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
-import { getTranslator } from "@/lib/i18n/server";
+import type { Locale } from "@/lib/i18n/locale";
+import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "@/features/brands/dao";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockRetestButton } from "@/features/functional-mock/run-buttons";
 import { Button } from "@/components/ui/button";
-import { listReports } from "./commands";
+import { presentSnapshotCost } from "./cost-copy";
+import { listReports, snapshotCostViews, type SnapshotCostView } from "./commands";
 import { m0StageGate } from "./m0-stage-gate";
 import type { ReportError } from "./contracts";
 
@@ -33,6 +35,35 @@ function relatedLinks(t: Awaited<ReturnType<typeof getTranslator<"reports">>>) {
     { href: "/dashboard/reports/connector-events", label: t("openConnectorEvents") },
     { href: "/dashboard/reports/crawler-visits", label: t("openCrawlerVisits") },
   ] as const;
+}
+
+function SnapshotCostLines({
+  view,
+  locale,
+  unavailable,
+  absent,
+}: {
+  view: SnapshotCostView | undefined;
+  locale: Locale;
+  unavailable: string;
+  absent: string;
+}) {
+  if (!view || view.state === "unavailable") {
+    return <p className="mt-2 break-words text-muted-foreground">{unavailable}</p>;
+  }
+  if (view.state === "absent") {
+    return <p className="mt-2 break-words text-muted-foreground">{absent}</p>;
+  }
+  const lines = presentSnapshotCost(locale, view.cost, view.labor);
+  return (
+    <div className="mt-2 space-y-1 break-words text-muted-foreground">
+      <p>{lines.known}</p>
+      <p>{lines.pending}</p>
+      {lines.reason ? <p>{lines.reason}</p> : null}
+      <p>{lines.labor}</p>
+      <p>{lines.laborReason}</p>
+    </div>
+  );
 }
 
 function ReportCanvas({
@@ -76,6 +107,7 @@ export default async function ReportsListPage({
 }) {
   const session = await requireSession();
   const t = await getTranslator("reports");
+  const locale = await getLocale();
   const params = await searchParams;
   const connection = getConnection();
   const requestedBrand = typeof params.brandId === "string" ? params.brandId : undefined;
@@ -100,6 +132,9 @@ export default async function ReportsListPage({
   }
 
   const result = await listReports(connection, session.user.id, brandId);
+  const costViews = "error" in result
+    ? new Map()
+    : await snapshotCostViews(connection, session.user.id, result.snapshots);
   const mockLane = brandIntakeOrigin(await headers())?.mode === "mock";
   const mockGate = m0StageGate({
     realBrand: false,
@@ -197,6 +232,12 @@ export default async function ReportsListPage({
                   {t("snapshotStatus", { status: item.status })}
                   {item.predecessorId ? ` · ${t("snapshotPrevious", { id: item.predecessorId })}` : ""}
                 </p>
+                <SnapshotCostLines
+                  view={costViews.get(item.id)}
+                  locale={locale}
+                  unavailable={t("costUnavailable")}
+                  absent={t("costAbsent")}
+                />
                 <p className="mt-3 flex flex-wrap gap-3">
                   <Link href={`/api/reports/snapshots/${item.id}?format=json`} prefetch={false} className="underline underline-offset-4">
                     {t("downloadJson")}

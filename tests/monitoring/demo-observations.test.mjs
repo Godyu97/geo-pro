@@ -135,6 +135,8 @@ function realSnapshot(brandId, observationId) {
     },
     publication: null,
     createdAt: time,
+    cost: { status: "not_applicable", reason: "no_sampling_cost" },
+    labor: { status: "not_applicable", reason: "unrecorded" },
   });
 }
 

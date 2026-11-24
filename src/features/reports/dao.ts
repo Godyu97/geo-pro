@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
+import { costGroupRow, samplingCostGroupsQuery, type CostWindows } from "./cost.ts";
 import {
   reportGradeSchema,
   reportIntentSchema,
@@ -208,6 +209,12 @@ export class ReportDao {
       [ownerId, brandId, limit],
     );
     return z.array(snapshotRow).parse(rows);
+  }
+
+  async samplingCostGroups(brandId: string, windows: CostWindows) {
+    const query = samplingCostGroupsQuery(brandId, windows);
+    const rows = await this.query(query.sql, query.values);
+    return z.array(costGroupRow).parse(rows);
   }
 
   async listRetests(ownerId: string, brandId: string, limit = 20) {
