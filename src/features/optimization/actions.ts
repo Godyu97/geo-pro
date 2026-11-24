@@ -9,6 +9,7 @@ import {
   checkPagesSchema,
   generateFromEvidenceSchema,
   updateTaskSchema,
+  type OptimizationError,
 } from "./contracts";
 
 export async function generateOptimizationAction(formData: FormData): Promise<void> {
@@ -59,7 +60,9 @@ export async function checkPagesAction(formData: FormData): Promise<void> {
   revalidatePath("/dashboard/optimization");
 }
 
-export async function updateOptimizationAction(formData: FormData): Promise<void> {
+export type OptimizationUpdateResult = "saved" | OptimizationError;
+
+export async function updateOptimizationAction(formData: FormData): Promise<OptimizationUpdateResult> {
   const session = await requireSession();
   const parsed = updateTaskSchema.safeParse({
     action: "update-task",
@@ -73,9 +76,16 @@ export async function updateOptimizationAction(formData: FormData): Promise<void
     manualRank: formData.get("manualRank") ? Number(formData.get("manualRank")) : undefined,
     reorderReason: String(formData.get("reorderReason") ?? "") || undefined,
   });
-  if (!parsed.success) return;
-  await updateTask(getConnection(), session.user.id, parsed.data);
+  if (!parsed.success) return "INVALID_INPUT";
+  try {
+    const result = await updateTask(getConnection(), session.user.id, parsed.data);
+    if ("error" in result) return result.error;
+  } catch {
+    console.error("optimization-task-update-failed");
+    return "SERVICE_UNAVAILABLE";
+  }
   revalidatePath("/dashboard/optimization");
   revalidatePath(`/dashboard/optimization/${parsed.data.taskId}`);
   revalidatePath("/dashboard/monitoring/overview");
+  return "saved";
 }

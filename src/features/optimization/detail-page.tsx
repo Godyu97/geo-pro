@@ -5,9 +5,12 @@ import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { updateOptimizationAction } from "./actions";
 import { readTaskDetail } from "./commands";
 import { taskDisplayLabels, taskStatusOptions } from "./task-labels.ts";
+import { TaskUpdateForm } from "./task-update-form";
+
+const panelClass = "min-w-0 space-y-3 rounded-2xl border bg-card p-4 sm:p-5";
+const actionClass = "h-auto min-h-9 max-w-full whitespace-normal text-left";
 
 export async function generateMetadata() {
   const t = await getTranslator("optimization");
@@ -29,30 +32,46 @@ export default async function OptimizationDetailPage({
 
   const { task, findings, checks } = detail;
   const labels = taskDisplayLabels(messages, task);
+  const publicStatusLabels = {
+    reachable: t("fixtureReachable"),
+    restricted: t("fixtureRestricted"),
+    pending_verification: t("pageCheckPending"),
+    not_applicable: t("pageCheckNotApplicable"),
+  };
+  const savedDetails = [
+    { label: t("completionNote"), value: task.completionNote },
+    { label: t("dismissReason"), value: task.dismissReason },
+    { label: t("manualRank"), value: task.manualRank == null ? null : new Intl.NumberFormat(locale).format(task.manualRank) },
+    { label: t("reorderReason"), value: task.reorderReason },
+  ].filter(({ value }) => value);
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            <Link href="/dashboard/optimization" prefetch={false} className="underline-offset-4 hover:underline">
-              {t("backToList")}
-            </Link>
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">{task.title}</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{task.targetPage}</p>
-        </div>
-        <div className="flex gap-2">
+    <div className="min-w-0 space-y-6">
+      <header className="min-w-0 space-y-3">
+        <Button asChild variant="outline" className={actionClass}>
+          <Link href={`/dashboard/optimization?brandId=${encodeURIComponent(task.brandId)}`} prefetch={false}>
+            {t("backToList")}
+          </Link>
+        </Button>
+        <h1 className="wrap-anywhere text-2xl font-semibold tracking-tight">{task.title}</h1>
+        <div className="flex flex-wrap gap-2">
           <Badge variant="outline">{labels.priority}</Badge>
           <Badge variant="secondary">{labels.status}</Badge>
         </div>
-      </div>
+        <Button asChild className={actionClass}>
+          <a href="#update-status">{t("updateTitle")}</a>
+        </Button>
+        <dl className="wrap-anywhere max-w-2xl space-y-1 text-sm">
+          <dt className="font-medium">{t("targetPage")}</dt>
+          <dd className="text-muted-foreground">{task.targetPage}</dd>
+        </dl>
+      </header>
 
-      <section className="space-y-3">
+      <section className={panelClass}>
         <h2 className="text-lg font-semibold">{t("findings")}</h2>
         <ul className="space-y-4">
           {findings.map((finding) => (
-            <li key={finding.id} className="rounded-2xl border px-4 py-4 text-sm leading-7">
+            <li key={finding.id} className="wrap-anywhere rounded-xl border px-4 py-4 text-sm leading-7">
               <p className="font-medium">{finding.problemStatement}</p>
               <p className="mt-2 text-muted-foreground">{finding.hypothesis}</p>
               <p className="mt-2">{finding.evidenceSummary}</p>
@@ -72,13 +91,13 @@ export default async function OptimizationDetailPage({
       </section>
 
       {checks.length > 0 ? (
-        <section className="space-y-3">
-          <h2 className="text-lg font-semibold">{t("pageChecks")}</h2>
+        <section aria-labelledby="task-page-checks" className={panelClass}>
+          <h2 id="task-page-checks" className="text-lg font-semibold">{t("pageChecks")}</h2>
           <ul className="space-y-3">
             {checks.map((check) => (
-              <li key={check.id} className="rounded-xl border px-4 py-3 text-sm">
+              <li key={check.id} className="wrap-anywhere rounded-xl border px-4 py-3 text-sm">
                 <p className="font-medium">{check.normalizedUrl}</p>
-                <p className="mt-1 text-muted-foreground">{check.publicStatus} · {check.accessCondition}</p>
+                <p className="mt-1 text-muted-foreground">{publicStatusLabels[check.publicStatus]} · {check.accessCondition}</p>
                 <p className="mt-2">{check.discoverabilityNotes}</p>
               </li>
             ))}
@@ -86,45 +105,44 @@ export default async function OptimizationDetailPage({
         </section>
       ) : null}
 
-      <section className="space-y-3 rounded-2xl border p-5">
-        <h2 className="text-lg font-semibold">{t("updateTitle")}</h2>
-        <form action={updateOptimizationAction} className="space-y-3">
-          <input type="hidden" name="brandId" value={task.brandId} />
-          <input type="hidden" name="taskId" value={task.id} />
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("status")}</span>
-            <select name="status" defaultValue={task.status} className="h-10 rounded-md border bg-background px-3">
-              {taskStatusOptions(messages).map((status) => (
-                <option key={status.value} value={status.value}>{status.label}</option>
+      <section id="update-status" tabIndex={-1} aria-labelledby="task-update-title" className={`${panelClass} scroll-mt-20`}>
+        <h2 id="task-update-title" className="text-lg font-semibold">{t("updateTitle")}</h2>
+        {savedDetails.length > 0 ? (
+          <div role="group" aria-labelledby="task-recorded-details" className="wrap-anywhere space-y-2 rounded-lg bg-muted/50 p-3 text-sm">
+            <h3 id="task-recorded-details" className="font-semibold">{t("recordedDetails")}</h3>
+            <dl className="space-y-2">
+              {savedDetails.map(({ label, value }) => (
+                <div key={label}>
+                  <dt className="font-medium">{label}</dt>
+                  <dd className="whitespace-pre-wrap text-muted-foreground">{value}</dd>
+                </div>
               ))}
-            </select>
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("completionNote")}</span>
-            <textarea name="completionNote" rows={3} className="w-full rounded-md border bg-background px-3 py-2" />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("dismissReason")}</span>
-            <textarea name="dismissReason" rows={2} className="w-full rounded-md border bg-background px-3 py-2" />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("reorderReason")}</span>
-            <div className="flex flex-wrap gap-2">
-              <input
-                name="manualRank"
-                type="number"
-                min={1}
-                placeholder="1"
-                className="h-10 w-24 rounded-md border bg-background px-3"
-              />
-              <input
-                name="reorderReason"
-                className="h-10 min-w-[16rem] flex-1 rounded-md border bg-background px-3"
-              />
-            </div>
-          </label>
-          <Button type="submit">{t("save")}</Button>
-        </form>
+            </dl>
+          </div>
+        ) : null}
+        <p id="task-update-hint" className="text-sm leading-6 text-muted-foreground">{t("updateHint")}</p>
+        <TaskUpdateForm
+          key={task.id}
+          brandId={task.brandId}
+          taskId={task.id}
+          initialStatus={task.status}
+          options={taskStatusOptions(messages)}
+          labels={{
+            status: t("status"),
+            completionNote: t("completionNote"),
+            dismissReason: t("dismissReason"),
+            manualRank: t("manualRank"),
+            reorderReason: t("reorderReason"),
+            save: t("save"),
+            saving: t("savingTask"),
+          }}
+          feedback={{
+            saved: t("taskSaved"),
+            INVALID_INPUT: t("taskUpdateInvalid"),
+            NOT_FOUND: t("NOT_FOUND"),
+            SERVICE_UNAVAILABLE: t("SERVICE_UNAVAILABLE"),
+          }}
+        />
       </section>
     </div>
   );
