@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
+import { factFields } from "../brand-facts/contracts.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { BrandDao } from "../brands/dao.ts";
 import {
@@ -17,16 +18,27 @@ import {
   readSourceOriginalSchema,
   setSourceRightsSchema,
   type SourceError,
+  type SourceFragmentView,
 } from "./contracts.ts";
 import {
   brandOwnedBy,
+  insertSourceFragmentConflicts,
+  insertSourceFragments,
   insertSourceOriginals,
+  listApprovedFactContents,
+  listBrandSourceOriginals,
+  listSourceFragmentConflicts,
+  listSourceFragments,
   listSourceOriginals,
   loadSourceOriginal,
   setSourceOriginalRights as writeRights,
+  sourceReadableBy,
+  type SourceFragmentConflictInsert,
+  type SourceFragmentInsert,
   type SourceOriginalInsert,
   type SourceOriginalRow,
 } from "./dao.ts";
+import { fragmentCandidates, type ApprovedFactRef } from "./rules.ts";
 
 const listLimit = 50;
 
@@ -48,6 +60,38 @@ function storageOptions(options: SourceCommandOptions) {
     ...(options.storage ? { storage: options.storage } : {}),
     ...(options.now ? { now: options.now } : {}),
   };
+}
+
+async function approvedFactRefs(db: QueryConnection, brandId: string) {
+  const rows = await listApprovedFactContents(db, brandId);
+  const facts: ApprovedFactRef[] = [];
+  for (const row of rows) {
+    let content: unknown;
+    try {
+      content = JSON.parse(row.content);
+    } catch {
+      continue;
+    }
+    const parsed = factFields.safeParse(content);
+    if (parsed.success) facts.push({ id: row.id, version: row.version, claim: parsed.data.claim });
+  }
+  return facts;
+}
+
+function presentFragments(
+  rights: SourceOriginalRow["rightsStatus"],
+  fragments: readonly { id: string; ordinal: number; page: number | null; text: string | null; conflicts: SourceFragmentView["conflicts"] }[],
+): SourceFragmentView[] {
+  const readable = rights === "active";
+  return fragments.map((fragment) => ({
+    id: fragment.id,
+    ordinal: fragment.ordinal,
+    page: fragment.page,
+    text: readable ? fragment.text : null,
+    readable,
+    approved: false,
+    conflicts: fragment.conflicts,
+  }));
 }
 
 async function openBrand(db: QueryConnection, ownerId: string, brandId: string) {
@@ -88,7 +132,11 @@ export async function importSourceOriginals(
   return db.transaction(async (tx) => {
     if (!await new BrandDao(tx).lockOwner(ownerId)) return denied("NOT_FOUND");
     if (!await openBrand(tx, ownerId, parsed.data.brandId)) return denied("NOT_FOUND");
+    const facts = await approvedFactRefs(tx, parsed.data.brandId);
     const rows: SourceOriginalInsert[] = [];
+    const fragmentRows: SourceFragmentInsert[] = [];
+    const conflictRows: SourceFragmentConflictInsert[] = [];
+    const fragmentsBySource = new Map<string, SourceFragmentView[]>();
     for (const file of classified.files) {
       let storedObjectId: string | null = null;
       let status = file.status;
@@ -120,8 +168,41 @@ export async function importSourceOriginals(
           storedObjectId = saved.id;
         }
       }
+      const id = randomUUID();
+      const kept = status === "ready" || status === "partial" ? file.pages : [];
+      const candidates = fragmentCandidates(kept, facts);
+      const views: SourceFragmentView[] = candidates.map((candidate) => {
+        const fragmentId = randomUUID();
+        fragmentRows.push({
+          id: fragmentId,
+          sourceOriginalId: id,
+          brandId: parsed.data.brandId,
+          ownerId,
+          ordinal: candidate.ordinal,
+          page: candidate.page,
+          excerpt: candidate.text,
+          createdAt: now,
+        });
+        for (const conflict of candidate.conflicts) {
+          conflictRows.push({
+            fragmentId,
+            brandId: parsed.data.brandId,
+            factVersionId: conflict.factVersionId,
+            factVersion: conflict.version,
+          });
+        }
+        return {
+          id: fragmentId,
+          ordinal: candidate.ordinal,
+          page: candidate.page,
+          text: candidate.text,
+          readable: true,
+          approved: false,
+          conflicts: candidate.conflicts,
+        };
+      });
       rows.push({
-        id: randomUUID(),
+        id,
         brandId: parsed.data.brandId,
         ownerId,
         batchId,
@@ -133,8 +214,11 @@ export async function importSourceOriginals(
         rightsStatus: "active",
         createdAt: now,
       });
+      fragmentsBySource.set(id, views);
     }
     await insertSourceOriginals(tx, rows);
+    await insertSourceFragments(tx, fragmentRows);
+    await insertSourceFragmentConflicts(tx, conflictRows);
     return {
       batchId,
       factsApproved: classified.factsApproved,
@@ -146,17 +230,50 @@ export async function importSourceOriginals(
         status: row.status,
         reason: row.reason,
         rightsStatus: row.rightsStatus,
+        fragments: fragmentsBySource.get(row.id) ?? [],
       })),
     };
   });
 }
 
-export async function listImportedOriginals(db: DatabaseConnection, ownerId: string, brandId: string) {
+async function withFragments(db: QueryConnection, brandId: string, files: readonly SourceOriginalRow[]) {
+  const fragments = await listSourceFragments(db, brandId, files.map((file) => file.id));
+  const conflicts = await listSourceFragmentConflicts(db, brandId, fragments.map((fragment) => fragment.id));
+  const conflictsByFragment = new Map<string, SourceFragmentView["conflicts"]>();
+  for (const conflict of conflicts) {
+    const current = conflictsByFragment.get(conflict.fragmentId) ?? [];
+    current.push({ factVersionId: conflict.factVersionId, version: conflict.factVersion });
+    conflictsByFragment.set(conflict.fragmentId, current);
+  }
+  const bySource = new Map<string, SourceFragmentView[]>();
+  for (const fragment of fragments) {
+    const current = bySource.get(fragment.sourceId) ?? [];
+    current.push({
+      id: fragment.id,
+      ordinal: fragment.ordinal,
+      page: fragment.page,
+      text: fragment.excerpt,
+      readable: true,
+      approved: false,
+      conflicts: conflictsByFragment.get(fragment.id) ?? [],
+    });
+    bySource.set(fragment.sourceId, current);
+  }
+  return files.map((file) => ({
+    ...file,
+    fragments: presentFragments(file.rightsStatus, bySource.get(file.id) ?? []),
+  }));
+}
+
+export async function listImportedOriginals(db: DatabaseConnection, userId: string, brandId: string, now = new Date()) {
   const parsed = brandIdSchema.safeParse(brandId);
   if (!parsed.success) return denied("INVALID_INPUT");
-  const brand = await brandOwnedBy(db, ownerId, parsed.data);
-  if (!brand) return denied("NOT_FOUND");
-  return { files: await listSourceOriginals(db, ownerId, parsed.data, listLimit) };
+  const viewer = await sourceReadableBy(db, userId, parsed.data, now.toISOString());
+  if (!viewer) return denied("NOT_FOUND");
+  const files = viewer === "owner"
+    ? await listSourceOriginals(db, userId, parsed.data, listLimit)
+    : await listBrandSourceOriginals(db, parsed.data, listLimit);
+  return { viewer, files: await withFragments(db, parsed.data, files) };
 }
 
 export async function setSourceOriginalRights(

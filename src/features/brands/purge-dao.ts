@@ -125,6 +125,8 @@ export class PurgeDao {
     await this.query("DELETE FROM channel_profile WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_approval WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM content_asset WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM source_original_fragment_conflict WHERE brand_id = ?", [brandId]);
+    await this.query("DELETE FROM source_original_fragment WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM source_original WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM image_asset_todo WHERE brand_id = ?", [brandId]);
     await this.query("DELETE FROM image_asset_use WHERE brand_id = ?", [brandId]);

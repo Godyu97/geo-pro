@@ -53,3 +53,15 @@ export type SourceFileInput = z.infer<typeof sourceFileSchema>;
 export type ImportSourceOriginalsInput = z.infer<typeof importSourceOriginalsSchema>;
 export type SetSourceRightsInput = z.infer<typeof setSourceRightsSchema>;
 export type ReadSourceOriginalInput = z.infer<typeof readSourceOriginalSchema>;
+
+export type SourceFragmentConflictView = { factVersionId: string; version: number };
+
+export type SourceFragmentView = {
+  id: string;
+  ordinal: number;
+  page: number | null;
+  text: string | null;
+  readable: boolean;
+  approved: false;
+  conflicts: SourceFragmentConflictView[];
+};

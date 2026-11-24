@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, foreignKey, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { brand } from "./brand-schema.sqlite";
+import { brandFactVersion } from "./brand-fact-schema.sqlite";
 
 // Import outcome for one original. Bytes live in stored_object; this row keeps the
 // batch result and rights state after the object itself is revoked or expired.
@@ -40,4 +41,57 @@ export const sourceOriginal = sqliteTable("source_original", {
         and ${table.rightsStatus} = 'active'
         and ${table.byteSize} between 0 and 2147483647)
     )`),
+]);
+
+export const sourceOriginalFragment = sqliteTable("source_original_fragment", {
+  id: text("id").primaryKey(),
+  sourceOriginalId: text("source_original_id").notNull(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  ordinal: integer("ordinal").notNull(),
+  page: integer("page"),
+  excerpt: text("excerpt"),
+  candidateState: text("candidate_state").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "source_original_fragment_source_fk",
+    columns: [table.sourceOriginalId],
+    foreignColumns: [sourceOriginal.id],
+  }).onDelete("cascade"),
+  uniqueIndex("source_original_fragment_ordinal_uidx").on(table.sourceOriginalId, table.ordinal),
+  index("source_original_fragment_brand_idx").on(table.brandId, table.sourceOriginalId, table.ordinal),
+  check("source_original_fragment_state_check", sql`${table.candidateState} = 'unapproved'
+    and ${table.ordinal} between 0 and 199
+    and (${table.page} is null or ${table.page} between 1 and 100000)
+    and (${table.excerpt} is null or length(${table.excerpt}) between 1 and 50000)
+    and length(${table.id}) = 36
+    and length(${table.sourceOriginalId}) = 36
+    and length(${table.brandId}) = 36
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.createdAt}) between 20 and 40`),
+]);
+
+export const sourceOriginalFragmentConflict = sqliteTable("source_original_fragment_conflict", {
+  fragmentId: text("fragment_id").notNull(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  factVersionId: text("fact_version_id").notNull(),
+  factVersion: integer("fact_version").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "source_original_fragment_conflict_fragment_fk",
+    columns: [table.fragmentId],
+    foreignColumns: [sourceOriginalFragment.id],
+  }).onDelete("cascade"),
+  foreignKey({
+    name: "source_original_fragment_conflict_fact_fk",
+    columns: [table.brandId, table.factVersionId],
+    foreignColumns: [brandFactVersion.brandId, brandFactVersion.id],
+  }).onDelete("cascade"),
+  uniqueIndex("source_original_fragment_conflict_uidx").on(table.fragmentId, table.factVersionId),
+  index("source_original_fragment_conflict_brand_idx").on(table.brandId, table.fragmentId, table.factVersion, table.factVersionId),
+  check("source_original_fragment_conflict_state_check", sql`${table.factVersion} > 0
+    and length(${table.fragmentId}) = 36
+    and length(${table.brandId}) = 36
+    and length(${table.factVersionId}) = 36`),
 ]);

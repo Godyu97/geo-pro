@@ -75,6 +75,23 @@ export async function insertSourceOriginals(db: QueryConnection, rows: readonly 
   );
 }
 
+const approvedFactSchema = z.object({
+  id: brandIdSchema,
+  version: z.number().int().positive(),
+  content: z.string(),
+});
+
+export async function listApprovedFactContents(db: QueryConnection, brandId: string) {
+  const rows = await queryWithParameters(
+    db,
+    `SELECT id, version, content FROM brand_fact_version
+     WHERE brand_id = ? AND state = 'approved' AND revoked_at IS NULL
+     ORDER BY id`,
+    [brandId],
+  );
+  return z.array(approvedFactSchema).parse(rows);
+}
+
 export async function listSourceOriginals(db: QueryConnection, ownerId: string, brandId: string, limit: number) {
   const rows = await queryWithParameters(
     db,
@@ -83,6 +100,18 @@ export async function listSourceOriginals(db: QueryConnection, ownerId: string, 
      ORDER BY created_at DESC, batch_id DESC, id DESC
      LIMIT ?`,
     [ownerId, brandId, limit],
+  );
+  return z.array(sourceRowSchema).parse(rows);
+}
+
+export async function listBrandSourceOriginals(db: QueryConnection, brandId: string, limit: number) {
+  const rows = await queryWithParameters(
+    db,
+    `SELECT ${columns} FROM source_original
+     WHERE brand_id = ?
+     ORDER BY created_at DESC, batch_id DESC, id DESC
+     LIMIT ?`,
+    [brandId, limit],
   );
   return z.array(sourceRowSchema).parse(rows);
 }
@@ -122,6 +151,131 @@ export async function sourceOriginalMayDownload(db: QueryConnection, ownerId: st
     [ownerId, objectId],
   );
   return rows.length === 1;
+}
+
+const fragmentRowSchema = z.object({
+  id: brandIdSchema,
+  sourceId: brandIdSchema,
+  ordinal: z.number().int().nonnegative().max(199),
+  page: z.number().int().positive().max(100_000).nullable(),
+  excerpt: z.string().min(1).max(50_000).nullable(),
+  candidateState: z.literal("unapproved"),
+});
+
+const conflictRowSchema = z.object({
+  fragmentId: brandIdSchema,
+  factVersionId: brandIdSchema,
+  factVersion: z.number().int().positive(),
+});
+
+export type SourceFragmentRow = z.infer<typeof fragmentRowSchema>;
+export type SourceFragmentConflictRow = z.infer<typeof conflictRowSchema>;
+
+export type SourceFragmentInsert = {
+  id: string;
+  sourceOriginalId: string;
+  brandId: string;
+  ownerId: string;
+  ordinal: number;
+  page: number | null;
+  excerpt: string | null;
+  createdAt: string;
+};
+
+export type SourceFragmentConflictInsert = {
+  fragmentId: string;
+  brandId: string;
+  factVersionId: string;
+  factVersion: number;
+};
+
+const fragmentColumns = `id, source_original_id AS "sourceId", ordinal, page, excerpt, candidate_state AS "candidateState"`;
+const conflictColumns = `fragment_id AS "fragmentId", fact_version_id AS "factVersionId", fact_version AS "factVersion"`;
+const insertChunk = 80;
+
+function chunk<T>(items: readonly T[], size: number) {
+  const groups: T[][] = [];
+  for (let index = 0; index < items.length; index += size) groups.push(items.slice(index, index + size));
+  return groups;
+}
+
+export async function insertSourceFragments(db: QueryConnection, rows: readonly SourceFragmentInsert[]) {
+  for (const group of chunk(rows, insertChunk)) {
+    const values: QueryValue[] = [];
+    const groups = group.map((row) => {
+      values.push(row.id, row.sourceOriginalId, row.brandId, row.ownerId, row.ordinal, row.page, row.excerpt, "unapproved", row.createdAt);
+      return "(?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    });
+    await queryWithParameters(
+      db,
+      `INSERT INTO source_original_fragment (
+        id, source_original_id, brand_id, owner_id, ordinal, page, excerpt, candidate_state, created_at
+      ) VALUES ${groups.join(", ")}`,
+      values,
+    );
+  }
+}
+
+export async function insertSourceFragmentConflicts(db: QueryConnection, rows: readonly SourceFragmentConflictInsert[]) {
+  for (const group of chunk(rows, insertChunk)) {
+    const values: QueryValue[] = [];
+    const groups = group.map((row) => {
+      values.push(row.fragmentId, row.brandId, row.factVersionId, row.factVersion);
+      return "(?, ?, ?, ?)";
+    });
+    await queryWithParameters(
+      db,
+      `INSERT INTO source_original_fragment_conflict (fragment_id, brand_id, fact_version_id, fact_version)
+       VALUES ${groups.join(", ")}`,
+      values,
+    );
+  }
+}
+
+export async function listSourceFragments(db: QueryConnection, brandId: string, sourceIds: readonly string[]) {
+  const rows: unknown[] = [];
+  for (const ids of chunk(sourceIds, 100)) {
+    const found = await queryWithParameters(
+      db,
+      `SELECT ${fragmentColumns} FROM source_original_fragment
+       WHERE brand_id = ? AND source_original_id IN (${ids.map(() => "?").join(", ")})
+       ORDER BY source_original_id, ordinal`,
+      [brandId, ...ids],
+    );
+    rows.push(...found);
+  }
+  return z.array(fragmentRowSchema).parse(rows).sort((left, right) => (
+    left.sourceId === right.sourceId ? left.ordinal - right.ordinal : left.sourceId < right.sourceId ? -1 : 1
+  ));
+}
+
+export async function listSourceFragmentConflicts(db: QueryConnection, brandId: string, fragmentIds: readonly string[]) {
+  const rows: unknown[] = [];
+  for (const ids of chunk(fragmentIds, 100)) {
+    const found = await queryWithParameters(
+      db,
+      `SELECT ${conflictColumns} FROM source_original_fragment_conflict
+       WHERE brand_id = ? AND fragment_id IN (${ids.map(() => "?").join(", ")})
+       ORDER BY fragment_id, fact_version, fact_version_id`,
+      [brandId, ...ids],
+    );
+    rows.push(...found);
+  }
+  return z.array(conflictRowSchema).parse(rows);
+}
+
+export async function sourceReadableBy(db: QueryConnection, userId: string, brandId: string, now: string) {
+  const owned = await brandOwnedBy(db, userId, brandId);
+  if (owned) return "owner" as const;
+  const rows = await queryWithParameters(
+    db,
+    `SELECT id FROM brand_member_grant
+     WHERE user_id = ? AND brand_id = ? AND active = 1
+       AND (expires_at IS NULL OR expires_at > ?)
+     LIMIT 1`,
+    [userId, brandId, now],
+  );
+  return rows.length === 1 ? "member" as const : null;
 }
 
 export async function brandOwnedBy(db: QueryConnection, ownerId: string, brandId: string) {

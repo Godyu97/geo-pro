@@ -6,7 +6,7 @@ import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { importSourceOriginals, setSourceOriginalRights } from "./commands.ts";
-import { sourceImportLimits, type ImportPage } from "./rules.ts";
+import { pagesFromText, sourceImportLimits, type ImportPage } from "./rules.ts";
 
 const textTypes = new Set(["text/plain", "text/markdown", "application/json"]);
 const allowedTypes = new Set([...textTypes, "application/pdf"]);
@@ -64,7 +64,18 @@ export async function importSourcesAction(formData: FormData) {
       try {
         const text = new TextDecoder("utf-8", { fatal: true }).decode(body);
         const chars = [...text].length;
-        const pages: ImportPage[] = chars > 0 ? [{ page: 1, text: text.slice(0, 1) }] : [{ page: null, text: null }];
+        const pages = pagesFromText(text);
+        if (pages.length > 200) {
+          files.push({
+            name,
+            contentType: "application/octet-stream",
+            chars: 0,
+            encrypted: false,
+            pages: [] as ImportPage[],
+            body,
+          });
+          continue;
+        }
         files.push({ name, contentType: declared, chars, encrypted: false, pages, body });
       } catch {
         files.push({

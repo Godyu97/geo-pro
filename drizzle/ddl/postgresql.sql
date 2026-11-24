@@ -1405,6 +1405,38 @@ CREATE TABLE "source_original" (
     ))
 );
 
+CREATE TABLE "source_original_fragment" (
+	"id" text PRIMARY KEY NOT NULL,
+	"source_original_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"owner_id" text NOT NULL,
+	"ordinal" integer NOT NULL,
+	"page" integer,
+	"excerpt" text,
+	"candidate_state" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "source_original_fragment_state_check" CHECK ("source_original_fragment"."candidate_state" = 'unapproved'
+    and "source_original_fragment"."ordinal" between 0 and 199
+    and ("source_original_fragment"."page" is null or "source_original_fragment"."page" between 1 and 100000)
+    and ("source_original_fragment"."excerpt" is null or length("source_original_fragment"."excerpt") between 1 and 50000)
+    and length("source_original_fragment"."id") = 36
+    and length("source_original_fragment"."source_original_id") = 36
+    and length("source_original_fragment"."brand_id") = 36
+    and length("source_original_fragment"."owner_id") between 1 and 128
+    and length("source_original_fragment"."created_at") between 20 and 40)
+);
+
+CREATE TABLE "source_original_fragment_conflict" (
+	"fragment_id" text NOT NULL,
+	"brand_id" text NOT NULL,
+	"fact_version_id" text NOT NULL,
+	"fact_version" integer NOT NULL,
+	CONSTRAINT "source_original_fragment_conflict_state_check" CHECK ("source_original_fragment_conflict"."fact_version" > 0
+    and length("source_original_fragment_conflict"."fragment_id") = 36
+    and length("source_original_fragment_conflict"."brand_id") = 36
+    and length("source_original_fragment_conflict"."fact_version_id") = 36)
+);
+
 CREATE TABLE "sampling_due_run" (
 	"id" text PRIMARY KEY NOT NULL,
 	"plan_id" text NOT NULL,
@@ -2754,6 +2786,11 @@ ALTER TABLE "source_inspection" ADD CONSTRAINT "source_inspection_brand_id_brand
 ALTER TABLE "source_inspection" ADD CONSTRAINT "source_inspection_citation_id_answer_citation_id_fk" FOREIGN KEY ("citation_id") REFERENCES "public"."answer_citation"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_storage_limit" ADD CONSTRAINT "brand_storage_limit_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "source_original" ADD CONSTRAINT "source_original_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "source_original_fragment" ADD CONSTRAINT "source_original_fragment_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "source_original_fragment" ADD CONSTRAINT "source_original_fragment_source_fk" FOREIGN KEY ("source_original_id") REFERENCES "public"."source_original"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "source_original_fragment_conflict" ADD CONSTRAINT "source_original_fragment_conflict_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "source_original_fragment_conflict" ADD CONSTRAINT "source_original_fragment_conflict_fragment_fk" FOREIGN KEY ("fragment_id") REFERENCES "public"."source_original_fragment"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "source_original_fragment_conflict" ADD CONSTRAINT "source_original_fragment_conflict_fact_fk" FOREIGN KEY ("brand_id","fact_version_id") REFERENCES "public"."brand_fact_version"("brand_id","id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sampling_due_run" ADD CONSTRAINT "sampling_due_run_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sampling_due_run" ADD CONSTRAINT "sampling_due_run_slot_id_sampling_slot_id_fk" FOREIGN KEY ("slot_id") REFERENCES "public"."sampling_slot"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "sampling_due_run" ADD CONSTRAINT "sampling_due_run_monitoring_run_id_monitoring_run_id_fk" FOREIGN KEY ("monitoring_run_id") REFERENCES "public"."monitoring_run"("id") ON DELETE cascade ON UPDATE no action;
@@ -3000,6 +3037,10 @@ CREATE INDEX "stored_object_brand_live_idx" ON "stored_object" USING btree ("bra
 CREATE UNIQUE INDEX "source_original_object_uidx" ON "source_original" USING btree ("stored_object_id") WHERE "source_original"."stored_object_id" is not null;
 CREATE INDEX "source_original_owner_idx" ON "source_original" USING btree ("owner_id","brand_id","created_at","id");
 CREATE INDEX "source_original_brand_idx" ON "source_original" USING btree ("brand_id","created_at","id");
+CREATE UNIQUE INDEX "source_original_fragment_ordinal_uidx" ON "source_original_fragment" USING btree ("source_original_id","ordinal");
+CREATE INDEX "source_original_fragment_brand_idx" ON "source_original_fragment" USING btree ("brand_id","source_original_id","ordinal");
+CREATE UNIQUE INDEX "source_original_fragment_conflict_uidx" ON "source_original_fragment_conflict" USING btree ("fragment_id","fact_version_id");
+CREATE INDEX "source_original_fragment_conflict_brand_idx" ON "source_original_fragment_conflict" USING btree ("brand_id","fragment_id","fact_version","fact_version_id");
 CREATE UNIQUE INDEX "sampling_due_run_slot_uidx" ON "sampling_due_run" USING btree ("plan_id","channel_id","window_id","slot_id");
 CREATE INDEX "sampling_due_run_owner_idx" ON "sampling_due_run" USING btree ("owner_id","plan_id","window_id","id");
 CREATE INDEX "sampling_plan_owner_idx" ON "sampling_plan" USING btree ("brand_id","owner_id","id");

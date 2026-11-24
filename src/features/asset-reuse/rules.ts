@@ -13,10 +13,11 @@ export function importBatch(files: readonly { name: string; bytes: number; chars
     if (file.encrypted || file.bytes > maxBytes || file.chars > maxChars) {
       return { name: file.name, status: "unsupported" as const, pages: [] as ImportPage[] };
     }
-    const pages = file.pages.map((page) => (
-      page.text && page.page !== null ? page : { page: page.page, text: null }
-    ));
-    const missing = pages.some((page) => page.text === null);
+    const pages = file.pages.map((page) => ({
+      page: page.page,
+      text: page.text && page.text.length > 0 ? page.text : null,
+    }));
+    const missing = pages.some((page) => page.text === null || page.page === null);
     return { name: file.name, status: missing ? "partial" as const : "ready" as const, pages };
   });
 }
@@ -83,4 +84,33 @@ export function candidateFact(input: { text: string | null; page: number | null;
     conflicts: input.approvedValues.filter((value) => value !== input.text),
     inventedPage: false as const,
   };
+}
+
+/** Form-feed splits explicit text pages. Without one, the page number stays missing. */
+export function pagesFromText(text: string): ImportPage[] {
+  const readable = (value: string) => value.trim().length > 0 ? value : null;
+  if ([...text].length === 0) return [{ page: null, text: null }];
+  if (!text.includes("\f")) return [{ page: null, text: readable(text) }];
+  return text.split("\f").map((part, index) => ({ page: index + 1, text: readable(part) }));
+}
+
+export type ApprovedFactRef = { id: string; version: number; claim: string };
+
+/** Compare each extracted page with approved claims. Missing text or page is not a conflict. */
+export function fragmentCandidates(pages: readonly ImportPage[], approved: readonly ApprovedFactRef[]) {
+  const approvedValues = approved.map((fact) => fact.claim);
+  return pages.map((page, ordinal) => {
+    const judged = candidateFact({ text: page.text, page: page.page, approvedValues });
+    const conflictValues = new Set(judged.conflicts);
+    return {
+      ordinal,
+      page: judged.page,
+      text: page.text,
+      approved: judged.approved,
+      conflicts: approved.filter((fact) => conflictValues.has(fact.claim)).map((fact) => ({
+        factVersionId: fact.id,
+        version: fact.version,
+      })),
+    };
+  });
 }

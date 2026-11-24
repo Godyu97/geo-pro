@@ -2,7 +2,8 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
-import { getTranslator } from "@/lib/i18n/server";
+import { formatNumber } from "@/lib/i18n/format";
+import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "../brands/dao.ts";
 import { importSourcesAction, setSourceRightsAction } from "./actions.ts";
 import { listImportedOriginals } from "./commands.ts";
@@ -49,6 +50,7 @@ export default async function SourceOriginalsPage({
 }) {
   const session = await requireSession();
   const params = await searchParams;
+  const locale = await getLocale();
   const t = await getTranslator("sources");
   const connection = getConnection();
   const brands = new BrandDao(connection);
@@ -124,13 +126,42 @@ export default async function SourceOriginalsPage({
               <p className="text-sm text-muted-foreground">{t("notApproved")}</p>
               <ul className="space-y-3">
                 {group.files.map((file) => {
-                  const downloadable = file.rightsStatus === "active" && file.storedObjectId !== null;
+                  const downloadable = listed.viewer === "owner" && file.rightsStatus === "active" && file.storedObjectId !== null;
                   return (
                     <li key={file.id} className="rounded-2xl border px-4 py-4 text-sm">
                       <p className="font-medium break-all">{file.fileName}</p>
                       <p className="mt-2 leading-6">{t(statusKey(file.status))}</p>
                       {file.reason ? <p className="mt-1 leading-6">{t(reasonKey(file.reason))}</p> : null}
                       {file.storedObjectId ? <p className="mt-1 leading-6">{t(rightsKey(file.rightsStatus))}</p> : null}
+                      {file.fragments.length > 0 ? (
+                        <div className="mt-3 space-y-2">
+                          <h3 className="font-medium">{t("fragmentHeading")}</h3>
+                          <ul className="space-y-2">
+                            {file.fragments.map((fragment) => (
+                              <li key={fragment.id} className="rounded-xl border border-dashed px-3 py-3 leading-6">
+                                {fragment.readable && fragment.text !== null ? (
+                                  <p className="break-words whitespace-pre-wrap">{fragment.text}</p>
+                                ) : null}
+                                {fragment.readable && fragment.text === null ? <p>{t("fragmentMissing")}</p> : null}
+                                {!fragment.readable ? <p>{t("fragmentUnreadable")}</p> : null}
+                                {fragment.page !== null ? (
+                                  <p>{t("fragmentPage", { page: formatNumber(locale, fragment.page) })}</p>
+                                ) : (
+                                  <p>{t("fragmentPageMissing")}</p>
+                                )}
+                                {fragment.conflicts.length === 0 ? <p>{t("fragmentNoConflict")}</p> : fragment.conflicts.map((conflict) => (
+                                  <p key={conflict.factVersionId} className="break-all">
+                                    {t("fragmentConflict", {
+                                      version: formatNumber(locale, conflict.version),
+                                      id: conflict.factVersionId,
+                                    })}
+                                  </p>
+                                ))}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
                       {downloadable ? (
                         <p className="mt-3">
                           <Link
