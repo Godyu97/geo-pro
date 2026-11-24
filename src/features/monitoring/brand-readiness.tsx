@@ -4,7 +4,7 @@ import { formatNumber } from "@/lib/i18n/format";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { CapabilityRetryButton } from "../capabilities/retry-button";
 import { formatMinorUnits } from "./format";
-import { minimumNaturalQuestions, type ReadinessChannel, type ReadinessEligibility } from "./readiness";
+import { minimumNaturalQuestions, type ReadinessChannel, type ReadinessEligibility, type ReadinessNext } from "./readiness";
 import { readBrandMonitoringReadiness } from "./service";
 
 const eligibilityKey: Record<ReadinessEligibility, "eligible" | "unverified" | "expired" | "degraded" | "disabled" | "missing"> = {
@@ -45,24 +45,63 @@ function ChannelList({
   );
 }
 
+const nextCopy = {
+  "add-questions": "readinessNextQuestions",
+  "review-inactive": "readinessNextInactive",
+  "verify-channel": "readinessNextExpired",
+  "choose-channel": "readinessNextChannel",
+  "request-quota": "readinessNextQuota",
+  archived: "readinessArchived",
+} as const;
+
+export type BrandReadinessResult = Awaited<ReturnType<typeof readBrandMonitoringReadiness>>;
+
+export type ReadinessAction =
+  | { kind: "current" }
+  | { kind: "retry" }
+  | { kind: "confirm" }
+  | { kind: "next"; step: ReadinessNext };
+
+export function readinessAction(historical: boolean, result: BrandReadinessResult): ReadinessAction {
+  if (historical) return { kind: "current" };
+  if (result.kind === "unavailable") return { kind: "retry" };
+  if (result.report.canConfirm) return { kind: "confirm" };
+  const step = result.report.next[0];
+  if (step) return { kind: "next", step };
+  return { kind: "retry" };
+}
+
+export function readinessStepHref(brandId: string, step: ReadinessNext) {
+  if (step === "add-questions" || step === "review-inactive") return `/dashboard/brands/${brandId}/questions`;
+  if (step === "request-quota") return "/dashboard/settings#pilot-quotas";
+  if (step === "archived") return `/dashboard/brands/${brandId}`;
+  return "/dashboard/settings#monitoring-capabilities";
+}
+
+export function readinessStepLabel(step: ReadinessNext) {
+  return nextCopy[step];
+}
+
 export async function BrandMonitoringReadiness({
-  ownerId,
   brand,
   historical,
+  result,
+  promoted = false,
 }: {
-  ownerId: string;
-  brand: { id: string; status: "active" | "archived"; version: number; website: string };
+  brand: { id: string; version: number };
   historical: boolean;
+  result: BrandReadinessResult;
+  promoted?: boolean;
 }) {
   const locale = await getLocale();
   const t = await getTranslator("brands");
   const monitoring = await getTranslator("monitoring");
-  const result = await readBrandMonitoringReadiness(ownerId, brand, historical);
+  const action = readinessAction(historical, result);
   if (result.kind === "unavailable") {
     return (
-      <div role="alert" className="space-y-2 text-sm">
-        <p>{t("readinessUnavailable")}</p>
-        <CapabilityRetryButton label={monitoring("retry")} />
+      <div role={promoted ? undefined : "alert"} className="min-w-0 space-y-2 break-words text-sm">
+        {promoted ? null : <p>{t("readinessUnavailable")}</p>}
+        {promoted ? null : <CapabilityRetryButton label={monitoring("retry")} />}
         <p className="break-all text-muted-foreground">{monitoring("trace", { id: result.traceId })}</p>
       </div>
     );
@@ -70,24 +109,9 @@ export async function BrandMonitoringReadiness({
   const { report, promptSet, grant, facts, protocol } = result;
   const versionLabel = (version: number) => t("readinessChannelVersion", { version: formatNumber(locale, version) });
   const statusLabel = (eligibility: ReadinessEligibility) => monitoring(eligibilityKey[eligibility]);
-  const nextHref = {
-    "add-questions": `/dashboard/brands/${brand.id}/questions`,
-    "review-inactive": `/dashboard/brands/${brand.id}/questions`,
-    "verify-channel": "/dashboard/settings#monitoring-capabilities",
-    "choose-channel": "/dashboard/settings#monitoring-capabilities",
-    "request-quota": "/dashboard/settings#pilot-quotas",
-    archived: `/dashboard/brands/${brand.id}`,
-  } as const;
-  const nextCopy = {
-    "add-questions": "readinessNextQuestions",
-    "review-inactive": "readinessNextInactive",
-    "verify-channel": "readinessNextExpired",
-    "choose-channel": "readinessNextChannel",
-    "request-quota": "readinessNextQuota",
-    archived: "readinessArchived",
-  } as const;
+  const steps = report.next.filter((item) => !(promoted && action.kind === "next" && item === action.step));
   return (
-    <section aria-labelledby="monitoring-readiness" className="space-y-3 text-sm">
+    <section aria-labelledby="monitoring-readiness" className="min-w-0 space-y-3 break-words text-sm">
       <h2 id="monitoring-readiness" className="font-medium">{t("readinessTitle")}</h2>
       <p className="leading-6 text-muted-foreground">{t("readinessDescription")}</p>
       {!historical && <p>{t("readinessEntity", { version: formatNumber(locale, brand.version) })}</p>}
@@ -140,22 +164,22 @@ export async function BrandMonitoringReadiness({
           timezone: protocol.timezone,
         })}</p>
       ) : <p>{t("readinessNoProtocol")}</p>}
-      {report.next.length > 0 && (
+      {steps.length > 0 && (
         <ul className="space-y-2">
-          {report.next.map((item) => (
+          {steps.map((item) => (
             <li key={item}>
-              <Link className="underline underline-offset-4" href={nextHref[item]} prefetch={false}>{t(nextCopy[item])}</Link>
+              <Link className="underline underline-offset-4 [overflow-wrap:anywhere]" href={readinessStepHref(brand.id, item)} prefetch={false}>{t(nextCopy[item])}</Link>
             </li>
           ))}
         </ul>
       )}
-      <div className="flex flex-wrap gap-x-4 gap-y-2">
-        <Link className="underline underline-offset-4" href={`/dashboard/brands/${brand.id}/facts`} prefetch={false}>{t("readinessOpenFacts")}</Link>
-        <Link className="underline underline-offset-4" href="/dashboard/settings#monitoring-capabilities" prefetch={false}>{t("readinessOpenChannels")}</Link>
-        <Link className="underline underline-offset-4" href="/dashboard/settings#pilot-quotas" prefetch={false}>{t("readinessOpenQuota")}</Link>
-        <Link className="underline underline-offset-4" href="/dashboard/monitoring/protocols" prefetch={false}>{t("readinessOpenProtocols")}</Link>
+      <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-2">
+        <Link className="underline underline-offset-4 [overflow-wrap:anywhere]" href={`/dashboard/brands/${brand.id}/facts`} prefetch={false}>{t("readinessOpenFacts")}</Link>
+        <Link className="underline underline-offset-4 [overflow-wrap:anywhere]" href="/dashboard/settings#monitoring-capabilities" prefetch={false}>{t("readinessOpenChannels")}</Link>
+        <Link className="underline underline-offset-4 [overflow-wrap:anywhere]" href="/dashboard/settings#pilot-quotas" prefetch={false}>{t("readinessOpenQuota")}</Link>
+        <Link className="underline underline-offset-4 [overflow-wrap:anywhere]" href="/dashboard/monitoring/protocols" prefetch={false}>{t("readinessOpenProtocols")}</Link>
       </div>
-      {report.canConfirm && (
+      {report.canConfirm && !(promoted && action.kind === "confirm") && (
         <Button asChild>
           <Link href={`/dashboard/monitoring/new?brandId=${brand.id}`} prefetch={false}>{t("readinessConfirm")}</Link>
         </Button>

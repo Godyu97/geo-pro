@@ -446,6 +446,7 @@
   "brands": {
     "title": "Brand workspace",
     "pageDescription": "Set up a brand and manage its focus area and draft questions.",
+    "detailTask": "Check the latest entity version, confirmed natural-discovery questions, channels, and quota. Confirm a monitoring run from here when those are ready.",
     "fixtureLabel": "Local testing · Synthetic data",
     "fixtureStatus": "Local testing",
     "fixtureDescription": "Use synthetic data only. Saved drafts and versions stay in the isolated test database. Sign in again to continue a saved draft. The owner can restore an archived brand. The test operator clears the database.",

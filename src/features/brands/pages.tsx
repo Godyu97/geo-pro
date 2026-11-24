@@ -19,7 +19,14 @@ import { BrandDeletionButtons } from "./deletion-buttons";
 import { brandErrorMessage } from "./error-messages";
 import { mockBrandFields } from "@/features/functional-mock/brand-profile";
 import { brandIntakeDecision, type BrandIntakeMode } from "./intake";
-import { BrandMonitoringReadiness } from "@/features/monitoring/brand-readiness";
+import { CapabilityRetryButton } from "@/features/capabilities/retry-button";
+import {
+  BrandMonitoringReadiness,
+  readinessAction,
+  readinessStepHref,
+  readinessStepLabel,
+} from "@/features/monitoring/brand-readiness";
+import { readBrandMonitoringReadiness } from "@/features/monitoring/service";
 import { readPilotAdmission, type PilotAdmissionItem } from "./pilot-admission";
 import { readBrandData } from "./service";
 import type { RetentionView } from "./dao";
@@ -410,7 +417,19 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
 
   if ("unavailable" in result) {
     const retry = version.data ? href + "?version=" + version.data : query.edit === "1" ? href + "?edit=1" : href;
-    return <BrandFrame title={t("title")} back="/dashboard/brands" backLabel={t("allBrands")}><BrandLoadFailure t={t} href={retry} /></BrandFrame>;
+    return (
+      <BrandCanvas
+        title={t("title")}
+        summary={<p role="alert" className="max-w-2xl break-words text-sm leading-7">{t("unavailable")}</p>}
+        primary={(
+          <Button asChild className={brandActionClass}>
+            <a href={retry}>{t("reload")}</a>
+          </Button>
+        )}
+        relatedLabel={t("relatedEntries")}
+        related={[{ href: "/dashboard/brands", label: t("allBrands") }, ...brandResourceLinks(t)]}
+      />
+    );
   }
   if (!result.data) notFound();
   const { brand, editing, draft, retention } = result.data;
@@ -435,53 +454,87 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
     { title: t("fieldCompetitors"), values: competitors },
     { title: t("stepQuestions"), values: questions },
   ];
+  const readiness = await readBrandMonitoringReadiness(user.id, {
+    id, status: brand.status, website,
+  }, snapshot);
+  const action = readinessAction(snapshot, readiness);
+  const monitoring = await getTranslator("monitoring");
+  const factsTitle = getMessages(locale).brandFacts.title;
+  const questionsTitle = getMessages(locale).promptSets.title;
+  const primary = action.kind === "current" ? (
+    <Button asChild className={brandActionClass}>
+      <Link href={href} prefetch={false}>{t("currentVersion")}</Link>
+    </Button>
+  ) : action.kind === "confirm" ? (
+    <Button asChild className={brandActionClass}>
+      <Link href={"/dashboard/monitoring/new?brandId=" + id} prefetch={false}>{t("readinessConfirm")}</Link>
+    </Button>
+  ) : action.kind === "next" ? (
+    <Button asChild className={brandActionClass}>
+      <Link href={readinessStepHref(id, action.step)} prefetch={false}>{t(readinessStepLabel(action.step))}</Link>
+    </Button>
+  ) : (
+    <CapabilityRetryButton label={monitoring("retry")} />
+  );
+  const related = [
+    { href: "/dashboard/brands", label: t("allBrands") },
+    ...(!snapshot ? [
+      { href: href + "/facts", label: factsTitle },
+      { href: href + "/questions", label: questionsTitle },
+    ] : []),
+    ...brandResourceLinks(t),
+  ];
   return (
-    <BrandFrame title={brand.fields.name} back="/dashboard/brands" backLabel={t("allBrands")}>
+    <BrandCanvas
+      title={brand.fields.name}
+      summary={(
+        <div className="max-w-2xl space-y-3">
+          <p className="break-words text-sm leading-7 text-muted-foreground">{t("detailTask")}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary"><Building2 aria-hidden="true" />{t("versionLabel", { version: formatNumber(locale, brand.version) })}</Badge>
+            <Badge variant="outline">{t(brand.status)}</Badge>
+          </div>
+          {readiness.kind === "unavailable" ? <p role="alert" className="break-words text-sm leading-6">{t("readinessUnavailable")}</p> : null}
+        </div>
+      )}
+      primary={primary}
+      relatedLabel={t("relatedEntries")}
+      related={related}
+    >
       <IntakeNotice t={t} mode={intake.mode} />
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <Card className="py-0 shadow-none">
+      <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <BrandMonitoringReadiness brand={{ id, version: brand.version }} historical={snapshot} result={readiness} promoted />
+        <Card className="min-w-0 py-0 shadow-none">
           <CardContent className="space-y-5 p-5 sm:p-6">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary"><Building2 aria-hidden="true" />{t("versionLabel", { version: formatNumber(locale, brand.version) })}</Badge>
-              <Badge variant="outline">{t(brand.status)}</Badge>
-            </div>
-            <p className="text-sm leading-6 text-muted-foreground">{t("updated", { time: formatDateTime(locale, new Date(brand.versionCreatedAt)) })}</p>
-            {snapshot && <p className="text-sm font-medium">{t("historicalVersion")}</p>}
+            <p className="text-sm leading-6 break-words text-muted-foreground">{t("updated", { time: formatDateTime(locale, new Date(brand.versionCreatedAt)) })}</p>
+            {snapshot && <p className="text-sm font-medium break-words">{t("historicalVersion")}</p>}
             <dl className="grid gap-4 sm:grid-cols-2">
               {rows.map(({ title, values }) => (
                 <div className="min-w-0 space-y-1 border-t pt-3" key={title}>
                   <dt className="text-sm font-medium">{title}</dt>
                   {values.length > 1 ? (
-                    <dd><ul className="list-inside list-disc space-y-1 text-sm leading-6 break-words text-muted-foreground">
+                    <dd><ul className="list-inside list-disc space-y-1 text-sm leading-6 break-words text-muted-foreground [overflow-wrap:anywhere]">
                       {values.map((value, index) => <li key={index}>{value}</li>)}
                     </ul></dd>
-                  ) : <dd className="text-sm leading-6 break-words whitespace-pre-wrap text-muted-foreground">{values[0] ?? t("emptyValue")}</dd>}
+                  ) : <dd className="text-sm leading-6 break-words whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">{values[0] ?? t("emptyValue")}</dd>}
                 </div>
               ))}
             </dl>
           </CardContent>
         </Card>
-        <div className="space-y-4 rounded-xl border bg-card p-5">
-          <BrandMonitoringReadiness
-            ownerId={user.id}
-            brand={{ id, status: brand.status, version: brand.version, website }}
-            historical={snapshot}
-          />
-          <div className="flex flex-wrap gap-2">
-            {!snapshot && brand.status === "active" && <Button asChild><Link href={href + "?edit=1"} prefetch={false}>{t("edit")}</Link></Button>}
-            {snapshot && <Button asChild><Link href={href} prefetch={false}>{t("currentVersion")}</Link></Button>}
-            {brand.version > 1 && <Button asChild variant="outline"><Link href={href + "?version=" + (brand.version - 1)} prefetch={false}>{t("previousVersion")}</Link></Button>}
+        <div className="min-w-0 space-y-4 rounded-xl border bg-card p-5 lg:col-start-2">
+          <div className="flex min-w-0 flex-wrap gap-2">
+            {!snapshot && brand.status === "active" && <Button asChild className={brandActionClass}><Link href={href + "?edit=1"} prefetch={false}>{t("edit")}</Link></Button>}
+            {brand.version > 1 && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "?version=" + (brand.version - 1)} prefetch={false}>{t("previousVersion")}</Link></Button>}
           </div>
           {!snapshot && <BrandStatusButton brand={{ id, status: brand.status, revision: brand.revision }} actorId={user.id} messages={messages} />}
-          {!snapshot && <Button asChild variant="outline"><Link href={href + "/facts"} prefetch={false}>{getMessages(locale).brandFacts.title}</Link></Button>}
-          {!snapshot && <Button asChild variant="outline"><Link href={href + "/questions"} prefetch={false}>{getMessages(locale).promptSets.title}</Link></Button>}
-          {!snapshot && <Button asChild variant="outline"><Link href={href + "/entity-reviews"} prefetch={false}>{getMessages(locale).entityReviews.title}</Link></Button>}
-          {!snapshot && <Button asChild variant="outline"><Link href={href + "/entity-corrections"} prefetch={false}>{getMessages(locale).entityCorrections.title}</Link></Button>}
-          {!snapshot && <Button asChild variant="outline"><Link href={href + "/delete"} prefetch={false}>{t("reviewDeletion")}</Link></Button>}
+          {!snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/entity-reviews"} prefetch={false}>{getMessages(locale).entityReviews.title}</Link></Button>}
+          {!snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/entity-corrections"} prefetch={false}>{getMessages(locale).entityCorrections.title}</Link></Button>}
+          {!snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/delete"} prefetch={false}>{t("reviewDeletion")}</Link></Button>}
         </div>
       </div>
       {retention && <RetentionRecord t={t} locale={locale} view={retention} />}
-    </BrandFrame>
+    </BrandCanvas>
   );
 }
 

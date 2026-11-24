@@ -30,6 +30,18 @@ test("brand entry keeps the task and related actions in the workspace canvas", (
   assert.match(index, /newOrResume/);
 });
 
+test("brand detail keeps the monitoring action and recovery in the workspace canvas", () => {
+  const brands = read("../../src/features/brands/pages.tsx");
+  const detail = brands.slice(brands.indexOf("export async function BrandDetailsPage"), brands.indexOf("export async function BrandDeletionPage"));
+  assert.doesNotMatch(detail, /<main\b/);
+  assert.match(detail, /detailTask/);
+  assert.match(detail, /relatedEntries/);
+  assert.match(detail, /readinessAction/);
+  assert.match(detail, /\[overflow-wrap:anywhere\]/);
+  assert.match(detail, /brandActionClass/);
+  assert.match(detail, /readinessUnavailable/);
+});
+
 test("answer list keeps the task and related actions in the workspace canvas", () => {
   const answers = read("../../src/features/evidence/answers-page.tsx");
   assert.doesNotMatch(answers, /<main\b/);

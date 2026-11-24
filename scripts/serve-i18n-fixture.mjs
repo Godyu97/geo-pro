@@ -76,7 +76,7 @@ await writeFile(settingsPage, (await readFile(settingsPage, "utf8")).replace(
 const brandService = path.join(fixture, "src/features/brands/service.ts");
 await writeFile(brandService, (await readFile(brandService, "utf8")).replace(
   '    return { data: await read(new BrandDao(getConnection())) };',
-  '    if ((await (await import("next/headers")).headers()).get("cookie")?.includes("geo-brands-slow=1")) await new Promise(resolve => setTimeout(resolve, 1500));\n    return { data: await read(new BrandDao(getConnection())) };',
+  '    const brandProbe = (await (await import("next/headers")).headers()).get("cookie") ?? "";\n    if (brandProbe.includes("geo-brands-unavailable=1")) throw new Error("Private brand fixture failure");\n    if (brandProbe.includes("geo-brands-slow=1")) await new Promise(resolve => setTimeout(resolve, 1500));\n    return { data: await read(new BrandDao(getConnection())) };',
 ));
 
 const evidenceCommands = path.join(fixture, "src/features/evidence/commands.ts");
