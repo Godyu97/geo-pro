@@ -271,6 +271,15 @@ await writeFile(crawlerPage, crawlerSource.replace(crawlerLabels, `    const pro
     if (probe === "unavailable") throw new Error("Private crawler visits fixture failure");
 ${crawlerLabels}`));
 
+const connectorEventsPage = path.join(fixture, "src/features/data-connections/event-page.tsx");
+const connectorEventsSource = await readFile(connectorEventsPage, "utf8");
+const connectorEventLabels = "    const labels = await loadOwnedLabels(connection, workspace.brands.map((brand) => brand.id));";
+assert.ok(connectorEventsSource.includes(connectorEventLabels));
+await writeFile(connectorEventsPage, connectorEventsSource.replace(connectorEventLabels, `    const probe = (await (await import("next/headers")).cookies()).get("geo-connector-events-read")?.value;
+    if (probe === "slow") await new Promise(resolve => setTimeout(resolve, 1800));
+    if (probe === "unavailable") throw new Error("Private connector events fixture failure");
+${connectorEventLabels}`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
