@@ -2275,6 +2275,8 @@
     "backReports": "Back to retest and reports",
     "openQuality": "Open lead validity",
     "openSuggestions": "Open next-question drafts",
+    "startImport": "Start import",
+    "reload": "Reload",
     "empty": "No de-identified leads yet. Rejected rows do not appear in the ledger.",
     "ledger": "Deduplicated ledger",
     "importTitle": "Import leads",

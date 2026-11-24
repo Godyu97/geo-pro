@@ -21,10 +21,12 @@ export function LeadImportForm({
   locale,
   messages,
   brandId,
+  rowsId,
 }: {
   locale: Locale;
   messages: Copy;
   brandId: string;
+  rowsId: string;
 }) {
   const t = createTranslator(locale, messages);
   const router = useRouter();
@@ -44,6 +46,7 @@ export function LeadImportForm({
   };
 
   async function submit() {
+    if (pending) return;
     const parsed = parseLeadLines(rows);
     if ("error" in parsed) {
       setResult(null);
@@ -52,6 +55,7 @@ export function LeadImportForm({
     }
     setPending(true);
     setStatus(null);
+    setResult(null);
     try {
       const response = await fetch("/api/reports/leads", {
         method: "POST",
@@ -61,7 +65,6 @@ export function LeadImportForm({
       });
       const payload = await response.json() as ImportResult & { error?: { code?: keyof Copy; message?: string } };
       if (!response.ok) {
-        setResult(null);
         const code = payload.error?.code;
         setStatus(code && code in messages ? t(code) : t("SERVICE_UNAVAILABLE"));
         return;
@@ -70,7 +73,6 @@ export function LeadImportForm({
       setRows("");
       router.refresh();
     } catch {
-      setResult(null);
       setStatus(t("SERVICE_UNAVAILABLE"));
     } finally {
       setPending(false);
@@ -78,48 +80,55 @@ export function LeadImportForm({
   }
 
   return (
-    <form className="space-y-4 rounded-2xl border p-5" onSubmit={(event) => {
+    <form className="min-w-0 rounded-2xl border bg-card p-5" onSubmit={(event) => {
       event.preventDefault();
       void submit();
     }}>
       <h2 className="text-lg font-semibold">{t("importTitle")}</h2>
-      <label className="block space-y-2 text-sm">
-        <span>{t("rows")}</span>
+      <div className="mt-4 space-y-2 text-sm">
+        <label htmlFor={rowsId} className="block font-medium">{t("rows")}</label>
         <textarea
+          id={rowsId}
           name="rows"
           value={rows}
           onChange={(event) => setRows(event.target.value)}
           required
           rows={6}
-          className="w-full rounded-md border bg-background px-3 py-2"
+          spellCheck={false}
+          aria-describedby={`${rowsId}-hint`}
+          className="block w-full scroll-mt-8 rounded-lg border border-input bg-background px-3 py-2 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm"
         />
-        <span className="block text-muted-foreground">{t("rowsHint")}</span>
-      </label>
-      <Button type="submit" disabled={pending}>{pending ? t("importing") : t("import")}</Button>
-      {status ? <p role="alert" className="text-sm">{status}</p> : null}
-      {result ? (
-        <div className="space-y-3">
-          <h3 className="text-base font-semibold">{t("importedHeading")}</h3>
-          {result.leads.length === 0 ? <p className="text-sm text-muted-foreground">{t("importedNone")}</p> : result.leads.map((lead) => (
-            <article key={lead.id} className="space-y-1 rounded-xl border border-dashed p-4 text-sm">
-              <p className="tabular-nums">{t("eventLine", { id: lead.eventId })}</p>
-              <p>{t("countLine")}</p>
-              <p>{t("primaryLine", { primary: evidenceLabel[lead.primary] })}</p>
-              <p>{lead.evidence.map((category) => evidenceLabel[category]).join(" · ")}</p>
-            </article>
-          ))}
-          {result.rejected.length > 0 ? (
-            <div>
-              <h3 className="text-base font-semibold">{t("rejectedHeading")}</h3>
-              <ul className="mt-2 space-y-1 text-sm">
-                {result.rejected.map((row) => (
-                  <li key={row.index}>{t("rejectedLine", { row: row.index + 1, reason: reasonLabel[row.reason] })}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+        <p id={`${rowsId}-hint`} className="text-muted-foreground">{t("rowsHint")}</p>
+      </div>
+      <Button type="submit" aria-disabled={pending} className="mt-4 min-h-10 aria-disabled:cursor-not-allowed aria-disabled:opacity-50">
+        {pending ? t("importing") : t("import")}
+      </Button>
+      {status ? <p role="alert" className="mt-4 rounded-xl border px-4 py-3 text-sm">{status}</p> : null}
+      <div role="status" aria-atomic={false}>
+        {result ? (
+          <div className="mt-4 space-y-3">
+            <h3 className="text-base font-semibold">{t("importedHeading")}</h3>
+            {result.leads.length === 0 ? <p className="text-sm text-muted-foreground">{t("importedNone")}</p> : result.leads.map((lead) => (
+              <article key={lead.id} className="space-y-1 rounded-xl border border-dashed p-4 text-sm [overflow-wrap:anywhere]">
+                <p className="tabular-nums">{t("eventLine", { id: lead.eventId })}</p>
+                <p>{t("countLine")}</p>
+                <p>{t("primaryLine", { primary: evidenceLabel[lead.primary] })}</p>
+                <p>{lead.evidence.map((category) => evidenceLabel[category]).join(" · ")}</p>
+              </article>
+            ))}
+            {result.rejected.length > 0 ? (
+              <div>
+                <h3 className="text-base font-semibold">{t("rejectedHeading")}</h3>
+                <ul className="mt-2 space-y-1 text-sm">
+                  {result.rejected.map((row) => (
+                    <li key={row.index}>{t("rejectedLine", { row: row.index + 1, reason: reasonLabel[row.reason] })}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </form>
   );
 }

@@ -224,6 +224,15 @@ await writeFile(interventionCommands, interventionSource.replace(interventionLis
     throw new Error("Private intervention fixture failure");
   }`));
 
+const leadCommands = path.join(fixture, "src/features/business-feedback/commands.ts");
+const leadSource = await readFile(leadCommands, "utf8");
+const leadList = "export async function listBusinessLeads(db: DatabaseConnection, ownerId: string, brandId: string) {";
+assert.ok(leadSource.includes(leadList));
+await writeFile(leadCommands, leadSource.replace(leadList, `${leadList}
+  if ((await (await import("next/headers")).cookies()).get("geo-leads-unavailable")?.value === "1") {
+    throw new Error("Private leads fixture failure");
+  }`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";

@@ -2275,6 +2275,8 @@
     "backReports": "返回复测与报告",
     "openQuality": "打开线索有效性",
     "openSuggestions": "打开下轮问题建议",
+    "startImport": "开始导入",
+    "reload": "重新载入",
     "empty": "还没有脱敏线索。被拒绝的行不会出现在台账里。",
     "ledger": "去重台账",
     "importTitle": "导入线索",
