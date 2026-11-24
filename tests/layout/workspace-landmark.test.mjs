@@ -101,6 +101,19 @@ test("content batch keeps the next action and recovery in the workspace canvas",
   assert.doesNotMatch(batch, /attempts=/);
 });
 
+test("content version keeps the next review action and recovery in the workspace canvas", () => {
+  const version = read("../../src/features/content/version-page.tsx");
+  assert.doesNotMatch(version, /<main\b/);
+  assert.match(version, /versionTaskDraft/);
+  assert.match(version, /versionTaskReview/);
+  assert.match(version, /versionUnavailable/);
+  assert.match(version, /relatedEntries/);
+  assert.match(version, /submit-review/);
+  assert.match(version, /approve-content/);
+  assert.match(version, /\[overflow-wrap:anywhere\]/);
+  assert.match(version, /whitespace-normal/);
+});
+
 test("content brief keeps the next action and recovery in the workspace canvas", () => {
   const brief = read("../../src/features/content/brief-page.tsx");
   assert.doesNotMatch(brief, /<main\b/);

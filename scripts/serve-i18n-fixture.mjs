@@ -126,6 +126,23 @@ await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(b
   }
   const dao = new ContentDao(db);`));
 
+const versionRead = `export async function readContentVersion(
+  db: DatabaseConnection,
+  ownerId: string,
+  versionId: string,
+) {
+  const dao = new ContentDao(db);`;
+assert.ok((await readFile(briefCommands, "utf8")).includes(versionRead));
+await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(versionRead, `export async function readContentVersion(
+  db: DatabaseConnection,
+  ownerId: string,
+  versionId: string,
+) {
+  if ((await (await import("next/headers")).cookies()).get("geo-content-version-unavailable")?.value === "1") {
+    throw new Error("Private content version fixture failure");
+  }
+  const dao = new ContentDao(db);`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
