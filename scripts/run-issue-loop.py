@@ -20,15 +20,16 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-MAX_ROUNDS = 20
-DEFAULT_MODEL = "grok-4.7-high"
+MAX_ROUNDS = 30
+DEFAULT_MODELS = {"codex": "gpt-6.2-sol", "cursor": "grok-4.7-high"}
+DEFAULT_CODEX_REASONING_EFFORT = "high"
 DEFAULT_ROUND_TIMEOUT = 0
 DEFAULT_MIN_BACKLOG = 1
 DEFAULT_REPLENISH_COUNT = 12
 DEFAULT_MAX_REPLENISHES = 3
 DEFAULT_MAX_CONSECUTIVE_FAILURES = 3
 DEFAULT_MAX_CONSECUTIVE_NOOP = 2
-DEFAULT_MAX_SAME_ISSUE_ROUNDS = 3
+DEFAULT_MAX_SAME_ISSUE_ROUNDS = 30
 
 NON_ACTIONABLE_LABELS = {
     "status:external-gate",
@@ -478,21 +479,22 @@ def run_preflight(workspace: Path, env: dict[str, str], probe_ai: bool = False) 
     return proc.returncode == 0
 
 
-def resolve_cursor_agent_bin(explicit_bin: str | None) -> str:
+def resolve_agent_bin(agent: str, explicit_bin: str | None, env: dict[str, str]) -> str:
     if explicit_bin:
         return explicit_bin
-    found = shutil.which("cursor-agent")
+    default_bin = "codex" if agent == "codex" else "cursor-agent"
+    found = shutil.which(default_bin, path=env.get("PATH"))
     if found:
-        return found
-    fallback = Path.home() / ".local" / "bin" / "cursor-agent"
-    if fallback.is_file():
-        return str(fallback)
+        return str(Path(found).absolute())
+    fallback = shutil.which(str(Path.home() / ".local" / "bin" / default_bin))
+    if fallback:
+        return fallback
     raise FileNotFoundError(
-        "未找到 cursor-agent 可执行文件，请将其加入 PATH 或通过 --agent-bin 指定路径。"
+        f"未找到 {default_bin} 可执行文件，请检查 PATH 或 --agent-bin。"
     )
 
 
-def create_new_session(agent_bin: str, workspace: Path, env: dict[str, str]) -> str:
+def create_cursor_session(agent_bin: str, workspace: Path, env: dict[str, str]) -> str:
     proc = run_cmd([agent_bin, "create-chat"], workspace, env, timeout=60)
     if proc.returncode != 0:
         raise RuntimeError(
@@ -534,39 +536,49 @@ def run_round(
     round_index: int,
     mode: str,
     target_issue: int | None,
+    agent: str,
     agent_bin: str,
     workspace: Path,
     env: dict[str, str],
     log_dir: Path,
     model: str,
+    reasoning_effort: str | None,
     round_timeout: int | None,
     approve_mcps: bool,
     prompt: str,
     before_head: str,
 ) -> RoundResult:
-    session_id = create_new_session(agent_bin, workspace, env)
+    session_id = ""
     log_file = log_dir / f"round-{round_index:02d}-{mode}-{uuid4().hex}.jsonl"
-    cmd = [
-        agent_bin, "-p", "--force", "--trust", "--workspace", str(workspace),
-        "--resume", session_id, "--output-format", "stream-json", "--model", model,
-    ]
-    if approve_mcps:
-        cmd.append("--approve-mcps")
+    if agent == "codex":
+        cmd = [
+            agent_bin, "exec", "--json", "--model", model,
+            "-c", f"model_reasoning_effort={json.dumps(reasoning_effort)}",
+        ]
+    else:
+        session_id = create_cursor_session(agent_bin, workspace, env)
+        cmd = [
+            agent_bin, "-p", "--force", "--trust", "--workspace", str(workspace),
+            "--resume", session_id, "--output-format", "stream-json", "--model", model,
+        ]
+        if approve_mcps:
+            cmd.append("--approve-mcps")
     cmd.append(prompt)
 
     target_desc = f"#{target_issue}" if target_issue is not None else "backlog"
     print(
         f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
         f"=== 第 {round_index} 轮开始 | mode={mode} | target={target_desc} "
-        f"| session={session_id} | model={model} | log={log_file} ===",
+        f"| agent={agent} | session={session_id or '待启动'} | model={model} | log={log_file} ===",
         flush=True,
     )
 
-    result_event: dict[str, Any] | None = None
+    result_text = None
+    event_error = None
     pending = b""
 
     def display_chunk(chunk: bytes) -> None:
-        nonlocal pending, result_event
+        nonlocal pending, session_id, result_text, event_error
         lines = (pending + chunk).split(b"\n")
         pending = lines.pop()
         for raw_line in lines:
@@ -580,9 +592,24 @@ def run_round(
                 continue
             if not isinstance(event, dict):
                 continue
-            if event.get("type") == "result":
-                result_event = event
-            elif event.get("type") == "assistant":
+            event_type = event.get("type")
+            if agent == "codex":
+                if event_type == "thread.started" and isinstance(event.get("thread_id"), str):
+                    session_id = event["thread_id"]
+                elif event_type == "item.completed":
+                    item = event.get("item")
+                    if isinstance(item, dict) and item.get("type") == "agent_message":
+                        message = item.get("text")
+                        if isinstance(message, str):
+                            result_text = message
+                            print(message, flush=True)
+                elif event_type == "turn.failed":
+                    event_error = "Codex 的 turn.failed 事件标记失败（详见轮次日志）"
+            elif event_type == "result":
+                result_text = event.get("result")
+                failed = event.get("is_error") or event.get("subtype") != "success"
+                event_error = "cursor-agent 的 result 事件标记失败" if failed else None
+            elif event_type == "assistant":
                 message = event.get("message")
                 content = message.get("content") if isinstance(message, dict) else None
                 if isinstance(content, list):
@@ -596,7 +623,8 @@ def run_round(
         started_at = time.monotonic()
         deadline = started_at + round_timeout if round_timeout is not None else None
         proc = subprocess.Popen(
-            cmd, cwd=workspace, env=env, stdout=output, stderr=subprocess.STDOUT,
+            cmd, cwd=workspace, env=env, stdin=subprocess.DEVNULL if agent == "codex" else None,
+            stdout=output, stderr=subprocess.STDOUT,
             start_new_session=True,
         )
         try:
@@ -623,16 +651,13 @@ def run_round(
             display_chunk(chunk)
         display_chunk(b"\n")
 
-    result_text = result_event.get("result") if result_event else None
-    error = None
+    error = event_error
     if interrupt_signal is not None:
         error = "收到中断信号，已终止进程组"
     elif timed_out:
         error = f"第 {round_index} 轮执行超过 {round_timeout} 秒，已终止进程组"
     elif proc.returncode:
-        error = f"cursor-agent 进程非零退出（退出码 {proc.returncode}，详见轮次日志）"
-    elif result_event is not None and (result_event.get("is_error") or result_event.get("subtype") != "success"):
-        error = "cursor-agent 的 result 事件标记失败"
+        error = f"{agent} 进程非零退出（退出码 {proc.returncode}，详见轮次日志）"
 
     return RoundResult(
         round_index=round_index, mode=mode, target_issue=target_issue,
@@ -679,16 +704,25 @@ def parse_args() -> argparse.Namespace:
         help=f"工作区根目录（默认 {default_workspace}）",
     )
     parser.add_argument(
+        "--agent",
+        choices=tuple(DEFAULT_MODELS),
+        default="codex",
+        help="Agent 通道（默认 codex，可选 cursor）",
+    )
+    parser.add_argument(
         "--agent-bin",
         type=str,
         default=None,
-        help="cursor-agent 可执行文件路径（默认自动查找）",
+        help="所选 Agent 的可执行文件路径（默认自动查找）",
     )
     parser.add_argument(
         "--model",
         type=str,
-        default=DEFAULT_MODEL,
-        help=f"cursor-agent 模型（默认 {DEFAULT_MODEL}）",
+        help=f"模型（Codex 默认 {DEFAULT_MODELS['codex']}，Cursor 默认 {DEFAULT_MODELS['cursor']}）",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        help=f"Codex 推理强度（默认 {DEFAULT_CODEX_REASONING_EFFORT}）",
     )
     parser.add_argument(
         "--round-timeout",
@@ -699,7 +733,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--approve-mcps",
         action="store_true",
-        help="自动批准 MCP servers（传递 --approve-mcps）",
+        help="自动批准 Cursor 的 MCP servers（仅 --agent cursor 支持）",
     )
     parser.add_argument(
         "--log-dir",
@@ -747,7 +781,7 @@ def parse_args() -> argparse.Namespace:
         "--max-same-issue-rounds",
         type=int,
         default=DEFAULT_MAX_SAME_ISSUE_ROUNDS,
-        help=f"同一 Issue 连续 progressed 轮数上限，超过后自动轮换（默认 {DEFAULT_MAX_SAME_ISSUE_ROUNDS}）",
+        help=f"同一 Issue 连续 progressed 轮数上限，达到后轮换（默认 {DEFAULT_MAX_SAME_ISSUE_ROUNDS}）",
     )
     parser.add_argument(
         "--skip-issues",
@@ -783,9 +817,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="仅执行预检与第 1 轮队列演算，不调用 cursor-agent",
+        help="仅执行预检与第 1 轮队列演算，不调用 Agent",
     )
     args = parser.parse_args()
+    if args.model is None:
+        args.model = DEFAULT_MODELS[args.agent]
+    if args.agent == "codex":
+        if args.approve_mcps:
+            parser.error("--approve-mcps 仅支持 --agent cursor")
+        args.reasoning_effort = args.reasoning_effort or DEFAULT_CODEX_REASONING_EFFORT
+    elif args.reasoning_effort is not None:
+        parser.error("--reasoning-effort 仅支持 --agent codex")
     for option in ("max-rounds", "replenish-count", "max-consecutive-failures",
                    "max-consecutive-noop", "max-same-issue-rounds"):
         if getattr(args, option.replace("-", "_")) < 1:
@@ -845,7 +887,7 @@ def print_summary(
 def run_loop(
     args: argparse.Namespace, workspace: Path, env: dict[str, str], branch: str
 ) -> int:
-    agent_bin = resolve_cursor_agent_bin(args.agent_bin)
+    agent_bin = resolve_agent_bin(args.agent, args.agent_bin, env)
     log_dir = (args.log_dir or workspace / "tmp").resolve()
     run_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:8]}"
     summary_file = log_dir / f"loop-summary-{run_id}.json"
@@ -860,9 +902,10 @@ def run_loop(
 
     round_timeout = args.round_timeout or None
     timeout_desc = f"{round_timeout}s" if round_timeout is not None else "不限时"
+    effort_desc = f" | reasoning_effort={args.reasoning_effort}" if args.reasoning_effort else ""
     print(
         f"启动 GeoPro Issue 循环 | max_rounds={args.max_rounds} | mode={args.prompt_mode} | "
-        f"model={args.model} | timeout={timeout_desc} | branch={branch}",
+        f"agent={args.agent} | model={args.model}{effort_desc} | timeout={timeout_desc} | branch={branch}",
         flush=True,
     )
 
@@ -880,7 +923,11 @@ def run_loop(
         payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "branch": branch,
+            "agent": args.agent,
+            "model": args.model,
+            "reasoning_effort": args.reasoning_effort,
             "max_rounds": args.max_rounds,
+            "max_same_issue_rounds": args.max_same_issue_rounds,
             "dev_commits": dev_commits,
             "issues_created_total": total_created,
             "replenishes_done": successful_batches,
@@ -937,8 +984,9 @@ def run_loop(
             try:
                 result = run_round(
                     round_index=index, mode=mode, target_issue=target_num,
-                    agent_bin=agent_bin, workspace=workspace, env=env, log_dir=log_dir,
-                    model=args.model, round_timeout=round_timeout, approve_mcps=args.approve_mcps,
+                    agent=args.agent, agent_bin=agent_bin, workspace=workspace, env=env, log_dir=log_dir,
+                    model=args.model, reasoning_effort=args.reasoning_effort,
+                    round_timeout=round_timeout, approve_mcps=args.approve_mcps,
                     prompt=prompt, before_head=before_head,
                 )
             except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
@@ -1026,7 +1074,7 @@ def run_loop(
                 if outcome == "progressed":
                     same_issue_rounds = same_issue_rounds + 1 if last_progress_issue == target_num else 1
                     last_progress_issue = target_num
-                    if same_issue_rounds >= args.max_same_issue_rounds:
+                    if same_issue_rounds >= args.max_same_issue_rounds and index < args.max_rounds:
                         skipped_issues[target_num] = f"已连续推进 {same_issue_rounds} 轮，本次运行轮换"
                 else:
                     same_issue_rounds, last_progress_issue = 0, None

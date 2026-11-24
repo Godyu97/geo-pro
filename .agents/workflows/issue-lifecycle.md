@@ -33,6 +33,10 @@ Agent 先核对现有实现、已交付范围及实测证据。适用验证完�
 
 实跑需要干净的工作树，同一个工作树一次只运行一个循环。未交付的本地修改默认保留并停止派发。显式传入 `--quarantine-dirty` 时，可将本轮残留的未提交修改保存到命名 stash。遇到未能核对的本轮 Git 提交时，保留现场并停止派发。每轮日志与 JSON 汇总保存在 `--log-dir`（默认 `tmp/`）。
 
+默认通过 `codex exec` 启动独立会话，模型为 `gpt-6.2-sol`，推理强度为 `high`，沿用本机 Codex 权限配置。用 `--model` 或 `--reasoning-effort` 可覆盖对应设置。用 `--agent cursor` 可选择 Cursor，默认模型为 `grok-4.7-high`，`--approve-mcps` 仅用于该通道。
+
+单次运行默认最多 30 轮，含补货轮。连续有可核验交付且仍可执行的 Issue 可推进至 30 轮。可用 `--max-rounds` 调整总轮数，用 `--max-same-issue-rounds` 调整同一 Issue 的连续推进上限。达到单项上限且还有调度轮次时，轮换到其他工单。
+
 Agent 单轮默认不限时。收到 `Ctrl+C` 或 `SIGTERM` 时终止当前进程组并保留日志。显式传入 `--round-timeout <秒数>`（正数）可启用按时限中止，并按失败轮次处理。
 
 用 `python3 scripts/run-issue-loop.py --dry-run --skip-preflight` 查看当前队列决策，用 `python3 scripts/test-run-issue-loop.py` 在临时 Git 仓库中验证调度和回执逻辑。

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the dispatcher against a temporary Git origin and stand-ins for gh and Cursor."""
+"""Run the dispatcher against a temporary Git origin and stand-ins for gh and the agents."""
 
 import json
 import os
@@ -28,18 +28,24 @@ control = Path(os.environ["ISSUE_LOOP_TEST_CONTROL"])
 scenario = os.environ["ISSUE_LOOP_TEST_SCENARIO"]
 state_file = control / "github.json"
 state = json.loads(state_file.read_text())
+issue_number = state["target"]["number"]
 
 if Path(sys.argv[0]).name == "gh":
     if sys.argv[1] == "api":
         # The first page only contains a PR. The open Issue must come from page two.
         print(json.dumps([[{"pull_request": {}}], state["open"]]))
-    elif sys.argv[1:4] == ["issue", "view", "131"]:
+    elif sys.argv[1:4] == ["issue", "view", str(issue_number)]:
         print(json.dumps(state["target"]))
     else:
         sys.exit(2)
     sys.exit(0)
 
-if sys.argv[1] == "create-chat":
+is_codex = sys.argv[1] == "exec"
+if is_codex:
+    (control / "codex-args.json").write_text(json.dumps(sys.argv[1:-1]))
+    print(json.dumps({"type": "thread.started", "thread_id": "test-codex-session"}), flush=True)
+    print(json.dumps({"type": "turn.started"}), flush=True)
+elif sys.argv[1] == "create-chat":
     print("test-session")
     sys.exit(0)
 
@@ -94,8 +100,8 @@ else:
     if scenario in {"pushed", "unpushed", "wrong-commit-issue"} or first_prose_round:
         Path("change.txt").write_text("fixture change")
         git("add", "change.txt")
-        issue_number = 999 if scenario == "wrong-commit-issue" else 131
-        git("commit", "-m", f"feat: fixture change (#{issue_number})")
+        commit_issue = 999 if scenario == "wrong-commit-issue" else issue_number
+        git("commit", "-m", f"feat: fixture change (#{commit_issue})")
         if scenario != "unpushed":
             git("push", "origin", "main")
     keep_open = {
@@ -118,7 +124,7 @@ else:
         version = "0" * 40 if scenario == "wrong-version" else git("rev-parse", "HEAD")
         comments = state["target"]["comments"]
         comments.append({
-            "url": f"https://example.test/owner/repo/issues/131#issuecomment-{len(comments) + 1}",
+            "url": f"https://example.test/owner/repo/issues/{issue_number}#issuecomment-{len(comments) + 1}",
             "body": f"已核对本轮验收。版本为 {version}。\n{marker}",
             "createdAt": ("2020-01-01T00:00:00Z" if scenario == "old-comment"
                           else datetime.now(timezone.utc).isoformat()),
@@ -127,7 +133,11 @@ else:
         reply += "\n\nloop-round:\nunblock: none后面还有补充说明。\n\n下一轮可继续核对。"
 
 state_file.write_text(json.dumps(state))
-if scenario != "no-result":
+if is_codex:
+    print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": reply}}))
+    event_type = "turn.failed" if scenario == "codex-failed" else "turn.completed"
+    print(json.dumps({"type": event_type}), end="", flush=True)
+elif scenario != "no-result":
     print(json.dumps({"type": "result", "subtype": "success", "result": reply}), end="", flush=True)
 '''
 
@@ -158,7 +168,7 @@ class IssueLoopTest(unittest.TestCase):
         self.git("commit", "-m", "Fixture baseline")
         self.git("push", "origin", "main")
 
-        for name in ("gh", "fake-agent"):
+        for name in ("gh", "cursor-agent", "codex"):
             executable = self.root / name
             executable.write_text(f"#!{sys.executable}\n" + FAKE_CLI, encoding="utf-8")
             executable.chmod(0o700)
@@ -174,19 +184,22 @@ class IssueLoopTest(unittest.TestCase):
             check=True, capture_output=True, text=True, timeout=10,
         ).stdout.strip()
 
-    def command(self, *args):
+    def command(self, *args, max_rounds=1, agent="cursor"):
+        round_options = ["--max-rounds", str(max_rounds)] if max_rounds is not None else []
+        agent_options = ["--agent", agent] if agent is not None else []
         return [
             sys.executable, str(LOOP), "--workspace", str(self.workspace),
-            "--agent-bin", str(self.root / "fake-agent"), "--log-dir", str(self.logs),
-            "--skip-preflight", "--max-rounds", "1", "--max-consecutive-failures", "1", *args,
+            "--log-dir", str(self.logs), "--skip-preflight", "--max-consecutive-failures", "1",
+            *agent_options, *round_options, *args,
         ]
 
     def summary(self):
         return json.loads(max(self.logs.glob("loop-summary-*.json")).read_text())
 
-    def run_loop(self, scenario, *args, expected_exit=0):
+    def run_loop(self, scenario, *args, expected_exit=0, max_rounds=1, agent="cursor"):
         proc = subprocess.run(
-            self.command(*args), env={**self.env, "ISSUE_LOOP_TEST_SCENARIO": scenario},
+            self.command(*args, max_rounds=max_rounds, agent=agent),
+            env={**self.env, "ISSUE_LOOP_TEST_SCENARIO": scenario},
             capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(proc.returncode, expected_exit, proc.stdout + proc.stderr)
@@ -198,6 +211,26 @@ class IssueLoopTest(unittest.TestCase):
         self.assertIn("timeout=不限时", proc.stdout)
         self.assertEqual(summary["dev_commits"], 1)
         self.assertEqual(summary["rounds"][0]["after_head"], self.git("rev-parse", "origin/main"))
+
+    def test_default_codex_dispatch_records_session_and_reply(self):
+        self.run_loop("pushed", "--target-dev-commits", "1", agent=None)
+        self.assertEqual(json.loads((self.root / "codex-args.json").read_text()), [
+            "exec", "--json", "--model", "gpt-6.2-sol", "-c", 'model_reasoning_effort="high"',
+        ])
+        summary = self.summary()
+        self.assertEqual(summary["agent"], "codex")
+        self.assertEqual(summary["dev_commits"], 1)
+        result, = summary["rounds"]
+        self.assertEqual(result["session_id"], "test-codex-session")
+        self.assertEqual(result["outcome"], "progressed")
+        self.assertEqual(result["result_text"], "已执行本轮检查。详情见工单评论。")
+
+    def test_codex_turn_failed_is_not_accepted_even_with_zero_exit(self):
+        self.run_loop("codex-failed", agent="codex", expected_exit=1)
+        result, = self.summary()["rounds"]
+        self.assertEqual(result["exit_code"], 0)
+        self.assertFalse(result["success"])
+        self.assertIn("turn.failed", result["error_reason"])
 
     def test_continues_after_a_pushed_commit_with_extra_reply_text(self):
         self.run_loop("pushed-with-prose", "--prompt-mode", "dev", "--max-rounds", "2")
@@ -247,6 +280,21 @@ class IssueLoopTest(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["outcome"], "progressed")
         self.assertIn("131", summary["skipped_issues"])
+
+    def test_default_limits_allow_thirty_verified_rounds_on_issue_135(self):
+        state_file = self.root / "github.json"
+        state = json.loads(state_file.read_text())
+        state["open"][0]["number"] = state["target"]["number"] = 135
+        state_file.write_text(json.dumps(state))
+        self.run_loop("acceptance-progress", "--prompt-mode", "dev", max_rounds=None, agent=None)
+        summary = self.summary()
+        self.assertEqual(summary["max_rounds"], 30)
+        self.assertEqual(summary["max_same_issue_rounds"], 30)
+        self.assertEqual(
+            [(row["target_issue"], row["outcome"]) for row in summary["rounds"]],
+            [(135, "progressed")] * 30,
+        )
+        self.assertNotIn("135", summary["skipped_issues"])
 
     def test_counts_new_evidence_on_open_issue_as_progress(self):
         self.run_loop("not-closed")
