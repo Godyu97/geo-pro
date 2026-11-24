@@ -64,9 +64,9 @@ test("sync authorization copy states revocation without deleting history", async
   assert.equal(en.syncAuthorizations.resultStopped, "Stopped");
   assert.equal(zhCN.settings.openSyncAuthorizations.length > 0, true);
   assert.equal(en.settings.openSyncAuthorizations.length > 0, true);
-  const page = await readFile(new URL("../../src/features/data-connections/revocation-page.tsx", import.meta.url), "utf8");
-  assert.equal(page.includes("statusActive") && page.includes("statusRevoked"), true);
-  assert.equal(page.includes("resultAllowed") && page.includes("resultStopped"), true);
+  const panel = await readFile(new URL("../../src/features/data-connections/revocation-panel.tsx", import.meta.url), "utf8");
+  assert.equal(panel.includes("statusActive") && panel.includes("statusRevoked"), true);
+  assert.equal(panel.includes("resultAllowed") && panel.includes("resultStopped"), true);
   const source = await readFile(new URL("../../src/features/data-connections/revocation-commands.ts", import.meta.url), "utf8");
   assert.equal(source.includes("revokeSync"), true);
   assert.equal(/\bfetch\s*\(|\bundici\b|net\.request|https?:\/\//.test(source), false);

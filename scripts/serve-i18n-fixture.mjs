@@ -289,6 +289,15 @@ await writeFile(dataConnectionsPage, dataConnectionsSource.replace(dataConnectio
     if (probe === "unavailable") throw new Error("Private data connections fixture failure");
 ${dataConnectionLabels}`));
 
+const syncAuthorizationsPage = path.join(fixture, "src/features/data-connections/revocation-page.tsx");
+const syncAuthorizationsSource = await readFile(syncAuthorizationsPage, "utf8");
+const syncAuthorizationLabels = "    const labels = await loadOwnedLabels(connection, workspace.brands.map((brand) => brand.id));";
+assert.ok(syncAuthorizationsSource.includes(syncAuthorizationLabels));
+await writeFile(syncAuthorizationsPage, syncAuthorizationsSource.replace(syncAuthorizationLabels, `    const probe = (await (await import("next/headers")).cookies()).get("geo-sync-authorizations-read")?.value;
+    if (probe === "slow") await new Promise(resolve => setTimeout(resolve, 1800));
+    if (probe === "unavailable") throw new Error("Private sync authorizations fixture failure");
+${syncAuthorizationLabels}`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
