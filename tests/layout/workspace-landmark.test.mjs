@@ -174,11 +174,18 @@ test("content brief keeps the next action and recovery in the workspace canvas",
   assert.match(brief, /gapFields\[gap\.code\]\.text/);
 });
 
-test("report entry stays inside the workspace canvas", () => {
+test("report entry keeps the current snapshot action and recovery in the workspace canvas", () => {
   const reports = read("../../src/features/reports/list-page.tsx");
   assert.doesNotMatch(reports, /<main\b/);
   assert.match(reports, /tracking-tight/);
   assert.match(reports, /aria-label=\{relatedLabel\}/);
   assert.match(reports, /break-words/);
   assert.match(reports, /relatedEntries/);
+  assert.match(reports, /snapshotTaskCurrent/);
+  assert.match(reports, /snapshotTaskEmpty/);
+  assert.match(reports, /snapshotTaskHistory/);
+  assert.match(reports, /downloadCurrentJson/);
+  assert.match(reports, /reportsUnavailable/);
+  assert.match(reports, /\[overflow-wrap:anywhere\]/);
+  assert.match(reports, /whitespace-normal/);
 });

@@ -195,6 +195,16 @@ await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(v
   }
   const dao = new ContentDao(db);`));
 
+const reportCommands = path.join(fixture, "src/features/reports/commands.ts");
+const reportList = `export async function listReports(db: QueryConnection, ownerId: string, brandId: string, limit = 20) {
+  const brand = await requireOwnedBrand(db, ownerId, brandId);`;
+assert.ok((await readFile(reportCommands, "utf8")).includes(reportList));
+await writeFile(reportCommands, (await readFile(reportCommands, "utf8")).replace(reportList, `export async function listReports(db: QueryConnection, ownerId: string, brandId: string, limit = 20) {
+  if ((await (await import("next/headers")).cookies()).get("geo-reports-unavailable")?.value === "1") {
+    throw new Error("Private report fixture failure");
+  }
+  const brand = await requireOwnedBrand(db, ownerId, brandId);`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";

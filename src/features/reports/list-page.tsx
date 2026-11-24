@@ -14,10 +14,12 @@ import { presentSnapshotCost } from "./cost-copy";
 import { listReports, snapshotCostViews, type SnapshotCostView } from "./commands";
 import { m0StageGate } from "./m0-stage-gate";
 import type { ReportError } from "./contracts";
+import type { ReportSnapshotRow } from "./dao";
 
+const actionClass = "h-auto max-w-full whitespace-normal";
 const emptyClass = "rounded-2xl border border-dashed bg-card px-4 py-5 text-sm leading-6 text-muted-foreground";
-const itemClass = "rounded-2xl border bg-card px-4 py-4 text-sm";
-const relatedClass = "inline-flex min-w-0 max-w-full min-h-10 items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 break-words outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const itemClass = "min-w-0 rounded-2xl border bg-card px-4 py-4 text-sm";
+const relatedClass = "inline-flex min-h-10 min-w-0 max-w-full items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 break-words whitespace-normal outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 export async function generateMetadata() {
   const t = await getTranslator("reports");
@@ -66,6 +68,13 @@ function SnapshotCostLines({
   );
 }
 
+function nextSnapshot(snapshots: readonly ReportSnapshotRow[]) {
+  const current = snapshots.find((item) => item.status === "created");
+  if (current) return { kind: "current" as const, snapshot: current };
+  if (snapshots.length > 0) return { kind: "history" as const, snapshot: null };
+  return { kind: "empty" as const, snapshot: null };
+}
+
 function ReportCanvas({
   title,
   summary,
@@ -82,8 +91,8 @@ function ReportCanvas({
   children?: ReactNode;
 }) {
   return (
-    <div className="space-y-8">
-      <header className="space-y-3">
+    <div className="min-w-0 max-w-full space-y-8">
+      <header className="min-w-0 space-y-3">
         <h1 className="break-words text-2xl font-semibold tracking-tight">{title}</h1>
         {summary}
         {primary}
@@ -112,10 +121,17 @@ export default async function ReportsListPage({
   const connection = getConnection();
   const requestedBrand = typeof params.brandId === "string" ? params.brandId : undefined;
   const brandId = requestedBrand || (await new BrandDao(connection).active(session.user.id))?.id;
-  const related = relatedLinks(t);
+  const reportsHref = requestedBrand
+    ? `/dashboard/reports?brandId=${encodeURIComponent(requestedBrand)}`
+    : "/dashboard/reports";
   const brandsAction = (
-    <Button asChild>
+    <Button asChild className={actionClass}>
       <Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link>
+    </Button>
+  );
+  const reloadAction = (
+    <Button asChild className={actionClass}>
+      <a href={reportsHref}>{t("reload")}</a>
     </Button>
   );
 
@@ -123,18 +139,30 @@ export default async function ReportsListPage({
     return (
       <ReportCanvas
         title={t("title")}
-        summary={<p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>}
+        summary={<p className="max-w-2xl break-words text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>}
         primary={brandsAction}
         relatedLabel={t("relatedEntries")}
-        related={related}
+        related={relatedLinks(t)}
       />
     );
   }
 
-  const result = await listReports(connection, session.user.id, brandId);
-  const costViews = "error" in result
-    ? new Map()
-    : await snapshotCostViews(connection, session.user.id, result.snapshots);
+  let result: Awaited<ReturnType<typeof listReports>> | { error: ReportError };
+  try {
+    result = await listReports(connection, session.user.id, brandId);
+  } catch {
+    console.error("reports-read-failed", { brandId });
+    result = { error: "SERVICE_UNAVAILABLE" };
+  }
+  let costViews = new Map<string, SnapshotCostView>();
+  if (!("error" in result)) {
+    try {
+      costViews = await snapshotCostViews(connection, session.user.id, result.snapshots);
+    } catch {
+      console.error("reports-cost-read-failed", { brandId });
+      costViews = new Map(result.snapshots.map((item) => [item.id, { state: "unavailable" as const }]));
+    }
+  }
   const mockLane = brandIntakeOrigin(await headers())?.mode === "mock";
   const mockGate = m0StageGate({
     realBrand: false,
@@ -148,25 +176,48 @@ export default async function ReportsListPage({
     consumer_manual: t("mockGateMissConsumer"),
     walkthrough: t("mockGateMissWalkthrough"),
   };
-  if ("error" in result) {
-    const code = result.error as ReportError;
+  if ("error" in result && result.error) {
+    const code = result.error;
     return (
       <ReportCanvas
         title={t("title")}
-        summary={<p role="alert" className="max-w-2xl text-sm leading-7">{t(code)}</p>}
-        primary={code === "NOT_FOUND" ? brandsAction : undefined}
+        summary={<p role="alert" className="max-w-2xl break-words text-sm leading-7">{code === "SERVICE_UNAVAILABLE" ? t("reportsUnavailable") : t(code)}</p>}
+        primary={code === "NOT_FOUND" ? brandsAction : reloadAction}
         relatedLabel={t("relatedEntries")}
-        related={related}
+        related={relatedLinks(t)}
       />
     );
   }
 
+  const next = nextSnapshot(result.snapshots);
+  const observationsHref = "/dashboard/reports/observations";
+  const taskKey = next.kind === "current"
+    ? "snapshotTaskCurrent"
+    : next.kind === "history"
+      ? "snapshotTaskHistory"
+      : "snapshotTaskEmpty";
+  const primary = next.snapshot ? (
+    <Button asChild className={actionClass}>
+      <a href={`/api/reports/snapshots/${next.snapshot.id}?format=json`}>{t("downloadCurrentJson")}</a>
+    </Button>
+  ) : (
+    <Button asChild className={actionClass}>
+      <Link href={observationsHref} prefetch={false}>{t("openObservations")}</Link>
+    </Button>
+  );
+
   return (
     <ReportCanvas
       title={t("title")}
-      summary={<p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>}
+      summary={(
+        <div className="max-w-2xl space-y-2">
+          <p role="status" className="break-words text-sm leading-7 text-muted-foreground">{t(taskKey)}</p>
+          <p className="break-words text-sm leading-7 text-muted-foreground">{t("description")}</p>
+        </div>
+      )}
+      primary={primary}
       relatedLabel={t("relatedEntries")}
-      related={related}
+      related={relatedLinks(t).filter((item) => next.snapshot || item.href !== observationsHref)}
     >
       {mockLane && (
         <div className="space-y-2">
@@ -228,7 +279,7 @@ export default async function ReportsListPage({
                     loop: item.loopCompleted ? t("loopYes") : t("loopNo"),
                   })}
                 </p>
-                <p className="mt-1 break-words text-muted-foreground">
+                <p className="mt-1 [overflow-wrap:anywhere] text-muted-foreground">
                   {t("snapshotStatus", { status: item.status })}
                   {item.predecessorId ? ` · ${t("snapshotPrevious", { id: item.predecessorId })}` : ""}
                 </p>

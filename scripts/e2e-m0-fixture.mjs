@@ -123,6 +123,21 @@ try {
       await queryWithParameters(db, `DELETE FROM capability_channel WHERE id = ?`, [channelId]);
     }
     if (payload.userId && payload.email) {
+      const objects = await queryWithParameters(db,
+        `SELECT object_key AS "objectKey" FROM stored_object WHERE owner_id = ? AND object_key IS NOT NULL`,
+        [payload.userId]);
+      if (objects.length > 0) {
+        try {
+          const { createObjectStorage } = await import("../src/lib/storage/operations.ts");
+          const storage = createObjectStorage();
+          for (const row of objects) {
+            if (row.objectKey) await storage.deleteObject({ key: String(row.objectKey) });
+          }
+        } catch (error) {
+          console.error("fixture-object-delete-failed", error instanceof Error ? error.message : "unknown");
+        }
+      }
+      await queryWithParameters(db, `DELETE FROM stored_object WHERE owner_id = ?`, [payload.userId]);
       await queryWithParameters(db, `DELETE FROM "user" WHERE id = ? AND email = ?`, [payload.userId, payload.email]);
     }
     process.stdout.write(JSON.stringify({ cleaned: true }));
