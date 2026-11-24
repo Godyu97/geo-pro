@@ -13,6 +13,7 @@ import { cancelMonitoringRun, continueMonitoringRun, executeMonitoringRun, pause
 import { officialSamplingPortFromEnv } from "./official-port";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { executeFunctionalMockRun } from "@/features/functional-mock/apply-run";
+import { functionalMockRequested } from "@/features/functional-mock/mode";
 
 const privateHeaders = {
   "Cache-Control": "private, no-store",
@@ -84,7 +85,9 @@ export async function monitoringRunControlResponse(request: Request, runId: stri
               ? await executeFunctionalMockRun(connection, ownerId, runId)
               : { error: "REAL_CHANNEL_CLOSED" as const, next: "await-channel" as const }
             : command.data.action === "execute"
-              ? await executeMonitoringRun(connection, ownerId, runId, officialSamplingPortFromEnv())
+              ? functionalMockRequested(process.env)
+                ? { error: "REAL_CHANNEL_CLOSED" as const, next: "await-channel" as const }
+                : await executeMonitoringRun(connection, ownerId, runId, officialSamplingPortFromEnv())
             : command.data.action === "redo-analysis" ? await redoMonitoringAnalysis(connection, ownerId, runId, command.data.slotId)
               : await reconcileMonitoringCost(connection, ownerId, runId, command.data.attemptId, command.data.actualMinor);
     if ("error" in result) return failure(result.error, undefined, result.next);

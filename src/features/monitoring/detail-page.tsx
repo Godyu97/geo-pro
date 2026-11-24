@@ -50,10 +50,17 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
     cancelled: result.slots.filter((slot) => slot.status === "cancelled").length,
   };
   const attemptsBySlot = new Map<string, typeof result.attempts>();
+  let knownCost: number | null = null;
+  let hasPendingCost = false;
+  let hasUnknownCost = false;
   for (const attempt of result.attempts) {
     const list = attemptsBySlot.get(attempt.slotId) ?? [];
     list.push(attempt);
     attemptsBySlot.set(attempt.slotId, list);
+    if (attempt.kind !== "sampling") continue;
+    if (attempt.costState === "known" && attempt.actualMinor !== null) knownCost = (knownCost ?? 0) + attempt.actualMinor;
+    if (attempt.costState === "pending") hasPendingCost = true;
+    if (attempt.costState === "unknown") hasUnknownCost = true;
   }
   const connection = getConnection();
   const mockRun = brandIntakeOrigin(await headers())?.mode === "mock";
@@ -125,7 +132,8 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
       ) : (
         <p className="text-sm text-muted-foreground">{t("realChannelClosed")}</p>
       )}
-      {result.track !== "model_api" && <p className="text-sm text-muted-foreground">{t("isolatedNote")}</p>}
+      {result.attempts.some((attempt) => attempt.synthetic === 1) && <p className="text-sm text-muted-foreground">{t("isolatedNote")}</p>}
+      {hasPendingCost && <p className="max-w-2xl text-sm text-muted-foreground">{t("recoveryNote")}</p>}
       {mockRun && (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">{t("executeMockNote")}</p>
@@ -158,7 +166,9 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
           <p>{t("estimateHigh", { amount: formatMinorUnits(locale, result.estimateHighMinor, result.currency) })}</p>
           <p>{t("estimateLow")}</p>
           <p>{t("reserved", { amount: formatMinorUnits(locale, result.estimateHighMinor, result.currency) })}</p>
-          <p>{counts.pending > 0 ? t("actualUnknown") : t("costNone")}</p>
+          {knownCost !== null && <p>{t("costKnown", { amount: formatMinorUnits(locale, knownCost, result.currency) })}</p>}
+          {hasPendingCost && <p>{t("costPending")}</p>}
+          {hasUnknownCost && <p>{t("actualUnknown")}</p>}
         </div>
       ) : <p className="text-sm">{t("notCharged")}</p>}
       <section className="space-y-2" aria-labelledby="run-questions">
@@ -212,7 +222,9 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
                           {attempt.synthetic === 1 && <p>{t("syntheticResult")}</p>}
                           {attempt.transport === "official_api" && <p>{t("officialAttempt")}</p>}
                           {attempt.late === 1 && <p>{t("lateResult")}</p>}
-                          <p>{attempt.actualMinor === null || !result.currency ? attempt.costState === "none" ? t("costNone") : t("actualUnknown") : t("costKnown", { amount: formatMinorUnits(locale, attempt.actualMinor, result.currency) })}</p>
+                          <p>{attempt.actualMinor !== null && result.currency
+                            ? t("costKnown", { amount: formatMinorUnits(locale, attempt.actualMinor, result.currency) })
+                            : t(attempt.costState === "none" ? "costNone" : attempt.costState === "pending" ? "costPending" : "actualUnknown")}</p>
                           {receipt?.responseId && <p className="break-all">{t("responseLocator", { id: receipt.responseId })}</p>}
                           {receipt && <p>{t(triggerLabel[receipt.networkTrigger])}</p>}
                           {receipt && <p>{t("citationState", { state: t(citationLabel[receipt.citationSetState]) })}</p>}

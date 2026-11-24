@@ -211,7 +211,8 @@ export function officialNetworkFacts(trigger: OfficialNetworkTrigger, searchRequ
 
 function citationUrl(value: string | undefined) {
   if (!value || value.length > 2000 || !isHttpUrl(value)) return null;
-  return new URL(value).toString();
+  const normalized = new URL(value).toString();
+  return normalized.length <= 2000 ? normalized : null;
 }
 
 function citationsFrom(items: Array<{ url?: string; title?: string }> | undefined) {
@@ -304,7 +305,7 @@ function networkTrigger(payload: OfficialPayload, requested: "on" | "off" | "unk
 }
 
 export function priceMinor(usage: { input_tokens: number; output_tokens: number } | null | undefined, model: string, table: OfficialPriceTable) {
-  const rate = table.models[model];
+  const rate = Object.hasOwn(table.models, model) ? table.models[model] : undefined;
   if (!usage || !rate) return null;
   const numerator = usage.input_tokens * rate.inputMinorPerMillion + usage.output_tokens * rate.outputMinorPerMillion;
   if (!Number.isSafeInteger(numerator) || numerator < 0) return null;
@@ -320,16 +321,13 @@ export function interpretOfficialPayload(input: {
   priceTable: OfficialPriceTable;
   currency: string | null;
   upperMinor: number | null;
-  accepted: boolean;
 }): OfficialSample {
   const parsed = officialPayloadSchema.safeParse(input.payload);
-  if (!parsed.success) {
-    return input.httpStatus >= 200 && input.httpStatus < 300 || input.accepted
-      ? unknownOfficialSample()
-      : safeFailureOfficialSample();
-  }
+  const successful = input.httpStatus >= 200 && input.httpStatus < 300;
+  const rejected = [400, 401, 403, 404, 405, 413, 415, 422, 429].includes(input.httpStatus);
+  if (rejected && !payloadAccepted(input.payload)) return safeFailureOfficialSample();
+  if (!parsed.success) return unknownOfficialSample();
   const payload = parsed.data;
-  if (payload.error && input.httpStatus >= 400 && !input.accepted) return safeFailureOfficialSample();
   const text = responseText(payload);
   const responseId = responseLocator(payload.id);
   const modelVersion = payload.model?.trim() || input.requestedModel;
@@ -339,7 +337,9 @@ export function interpretOfficialPayload(input: {
   const withinCeiling = amount !== null && (input.upperMinor === null || amount <= input.upperMinor);
   const citations = classifyCitations(payload, input.citationCapability);
   const trigger = networkTrigger(payload, input.requestedNetworkMode);
-  if (text.length > 0 && text.length <= MAX_TEXT && amount !== null && currencyMatches && withinCeiling && !payload.error) {
+  if (successful && (!payload.status || payload.status === "completed")
+    && text.length >= 2 && text.length <= MAX_TEXT && !text.includes("\0")
+    && amount !== null && currencyMatches && withinCeiling && !payload.error) {
     return {
       disposition: "adopted",
       synthetic: false,
@@ -354,7 +354,6 @@ export function interpretOfficialPayload(input: {
       ...citations,
     };
   }
-  if (!text && !input.accepted && !payload.usage && input.httpStatus >= 400) return safeFailureOfficialSample();
   return {
     ...unknownOfficialSample(text, modelVersion),
     responseId,
@@ -386,26 +385,41 @@ export function parseOfficialReceipt(value: string | null) {
 }
 
 export function serializeOfficialReceipt(sample: Pick<OfficialSample, "responseId" | "modelVersion" | "networkTrigger" | "citationSetState" | "citations">) {
+  const citations: OfficialCitation[] = [];
   const body = {
-    responseId: sample.responseId,
-    modelVersion: sample.modelVersion,
+    responseId: responseLocator(sample.responseId ?? undefined),
+    modelVersion: sample.modelVersion && sample.modelVersion.length <= 80 ? sample.modelVersion : null,
     networkTrigger: sample.networkTrigger,
     citationSetState: sample.citationSetState,
-    citations: sample.citations.slice(0, 40),
+    citations,
   };
-  let text = JSON.stringify(body);
-  if (text.length > 8000) text = JSON.stringify({ ...body, citations: [] });
-  if (text.length > 8000 || !officialReceiptSchema.safeParse(JSON.parse(text)).success) return null;
-  return text;
+  // Keep the URLs intact and mark any loss of completeness when hitting the storage limit.
+  for (const item of sample.citations) {
+    if (citations.length === 40) break;
+    const url = citationUrl(item.url);
+    if (!url) continue;
+    citations.push({ url, title: item.title?.trim().slice(0, 200) || null, position: citations.length + 1 });
+    if (JSON.stringify(body).length > 8000) {
+      citations.pop();
+      break;
+    }
+  }
+  if (citations.length !== sample.citations.length && body.citationSetState === "complete") {
+    body.citationSetState = citations.length ? "partial" : "missing";
+  }
+  return JSON.stringify(body);
 }
 
 function responseLocator(value: string | undefined) {
   const trimmed = value?.trim();
-  if (!trimmed || trimmed.length > 200) return null;
+  if (!trimmed || trimmed.length > 200 || !/^[\w.:-]+$/.test(trimmed)) return null;
   return trimmed;
 }
 
-export function payloadAccepted(payload: unknown) {
-  if (!payload || typeof payload !== "object" || !("id" in payload)) return false;
-  return typeof payload.id === "string" && payload.id.length > 0;
+function payloadAccepted(payload: unknown) {
+  if (!payload || typeof payload !== "object") return false;
+  return ("id" in payload && typeof payload.id === "string" && payload.id.length > 0)
+    || ("usage" in payload && payload.usage != null)
+    || ("output" in payload && Array.isArray(payload.output) && payload.output.length > 0)
+    || ("output_text" in payload && typeof payload.output_text === "string" && payload.output_text.length > 0);
 }

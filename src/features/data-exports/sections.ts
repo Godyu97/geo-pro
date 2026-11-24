@@ -49,7 +49,7 @@ const sections: Record<Exclude<ExportScope, "profile" | "brands">, Slice[]> = {
       src.repeat_index AS "repeatIndex", src.status AS "status", src.created_at AS "createdAt"`),
     byId("attempts", "monitoring_attempt", `src.slot_id AS "slotId", src.kind AS "kind", src.ordinal AS "ordinal",
       src.raw_text AS "rawText", src.currency AS "currency", src.upper_minor AS "upperMinor", src.actual_minor AS "actualMinor",
-      src.cost_state AS "costState", src.created_at AS "createdAt"`),
+      src.cost_state AS "costState", src.receipt AS "officialReceipt", src.created_at AS "createdAt"`),
     byId("observations", "answer_observation", `src.question_text AS "questionText", src.answer_text AS "answerText",
       src.source_mode AS "sourceMode", src.region AS "region", src.language AS "language", src.captured_at AS "capturedAt",
       src.evidence_state AS "evidenceState"`),

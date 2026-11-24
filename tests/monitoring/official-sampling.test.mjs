@@ -8,10 +8,12 @@ import { BrandDao } from "../../src/features/brands/dao.ts";
 import { recordCapability } from "../../src/features/capabilities/commands.ts";
 import { changeMaintenanceGrant } from "../../src/features/maintenance/core.ts";
 import { acceptMonitoringRun, previewMonitoringRun } from "../../src/features/monitoring/commands.ts";
-import { executeMonitoringRun } from "../../src/features/monitoring/execution.ts";
+import { cancelMonitoringRun, continueMonitoringRun, executeMonitoringRun, pauseMonitoringRun, reconcileMonitoringCost } from "../../src/features/monitoring/execution.ts";
+import { createSamplingProtocol, freezeSamplingProtocol, pinSamplingProtocol } from "../../src/features/monitoring/protocol-commands.ts";
 import { createOfficialSamplingPort, officialSamplingPortFromEnv } from "../../src/features/monitoring/official-port.ts";
 import { PromptDao } from "../../src/features/prompts/dao.ts";
 import { updateQuota } from "../../src/features/quotas/commands.ts";
+import { parseOfficialReceipt, safeFailureOfficialSample, serializeOfficialReceipt } from "../../src/lib/ai/official-sampling.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
 
@@ -234,6 +236,39 @@ test("official adapter stays closed without config and does not follow redirects
   }
 });
 
+test("a broken connection after POST does not authorize another request", async (t) => {
+  const server = await listen((req) => req.socket.destroy());
+  t.after(() => server.close());
+  const port = createOfficialSamplingPort({
+    baseUrl: server.baseUrl, apiKey, productEntry: "official-responses", priceTable, timeoutMs: 200,
+  });
+  const channelId = randomUUID();
+  const result = await port.sample({
+    slotId: randomUUID(), questionId: randomUUID(), channelId, ordinal: 1,
+    questionText: "连接断开后是否保留预留", requestedNetworkMode: "off", upperMinor: 100, currency: "CNY", now: time,
+    capability: {
+      channelId, version: 1, kind: "model_api", status: "verified", productEntry: "official-responses",
+      modelVersion: "fixture-model", verifiedAt: time, expiresAt: later, citationCapability: "complete", searchRequired: 0,
+    },
+  });
+  assert.equal(result.disposition, "unknown");
+  assert.equal(server.requests.length, 1);
+});
+
+test("official receipts retain intact URLs and downgrade incomplete citation sets", () => {
+  const citations = Array.from({ length: 40 }, (_, index) => ({
+    url: `https://example.com/${index}/${"a".repeat(1800)}`, title: "公开参考", position: index + 1,
+  }));
+  const receipt = parseOfficialReceipt(serializeOfficialReceipt({
+    responseId: "resp-many", modelVersion: "fixture-model",
+    networkTrigger: "triggered", citationSetState: "complete", citations,
+  }));
+  assert.equal(receipt.responseId, "resp-many");
+  assert.equal(receipt.citationSetState, "partial");
+  assert.ok(receipt.citations.length > 0 && receipt.citations.length < citations.length);
+  assert.deepEqual(receipt.citations, citations.slice(0, receipt.citations.length));
+});
+
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: official sampling fails closed before quota use`, async (t) => {
     const fixture = await testDatabase(kind, { migrateNow: false });
@@ -301,9 +336,9 @@ for (const kind of ["sqlite", "postgresql"]) {
       }
       if (code === "Q08") return;
       if (code === "Q06") {
-        const seen = (counts.get(code) ?? 0) + 1;
-        counts.set(code, seen);
-        if (seen % 2 === 1) {
+        const seen = (counts.get(body.input) ?? 0) + 1;
+        counts.set(body.input, seen);
+        if (seen <= 2) {
           res.writeHead(429, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { message: "slow down" } }));
           return;
@@ -344,7 +379,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(server.requests.every((item) => item.url === "/responses" && item.authorization === `Bearer ${apiKey}` && item.body.tools?.[0]?.type === "web_search"), true);
     for (const code of ["Q01", "Q02", "Q03", "Q04", "Q05", "Q09", "Q10"]) assert.equal(byCode(code).length, 2, code);
     assert.equal(byCode("Q06").length, 4);
-    assert.equal(byCode("Q07").length, 8);
+    assert.equal(byCode("Q07").length, 2);
     assert.equal(byCode("Q08").length, 2);
     assert.equal(errors.some((line) => line.includes(apiKey)), false);
     const codeByQuestion = new Map(content.questions.map((question) => [question.id, question.text.slice(0, 3)]));
@@ -354,8 +389,8 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(samplesFor("Q03").every((sample) => sample.citationSetState === "missing" && sample.disposition === "adopted"), true);
     assert.equal(samplesFor("Q04").every((sample) => sample.citationSetState === "unsupported" && sample.disposition === "adopted"), true);
     assert.equal(samplesFor("Q05").every((sample) => sample.networkTrigger === "unknown" && sample.citationSetState === "complete" && sample.disposition === "adopted"), true);
-    assert.equal(samplesFor("Q06").every((sample) => sample.disposition === "adopted" && sample.actualMinor === 11), true);
-    assert.equal(samplesFor("Q07").every((sample) => sample.disposition === "safe_failure" && sample.rawText === null), true);
+    assert.equal(samplesFor("Q06").filter((sample) => sample.disposition === "adopted" && sample.actualMinor === 11).length, 2);
+    assert.equal(samplesFor("Q07").every((sample) => sample.disposition === "unknown" && sample.rawText === null), true);
     assert.equal(samplesFor("Q08").every((sample) => sample.disposition === "unknown" && sample.reconciliationRequired === true && sample.costState === "unknown"), true);
     assert.equal(samplesFor("Q09").every((sample) => sample.disposition === "unknown" && sample.modelVersion === "other-model" && sample.citationSetState === "complete"), true);
     assert.equal(samplesFor("Q10").every((sample) => sample.disposition === "unknown" && sample.citationSetState === "partial" && sample.citations.length === 1), true);
@@ -366,20 +401,20 @@ for (const kind of ["sqlite", "postgresql"]) {
     const slotCode = new Map(slots.map((slot) => [slot.id, codeByQuestion.get(slot.questionId)]));
     const withCode = (code) => slots.filter((slot) => slotCode.get(slot.id) === code);
     for (const code of ["Q01", "Q02", "Q03", "Q04", "Q05", "Q06"]) assert.equal(withCode(code).every((slot) => slot.status === "succeeded"), true, code);
-    for (const code of ["Q08", "Q09", "Q10"]) assert.equal(withCode(code).every((slot) => slot.status === "reconciliation_required"), true, code);
-    assert.equal(withCode("Q07").every((slot) => slot.status === "queued"), true);
+    for (const code of ["Q07", "Q08", "Q09", "Q10"]) assert.equal(withCode(code).every((slot) => slot.status === "reconciliation_required"), true, code);
     const attempts = await queryWithParameters(db, "SELECT slot_id AS \"slotId\", transport, synthetic, disposition, actual_minor AS \"actualMinor\", cost_state AS \"costState\", raw_text AS \"rawText\" FROM monitoring_attempt WHERE run_id = ? AND kind = 'sampling'", [accepted.id]);
     assert.equal(attempts.every((row) => row.transport === "official_api" && Number(row.synthetic) === 0), true);
     assert.equal(attempts.filter((row) => slotCode.get(row.slotId) === "Q01").every((row) => Number(row.actualMinor) === 11 && row.costState === "known"), true);
     assert.equal(attempts.filter((row) => slotCode.get(row.slotId) === "Q08").every((row) => row.actualMinor === null && row.costState === "unknown"), true);
-    assert.equal(attempts.filter((row) => slotCode.get(row.slotId) === "Q07").every((row) => Number(row.actualMinor) === 0 && row.rawText === null), true);
+    assert.equal(attempts.filter((row) => slotCode.get(row.slotId) === "Q07").every((row) => row.costState === "unknown" && row.actualMinor === null && row.rawText === null), true);
     const networks = await queryWithParameters(db, "SELECT actual_network AS \"actualNetwork\", qualifies_required_search AS \"qualifies\" FROM sampling_answer_network WHERE brand_id = ?", [brand]);
-    assert.equal(networks.filter((row) => row.actualNetwork === "unknown").length, 4);
+    assert.equal(networks.filter((row) => row.actualNetwork === "unknown").length, 6);
     assert.equal(networks.filter((row) => row.actualNetwork === "unknown").every((row) => Number(row.qualifies) === 0), true);
     assert.equal(networks.filter((row) => row.actualNetwork === "true").length, 14);
     const reserved = await queryWithParameters(db, `SELECT s.id FROM monitoring_slot s JOIN quota_reservation r ON r.id = s.reservation_id
       WHERE s.run_id = ? AND s.status = 'reconciliation_required' AND r.state = 'reserved'`, [accepted.id]);
-    assert.equal(reserved.length, 6);
+    assert.equal(reserved.length, 8);
+    assert.equal(server.requests.length, attempts.length);
   });
 
   test(`${kind}: official execution claims before the call and recovers unknown cost`, async (t) => {
@@ -399,14 +434,14 @@ for (const kind of ["sqlite", "postgresql"]) {
       if (index > 0) question.clusterId = content.questions[0].clusterId;
     });
     content.clusters[0].id = content.questions[0].clusterId;
-    async function acceptSmall() {
+    async function acceptSmall(requestedNetworkMode = "off", track = "model_api", channelId = channel.channelId) {
       const setId = randomUUID();
       await new PromptDao(db, brand).insertSet({
         id: setId, setId, version: 1, entityVersion: 1, region: "CN", language: "zh-CN", createdAt: time, content,
       });
       const preview = await previewMonitoringRun(db, owner, {
-        action: "preview", brandId: brand, track: "model_api", promptSetId: setId, repeats: 1,
-        requestedNetworkMode: "off", channelIds: [channel.channelId], ceiling: { currency: "CNY", upperMinor: 100 },
+        action: "preview", brandId: brand, track, promptSetId: setId, repeats: 1,
+        requestedNetworkMode, channelIds: [channelId], ceiling: track === "model_api" ? { currency: "CNY", upperMinor: 100 } : null,
       }, secret, clock);
       assert.equal(preview.error, undefined, preview.error);
       const accepted = await acceptMonitoringRun(db, owner, {
@@ -418,7 +453,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const server = await listen((req, res, body) => {
       const text = String(body?.input ?? "");
       if (text.startsWith("SAFE")) {
-        res.writeHead(500, { "content-type": "application/json" });
+        res.writeHead(429, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: { message: "unavailable" } }));
         return;
       }
@@ -444,11 +479,12 @@ for (const kind of ["sqlite", "postgresql"]) {
     const denied = await executeMonitoringRun(db, outsider, accepted.id, port, clock);
     assert.equal(denied.error, "NOT_FOUND");
     assert.equal(server.requests.length, 0);
+    const emailRun = await acceptSmall();
     const previousMail = process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK;
     process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK = "false";
     try {
       await queryWithParameters(db, 'UPDATE "user" SET email_verified = ? WHERE id = ?', [db.kind === "sqlite" ? 0 : false, owner]);
-      const unverified = await executeMonitoringRun(db, owner, accepted.id, port, clock);
+      const unverified = await executeMonitoringRun(db, owner, emailRun.id, port, clock);
       assert.equal(unverified.error, "EMAIL_UNVERIFIED");
     } finally {
       if (previousMail === undefined) delete process.env.GEO_AUTH_EMAIL_VERIFIED_MOCK;
@@ -481,6 +517,111 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(reconciled.status, "reconciliation_required");
     const [stillReserved] = await queryWithParameters(db, "SELECT state FROM quota_reservation WHERE id = ?", [reconciled.reservationId]);
     assert.equal(stillReserved.state, "reserved");
+
+    const consumer = await recordCapability(db, operator, capability(operator, { kind: "consumer_ui" }), clock);
+    assert.equal(consumer.status, "allowed");
+    const consumerVerified = await recordCapability(db, operator, capability(operator, {
+      kind: "consumer_ui", expectedVersion: 1, channelId: consumer.data.after.channelId,
+      reason: "verification", status: "verified", verifiedAt: time, expiresAt: later,
+    }), clock);
+    assert.equal(consumerVerified.status, "allowed");
+    const manual = await acceptSmall("off", "consumer_ui", consumerVerified.data.after.channelId);
+    const protocolMark = server.requests.length;
+    assert.equal((await executeMonitoringRun(db, owner, manual.id, port, clock)).error, "REAL_CHANNEL_CLOSED");
+
+    const protocolDraft = {
+      newSessionRequired: false, searchRequired: true, targetRegion: "CN", timezone: "Asia/Shanghai",
+    };
+    const created = await createSamplingProtocol(db, owner, { ...protocolDraft, operationId: randomUUID(), brandId: brand }, clock);
+    assert.equal(created.error, undefined, created.error);
+    const frozen = await freezeSamplingProtocol(db, owner, created.protocol.protocolId, { ...protocolDraft, operationId: randomUUID() }, clock);
+    assert.equal(frozen.error, undefined, frozen.error);
+    const incompatible = await acceptSmall();
+    const linked = await pinSamplingProtocol(db, owner, incompatible.id, {
+      protocolId: frozen.protocol.protocolId, version: frozen.protocol.version,
+    }, clock);
+    assert.equal(linked.error, undefined, linked.error);
+    assert.equal((await executeMonitoringRun(db, owner, incompatible.id, port, clock)).error, "NETWORK_REQUIRED");
+    assert.equal(server.requests.length, protocolMark);
+
+    const providerPayload = payload("CONTROLS", { network_trigger: "not_triggered", citations: [] });
+    let controlRequests = 0;
+    const controlServer = await listen((_req, res) => {
+      controlRequests += 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(providerPayload));
+    });
+    t.after(() => controlServer.close());
+    const controlPort = createOfficialSamplingPort({
+      baseUrl: controlServer.baseUrl, apiKey, productEntry: "official-responses", priceTable, timeoutMs: 200,
+    });
+    const compatible = await acceptSmall("on");
+    const pinned = await pinSamplingProtocol(db, owner, compatible.id, {
+      protocolId: frozen.protocol.protocolId, version: frozen.protocol.version,
+    }, clock);
+    assert.equal(pinned.error, undefined, pinned.error);
+    const compatibleResult = await executeMonitoringRun(db, owner, compatible.id, controlPort, clock);
+    assert.equal(compatibleResult.status, "succeeded");
+    assert.equal(controlRequests, 3);
+    assert.equal(controlServer.requests.every(({ body }) => Object.keys(body).sort().join(",") === "input,model,store,tools"
+      && body.tools[0].type === "web_search" && content.questions.some((question) => question.text === body.input)), true);
+
+    async function changeDuringClaim(change, reply, recover = false) {
+      const run = await acceptSmall();
+      const { promise: started, resolve: exposeClaim } = Promise.withResolvers();
+      const { promise: hold, resolve: releaseClaim } = Promise.withResolvers();
+      const execution = executeMonitoringRun(db, owner, run.id, {
+        ...controlPort,
+        async sample(request) {
+          exposeClaim();
+          await hold;
+          return reply(request);
+        },
+      }, clock);
+      try {
+        await started;
+        const changed = await change(db, owner, run.id);
+        assert.equal(changed.error, undefined, changed.error);
+        const pending = changed.attempts.find((attempt) => attempt.disposition === "pending");
+        assert.ok(pending);
+        assert.equal((await reconcileMonitoringCost(db, owner, run.id, pending.id, 0, clock)).error, "OPERATION_CONFLICT");
+        if (recover) {
+          const recovered = await executeMonitoringRun(db, owner, run.id, officialSamplingPortFromEnv({}), lateClock);
+          assert.equal(recovered.attempts[0].costState, "unknown");
+          assert.equal(recovered.slots.find((slot) => slot.id === pending.slotId).status, "reconciliation_required");
+        }
+      } finally {
+        releaseClaim();
+      }
+      return execution;
+    }
+    const pausedDuringClaim = await changeDuringClaim(pauseMonitoringRun, safeFailureOfficialSample);
+    assert.equal(pausedDuringClaim.status, "paused");
+    assert.equal(pausedDuringClaim.attempts.length, 1);
+    assert.equal(pausedDuringClaim.attempts[0].late, 1);
+    assert.equal((await executeMonitoringRun(db, owner, pausedDuringClaim.id, controlPort, clock)).replayed, true);
+    assert.equal(controlRequests, 3);
+    assert.equal((await continueMonitoringRun(db, owner, pausedDuringClaim.id)).status, "queued");
+    const continued = await executeMonitoringRun(db, owner, pausedDuringClaim.id, controlPort, clock);
+    assert.equal(continued.status, "succeeded");
+    assert.equal(controlRequests, 6);
+
+    const cancelledDuringClaim = await changeDuringClaim(cancelMonitoringRun, controlPort.sample);
+    assert.equal(cancelledDuringClaim.status, "cancelled");
+    assert.equal(cancelledDuringClaim.attempts.length, 1);
+    assert.equal(cancelledDuringClaim.attempts[0].disposition, "late");
+    assert.equal(cancelledDuringClaim.attempts[0].actualMinor, 11);
+    assert.equal(parseOfficialReceipt(cancelledDuringClaim.attempts[0].receipt).responseId, "resp-CONTROLS");
+    assert.equal(cancelledDuringClaim.slots.every((slot) => slot.adoptedAttemptId === null), true);
+    assert.equal(controlRequests, 7);
+
+    const recoveredWhilePaused = await changeDuringClaim(pauseMonitoringRun, controlPort.sample, true);
+    assert.equal(recoveredWhilePaused.status, "paused");
+    assert.equal(recoveredWhilePaused.attempts.length, 1);
+    assert.equal(recoveredWhilePaused.attempts[0].disposition, "adopted");
+    assert.equal(recoveredWhilePaused.attempts[0].actualMinor, 11);
+    assert.equal(recoveredWhilePaused.attempts[0].late, 1);
+    assert.equal(controlRequests, 8);
 
     const live = await acceptSmall();
     let release;
@@ -530,11 +671,17 @@ for (const kind of ["sqlite", "postgresql"]) {
     const again = await executeMonitoringRun(db, owner, retried.id, port, clock);
     assert.equal(again.error, undefined, again.error);
     const byInput = (prefix) => server.requests.slice(mark).filter((item) => String(item.body?.input ?? "").startsWith(prefix));
-    assert.equal(byInput("SAFE").length, 4);
+    assert.equal(byInput("SAFE").length, 2);
+    const finalRetry = await executeMonitoringRun(db, owner, retried.id, port, clock);
+    assert.equal(finalRetry.error, undefined, finalRetry.error);
+    assert.equal(byInput("SAFE").length, 3);
+    assert.equal((await executeMonitoringRun(db, owner, retried.id, port, clock)).replayed, true);
+    assert.equal(byInput("SAFE").length, 3);
     assert.equal(byInput("LATE").length, 1);
     const safeSlot = again.slots.find((slot) => content.questions.find((question) => question.id === slot.questionId)?.text.startsWith("SAFE"));
     const lateSlot = again.slots.find((slot) => content.questions.find((question) => question.id === slot.questionId)?.text.startsWith("LATE"));
     assert.equal(safeSlot.status, "queued");
+    assert.equal(finalRetry.slots.find((slot) => slot.id === safeSlot.id).status, "failed");
     assert.equal(lateSlot.status, "reconciliation_required");
     const [lateReservation] = await queryWithParameters(db, "SELECT state FROM quota_reservation WHERE id = ?", [lateSlot.reservationId]);
     assert.equal(lateReservation.state, "reserved");
@@ -575,6 +722,9 @@ for (const kind of ["sqlite", "postgresql"]) {
     const [tightAttempts] = await queryWithParameters(db, "SELECT COUNT(*) AS count FROM monitoring_attempt WHERE run_id = ?", [tight.id]);
     assert.equal(Number(tightAttempts.count), 0);
     assert.equal(paused.slots.every((slot) => slot.status === "paused"), true);
+    const retryPaused = await executeMonitoringRun(db, owner, raced.id, port, clock);
+    assert.equal(retryPaused.pausedForBudget, true);
+    assert.equal(server.requests.length, tightMark);
 
     const recorded = await recordCapability(db, operator, capability(operator, {
       expectedVersion: 2, channelId: channel.channelId, reason: "significant-change", status: "degraded",

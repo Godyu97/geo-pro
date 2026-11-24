@@ -60,7 +60,7 @@ export function createOfficialSamplingPort(
       return probeChannel(ready, channel, now);
     },
     priced(model, currency) {
-      return Boolean(currency && currency === ready.priceTable.currency && ready.priceTable.models[model]);
+      return currency === ready.priceTable.currency && Object.hasOwn(ready.priceTable.models, model);
     },
     sample(input) {
       const channel = gateFromRequest(input);

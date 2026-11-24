@@ -15,6 +15,7 @@ import {
   type MonitoringSlotRow,
 } from "./dao.ts";
 import { PromptDao } from "../prompts/dao.ts";
+import { SamplingProtocolDao } from "./protocol-dao.ts";
 import {
   type IsolatedSample,
   type OfficialSample,
@@ -105,8 +106,14 @@ async function startQuota(quota: QuotaDao, brandId: string, reservationId: strin
 function canAdopt(sample: IsolatedSample | OfficialSample, run: MonitoringRunRow) {
   if (sample.disposition !== "adopted" || sample.rawText.length === 0 || sample.rawText.length > 8000) return false;
   if (run.upperMinor !== null && sample.actualMinor > run.upperMinor) return false;
-  if (!sample.synthetic && (sample.costState !== "known" || sample.currency !== run.currency)) return false;
+  if (!sample.synthetic && (!officialRawText(sample.rawText)
+    || !Number.isSafeInteger(sample.actualMinor) || sample.actualMinor < 0
+    || sample.costState !== "known" || sample.currency !== run.currency)) return false;
   return true;
+}
+
+function officialRawText(rawText: string | null) {
+  return rawText && rawText.length >= 2 && rawText.length <= 8000 && !rawText.includes("\0") ? rawText : null;
 }
 
 async function applySample(
@@ -118,13 +125,14 @@ async function applySample(
   sample: IsolatedSample | OfficialSample,
   time: string,
   usage: Usage | null,
+  late: 0 | 1 = 0,
 ) {
   const upper = run.upperMinor ?? 0;
   const paid = Boolean(slot.reservationId && run.currency);
   if (canAdopt(sample, run) && sample.disposition === "adopted") {
     await monitoring.updateAttempt({
       id: attempt.id, disposition: "adopted", rawText: sample.rawText, actualMinor: paid ? sample.actualMinor : null,
-      costState: paid ? "known" : "none", late: 0, receipt: sampleReceipt(sample),
+      costState: paid ? "known" : "none", late, receipt: sampleReceipt(sample),
     });
     if (paid && slot.reservationId) {
       await quota.updateAttempt(attemptScope(run.brandId, slot.reservationId, attempt.id), sample.actualMinor, time);
@@ -134,41 +142,41 @@ async function applySample(
         usage.knownActual += sample.actualMinor;
       }
     }
-    await monitoring.setSlot(slot.id, "succeeded", attempt.id, 0);
+    await monitoring.setSlot(slot.id, "succeeded", attempt.id, late);
     return;
   }
   if (sample.disposition === "safe_failure") {
     await monitoring.updateAttempt({
       id: attempt.id, disposition: "safe_failure", rawText: null, actualMinor: paid ? 0 : null,
-      costState: paid ? "known" : "none", late: 0, receipt: sampleReceipt(sample),
+      costState: paid ? "known" : "none", late, receipt: sampleReceipt(sample),
     });
     if (paid && slot.reservationId) {
       await quota.updateAttempt(attemptScope(run.brandId, slot.reservationId, attempt.id), 0, time);
       if (usage) usage.pendingUpper -= upper;
       if (attempt.ordinal >= 3) await quota.finalize(reservationScope(run.brandId, slot.reservationId), "released", time);
     }
-    await monitoring.setSlot(slot.id, attempt.ordinal >= 3 ? "failed" : "queued", null, 0);
+    await monitoring.setSlot(slot.id, attempt.ordinal >= 3 ? "failed" : slot.status === "paused" ? "paused" : "queued", null, late);
     return;
   }
   const rawText = sample.synthetic
     ? sample.disposition === "unknown" ? sample.rawText ?? null : null
-    : sample.rawText;
+    : officialRawText(sample.rawText);
   await monitoring.updateAttempt({
-    id: attempt.id, disposition: "unknown", rawText, actualMinor: null, costState: paid ? "unknown" : "none", late: 0,
+    id: attempt.id, disposition: "unknown", rawText, actualMinor: null, costState: paid ? "unknown" : "none", late,
     receipt: sampleReceipt(sample),
   });
   if (paid && slot.reservationId) {
     await quota.updateAttempt(attemptScope(run.brandId, slot.reservationId, attempt.id), null, time);
   }
-  await monitoring.setSlot(slot.id, "reconciliation_required", null, slot.late);
+  await monitoring.setSlot(slot.id, "reconciliation_required", null, late);
 }
 
-async function ownedRun(connection: DatabaseConnection, ownerId: string, runId: string, work: (
+async function ownedRun<T>(connection: DatabaseConnection, ownerId: string, runId: string, work: (
   transaction: TransactionConnection,
   monitoring: MonitoringDao,
   quota: QuotaDao,
   run: MonitoringRunRow,
-) => Promise<ExecutedRun | Denied>) {
+) => Promise<T | Denied>): Promise<T | Denied> {
   try {
     return await connection.transaction(async (transaction) => {
       const monitoring = new MonitoringDao(transaction);
@@ -178,7 +186,8 @@ async function ownedRun(connection: DatabaseConnection, ownerId: string, runId: 
       const brand = await quota.lockBrand(run.brandId, ownerId);
       if (!brand) return denied("NOT_FOUND");
       if (brand !== "active") return denied("NOT_ENTITLED");
-      return work(transaction, monitoring, quota, run);
+      const current = await monitoring.runForOwner(ownerId, runId);
+      return current ? work(transaction, monitoring, quota, current) : denied("NOT_FOUND");
     });
   } catch (error) {
     if (error instanceof Error && error.message === "forced-rollback") throw error;
@@ -197,35 +206,6 @@ const claimLeaseMs = 120_000;
 function attemptAge(createdAt: string, time: string) {
   const age = Date.parse(time) - Date.parse(createdAt);
   return Number.isFinite(age) ? age : claimLeaseMs;
-}
-
-async function withLockedRun<T>(
-  connection: DatabaseConnection,
-  ownerId: string,
-  runId: string,
-  work: (
-    transaction: TransactionConnection,
-    monitoring: MonitoringDao,
-    quota: QuotaDao,
-    run: MonitoringRunRow,
-  ) => Promise<T | Denied>,
-): Promise<T | Denied> {
-  try {
-    return await connection.transaction(async (transaction) => {
-      const monitoring = new MonitoringDao(transaction);
-      const quota = new QuotaDao(transaction);
-      const run = await monitoring.runForOwner(ownerId, runId);
-      if (!run) return denied("NOT_FOUND");
-      const brand = await quota.lockBrand(run.brandId, ownerId);
-      if (!brand) return denied("NOT_FOUND");
-      if (brand !== "active") return denied("NOT_ENTITLED");
-      return work(transaction, monitoring, quota, run);
-    });
-  } catch (error) {
-    if (error instanceof Error && (error.message === "forced-rollback" || error.message === "official-claim-crash")) throw error;
-    console.error("monitoring-execution-failed", { name: error instanceof Error ? error.name : "unknown" });
-    return denied("SERVICE_UNAVAILABLE");
-  }
 }
 
 export async function executeMonitoringRun(
@@ -347,26 +327,194 @@ export async function executeMonitoringRun(
   });
 }
 
-const terminalSlot = new Set(["succeeded", "failed", "cancelled", "reconciliation_required"]);
+type OfficialClaim = {
+  slotId: string;
+  attemptId: string;
+  searchRequired: 0 | 1;
+  request: SamplingRequest;
+};
 
-function channelGate(channel: {
-  channelId: string;
-  kind: string;
-  status: string;
-  productEntry: string;
-  modelVersion: string;
-  verifiedAt: string | null;
-  expiresAt: string | null;
-}) {
-  return {
-    channelId: channel.channelId,
-    kind: channel.kind,
-    status: channel.status,
-    productEntry: channel.productEntry,
-    modelVersion: channel.modelVersion,
-    verifiedAt: channel.verifiedAt,
-    expiresAt: channel.expiresAt,
-  };
+async function claimOfficialSlot(
+  connection: DatabaseConnection,
+  ownerId: string,
+  runId: string,
+  transport: OfficialSamplingPort,
+  now: () => string,
+  touched: ReadonlySet<string>,
+  changed: boolean,
+) {
+  return ownedRun<OfficialClaim | ExecutedRun>(connection, ownerId, runId, async (transaction, monitoring, quota, run) => {
+    if (run.track !== "model_api") return denied("REAL_CHANNEL_CLOSED", "await-channel");
+    const time = now();
+    const [slots, attempts] = await Promise.all([monitoring.slots([run.id]), monitoring.attempts([run.id])]);
+    if (attempts.some((attempt) => attempt.kind === "sampling" && attempt.synthetic === 1)) {
+      return denied("REAL_CHANNEL_CLOSED", "await-channel");
+    }
+    const samplingBySlot = new Map<string, MonitoringAttemptRow[]>();
+    for (const attempt of attempts) {
+      if (attempt.kind !== "sampling") continue;
+      const sampling = samplingBySlot.get(attempt.slotId) ?? [];
+      sampling.push(attempt);
+      samplingBySlot.set(attempt.slotId, sampling);
+    }
+
+    // Expired claims keep their reservations. Recovery also works after a pause,
+    // cancellation or capability change because it never calls the provider.
+    let recovered = false;
+    for (const slot of slots) {
+      if (touched.has(slot.id)) continue;
+      const pending = samplingBySlot.get(slot.id)?.find((attempt) => attempt.disposition === "pending");
+      if (!pending || attemptAge(pending.createdAt, time) < claimLeaseMs) continue;
+      await monitoring.updateAttempt({ ...pending, disposition: "unknown", costState: pending.costState === "none" ? "none" : "unknown" });
+      if (slot.reservationId && pending.quotaAttemptId) {
+        await quota.updateAttempt(attemptScope(run.brandId, slot.reservationId, pending.quotaAttemptId), null, time);
+      }
+      if (slot.status !== "cancelled") await monitoring.setSlot(slot.id, "reconciliation_required", null, slot.late);
+      recovered = true;
+    }
+    if (recovered) await monitoring.setRun(run.id, ...progressFields(await monitoring.slots([run.id])));
+
+    const candidates = slots.filter((slot) => slot.status === "queued" && !touched.has(slot.id)
+      && (samplingBySlot.get(slot.id) ?? []).every((attempt) => attempt.disposition === "safe_failure"));
+    if (!candidates.length) return persist(monitoring, ownerId, run.id, !changed && !recovered);
+
+    async function pause(error: MonitoringError, next: MonitoringNextStep) {
+      await monitoring.pauseQueued(run.id);
+      await monitoring.setRun(run.id, ...progressFields(await monitoring.slots([run.id])));
+      return denied(error, next);
+    }
+
+    const channels = await new CapabilityDao(transaction).latestByIds([...new Set(candidates.map((slot) => slot.channelId))]);
+    const channelById = new Map(channels.map((channel) => [channel.channelId, channel]));
+    if (candidates.some((slot) => channelById.get(slot.channelId)?.version !== slot.channelVersion)) {
+      return pause("CHANNEL_UNVERIFIED", "verify-channel");
+    }
+    for (const channel of channels) {
+      if (channel.kind !== "model_api" || formalRunEligibility(channel, time) !== "eligible") {
+        return pause("CHANNEL_UNVERIFIED", "verify-channel");
+      }
+      const probe = transport.probe(channel, time);
+      if (!probe.open) return probe.code === "CHANNEL_UNVERIFIED"
+        ? pause("CHANNEL_UNVERIFIED", "verify-channel") : denied("REAL_CHANNEL_CLOSED", "await-channel");
+      if (!transport.priced(channel.modelVersion, run.currency)) return pause("NO_TRUSTED_CEILING", "confirm-ceiling");
+    }
+    if (!(await monitoring.emailVerified(ownerId))) return pause("EMAIL_UNVERIFIED", "verify-email");
+    const { currency, upperMinor } = run;
+    if (currency === null || upperMinor === null || upperMinor === 0) return pause("NO_TRUSTED_CEILING", "confirm-ceiling");
+    const grant = await quota.grant(run.brandId, "sampling");
+    if (!grant || grantState(grant, time) !== "active" || grant.currency !== currency) return pause("NOT_ENTITLED", "request-quota");
+
+    const protocolDao = new SamplingProtocolDao(transaction);
+    const [prompt, pin, usage] = await Promise.all([
+      new PromptDao(transaction, run.brandId).version(run.promptSetId),
+      protocolDao.pinForRun(ownerId, run.id),
+      monitoring.samplingUsage(run.brandId),
+    ]);
+    if (!prompt || prompt.version !== run.promptSetVersion) return denied("NOT_READY");
+    const protocol = pin && await protocolDao.versionForOwner(ownerId, pin.protocolId, pin.version);
+    if (pin && (!protocol || protocol.status !== "frozen" || protocol.brandId !== run.brandId)) return denied("NOT_READY");
+    if (protocol?.searchRequired === 1 && run.requestedNetworkMode !== "on") return denied("NETWORK_REQUIRED");
+
+    const questionText = new Map(prompt.content.questions.map((question) => [question.id, question.text.trim()]));
+    for (const slot of candidates) {
+      const channel = channelById.get(slot.channelId);
+      const text = questionText.get(slot.questionId);
+      if (!channel || !text) return denied("NOT_READY");
+      const ordinal = (samplingBySlot.get(slot.id)?.length ?? 0) + 1;
+      if (!slot.reservationId) return pause("NO_TRUSTED_CEILING", "confirm-ceiling");
+      if (ordinal > 3) {
+        const reservation = reservationScope(run.brandId, slot.reservationId);
+        const totals = await quota.attemptTotals(reservation);
+        if (!totals.unresolved) await quota.finalize(reservation, "released", time);
+        await monitoring.setSlot(slot.id, "failed", null, slot.late);
+        changed = true;
+        continue;
+      }
+
+      // Retries reuse the slot count and must still fit the current monetary cap.
+      const newSlotOverLimit = ordinal === 1 && usage.startedReservations >= grant.countLimit;
+      if (newSlotOverLimit || usage.knownActual + usage.pendingUpper + upperMinor > grant.budgetMinor) {
+        await monitoring.pauseQueued(run.id);
+        return persist(monitoring, ownerId, run.id, false, true);
+      }
+      const attemptId = randomUUID();
+      const started = await startQuota(quota, run.brandId, slot.reservationId, attemptId, upperMinor, currency, time);
+      if (started === "unresolved") {
+        await monitoring.setSlot(slot.id, "reconciliation_required", null, slot.late);
+        changed = true;
+        continue;
+      }
+      if (started !== "applied") {
+        await monitoring.pauseQueued(run.id);
+        return persist(monitoring, ownerId, run.id, false, true);
+      }
+      await monitoring.insertAttempt({
+        id: attemptId, slotId: slot.id, runId: run.id, brandId: run.brandId, kind: "sampling", ordinal,
+        transport: "official_api", synthetic: 0, disposition: "pending", rawText: null, currency, upperMinor,
+        actualMinor: null, costState: "pending", quotaAttemptId: attemptId, late: 0, receipt: null, createdAt: time,
+      });
+      await monitoring.setSlot(slot.id, "running", null, slot.late);
+      await monitoring.setRun(run.id, "running", 0);
+      return {
+        attemptId, slotId: slot.id,
+        searchRequired: protocol?.searchRequired === 1 ? 1 : channel.searchRequired,
+        request: {
+          slotId: slot.id, questionId: slot.questionId, channelId: slot.channelId, ordinal,
+          questionText: text, requestedNetworkMode: run.requestedNetworkMode, upperMinor, currency, now: time, capability: channel,
+        },
+      };
+    }
+    return persist(monitoring, ownerId, run.id, !changed && !recovered);
+  });
+}
+
+function progressFields(slots: MonitoringSlotRow[]) {
+  const progress = rollup(slots);
+  return [progress.status, progress.samplingComplete] as const;
+}
+
+async function writeOfficialResult(
+  connection: DatabaseConnection,
+  ownerId: string,
+  runId: string,
+  claim: OfficialClaim,
+  sample: OfficialSample,
+  now: () => string,
+) {
+  return ownedRun(connection, ownerId, runId, async (transaction, monitoring, quota, run) => {
+    const [current, slots] = await Promise.all([monitoring.attemptForOwner(ownerId, claim.attemptId), monitoring.slots([runId])]);
+    const slot = slots.find((item) => item.id === claim.slotId);
+    if (!current || !slot || !slot.reservationId || !current.quotaAttemptId) return denied("NOT_FOUND");
+    // A manually reconciled or already recorded receipt wins over a later reply.
+    if (current.costState === "known" || current.receipt) return null;
+
+    const time = now();
+    const late = current.disposition !== "pending" || slot.status !== "running"
+      || attemptAge(current.createdAt, time) >= claimLeaseMs ? 1 : 0;
+    if (slot.status === "cancelled" || (late && current.disposition !== "pending" && sample.disposition === "safe_failure")) {
+      const actualMinor = sample.disposition === "safe_failure" ? 0
+        : sample.disposition === "adopted" && canAdopt(sample, run) ? sample.actualMinor : null;
+      await quota.updateAttempt(attemptScope(run.brandId, slot.reservationId, current.quotaAttemptId), actualMinor, time);
+      if (actualMinor !== null) {
+        await quota.finalize(reservationScope(run.brandId, slot.reservationId), actualMinor > 0 ? "settled" : "released", time);
+      }
+      await monitoring.updateAttempt({
+        ...current, disposition: "late", rawText: officialRawText(sample.rawText) ?? current.rawText, actualMinor,
+        costState: actualMinor === null ? "unknown" : "known", late: 1, receipt: sampleReceipt(sample),
+      });
+      await monitoring.setSlot(slot.id, slot.status === "cancelled" ? "cancelled" : "failed", null, 1);
+    } else {
+      await applySample(monitoring, quota, run, slot, current, sample, time, null, late);
+    }
+    if (sample.disposition !== "safe_failure") {
+      await new CapabilityDao(transaction).insertAnswerNetwork({
+        id: randomUUID(), brandId: run.brandId, channelId: slot.channelId, channelVersion: slot.channelVersion,
+        requestedNetworkMode: run.requestedNetworkMode, ...officialNetworkFacts(sample.networkTrigger, claim.searchRequired), createdAt: time,
+      }, ownerId);
+    }
+    await monitoring.setRun(run.id, ...progressFields(await monitoring.slots([run.id])));
+    return null;
+  });
 }
 
 async function executeOfficialMonitoringRun(
@@ -377,180 +525,21 @@ async function executeOfficialMonitoringRun(
   now: () => string,
   options: { crashAfterClaim?: boolean },
 ) {
-  const time = now();
-  const opened = await withLockedRun(connection, ownerId, runId, async (transaction, monitoring, quota, run) => {
-    if (run.status === "cancelled") return { kind: "result" as const, result: await persist(monitoring, ownerId, run.id, true) };
-    const slots = await monitoring.slots([run.id]);
-    const channels = await new CapabilityDao(transaction).latestByIds([...new Set(slots.map((slot) => slot.channelId))]);
-    const channelById = new Map(channels.map((channel) => [channel.channelId, channel]));
-    const pinned = slots.every((slot) => channelById.get(slot.channelId)?.version === slot.channelVersion);
-    if (!pinned || channels.length === 0) {
-      await monitoring.pauseQueued(run.id);
-      await persist(monitoring, ownerId, run.id, false);
-      return { kind: "result" as const, result: denied("CHANNEL_UNVERIFIED", "verify-channel") };
-    }
-    for (const channel of channels) {
-      const decision = transport.probe(channelGate(channel), time);
-      if (!decision.open && decision.code === "CHANNEL_UNVERIFIED") {
-        await monitoring.pauseQueued(run.id);
-        await persist(monitoring, ownerId, run.id, false);
-        return { kind: "result" as const, result: denied("CHANNEL_UNVERIFIED", "verify-channel") };
-      }
-      if (!decision.open) return { kind: "result" as const, result: denied("REAL_CHANNEL_CLOSED", "await-channel") };
-      if (run.track === "model_api" && !transport.priced(channel.modelVersion, run.currency)) {
-        await monitoring.pauseQueued(run.id);
-        await persist(monitoring, ownerId, run.id, false);
-        return { kind: "result" as const, result: denied("NO_TRUSTED_CEILING", "confirm-ceiling") };
-      }
-    }
-    if (run.track === "model_api" && !(await monitoring.emailVerified(ownerId))) {
-      await monitoring.pauseQueued(run.id);
-      await persist(monitoring, ownerId, run.id, false);
-      return { kind: "result" as const, result: denied("EMAIL_UNVERIFIED", "verify-email") };
-    }
-    const grant = run.track === "model_api" ? await quota.grant(run.brandId, "sampling") : null;
-    if (run.track === "model_api" && (!grant || grantState(grant, time) !== "active" || grant.currency !== run.currency || run.upperMinor === null)) {
-      await monitoring.pauseQueued(run.id);
-      await persist(monitoring, ownerId, run.id, false);
-      return { kind: "result" as const, result: denied(run.upperMinor === null ? "NO_TRUSTED_CEILING" : "NOT_ENTITLED", run.upperMinor === null ? "confirm-ceiling" : "request-quota") };
-    }
-    const prompt = await new PromptDao(transaction, run.brandId).version(run.promptSetId);
-    if (!prompt || slots.some((slot) => !prompt.content.questions.some((question) => question.id === slot.questionId && question.text.trim()))) {
-      return { kind: "result" as const, result: denied("NOT_READY") };
-    }
-    return { kind: "ready" as const };
-  });
-  if (!opened || "error" in opened) return opened;
-  if (opened.kind === "result") return opened.result;
-
   const touched = new Set<string>();
   for (;;) {
-    const step = await withLockedRun(connection, ownerId, runId, async (transaction, monitoring, quota, run) => {
-      if (run.status === "cancelled") return { kind: "done" as const, result: await persist(monitoring, ownerId, run.id, true) };
-      const slots = await monitoring.slots([run.id]);
-      const grouped = new Map<string, MonitoringAttemptRow[]>();
-      for (const attempt of await monitoring.attempts([run.id])) {
-        const list = grouped.get(attempt.slotId) ?? [];
-        list.push(attempt);
-        grouped.set(attempt.slotId, list);
-      }
-      const channels = await new CapabilityDao(transaction).latestByIds([...new Set(slots.map((slot) => slot.channelId))]);
-      const channelById = new Map(channels.map((channel) => [channel.channelId, channel]));
-      const grant = run.track === "model_api" ? await quota.grant(run.brandId, "sampling") : null;
-      const usage = run.track === "model_api" ? await monitoring.samplingUsage(run.brandId) : null;
-      const prompt = await new PromptDao(transaction, run.brandId).version(run.promptSetId);
-      const questionText = new Map(prompt?.content.questions.map((question) => [question.id, question.text.trim()]) ?? []);
-      for (const slot of slots) {
-        if (terminalSlot.has(slot.status) || touched.has(slot.id)) continue;
-        const sampling = (grouped.get(slot.id) ?? []).filter((attempt) => attempt.kind === "sampling");
-        const pending = sampling.find((attempt) => attempt.disposition === "pending");
-        const blocked = sampling.some((attempt) => attempt.disposition === "unknown" || attempt.disposition === "late");
-        if (pending && !blocked && attemptAge(pending.createdAt, time) < claimLeaseMs) continue;
-        if (pending || blocked) {
-          if (pending && slot.reservationId) {
-            await monitoring.updateAttempt({
-              id: pending.id, disposition: "unknown", rawText: pending.rawText, actualMinor: null, costState: "unknown", late: pending.late,
-            });
-            await quota.updateAttempt(attemptScope(run.brandId, slot.reservationId, pending.id), null, time);
-          }
-          await monitoring.setSlot(slot.id, "reconciliation_required", null, slot.late);
-          await persist(monitoring, ownerId, run.id, false);
-          return { kind: "reconciled" as const };
-        }
-        if (sampling.length >= 3) {
-          if (slot.reservationId) {
-            const totals = await quota.attemptTotals(reservationScope(run.brandId, slot.reservationId));
-            if (totals.unresolved === 0) await quota.finalize(reservationScope(run.brandId, slot.reservationId), "released", time);
-          }
-          await monitoring.setSlot(slot.id, "failed", null, slot.late);
-          await persist(monitoring, ownerId, run.id, false);
-          return { kind: "reconciled" as const };
-        }
-        const channel = channelById.get(slot.channelId);
-        if (!channel || channel.version !== slot.channelVersion || channel.kind !== run.track || formalRunEligibility(channel, time) !== "eligible") {
-          await monitoring.pauseQueued(run.id);
-          await persist(monitoring, ownerId, run.id, false);
-          return { kind: "done" as const, result: denied("CHANNEL_UNVERIFIED", "verify-channel") };
-        }
-        if (run.track === "model_api" && !transport.priced(channel.modelVersion, run.currency)) {
-          await monitoring.pauseQueued(run.id);
-          await persist(monitoring, ownerId, run.id, false);
-          return { kind: "done" as const, result: denied("NO_TRUSTED_CEILING", "confirm-ceiling") };
-        }
-        const text = questionText.get(slot.questionId);
-        if (!text) return { kind: "done" as const, result: denied("NOT_READY") };
-        const upper = run.upperMinor ?? 0;
-        if (run.track === "model_api" && sampling.length === 0 && grant && usage
-          && (usage.startedReservations + 1 > grant.countLimit || usage.knownActual + usage.pendingUpper + upper > grant.budgetMinor)) {
-          await monitoring.pauseQueued(run.id);
-          return { kind: "done" as const, result: await persist(monitoring, ownerId, run.id, false, true) };
-        }
-        const attemptId = randomUUID();
-        const paid = Boolean(slot.reservationId && run.currency);
-        if (paid && slot.reservationId && run.currency) {
-          const started = await startQuota(quota, run.brandId, slot.reservationId, attemptId, upper, run.currency, time);
-          if (started === "unresolved") {
-            await monitoring.setSlot(slot.id, "reconciliation_required", null, slot.late);
-            await persist(monitoring, ownerId, run.id, false);
-            return { kind: "reconciled" as const };
-          }
-          if (started !== "applied") {
-            await monitoring.pauseQueued(run.id);
-            return { kind: "done" as const, result: await persist(monitoring, ownerId, run.id, false, true) };
-          }
-        }
-        const attempt: MonitoringAttemptRow = {
-          id: attemptId, slotId: slot.id, runId: run.id, brandId: run.brandId, kind: "sampling", ordinal: sampling.length + 1,
-          transport: "official_api", synthetic: 0, disposition: "pending", rawText: null, currency: run.currency,
-          upperMinor: paid ? upper : null, actualMinor: null, costState: paid ? "pending" : "none",
-          quotaAttemptId: paid ? attemptId : null, late: 0, receipt: null, createdAt: time,
-        };
-        await monitoring.insertAttempt(attempt);
-        await monitoring.setSlot(slot.id, "running", null, slot.late);
-        await persist(monitoring, ownerId, run.id, false);
-        const request: SamplingRequest = {
-          slotId: slot.id, questionId: slot.questionId, channelId: slot.channelId, ordinal: attempt.ordinal,
-          questionText: text, requestedNetworkMode: run.requestedNetworkMode,
-          upperMinor: run.upperMinor, currency: run.currency, now: time,
-          capability: {
-            channelId: channel.channelId, version: channel.version, kind: channel.kind, status: channel.status,
-            productEntry: channel.productEntry, modelVersion: channel.modelVersion,
-            citationCapability: channel.citationCapability, searchRequired: channel.searchRequired === 1 ? 1 : 0,
-            verifiedAt: channel.verifiedAt, expiresAt: channel.expiresAt,
-          },
-        };
-        return { kind: "claimed" as const, attempt, slot, searchRequired: channel.searchRequired === 1 ? 1 as const : 0 as const, request };
-      }
-      return { kind: "done" as const, result: await persist(monitoring, ownerId, run.id, false) };
-    });
-    if (!step || "error" in step) return step;
-    if (step.kind === "reconciled") continue;
-    if (step.kind === "done") return step.result;
-    touched.add(step.slot.id);
+    const claim = await claimOfficialSlot(connection, ownerId, runId, transport, now, touched, touched.size > 0);
+    if ("error" in claim || "status" in claim) return claim;
+    touched.add(claim.slotId);
     if (options.crashAfterClaim) throw new Error("official-claim-crash");
     let sample: OfficialSample;
     try {
-      const value = await transport.sample(step.request);
+      const value = await transport.sample(claim.request);
       sample = value.synthetic ? unknownOfficialSample() : value;
     } catch {
       sample = unknownOfficialSample();
     }
-    const written = await withLockedRun(connection, ownerId, runId, async (transaction, monitoring, quota, run) => {
-      const current = (await monitoring.attempts([run.id])).find((item) => item.id === step.attempt.id);
-      const slot = (await monitoring.slots([run.id])).find((item) => item.id === step.slot.id);
-      if (!current || !slot) return denied("NOT_FOUND");
-      if (current.costState === "known" && current.disposition !== "pending") return persist(monitoring, ownerId, run.id, true);
-      await applySample(monitoring, quota, run, slot, current, sample, time, null);
-      if (sample.disposition !== "safe_failure") {
-        const facts = officialNetworkFacts(sample.networkTrigger, step.searchRequired);
-        await new CapabilityDao(transaction).insertAnswerNetwork({
-          id: randomUUID(), brandId: run.brandId, channelId: slot.channelId, channelVersion: slot.channelVersion,
-          requestedNetworkMode: run.requestedNetworkMode, ...facts, createdAt: time,
-        }, ownerId);
-      }
-      return persist(monitoring, ownerId, run.id, false);
-    });
-    if (!written || "error" in written) return written;
+    const failure = await writeOfficialResult(connection, ownerId, runId, claim, sample, now);
+    if (failure) return failure;
   }
 }
 
@@ -558,21 +547,16 @@ export async function pauseMonitoringRun(connection: DatabaseConnection, ownerId
   return ownedRun(connection, ownerId, runId, async (_transaction, monitoring, _quota, run) => {
     if (run.status === "cancelled" || run.status === "succeeded" || run.status === "failed") return persist(monitoring, ownerId, run.id, true);
     const before = await monitoring.slots([run.id]);
-    await monitoring.pauseQueued(run.id);
-    const replayed = before.every((slot) => slot.status !== "queued");
+    await monitoring.pauseWaiting(run.id);
+    const replayed = before.every((slot) => slot.status !== "queued" && slot.status !== "running");
     return persist(monitoring, ownerId, run.id, replayed);
   });
 }
 
 export async function continueMonitoringRun(connection: DatabaseConnection, ownerId: string, runId: string) {
-  return ownedRun(connection, ownerId, runId, async (transaction, monitoring, _quota, run) => {
+  return ownedRun(connection, ownerId, runId, async (_transaction, monitoring, _quota, run) => {
     if (run.status === "cancelled" || run.status === "succeeded" || run.status === "failed") return persist(monitoring, ownerId, run.id, true);
-    const waiting = await queryWithParameters(transaction, "SELECT id FROM monitoring_slot WHERE run_id = ? AND status = 'paused'", [run.id]);
-    if (waiting.length) {
-      await queryWithParameters(transaction, `UPDATE monitoring_slot SET status = 'queued' WHERE id IN (${waiting.map(() => "?").join(", ")})`,
-        waiting.map((row) => String(row.id)));
-    }
-    return persist(monitoring, ownerId, run.id, waiting.length === 0);
+    return persist(monitoring, ownerId, run.id, !(await monitoring.resumeWaiting(run.id)));
   });
 }
 
@@ -619,6 +603,7 @@ export async function reconcileMonitoringCost(
   return ownedRun(connection, ownerId, runId, async (_transaction, monitoring, quota, run) => {
     const attempt = await monitoring.attemptForOwner(ownerId, attemptId);
     if (!attempt || attempt.runId !== run.id || attempt.kind !== "sampling") return denied("NOT_FOUND");
+    if (attempt.transport === "official_api" && attempt.costState === "pending") return denied("OPERATION_CONFLICT");
     if (attempt.costState === "known") {
       return attempt.actualMinor === actualMinor ? persist(monitoring, ownerId, run.id, true) : denied("OPERATION_CONFLICT");
     }

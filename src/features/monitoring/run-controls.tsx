@@ -22,17 +22,22 @@ export function RunControls({
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
+  const [executing, setExecuting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
-  async function send(body: object) {
-    setPending(true);
+  async function send(body: { action: string } & Record<string, unknown>) {
+    const setBusy = body.action === "execute" ? setExecuting : setPending;
+    setBusy(true);
     setStatus(null);
     try {
       const response = await fetch(`/api/monitoring/runs/${runId}`, {
         method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
       });
       const payload = await response.json() as { error?: { message?: string }; replayed?: boolean; pausedForBudget?: boolean };
-      if (!response.ok) setStatus(payload.error?.message ?? messages.SERVICE_UNAVAILABLE);
+      if (!response.ok) {
+        setStatus(payload.error?.message ?? messages.SERVICE_UNAVAILABLE);
+        router.refresh();
+      }
       else {
         setStatus(payload.pausedForBudget ? messages.PAUSED_FOR_BUDGET : payload.replayed ? messages.replayedControl : messages.savedControl);
         router.refresh();
@@ -40,14 +45,14 @@ export function RunControls({
     } catch {
       setStatus(messages.SERVICE_UNAVAILABLE);
     } finally {
-      setPending(false);
+      setBusy(false);
     }
   }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
-        {official && <Button type="button" disabled={pending} onClick={() => send({ action: "execute" })}>{messages.executeOfficial}</Button>}
+        {official && <Button type="button" disabled={pending || executing} onClick={() => send({ action: "execute" })}>{messages.executeOfficial}</Button>}
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "pause" })}>{messages.pause}</Button>
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "continue" })}>{messages.continue}</Button>
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "cancel" })}>{messages.cancel}</Button>
@@ -72,7 +77,7 @@ export function RunControls({
           <Button type="submit" variant="outline" disabled={pending}>{messages.reconcile}</Button>
         </form>
       ))}
-      {status && <p role="status" className="text-sm">{status}</p>}
+      {(status || executing) && <p role="status" className="text-sm">{status ?? messages.executeOfficialPending}</p>}
     </div>
   );
 }

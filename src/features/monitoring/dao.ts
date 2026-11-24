@@ -195,8 +195,17 @@ export class MonitoringDao {
     await this.query("UPDATE monitoring_slot SET status = 'paused' WHERE run_id = ? AND status = 'queued'", [runId]);
   }
 
+  async pauseWaiting(runId: string) {
+    await this.query("UPDATE monitoring_slot SET status = 'paused' WHERE run_id = ? AND status IN ('queued', 'running')", [runId]);
+  }
+
+  async resumeWaiting(runId: string) {
+    const resumed = await this.query("UPDATE monitoring_slot SET status = 'queued' WHERE run_id = ? AND status = 'paused' RETURNING id", [runId]);
+    return resumed.length > 0;
+  }
+
   async cancelWaiting(runId: string) {
-    await this.query("UPDATE monitoring_slot SET status = 'cancelled' WHERE run_id = ? AND status IN ('queued', 'paused')", [runId]);
+    await this.query("UPDATE monitoring_slot SET status = 'cancelled' WHERE run_id = ? AND status IN ('queued', 'paused', 'running')", [runId]);
   }
 
   async samplingUsage(brandId: string) {
