@@ -514,6 +514,8 @@
     "olderBrands": "Older archived brands",
     "allBrands": "Back to brands",
     "workspace": "Back to workspace",
+    "relatedEntries": "Related entries",
+    "noActiveBrand": "No active brand yet. Set up a brand or resume a saved draft to see it here.",
     "viewBrand": "View brand",
     "openLocalObservations": "Record a local observation",
     "openBrandStores": "Record store service areas",

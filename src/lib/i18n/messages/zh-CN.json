@@ -514,6 +514,8 @@
     "olderBrands": "较早归档的品牌",
     "allBrands": "返回品牌资料",
     "workspace": "返回工作台",
+    "relatedEntries": "相关入口",
+    "noActiveBrand": "还没有活跃品牌。建立品牌或继续已保存的草稿后，资料会显示在这里。",
     "viewBrand": "查看品牌",
     "openLocalObservations": "登记本地观察",
     "openBrandStores": "登记门店范围",

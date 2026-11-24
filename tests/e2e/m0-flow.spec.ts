@@ -467,6 +467,7 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
       "/dashboard/monitoring/answers?sourceMode=consumer_ui",
       "/dashboard/content",
       "/dashboard/reports",
+      "/dashboard/brands",
     ];
     for (const locale of ["zh-CN", "en"] as const) {
       await context.addCookies([{ name: "geo-locale", value: locale, url: baseURL }]);
@@ -506,6 +507,18 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
             await expect(page.getByRole("link", { name: locale === "en" ? "View answers" : "查看回答列表" })).toBeVisible();
             if (width === 375) {
               const entry = page.getByRole("link", { name: locale === "en" ? "Open demo space" : "打开演示空间" });
+              await entry.focus();
+              await expect(entry).toBeFocused();
+            }
+          }
+          if (path === "/dashboard/brands") {
+            await expect(page.locator("main")).toHaveCount(1);
+            await expect(page.getByRole("heading", { name: locale === "en" ? "Brand workspace" : "品牌资料", exact: true })).toBeVisible();
+            await expect(page.getByRole("navigation", { name: locale === "en" ? "Related entries" : "相关入口" })).toBeVisible();
+            await expect(page.getByRole("link", { name: locale === "en" ? "View brand" : "查看品牌", exact: true })).toBeVisible();
+            await expect(page.getByText(brandName, { exact: true }).first()).toBeVisible();
+            if (width === 375) {
+              const entry = page.getByRole("link", { name: locale === "en" ? "Record a local observation" : "登记本地观察", exact: true });
               await entry.focus();
               await expect(entry).toBeFocused();
             }
@@ -563,6 +576,22 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     await outsiderPage.goto("/dashboard/content");
     await expect(outsiderPage.getByRole("heading", { name: "Content plans and drafts", exact: true })).toBeVisible();
     await expect(outsiderPage.getByRole("link", { name: "Go to brands", exact: true })).toBeVisible();
+    await expectNoOverflow(outsiderPage);
+    await outsider.addCookies([{ name: "geo-locale", value: "zh-CN", url: baseURL }]);
+    await outsiderPage.goto("/dashboard/brands");
+    await expect(outsiderPage.getByRole("heading", { name: "品牌资料", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("link", { name: "建立品牌或继续草稿", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByText("还没有活跃品牌。")).toBeVisible();
+    await expect(outsiderPage.getByRole("navigation", { name: "相关入口" })).toBeVisible();
+    await expect(outsiderPage.locator("main")).toHaveCount(1);
+    await expectNoOverflow(outsiderPage);
+    await expect(outsiderPage.getByText(brandName)).toHaveCount(0);
+    await outsider.addCookies([{ name: "geo-locale", value: "en", url: baseURL }]);
+    await outsiderPage.goto("/dashboard/brands");
+    await expect(outsiderPage.getByRole("heading", { name: "Brand workspace", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("link", { name: "Set up a brand or resume a draft", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByText("No active brand yet.")).toBeVisible();
+    await expect(outsiderPage.getByRole("navigation", { name: "Related entries" })).toBeVisible();
     await expectNoOverflow(outsiderPage);
     await outsider.addCookies([{ name: "geo-locale", value: "zh-CN", url: baseURL }]);
     await outsiderPage.goto("/dashboard/monitoring/answers");

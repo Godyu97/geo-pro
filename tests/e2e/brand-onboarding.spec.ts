@@ -96,6 +96,16 @@ for (const locale of ["zh-CN", "en"] as const) {
       await page.goto("/");
       await page.locator("main").getByRole("link", { name: locale === "en" ? "Continue" : "继续使用", exact: true }).click();
       await page.locator("main").getByRole("link", { name: current.brandWorkspace, exact: true }).click();
+      await expect(page.getByRole("heading", { name: current.brandWorkspace, exact: true })).toBeVisible();
+      await expect(page.getByRole("navigation", { name: locale === "en" ? "Related entries" : "相关入口" })).toBeVisible();
+      await expect(page.getByText(locale === "en" ? "No active brand yet." : "还没有活跃品牌。", { exact: false })).toBeVisible();
+      await expect(page.locator("main")).toHaveCount(1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      if (width === 375) {
+        const entry = page.getByRole("link", { name: locale === "en" ? "Record a local observation" : "登记本地观察", exact: true });
+        await entry.focus();
+        await expect(entry).toBeFocused();
+      }
       await page.getByRole("link", { name: current.start, exact: true }).click();
       await expect(page.locator("html")).toHaveAttribute("lang", locale);
       await expect(page).toHaveTitle(new RegExp(current.brandWorkspace));

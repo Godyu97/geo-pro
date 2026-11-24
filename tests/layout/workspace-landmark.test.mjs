@@ -17,6 +17,19 @@ test("workspace shell keeps a single content landmark", () => {
   assert.match(layout, /id="main-content"/);
 });
 
+test("brand entry keeps the task and related actions in the workspace canvas", () => {
+  const brands = read("../../src/features/brands/pages.tsx");
+  const index = brands.slice(brands.indexOf("export async function BrandIndexPage"), brands.indexOf("export async function NewBrandPage"));
+  assert.doesNotMatch(index, /<main\b/);
+  assert.match(index, /relatedLabel=\{relatedLabel\}/);
+  assert.match(index, /break-words/);
+  assert.match(index, /relatedEntries/);
+  assert.match(brands, /whitespace-normal/);
+  assert.match(index, /noActiveBrand/);
+  assert.match(index, /viewBrand/);
+  assert.match(index, /newOrResume/);
+});
+
 test("answer list keeps the task and related actions in the workspace canvas", () => {
   const answers = read("../../src/features/evidence/answers-page.tsx");
   assert.doesNotMatch(answers, /<main\b/);

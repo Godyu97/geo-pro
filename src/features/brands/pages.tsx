@@ -121,69 +121,95 @@ function RetentionRecord({ t, locale, view }: { t: Translate; locale: Awaited<Re
 function IntakeNotice({ t, mode }: { t: Translate; mode: BrandIntakeMode }) {
   const copy = intakeCopy(mode);
   return (
-    <aside className="max-w-3xl space-y-2 rounded-xl border bg-muted/50 p-4">
+    <aside className="min-w-0 max-w-3xl space-y-2 break-words rounded-xl border bg-muted/50 p-4">
       <p className="text-sm font-semibold">{t(copy.label)}</p>
       <p className="text-sm leading-6 text-muted-foreground">{t(copy.description)}</p>
     </aside>
   );
 }
 
-function LocalObservationsLink({ t }: { t: Translate }) {
-  return (
-    <Link href="/dashboard/brands/local-observations" prefetch={false} className="inline-block text-sm underline underline-offset-4">
-      {t("openLocalObservations")}
-    </Link>
-  );
+const brandActionClass = "h-auto max-w-full whitespace-normal text-left";
+const brandRelatedClass = "inline-flex min-h-10 min-w-0 max-w-full items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 break-words outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const brandEmptyClass = "min-w-0 rounded-2xl border border-dashed bg-card px-4 py-8 text-center text-sm leading-7 break-words text-muted-foreground";
+
+function brandResourceLinks(t: Translate) {
+  return [
+    { href: "/dashboard/brands/local-observations", label: t("openLocalObservations") },
+    { href: "/dashboard/brands/stores", label: t("openBrandStores") },
+    { href: "/dashboard/brands/industry-packs", label: t("openIndustryPacks") },
+  ] as const;
 }
 
-function BrandStoresLink({ t }: { t: Translate }) {
-  return (
-    <Link href="/dashboard/brands/stores" prefetch={false} className="inline-block text-sm underline underline-offset-4">
-      {t("openBrandStores")}
-    </Link>
-  );
+function brandRelated(t: Translate) {
+  return [{ href: "/dashboard", label: t("workspace") }, ...brandResourceLinks(t)];
 }
 
-function IndustryPacksLink({ t }: { t: Translate }) {
+function BrandCanvas({
+  title,
+  summary,
+  primary,
+  relatedLabel,
+  related,
+  children,
+}: {
+  title: string;
+  summary?: ReactNode;
+  primary?: ReactNode;
+  relatedLabel: string;
+  related: ReadonlyArray<{ href: string; label: string }>;
+  children?: ReactNode;
+}) {
   return (
-    <Link href="/dashboard/brands/industry-packs" prefetch={false} className="inline-block text-sm underline underline-offset-4">
-      {t("openIndustryPacks")}
-    </Link>
-  );
-}
-
-function BrandResourceLinks({ t }: { t: Translate }) {
-  return (
-    <div className="flex flex-wrap gap-x-4 gap-y-2">
-      <LocalObservationsLink t={t} />
-      <BrandStoresLink t={t} />
-      <IndustryPacksLink t={t} />
+    <div className="min-w-0 space-y-8">
+      <header className="min-w-0 space-y-3">
+        <h1 className="break-words text-2xl font-semibold tracking-tight">{title}</h1>
+        {summary}
+        {primary}
+        <nav aria-label={relatedLabel} className="flex min-w-0 flex-wrap gap-2">
+          {related.map((item) => (
+            <Link key={item.href} href={item.href} prefetch={false} className={brandRelatedClass}>
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </header>
+      {children}
     </div>
   );
 }
 
 function ClosedBrandIntake({ t, items }: { t: Translate; items: PilotAdmissionItem[] }) {
   return (
-    <BrandFrame title={t("title")} back="/dashboard" backLabel={t("workspace")}>
-      <BrandResourceLinks t={t} />
-      <section className="max-w-3xl space-y-2 rounded-xl border bg-card p-5">
-        <h2 className="font-semibold">{t("closedTitle")}</h2>
-        <p className="text-sm leading-6 text-muted-foreground">{t("closedDescription")}</p>
-      </section>
-      <section aria-labelledby="pilot-admission" className="max-w-3xl space-y-3 rounded-xl border bg-card p-5">
-        <h2 id="pilot-admission" className="font-semibold">{t("admissionTitle")}</h2>
-        <p className="text-sm leading-6 text-muted-foreground">{t("admissionDescription")}</p>
+    <BrandCanvas
+      title={t("title")}
+      summary={(
+        <div className="max-w-2xl space-y-2">
+          <h2 className="break-words text-base font-semibold">{t("closedTitle")}</h2>
+          <p className="break-words text-sm leading-7 text-muted-foreground">{t("closedDescription")}</p>
+        </div>
+      )}
+      primary={(
+        <Button asChild className={brandActionClass}>
+          <Link href="/dashboard" prefetch={false}>{t("workspace")}</Link>
+        </Button>
+      )}
+      relatedLabel={t("relatedEntries")}
+      related={brandResourceLinks(t)}
+    >
+      <section aria-labelledby="pilot-admission" className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">
+        <h2 id="pilot-admission" className="break-words font-semibold">{t("admissionTitle")}</h2>
+        <p className="break-words text-sm leading-6 text-muted-foreground">{t("admissionDescription")}</p>
         <ul className="divide-y rounded-lg border">
           {items.map((item) => (
-            <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
-              <span>{t(admissionLabel[item.id])}</span>
+            <li key={item.id} className="flex min-w-0 flex-wrap items-center justify-between gap-2 p-3 text-sm">
+              <span className="min-w-0 break-words">{t(admissionLabel[item.id])}</span>
               <span className="text-muted-foreground">{item.met ? t("admissionMet") : t("admissionUnmet")}</span>
             </li>
           ))}
         </ul>
-        <p className="text-sm leading-6 text-muted-foreground">{t("admissionRealIntakeClosed")}</p>
+        <p className="break-words text-sm leading-6 text-muted-foreground">{t("admissionRealIntakeClosed")}</p>
       </section>
-    </BrandFrame>
+    </BrandCanvas>
   );
 }
 
@@ -193,12 +219,22 @@ function closedBrandIntake(t: Translate) {
 
 function DevActorDenied({ t }: { t: Translate }) {
   return (
-    <BrandFrame title={t("title")} back="/dashboard" backLabel={t("workspace")}>
-      <section className="max-w-3xl space-y-2 rounded-xl border bg-card p-5">
-        <h2 className="font-semibold">{t("devActorDeniedTitle")}</h2>
-        <p className="text-sm leading-6 text-muted-foreground">{t("devActorDeniedDescription")}</p>
-      </section>
-    </BrandFrame>
+    <BrandCanvas
+      title={t("title")}
+      summary={(
+        <div className="max-w-2xl space-y-2">
+          <h2 className="break-words text-base font-semibold">{t("devActorDeniedTitle")}</h2>
+          <p className="break-words text-sm leading-7 text-muted-foreground">{t("devActorDeniedDescription")}</p>
+        </div>
+      )}
+      primary={(
+        <Button asChild className={brandActionClass}>
+          <Link href="/dashboard" prefetch={false}>{t("workspace")}</Link>
+        </Button>
+      )}
+      relatedLabel={t("relatedEntries")}
+      related={brandResourceLinks(t)}
+    />
   );
 }
 
@@ -208,9 +244,9 @@ async function requireOpenIntake(email: string) {
 
 function BrandLoadFailure({ t, href }: { t: Translate; href: string }) {
   return (
-    <div role="alert" className="max-w-3xl space-y-3 rounded-xl border bg-card p-5">
-      <p className="text-sm leading-6">{t("unavailable")}</p>
-      <Button asChild variant="outline">
+    <div role="alert" className="min-w-0 max-w-3xl space-y-3 rounded-xl border bg-card p-5">
+      <p className="break-words text-sm leading-6">{t("unavailable")}</p>
+      <Button asChild variant="outline" className={brandActionClass}>
         <a href={href}>{t("reload")}</a>
       </Button>
     </div>
@@ -232,67 +268,94 @@ export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Q
     const [active, archive, frozen] = await Promise.all([dao.active(user.id), dao.archived(user.id, cursor.data), dao.frozen(user.id, frozenCursor.data)]);
     return { active, archive, frozen };
   });
+  const title = t("title");
+  const relatedLabel = t("relatedEntries");
+  const summary = <p className="max-w-2xl break-words text-sm leading-7 text-muted-foreground">{t("pageDescription")}</p>;
+  if ("unavailable" in result) {
+    return (
+      <BrandCanvas
+        title={title}
+        summary={summary}
+        relatedLabel={relatedLabel}
+        related={brandRelated(t)}
+      >
+        <BrandLoadFailure t={t} href="/dashboard/brands" />
+      </BrandCanvas>
+    );
+  }
+  const active = result.data.active;
   return (
-    <BrandFrame title={t("title")} back="/dashboard" backLabel={t("workspace")}>
-      <IntakeNotice t={t} mode={intake.mode} />
-      <BrandResourceLinks t={t} />
-      {"unavailable" in result ? <BrandLoadFailure t={t} href="/dashboard/brands" /> : (
+    <BrandCanvas
+      title={title}
+      summary={(
         <>
-          <section aria-labelledby="brand-current" className="max-w-3xl rounded-xl border bg-card p-5 sm:p-6">
-            <h2 id="brand-current" className="mb-3 font-semibold">{t("currentBrand")}</h2>
-            {result.data.active ? (
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="min-w-0 break-words text-lg">{result.data.active.name}</p>
-                <Button asChild><Link href={"/dashboard/brands/" + result.data.active.id} prefetch={false}>{t("viewBrand")}</Link></Button>
-              </div>
-            ) : <Button asChild><Link href="/dashboard/brands/new" prefetch={false}>{t("newOrResume")}</Link></Button>}
-          </section>
-          <section aria-labelledby="brand-archived" className="max-w-3xl space-y-3">
-            <h2 id="brand-archived" className="font-semibold">{t("archivedBrands")}</h2>
-            {result.data.archive.items.length === 0 ? <p className="text-sm text-muted-foreground">{t("noArchived")}</p> : (
-              <ul className="divide-y rounded-xl border bg-card">
-                {result.data.archive.items.map((brand) => (
-                  <li key={brand.id}>
-                    <Link href={"/dashboard/brands/" + brand.id} prefetch={false} className="block rounded-sm p-4 text-sm break-words underline-offset-4 hover:underline">{brand.name}</Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {result.data.archive.next && (
-              <Button asChild variant="outline">
-                <Link href={{ pathname: "/dashboard/brands", query: { before: result.data.archive.next.at, id: result.data.archive.next.id,
-                  frozenBefore: frozenCursor.data?.at, frozenId: frozenCursor.data?.id } }} prefetch={false}>
-                  {t("olderBrands")}
-                </Link>
-              </Button>
-            )}
-          </section>
-          <section aria-labelledby="brand-frozen" className="max-w-3xl space-y-3">
-            <h2 id="brand-frozen" className="font-semibold">{t("frozenBrands")}</h2>
-            {result.data.frozen.items.length === 0 ? <p className="text-sm text-muted-foreground">{t("noFrozenBrands")}</p> : (
-              <ul className="divide-y rounded-xl border bg-card">
-                {result.data.frozen.items.map((brand) => (
-                  <li key={brand.id}>
-                    <Link href={"/dashboard/brands/" + brand.id + "/recovery"} prefetch={false} className="block space-y-1 rounded-sm p-4 text-sm underline-offset-4 hover:underline">
-                      <span className="block">{t("brandFrozenAt", { time: formatDateTime(locale, new Date(brand.frozenAt)) })}</span>
-                      <span className="block break-all text-muted-foreground">{brand.id}</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {result.data.frozen.next && (
-              <Button asChild variant="outline">
-                <Link href={{ pathname: "/dashboard/brands", query: { frozenBefore: result.data.frozen.next.at, frozenId: result.data.frozen.next.id,
-                  before: cursor.data?.at, id: cursor.data?.id } }} prefetch={false}>
-                  {t("olderFrozenBrands")}
-                </Link>
-              </Button>
-            )}
-          </section>
+          {summary}
+          {active ? <p className="max-w-full break-words text-sm font-medium">{active.name}</p> : null}
         </>
       )}
-    </BrandFrame>
+      primary={active ? (
+        <Button asChild className={brandActionClass}>
+          <Link href={"/dashboard/brands/" + active.id} prefetch={false}>{t("viewBrand")}</Link>
+        </Button>
+      ) : (
+        <Button asChild className={brandActionClass}>
+          <Link href="/dashboard/brands/new" prefetch={false}>{t("newOrResume")}</Link>
+        </Button>
+      )}
+      relatedLabel={relatedLabel}
+      related={brandRelated(t)}
+    >
+      <IntakeNotice t={t} mode={intake.mode} />
+      <section aria-labelledby="brand-current" className="min-w-0 space-y-3">
+        <h2 id="brand-current" className="break-words font-semibold">{t("currentBrand")}</h2>
+        {active ? (
+          <p className="min-w-0 break-words text-lg">{active.name}</p>
+        ) : <p className={brandEmptyClass}>{t("noActiveBrand")}</p>}
+      </section>
+      <section aria-labelledby="brand-archived" className="min-w-0 space-y-3">
+        <h2 id="brand-archived" className="break-words font-semibold">{t("archivedBrands")}</h2>
+        {result.data.archive.items.length === 0 ? <p className={brandEmptyClass}>{t("noArchived")}</p> : (
+          <ul className="min-w-0 space-y-3">
+            {result.data.archive.items.map((brand) => (
+              <li key={brand.id}>
+                <Link href={"/dashboard/brands/" + brand.id} prefetch={false} className="block min-w-0 rounded-2xl border bg-card p-4 text-sm break-words wrap-anywhere underline-offset-4 outline-none hover:underline focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">{brand.name}</Link>
+              </li>
+            ))}
+          </ul>
+        )}
+        {result.data.archive.next && (
+          <Button asChild variant="outline" className={brandActionClass}>
+            <Link href={{ pathname: "/dashboard/brands", query: { before: result.data.archive.next.at, id: result.data.archive.next.id,
+              frozenBefore: frozenCursor.data?.at, frozenId: frozenCursor.data?.id } }} prefetch={false}>
+              {t("olderBrands")}
+            </Link>
+          </Button>
+        )}
+      </section>
+      <section aria-labelledby="brand-frozen" className="min-w-0 space-y-3">
+        <h2 id="brand-frozen" className="break-words font-semibold">{t("frozenBrands")}</h2>
+        {result.data.frozen.items.length === 0 ? <p className={brandEmptyClass}>{t("noFrozenBrands")}</p> : (
+          <ul className="min-w-0 space-y-3">
+            {result.data.frozen.items.map((brand) => (
+              <li key={brand.id}>
+                <Link href={"/dashboard/brands/" + brand.id + "/recovery"} prefetch={false} className="block min-w-0 space-y-1 rounded-2xl border bg-card p-4 text-sm break-words underline-offset-4 outline-none hover:underline focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
+                  <span className="block">{t("brandFrozenAt", { time: formatDateTime(locale, new Date(brand.frozenAt)) })}</span>
+                  <span className="block break-all text-muted-foreground">{brand.id}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+        {result.data.frozen.next && (
+          <Button asChild variant="outline" className={brandActionClass}>
+            <Link href={{ pathname: "/dashboard/brands", query: { frozenBefore: result.data.frozen.next.at, frozenId: result.data.frozen.next.id,
+              before: cursor.data?.at, id: cursor.data?.id } }} prefetch={false}>
+              {t("olderFrozenBrands")}
+            </Link>
+          </Button>
+        )}
+      </section>
+    </BrandCanvas>
   );
 }
 
