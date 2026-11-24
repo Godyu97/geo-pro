@@ -43,7 +43,7 @@ async function account(db) {
 
 test("a brief that only swaps the brand name is refused before it is stored", async () => {
   const refused = await proposeResearchBrief({
-    async transaction(work) {
+    async transaction() {
       throw new Error("copied brief must not touch the database");
     },
   }, "owner", {
