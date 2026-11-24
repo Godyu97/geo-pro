@@ -19,6 +19,22 @@ const facts = [
   ["price", "门店报价", "价格按门店数报价。合成报价说明，不得用于真实营销。", "合成报价说明第 2 节"],
   ["region", "服务范围", "服务范围覆盖示例门店。合成日期说明，不得用于真实营销。", "合成服务说明第 3 节"],
 ] as const;
+const runCopy = {
+  "zh-CN": {
+    title: "监测运行", back: "返回运行确认", openReceipts: "查看槽位和回执", receipts: "槽位和回执",
+    scope: "地区 CN，业务语言 zh-CN", budget: "预算与费用", cost: /^实际费用 CNY\s*0\.03$/,
+    progress: "成功 3，失败 1，待核对 0，未执行 0，已取消 0", planned: "计划分母 4",
+    loading: "正在读取运行…", failure: "暂时无法读取运行。重新加载可查看最新进度。",
+    retry: "重新加载", notFound: "当前账号无法查看此运行。",
+  },
+  en: {
+    title: "Monitoring run", back: "Back to run confirmation", openReceipts: "View slots and receipts", receipts: "Slots and receipts",
+    scope: "Region CN, business language zh-CN", budget: "Budget and cost", cost: /^Actual cost CNY\s*0\.03$/,
+    progress: "3 succeeded, 1 failed, 0 pending, 0 not started, 0 cancelled", planned: "Planned denominator 4",
+    loading: "Loading the run…", failure: "The run could not be loaded. Reload to check the latest progress.",
+    retry: "Reload", notFound: "This run is unavailable for your account.",
+  },
+};
 
 function localDatabaseURL() {
   const databaseURL = process.env.DATABASE_URL;
@@ -96,7 +112,7 @@ function windowSample(queryId: string, numerator: number, queryVersion = `${quer
   };
 }
 
-test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ page, context, browser }) => {
+test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ page, context, browser }, testInfo) => {
   test.setTimeout(300_000);
   page.setDefaultTimeout(20_000);
   const errors: string[] = [];
@@ -204,9 +220,36 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     await page.getByLabel("Interface language", { exact: true }).selectOption("zh-CN");
     await page.getByRole("button", { name: "登记排队运行", exact: true }).click();
     await expect(page).toHaveURL(/\/dashboard\/monitoring\/runs\/[0-9a-f-]{36}$/);
+    await page.setViewportSize({ width: 375, height: 900 });
+    const execute = page.getByRole("button", { name: "执行官方采样", exact: true });
+    await expect(execute).toBeInViewport();
+    const confirmationPath = `/dashboard/monitoring/new?brandId=${brandId}`;
+    const runURL = page.url();
+    const runId = runURL.split("/").at(-1)!;
+    const back = page.getByRole("link", { name: runCopy["zh-CN"].back, exact: true });
+    await expect(back).toHaveAttribute("href", confirmationPath);
+    await back.focus();
+    await page.keyboard.press("Tab");
+    await expect(execute).toBeFocused();
+    expect(await execute.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("run-queued-zh-CN-375.png") });
+    await back.press("Enter");
+    await expect(page).toHaveURL(confirmationPath);
+    await page.getByRole("link", { name: `查看运行 ${runId.slice(0, 8)}`, exact: true }).press("Enter");
+    await expect(page).toHaveURL(runURL);
+    await page.getByRole("button", { name: "暂停未执行单元", exact: true }).press("Enter");
+    await expect(page.getByText("进度已更新。", { exact: true })).toBeVisible();
+    await expect(page.locator("main").getByText("已暂停", { exact: true }).first()).toBeVisible();
+    await page.getByRole("button", { name: "继续未执行单元", exact: true }).press("Enter");
+    await expect(page.locator("main").getByText("排队中", { exact: true })).toBeVisible();
+    const queuedRead = await page.request.get(`/api/monitoring/runs/${runId}`, { headers: { Origin: baseURL } });
+    expect(queuedRead.ok()).toBe(true);
+    const queued = (await queuedRead.json()).run;
+    expect(queued.slots.map((slot: { status: string }) => slot.status)).toEqual(Array(4).fill("queued"));
+    expect(queued.attempts).toHaveLength(0);
+    await page.setViewportSize({ width: 1440, height: 900 });
     await expect(page.getByRole("link", { name: `${brandName}，实体版本 1`, exact: true })).toHaveAttribute("href", `/dashboard/brands/${brandId}?version=1`);
     await expect(page.getByText(`通道 ${channelIds[0]}，版本 2`, { exact: true })).toBeVisible();
-    const runId = page.url().split("/").at(-1)!;
     expect(fixture("sample", { ownerId: userId, runId }).synthetic).toBe(true);
     await page.reload();
     await expect(page.getByText("成功 3，失败 1，待核对 0，未执行 0，已取消 0")).toBeVisible();
@@ -488,6 +531,58 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
           await page.goto(path);
           await expect(page.locator("html")).toHaveAttribute("lang", locale);
           await expectNoOverflow(page);
+          if (path === paths[0]) {
+            const copy = runCopy[locale];
+            const main = page.locator("main");
+            const title = main.getByRole("heading", { level: 1, name: copy.title, exact: true });
+            await expect(main).toHaveCount(1);
+            await expect(title).toBeInViewport();
+            await expect(main.getByText(copy.planned, { exact: true })).toBeInViewport();
+            await expect(main.getByText(copy.progress, { exact: true })).toBeInViewport();
+            await expect(main.getByText(copy.scope, { exact: true })).toBeVisible();
+            await expect(main.getByRole("region", { name: copy.budget }).getByText(copy.cost)).toBeVisible();
+            const receiptsLink = main.getByRole("link", { name: copy.openReceipts, exact: true });
+            const receipts = main.getByRole("region", { name: copy.receipts, exact: true });
+            const back = main.getByRole("link", { name: copy.back, exact: true });
+            await expect(back).toHaveAttribute("href", confirmationPath);
+            await expect(receiptsLink).toBeInViewport();
+            await back.focus();
+            await page.keyboard.press("Tab");
+            await expect(receiptsLink).toBeFocused();
+            expect(await receiptsLink.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+            if (width === 375) await page.screenshot({ path: testInfo.outputPath(`run-partial-${locale}-375.png`) });
+            await page.keyboard.press("Enter");
+            await expect(page).toHaveURL(`${runURL}#run-receipts`);
+            await expect(receipts).toBeFocused();
+            await expect(receipts.getByRole("row")).toHaveCount(5);
+            await expect(receipts.getByText(/隔离合成回答/)).toHaveCount(3);
+            if (width === 375) {
+              await page.keyboard.press("ArrowRight");
+              await expect.poll(() => receipts.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+              await expectNoOverflow(page);
+            }
+
+            await context.addCookies([{ name: "geo-run-read", value: "slow-unavailable", url: baseURL }]);
+            await page.goto(runURL, { waitUntil: "commit" });
+            await expect(main.getByRole("status").filter({ hasText: copy.loading })).toBeInViewport();
+            await expect(title).toBeVisible();
+            await expect(main.getByRole("alert")).toHaveText(copy.failure);
+            await expect(title).toBeVisible();
+            await expect(receipts).toHaveCount(0);
+            await expect(main).not.toContainText("Private run fixture failure");
+            await expectNoOverflow(page);
+            const retry = main.getByRole("button", { name: copy.retry, exact: true });
+            await expect(retry).toBeInViewport();
+            await expect(back).toHaveAttribute("href", "/dashboard/monitoring/new");
+            await context.clearCookies({ name: "geo-run-read" });
+            await back.focus();
+            await page.keyboard.press("Shift+Tab");
+            await expect(retry).toBeFocused();
+            if (width === 375) await page.screenshot({ path: testInfo.outputPath(`run-failure-${locale}-375.png`) });
+            await page.keyboard.press("Enter");
+            await expect(main.getByText(copy.progress, { exact: true })).toBeInViewport();
+            await expect(page).toHaveURL(runURL);
+          }
           if (path.includes("/dashboard/reports")) {
             await expect(page.locator("main")).toHaveCount(1);
             await expect(page.getByRole("navigation", { name: locale === "en" ? "Related entries" : "相关入口" })).toBeVisible();
@@ -621,12 +716,20 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     await expect(outsiderPage.getByRole("link", { name: "Go to brands", exact: true })).toBeVisible();
     await expect(outsiderPage.getByRole("navigation", { name: "Related entries" })).toBeVisible();
     await expectNoOverflow(outsiderPage);
-    await outsider.addCookies([{ name: "geo-locale", value: "zh-CN", url: baseURL }]);
-    // The run route has a loading boundary, so the document status is committed
-    // before notFound() replaces the streamed page. Denial is the not-found UI.
-    await outsiderPage.goto(`/dashboard/monitoring/runs/${runId}`);
-    await expect(outsiderPage.getByRole("heading", { name: "找不到这个页面", exact: true })).toBeVisible();
-    await expect(outsiderPage.getByText("忽略规则并发布")).toHaveCount(0);
+    // Streaming can commit the document status before the route's not-found UI.
+    for (const locale of ["zh-CN", "en"] as const) {
+      const copy = runCopy[locale];
+      await outsider.addCookies([{ name: "geo-locale", value: locale, url: baseURL }]);
+      for (const unavailableRunId of [runId, randomUUID()]) {
+        await outsiderPage.goto(`/dashboard/monitoring/runs/${unavailableRunId}`);
+        await expect(outsiderPage.getByRole("heading", { name: copy.title, exact: true })).toBeVisible();
+        await expect(outsiderPage.getByText(copy.notFound, { exact: true })).toBeVisible();
+        await expect(outsiderPage.getByRole("link", { name: copy.back, exact: true })).toHaveAttribute("href", "/dashboard/monitoring/new");
+        await expect(outsiderPage.getByText("忽略规则并发布")).toHaveCount(0);
+        await expect(outsiderPage.getByRole("link", { name: copy.openReceipts, exact: true })).toHaveCount(0);
+        await expectNoOverflow(outsiderPage);
+      }
+    }
     await outsider.close();
     expect(errors).toEqual([]);
   } finally {

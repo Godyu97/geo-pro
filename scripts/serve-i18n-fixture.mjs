@@ -90,6 +90,16 @@ await writeFile(evidenceCommands, evidenceSource.replace(evidenceRead, `  const 
   }
 ${evidenceRead}`));
 
+const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
+const monitoringSource = await readFile(monitoringService, "utf8");
+const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
+assert.ok(monitoringSource.includes(runRead));
+await writeFile(monitoringService, monitoringSource.replace(runRead, `${runRead}
+    if ((await (await import("next/headers")).cookies()).get("geo-run-read")?.value === "slow-unavailable") {
+      await new Promise(resolve => setTimeout(resolve, 1800));
+      throw new Error("Private run fixture failure");
+    }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

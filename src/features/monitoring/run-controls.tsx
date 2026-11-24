@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { Messages } from "@/lib/i18n/server";
 
 type Copy = Messages["monitoring"];
@@ -12,13 +13,17 @@ export function RunControls({
   messages,
   succeededSlots,
   unknownAttempts,
-  official = false,
+  official,
+  executePrimary,
+  mockRun,
 }: {
   runId: string;
   messages: Copy;
   succeededSlots: Array<{ id: string; questionText: string }>;
   unknownAttempts: Array<{ id: string; questionText: string }>;
-  official?: boolean;
+  official: boolean;
+  executePrimary: boolean;
+  mockRun: boolean;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -49,19 +54,30 @@ export function RunControls({
     }
   }
 
+  const receipts = (
+    <Button asChild variant={executePrimary || mockRun ? "outline" : "default"}>
+      <a href="#run-receipts">{messages.openRunReceipts}</a>
+    </Button>
+  );
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
-        {official && <Button type="button" disabled={pending || executing} onClick={() => send({ action: "execute" })}>{messages.executeOfficial}</Button>}
+        {!executePrimary && receipts}
+        {official && (
+          <Button
+            type="button" variant={executePrimary ? "default" : "outline"}
+            aria-describedby="official-sampling-note" disabled={pending || executing}
+            onClick={() => send({ action: "execute" })}
+          >
+            {messages.executeOfficial}
+          </Button>
+        )}
+        {executePrimary && receipts}
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "pause" })}>{messages.pause}</Button>
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "continue" })}>{messages.continue}</Button>
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "cancel" })}>{messages.cancel}</Button>
       </div>
-      {succeededSlots.map((slot) => (
-        <Button key={slot.id} type="button" variant="outline" disabled={pending} className="h-auto max-w-full whitespace-normal py-2 text-left" onClick={() => send({ action: "redo-analysis", slotId: slot.id })}>
-          {messages.redo}: {slot.questionText}
-        </Button>
-      ))}
+      {(status || executing) && <p role="status" className="rounded-md border bg-background p-2 text-sm">{status ?? messages.executeOfficialPending}</p>}
       {unknownAttempts.map((attempt) => (
         <form key={attempt.id} className="flex flex-wrap items-end gap-2" onSubmit={(event) => {
           event.preventDefault();
@@ -69,15 +85,26 @@ export function RunControls({
           const actualMinor = value === "" || value === null ? null : Number(value);
           void send({ action: "reconcile", attemptId: attempt.id, actualMinor });
         }}>
-          <label className="grid gap-1 text-sm">
-            <span>{attempt.questionText}</span>
+          <label className="grid min-w-0 max-w-full gap-1 text-sm">
+            <span className="wrap-anywhere">{attempt.questionText}</span>
             <span className="text-muted-foreground">{messages.actualMinor}</span>
-            <input name="actualMinor" inputMode="numeric" className="h-10 rounded-md border bg-transparent px-3" />
+            <Input name="actualMinor" inputMode="numeric" />
           </label>
           <Button type="submit" variant="outline" disabled={pending}>{messages.reconcile}</Button>
         </form>
       ))}
-      {(status || executing) && <p role="status" className="text-sm">{status ?? messages.executeOfficialPending}</p>}
+      {succeededSlots.length > 0 && (
+        <details className="text-sm">
+          <summary className="w-fit cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">{messages.redo}</summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {succeededSlots.map((slot) => (
+              <Button key={slot.id} type="button" variant="outline" disabled={pending} className="h-auto max-w-full wrap-anywhere whitespace-normal py-2 text-left" onClick={() => send({ action: "redo-analysis", slotId: slot.id })}>
+                {slot.questionText}
+              </Button>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
