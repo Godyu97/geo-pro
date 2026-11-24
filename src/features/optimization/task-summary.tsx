@@ -20,7 +20,7 @@ export function TaskSummaryList({
 }) {
   if (items.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">
+      <p className="break-words rounded-xl border border-dashed bg-card px-4 py-5 text-sm leading-6 text-muted-foreground">
         {empty}
       </p>
     );
@@ -31,8 +31,8 @@ export function TaskSummaryList({
       {items.map((item) => {
         const labels = taskDisplayLabels(messages, item);
         return (
-          <li key={item.id} className="rounded-xl border px-4 py-3 text-sm">
-            <Link href={item.href} prefetch={false} className="font-medium underline-offset-4 hover:underline">
+          <li key={item.id} className="min-w-0 rounded-xl border bg-card px-4 py-3 text-sm">
+            <Link href={item.href} prefetch={false} className="break-words font-medium underline-offset-4 hover:underline">
               {item.title}
             </Link>
             <p className="mt-1 text-xs text-muted-foreground">

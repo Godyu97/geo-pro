@@ -1223,6 +1223,7 @@
     "answerCountOther": "{count} answers in this scope",
     "emptyAnswers": "This scope has no samples. Change the track, target region, requested network, or time above.",
     "viewTasks": "View optimization tasks",
+    "relatedEntries": "Related entries",
     "competitors": "Competitors and sources",
     "openPlans": "View sampling plans",
     "openAlerts": "View quality alerts",

@@ -1223,6 +1223,7 @@
     "answerCountOther": "当前范围 {count} 条回答",
     "emptyAnswers": "这个范围没有样本。可以在上方修改轨道、目标地区、请求联网或时间。",
     "viewTasks": "查看优化任务",
+    "relatedEntries": "相关入口",
     "competitors": "竞品与来源",
     "openPlans": "查看采样计划",
     "openAlerts": "查看质量提醒",

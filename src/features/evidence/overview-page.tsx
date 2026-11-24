@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
@@ -5,7 +6,6 @@ import { formatNumber, formatPercent } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "../brands/dao";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TaskSummaryList } from "../optimization/task-summary.tsx";
 import { MetricCard } from "./metric-card.tsx";
@@ -16,6 +16,58 @@ import { OverviewScopeForm } from "./scope-form";
 function formatRate(locale: Locale, value: number | null) {
   if (value == null) return "N/A";
   return formatPercent(locale, value);
+}
+
+const actionClass = "h-auto max-w-full whitespace-normal text-left";
+const relatedClass = "inline-flex min-h-10 min-w-0 max-w-full items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 break-words outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
+function relatedLinks(
+  t: Awaited<ReturnType<typeof getTranslator<"evidenceOverview">>>,
+  brandId?: string,
+) {
+  const brandQuery = brandId ? `?brandId=${encodeURIComponent(brandId)}` : "";
+  return [
+    { href: "/dashboard/monitoring/plans", label: t("openPlans") },
+    { href: "/dashboard/monitoring/alerts", label: t("openAlerts") },
+    { href: "/dashboard/monitoring/capture", label: t("openCapture") },
+    { href: "/dashboard/monitoring/protocols", label: t("openProtocols") },
+    { href: `/dashboard/monitoring/explorations${brandQuery}`, label: t("openExplorations") },
+    { href: `/dashboard/monitoring/demo${brandQuery}`, label: t("openDemo") },
+  ] as const;
+}
+
+function EvidenceCanvas({
+  title,
+  summary,
+  primary,
+  relatedLabel,
+  related,
+  children,
+}: {
+  title: string;
+  summary?: ReactNode;
+  primary?: ReactNode;
+  relatedLabel: string;
+  related: ReadonlyArray<{ href: string; label: string }>;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="min-w-0 space-y-8">
+      <header className="min-w-0 space-y-3">
+        <h1 className="break-words text-2xl font-semibold tracking-tight">{title}</h1>
+        {summary}
+        {primary}
+        <nav aria-label={relatedLabel} className="flex min-w-0 flex-wrap gap-2">
+          {related.map((item) => (
+            <Link key={item.href} href={item.href} prefetch={false} className={relatedClass}>
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </header>
+      {children}
+    </div>
+  );
 }
 
 export async function generateMetadata() {
@@ -42,94 +94,90 @@ export default async function EvidenceOverviewPage({
     ? params.brandId.trim()
     : active?.id;
 
+  const brandsAction = (
+    <Button asChild className={actionClass}>
+      <Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link>
+    </Button>
+  );
+
   if (!brandId) {
     return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild><Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link></Button>
-          <Button asChild variant="outline"><Link href="/dashboard/monitoring/plans" prefetch={false}>{t("openPlans")}</Link></Button>
-          <Button asChild variant="outline"><Link href="/dashboard/monitoring/alerts" prefetch={false}>{t("openAlerts")}</Link></Button>
-          <Button asChild variant="outline"><Link href="/dashboard/monitoring/capture" prefetch={false}>{t("openCapture")}</Link></Button>
-          <Button asChild variant="outline"><Link href="/dashboard/monitoring/protocols" prefetch={false}>{t("openProtocols")}</Link></Button>
-          <Button asChild variant="outline"><Link href="/dashboard/monitoring/explorations" prefetch={false}>{t("openExplorations")}</Link></Button>
-          <Button asChild variant="outline"><Link href="/dashboard/monitoring/demo" prefetch={false}>{t("openDemo")}</Link></Button>
-        </div>
-      </div>
+      <EvidenceCanvas
+        title={t("title")}
+        summary={<p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>}
+        primary={brandsAction}
+        relatedLabel={t("relatedEntries")}
+        related={relatedLinks(t)}
+      />
     );
   }
 
   const parsed = overviewScopeFromSearch(params, { brandId, sourceMode: "model_api" });
+  const related = relatedLinks(t, brandId);
   if (!parsed.success) {
     return (
-      <div role="alert" className="space-y-4 text-sm">
-        <p>{t("invalidScope")}</p>
-        {active?.id ? (
-          <Button asChild variant="outline">
+      <EvidenceCanvas
+        title={t("title")}
+        summary={<p role="alert" className="max-w-2xl text-sm leading-7">{t("invalidScope")}</p>}
+        primary={active?.id ? (
+          <Button asChild variant="outline" className={actionClass}>
             <Link href={`/dashboard/monitoring/overview?brandId=${active.id}`} prefetch={false}>{t("clearFilters")}</Link>
           </Button>
-        ) : null}
-      </div>
+        ) : undefined}
+        relatedLabel={t("relatedEntries")}
+        related={related}
+      />
     );
   }
 
   const overview = await readEvidenceOverview(connection, session.user.id, parsed.data);
   if ("error" in overview) {
     return (
-      <div role="alert" className="space-y-2 text-sm">
-        <p>{te(overview.error)}</p>
-      </div>
+      <EvidenceCanvas
+        title={t("title")}
+        summary={<p role="alert" className="max-w-2xl text-sm leading-7">{te(overview.error)}</p>}
+        primary={overview.error === "NOT_FOUND" ? brandsAction : undefined}
+        relatedLabel={t("relatedEntries")}
+        related={related}
+      />
     );
   }
 
   const answersHref = overviewScopePath("/dashboard/monitoring/answers", parsed.data);
+  const hasSamples = overview.viewStatus !== "empty";
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline">
-            <Link href="/dashboard/monitoring/plans" prefetch={false}>{t("openPlans")}</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/dashboard/monitoring/alerts" prefetch={false}>{t("openAlerts")}</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/dashboard/monitoring/capture" prefetch={false}>{t("openCapture")}</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/dashboard/monitoring/protocols" prefetch={false}>{t("openProtocols")}</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={`/dashboard/monitoring/explorations?brandId=${overview.scope.brandId}`} prefetch={false}>{t("openExplorations")}</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={`/dashboard/monitoring/demo?brandId=${overview.scope.brandId}`} prefetch={false}>{t("openDemo")}</Link>
-          </Button>
-          <Badge variant="outline">{overview.scope.brandName}</Badge>
-        </div>
-      </div>
-
+    <EvidenceCanvas
+      title={t("title")}
+      summary={(
+        <>
+          <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+          <p className="max-w-full break-words text-sm font-medium">{overview.scope.brandName}</p>
+        </>
+      )}
+      primary={hasSamples ? (
+        <Button asChild className={actionClass}>
+          <Link href={answersHref} prefetch={false}>{t("viewAnswers")}</Link>
+        </Button>
+      ) : undefined}
+      relatedLabel={t("relatedEntries")}
+      related={related}
+    >
       <OverviewScopeForm scope={parsed.data} t={t} />
 
       {overview.smallSample ? (
-        <p className="rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground" role="status">
+        <p className="break-words rounded-xl border border-dashed bg-card px-4 py-3 text-sm leading-6 text-muted-foreground" role="status">
           {t("smallSample")}
         </p>
       ) : null}
 
       {overview.viewStatus === "empty" ? (
-        <section className="rounded-2xl border border-dashed px-6 py-10 text-center">
-          <h2 className="font-medium">{t("emptyTitle")}</h2>
-          <p className="mx-auto mt-2 max-w-lg text-sm leading-7 text-muted-foreground">{t("emptyBody")}</p>
+        <section className="min-w-0 rounded-2xl border border-dashed bg-card px-4 py-8 text-center sm:px-6 sm:py-10">
+          <h2 className="break-words font-medium">{t("emptyTitle")}</h2>
+          <p className="mx-auto mt-2 max-w-lg break-words text-sm leading-7 text-muted-foreground">{t("emptyBody")}</p>
           <div className="mt-6 flex flex-wrap justify-center gap-2">
             {overview.nextActions.map((action) => (
-              <Button key={action.id} asChild variant={action.kind === "start_monitoring" ? "default" : "outline"}>
+              <Button key={action.id} asChild variant={action.kind === "start_monitoring" ? "default" : "outline"} className={actionClass}>
                 <Link href={action.href} prefetch={false}>
                   {action.kind === "start_monitoring"
                     ? t("startMonitoring")
@@ -143,7 +191,7 @@ export default async function EvidenceOverviewPage({
         </section>
       ) : (
         <>
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid min-w-0 gap-4 lg:grid-cols-3">
             {([
               ["mentionRate", overview.metrics.mentioned] as const,
               ["recommendRate", overview.metrics.recommended] as const,
@@ -172,14 +220,9 @@ export default async function EvidenceOverviewPage({
             ))}
           </div>
 
-          <section className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">{t("perQuestion")}</h2>
-              <Button asChild variant="outline" size="sm">
-                <Link href={answersHref} prefetch={false}>{t("viewAnswers")}</Link>
-              </Button>
-            </div>
-            <div className="overflow-x-auto rounded-2xl border">
+          <section className="min-w-0 space-y-3">
+            <h2 className="break-words text-lg font-semibold">{t("perQuestion")}</h2>
+            <div className="max-w-full min-w-0 overflow-x-auto rounded-2xl border bg-card">
               <table className="min-w-full text-left text-sm">
                 <thead className="bg-secondary/50 text-muted-foreground">
                   <tr>
@@ -192,7 +235,7 @@ export default async function EvidenceOverviewPage({
                   {overview.metrics.recommended.perQuestion.map((row) => (
                     <tr key={row.questionKey} className="border-t">
                       <td className="wrap-anywhere px-4 py-3">{row.questionText}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         {row.denominator === 0
                           ? "N/A"
                           : `${formatNumber(locale, row.numerator)}/${formatNumber(locale, row.denominator)} (${formatRate(locale, row.rate)})`}
@@ -207,10 +250,10 @@ export default async function EvidenceOverviewPage({
         </>
       )}
 
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">{t("suggestions")}</h2>
-          <Button asChild variant="outline" size="sm">
+      <section className="min-w-0 space-y-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+          <h2 className="break-words text-lg font-semibold">{t("suggestions")}</h2>
+          <Button asChild variant="outline" className={actionClass}>
             <Link href={`/dashboard/optimization?brandId=${overview.scope.brandId}`} prefetch={false}>
               {t("viewTasks")}
             </Link>
@@ -219,10 +262,10 @@ export default async function EvidenceOverviewPage({
         <TaskSummaryList items={overview.suggestions} messages={labels} empty={t("suggestionsEmpty")} />
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">{t("activeTasks")}</h2>
+      <section className="min-w-0 space-y-3">
+        <h2 className="break-words text-lg font-semibold">{t("activeTasks")}</h2>
         <TaskSummaryList items={overview.activeTasks} messages={labels} empty={t("activeTasksEmpty")} />
       </section>
-    </div>
+    </EvidenceCanvas>
   );
 }

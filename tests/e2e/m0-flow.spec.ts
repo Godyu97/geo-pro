@@ -487,6 +487,17 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
               await expect(entry).toBeFocused();
             }
           }
+          if (path === "/dashboard/monitoring/overview") {
+            await expect(page.locator("main")).toHaveCount(1);
+            await expect(page.getByRole("heading", { name: locale === "en" ? "Explainable overview" : "可解释概览" })).toBeVisible();
+            await expect(page.getByRole("navigation", { name: locale === "en" ? "Related entries" : "相关入口" })).toBeVisible();
+            await expect(page.getByRole("link", { name: locale === "en" ? "View answers" : "查看回答列表" })).toBeVisible();
+            if (width === 375) {
+              const entry = page.getByRole("link", { name: locale === "en" ? "Open demo space" : "打开演示空间" });
+              await entry.focus();
+              await expect(entry).toBeFocused();
+            }
+          }
           if (path === "/dashboard/content") {
             await expect(page.locator("main")).toHaveCount(1);
             await expect(page.getByRole("heading", { name: locale === "en" ? "Content plans and drafts" : "内容计划与草稿" })).toBeVisible();
@@ -518,6 +529,19 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     await expect(outsiderPage.getByText(brandName)).toHaveCount(0);
     await expect(outsiderPage.getByText("N/A", { exact: true })).toHaveCount(0);
     await outsiderPage.setViewportSize({ width: 375, height: 900 });
+    await outsiderPage.goto("/dashboard/monitoring/overview");
+    await expect(outsiderPage.getByRole("heading", { name: "可解释概览", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("link", { name: "前往品牌资料", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("navigation", { name: "相关入口" })).toBeVisible();
+    await expect(outsiderPage.locator("main")).toHaveCount(1);
+    await expectNoOverflow(outsiderPage);
+    await outsider.addCookies([{ name: "geo-locale", value: "en", url: baseURL }]);
+    await outsiderPage.goto("/dashboard/monitoring/overview");
+    await expect(outsiderPage.getByRole("heading", { name: "Explainable overview", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("link", { name: "Go to brands", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("navigation", { name: "Related entries" })).toBeVisible();
+    await expectNoOverflow(outsiderPage);
+    await outsider.addCookies([{ name: "geo-locale", value: "zh-CN", url: baseURL }]);
     await outsiderPage.goto("/dashboard/content");
     await expect(outsiderPage.getByRole("heading", { name: "内容计划与草稿", exact: true })).toBeVisible();
     await expect(outsiderPage.getByRole("link", { name: "前往品牌", exact: true })).toBeVisible();

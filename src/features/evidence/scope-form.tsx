@@ -28,9 +28,9 @@ export function OverviewScopeForm({
   t: ScopeTranslator;
 }) {
   return (
-    <form className="flex flex-wrap items-end gap-3 rounded-2xl border bg-secondary/40 p-4" method="get">
+    <form className="flex min-w-0 max-w-full flex-wrap items-end gap-3 rounded-2xl border bg-secondary/40 p-4" method="get">
       <input type="hidden" name="brandId" value={scope.brandId} />
-      <label className="min-w-0 text-sm" htmlFor="overview-source-mode">
+      <label className="min-w-0 max-w-full break-words text-sm" htmlFor="overview-source-mode">
         <span className="mb-1 block text-muted-foreground">{t("track")}</span>
         <select
           id="overview-source-mode"
@@ -42,7 +42,7 @@ export function OverviewScopeForm({
           <option value="consumer_ui">{t("trackConsumer")}</option>
         </select>
       </label>
-      <label className="min-w-0 text-sm" htmlFor="overview-region">
+      <label className="min-w-0 max-w-full break-words text-sm" htmlFor="overview-region">
         <span className="mb-1 block text-muted-foreground">{t("region")}</span>
         <input
           id="overview-region"
@@ -55,7 +55,7 @@ export function OverviewScopeForm({
           className={`${fieldClass} sm:w-36`}
         />
       </label>
-      <label className="min-w-0 text-sm" htmlFor="overview-network">
+      <label className="min-w-0 max-w-full break-words text-sm" htmlFor="overview-network">
         <span className="mb-1 block text-muted-foreground">{t("requestedNetwork")}</span>
         <select
           id="overview-network"
@@ -69,7 +69,7 @@ export function OverviewScopeForm({
           <option value="unknown">{t("networkUnknown")}</option>
         </select>
       </label>
-      <label className="min-w-0 text-sm sm:max-w-xs" htmlFor="overview-from">
+      <label className="min-w-0 max-w-full break-words text-sm sm:max-w-xs" htmlFor="overview-from">
         <span className="mb-1 block text-muted-foreground">{t("from")}</span>
         <input
           id="overview-from"
@@ -82,7 +82,7 @@ export function OverviewScopeForm({
           className={`${fieldClass} sm:w-72`}
         />
       </label>
-      <label className="min-w-0 text-sm sm:max-w-xs" htmlFor="overview-to">
+      <label className="min-w-0 max-w-full break-words text-sm sm:max-w-xs" htmlFor="overview-to">
         <span className="mb-1 block text-muted-foreground">{t("to")}</span>
         <input
           id="overview-to"
@@ -96,10 +96,10 @@ export function OverviewScopeForm({
         />
       </label>
       <div className="flex items-end">
-        <Button type="submit" variant="outline">{t("applyFilters")}</Button>
+        <Button type="submit" variant="outline" className="h-auto max-w-full whitespace-normal">{t("applyFilters")}</Button>
       </div>
-      <p id="overview-region-hint" className="basis-full text-xs leading-5 text-muted-foreground">{t("regionHint")}</p>
-      <p id="overview-time-hint" className="basis-full text-xs leading-5 text-muted-foreground">{t("timeHint")}</p>
+      <p id="overview-region-hint" className="basis-full break-words text-xs leading-5 text-muted-foreground">{t("regionHint")}</p>
+      <p id="overview-time-hint" className="basis-full break-words text-xs leading-5 text-muted-foreground">{t("timeHint")}</p>
     </form>
   );
 }
