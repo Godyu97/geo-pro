@@ -1230,6 +1230,8 @@
     "noCapture": "No valid capture yet",
     "capabilityExpired": "Capability record expired",
     "perQuestion": "Per-question detail",
+    "perQuestionNote": "Each fixed question lists the numerator, denominator, and rate for mention, recommendation, official-site citation, and owned-page citation. A cell shows N/A when its denominator is 0, and the question stays in the table. Unknown samples stay in that metric's unknown count. They are not counted as no and are not treated as zero. Without an official website, official-site citation is not applicable and is not shown as 0%.",
+    "perQuestionUnknown": "Unknown {count}",
     "question": "Question",
     "samples": "Samples",
     "suggestions": "Priority suggestions and tasks",

@@ -58,6 +58,21 @@ export type OverviewMetrics = {
   sampleIds: string[];
 };
 
+export const overviewMetricKinds = ["mentioned", "recommended", "officialSiteCited", "ownedPageCited"] as const;
+
+export type QuestionMetricCell = {
+  numerator: number;
+  denominator: number;
+  rate: number | null;
+  unknown: number;
+};
+
+export type QuestionMetricRow = {
+  questionKey: string;
+  questionText: string;
+  cells: Record<MetricKind, QuestionMetricCell>;
+};
+
 const PRIMARY = primaryTypes;
 const OWNED = new Set(["owned_domain", "owned_account"]);
 
@@ -240,6 +255,37 @@ export function aggregateOverviewMetrics(samples: OverviewSample[]): OverviewMet
     metrics,
     sampleIds,
   };
+}
+
+const emptyQuestionCell = (): QuestionMetricCell => ({
+  numerator: 0,
+  denominator: 0,
+  rate: null,
+  unknown: 0,
+});
+
+/** Aligns one row per fixed question. A missing metric stays a zero-denominator cell. */
+export function questionMetricRows(metrics: Record<MetricKind, RateBreakdown>): QuestionMetricRow[] {
+  const indexes = new Map<MetricKind, Map<string, RateBreakdown["perQuestion"][number]>>();
+  const questions = new Map<string, string>();
+  for (const kind of overviewMetricKinds) {
+    const index = new Map<string, RateBreakdown["perQuestion"][number]>();
+    for (const row of metrics[kind].perQuestion) {
+      index.set(row.questionKey, row);
+      if (!questions.has(row.questionKey)) questions.set(row.questionKey, row.questionText);
+    }
+    indexes.set(kind, index);
+  }
+  return [...questions.keys()].sort((left, right) => left.localeCompare(right)).map((questionKey) => {
+    const cells = {} as Record<MetricKind, QuestionMetricCell>;
+    for (const kind of overviewMetricKinds) {
+      const row = indexes.get(kind)?.get(questionKey);
+      cells[kind] = row
+        ? { numerator: row.numerator, denominator: row.denominator, rate: row.rate, unknown: row.unknown }
+        : emptyQuestionCell();
+    }
+    return { questionKey, questionText: questions.get(questionKey) ?? questionKey, cells };
+  });
 }
 
 export type CoveragePlanSlot = {

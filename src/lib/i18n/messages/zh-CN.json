@@ -1230,6 +1230,8 @@
     "noCapture": "尚无有效采集",
     "capabilityExpired": "能力记录已过期",
     "perQuestion": "逐题明细",
+    "perQuestionNote": "每道固定题同时列出提及、推荐、官网引用和自有页引用的分子、分母和比率。分母为 0 时该格显示 N/A，题目仍保留。未知样本只计入该项的未知数，不并入否，也不当作 0。未登记官网时，官网引用不适用，不显示 0%。",
+    "perQuestionUnknown": "未知 {count}",
     "question": "问题",
     "samples": "样本数",
     "suggestions": "优先建议与任务",

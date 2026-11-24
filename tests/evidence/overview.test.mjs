@@ -17,6 +17,7 @@ import {
   filterSamplesByScope,
   latestCompleteCapture,
   ownedPageJudgement,
+  questionMetricRows,
   summarizeCoverage,
 } from "../../src/features/evidence/metrics.ts";
 import { readEvidenceOverview } from "../../src/features/evidence/overview-commands.ts";
@@ -118,6 +119,92 @@ test("AC-M0-07-2 equal-weight 75% and pooled 80% with five samples", () => {
   assert.equal(metrics.metrics.recommended.pooled.numerator, 4);
   assert.equal(metrics.metrics.recommended.pooled.denominator, 5);
   assert.ok(Math.abs((metrics.metrics.recommended.pooled.rate ?? 0) - 0.8) < 1e-9);
+});
+
+test("per-question rows keep four different fractions and a zero-denominator N/A cell", () => {
+  const samples = [
+    sample({
+      questionKey: "q1", questionText: "购买怎么选",
+      mentioned: "true", recommended: "true", officialSiteCited: "unknown", ownedPageCited: "true",
+    }),
+    sample({
+      questionKey: "q1", questionText: "购买怎么选",
+      mentioned: "true", recommended: "false", officialSiteCited: "unknown", ownedPageCited: "unknown",
+    }),
+    sample({
+      questionKey: "q2", questionText: "售后怎么保",
+      mentioned: "true", recommended: "true", officialSiteCited: "true", ownedPageCited: "false",
+    }),
+    sample({
+      questionKey: "q2", questionText: "售后怎么保",
+      mentioned: "false", recommended: "true", officialSiteCited: "true", ownedPageCited: "false",
+    }),
+    sample({
+      questionKey: "q2", questionText: "售后怎么保",
+      mentioned: "false", recommended: "true", officialSiteCited: "false", ownedPageCited: "false",
+    }),
+    sample({
+      questionKey: "q3", questionText: "安装是否复杂",
+      mentioned: "true", recommended: "unknown", officialSiteCited: "false", ownedPageCited: "false",
+    }),
+  ];
+  const metrics = aggregateOverviewMetrics(samples);
+  assert.ok(Math.abs((metrics.metrics.recommended.equalWeight ?? 0) - 0.75) < 1e-9);
+  assert.equal(metrics.metrics.recommended.pooled.numerator, 4);
+  assert.equal(metrics.metrics.recommended.pooled.denominator, 5);
+  assert.equal(metrics.metrics.recommended.coveredQuestions, 2);
+  assert.equal(metrics.metrics.recommended.fixedQuestions, 3);
+
+  const rows = questionMetricRows(metrics.metrics);
+  const byText = new Map(rows.map((row) => [row.questionText, row]));
+  assert.equal(rows.length, 3);
+
+  const first = byText.get("购买怎么选");
+  assert.deepEqual(first.cells.mentioned, { numerator: 2, denominator: 2, rate: 1, unknown: 0 });
+  assert.deepEqual(first.cells.recommended, { numerator: 1, denominator: 2, rate: 0.5, unknown: 0 });
+  assert.deepEqual(first.cells.officialSiteCited, { numerator: 0, denominator: 0, rate: null, unknown: 2 });
+  assert.deepEqual(first.cells.ownedPageCited, { numerator: 1, denominator: 1, rate: 1, unknown: 1 });
+
+  const second = byText.get("售后怎么保");
+  assert.deepEqual(second.cells.mentioned, { numerator: 1, denominator: 3, rate: 1 / 3, unknown: 0 });
+  assert.deepEqual(second.cells.recommended, { numerator: 3, denominator: 3, rate: 1, unknown: 0 });
+  assert.deepEqual(second.cells.officialSiteCited, { numerator: 2, denominator: 3, rate: 2 / 3, unknown: 0 });
+  assert.deepEqual(second.cells.ownedPageCited, { numerator: 0, denominator: 3, rate: 0, unknown: 0 });
+
+  const unknownRecommendation = byText.get("安装是否复杂");
+  assert.deepEqual(unknownRecommendation.cells.recommended, { numerator: 0, denominator: 0, rate: null, unknown: 1 });
+  assert.deepEqual(unknownRecommendation.cells.mentioned, { numerator: 1, denominator: 1, rate: 1, unknown: 0 });
+  assert.notEqual(unknownRecommendation.cells.recommended.denominator, 1);
+});
+
+test("missing official-site rows stay N/A and are not shown as zero", () => {
+  const metrics = aggregateOverviewMetrics([
+    sample({ hasOfficialWebsite: false, questionKey: "q1", questionText: "题1", recommended: "true", officialSiteCited: "false" }),
+  ]);
+  assert.equal(metrics.metrics.officialSiteCited.reason, "official-website-not-applicable");
+  assert.equal(metrics.metrics.officialSiteCited.equalWeight, null);
+  const [row] = questionMetricRows(metrics.metrics);
+  assert.equal(row.questionText, "题1");
+  assert.deepEqual(row.cells.officialSiteCited, { numerator: 0, denominator: 0, rate: null, unknown: 0 });
+  assert.equal(row.cells.recommended.denominator, 1);
+});
+
+test("answer-list filters do not enter the overview scope used by the per-question table", () => {
+  const parsed = overviewScopeFromSearch({
+    brandId: "11111111-1111-4111-8111-111111111111",
+    sourceMode: "model_api",
+    region: "CN",
+    q: "购买怎么选",
+    recommended: "unknown",
+    mentioned: "false",
+    cluster: "cluster-1",
+  });
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.data.region, "CN");
+  assert.equal(parsed.data.q, undefined);
+  assert.equal(parsed.data.recommended, undefined);
+  assert.equal(parsed.data.mentioned, undefined);
+  assert.equal(parsed.data.cluster, undefined);
 });
 
 test("qualified answer without plan slots keeps rates and marks coverage N/A", () => {

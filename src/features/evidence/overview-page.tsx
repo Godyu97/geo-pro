@@ -9,7 +9,7 @@ import { BrandDao } from "../brands/dao";
 import { Button } from "@/components/ui/button";
 import { TaskSummaryList } from "../optimization/task-summary.tsx";
 import { CollectionLine, CoverageCard, MetricCard } from "./metric-card.tsx";
-import type { RateBreakdown } from "./metrics.ts";
+import { questionMetricRows, type QuestionMetricCell, type RateBreakdown } from "./metrics.ts";
 import { readEvidenceOverview } from "./overview-commands";
 import { overviewScopeFromSearch, overviewScopePath } from "./overview-contracts";
 import { OverviewScopeForm } from "./scope-form";
@@ -17,6 +17,17 @@ import { OverviewScopeForm } from "./scope-form";
 function formatRate(locale: Locale, value: number | null) {
   if (value == null) return "N/A";
   return formatPercent(locale, value);
+}
+
+function formatQuestionCell(
+  locale: Locale,
+  cell: QuestionMetricCell,
+  unknownLabel: string,
+) {
+  const value = cell.denominator === 0
+    ? "N/A"
+    : `${formatNumber(locale, cell.numerator)}/${formatNumber(locale, cell.denominator)} (${formatRate(locale, cell.rate)})`;
+  return { value, unknownLabel: cell.unknown > 0 ? unknownLabel : null };
 }
 
 function metricLabels(
@@ -284,27 +295,39 @@ export default async function EvidenceOverviewPage({
             })}
           </div>
 
-          <section className="min-w-0 space-y-3">
-            <h2 className="break-words text-lg font-semibold">{t("perQuestion")}</h2>
-            <div className="max-w-full min-w-0 overflow-x-auto rounded-2xl border bg-card">
+          <section className="min-w-0 space-y-3" aria-labelledby="overview-per-question">
+            <h2 id="overview-per-question" className="break-words text-lg font-semibold">{t("perQuestion")}</h2>
+            <p className="max-w-3xl break-words text-sm leading-6 text-muted-foreground">{t("perQuestionNote")}</p>
+            <div id="overview-question-table" className="max-w-full min-w-0 overflow-x-auto rounded-2xl border bg-card">
               <table className="min-w-full text-left text-sm">
                 <thead className="bg-secondary/50 text-muted-foreground">
                   <tr>
-                    <th className="px-4 py-3 font-medium">{t("question")}</th>
-                    <th className="px-4 py-3 font-medium">{t("recommendRate")}</th>
-                    <th className="px-4 py-3 font-medium">{t("samples")}</th>
+                    <th scope="col" className="px-4 py-3 font-medium whitespace-nowrap">{t("question")}</th>
+                    {(["mentionRate", "recommendRate", "officialCiteRate", "ownedCiteRate"] as const).map((label) => (
+                      <th key={label} scope="col" className="px-4 py-3 font-medium whitespace-nowrap">{t(label)}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {overview.metrics.recommended.perQuestion.map((row) => (
+                  {questionMetricRows(overview.metrics).map((row) => (
                     <tr key={row.questionKey} className="border-t">
-                      <td className="wrap-anywhere px-4 py-3">{row.questionText}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {row.denominator === 0
-                          ? "N/A"
-                          : `${formatNumber(locale, row.numerator)}/${formatNumber(locale, row.denominator)} (${formatRate(locale, row.rate)})`}
-                      </td>
-                      <td className="px-4 py-3">{formatNumber(locale, row.sampleIds.length)}</td>
+                      <th scope="row" className="wrap-anywhere px-4 py-3 text-left font-normal">{row.questionText}</th>
+                      {(["mentioned", "recommended", "officialSiteCited", "ownedPageCited"] as const).map((kind) => {
+                        const cell = row.cells[kind];
+                        const formatted = formatQuestionCell(
+                          locale,
+                          cell,
+                          t("perQuestionUnknown", { count: formatNumber(locale, cell.unknown) }),
+                        );
+                        return (
+                          <td key={kind} className="px-4 py-3 whitespace-nowrap tabular-nums">
+                            <span>{formatted.value}</span>
+                            {formatted.unknownLabel ? (
+                              <span className="mt-1 block text-xs leading-5 text-muted-foreground">{formatted.unknownLabel}</span>
+                            ) : null}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
