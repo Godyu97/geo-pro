@@ -87,6 +87,20 @@ test("competitor analysis keeps the task, share table and recovery in the worksp
   assert.match(page, /saveSet/);
 });
 
+test("content batch keeps the next action and recovery in the workspace canvas", () => {
+  const batch = read("../../src/features/content/batch-page.tsx");
+  assert.doesNotMatch(batch, /<main\b/);
+  assert.match(batch, /batchTaskRetry/);
+  assert.match(batch, /batchTaskPaused/);
+  assert.match(batch, /batchUnavailable/);
+  assert.match(batch, /relatedEntries/);
+  assert.match(batch, /retry-failed/);
+  assert.match(batch, /canPause/);
+  assert.match(batch, /\[overflow-wrap:anywhere\]/);
+  assert.match(batch, /whitespace-normal/);
+  assert.doesNotMatch(batch, /attempts=/);
+});
+
 test("content brief keeps the next action and recovery in the workspace canvas", () => {
   const brief = read("../../src/features/content/brief-page.tsx");
   assert.doesNotMatch(brief, /<main\b/);

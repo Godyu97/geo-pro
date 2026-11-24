@@ -109,6 +109,23 @@ await writeFile(briefCommands, briefSource.replace(briefRead, `export async func
   }
   const dao = new ContentDao(db);`));
 
+const batchRead = `export async function readBatch(
+  db: DatabaseConnection,
+  ownerId: string,
+  batchId: string,
+) {
+  const dao = new ContentDao(db);`;
+assert.ok(briefSource.includes(batchRead));
+await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(batchRead, `export async function readBatch(
+  db: DatabaseConnection,
+  ownerId: string,
+  batchId: string,
+) {
+  if ((await (await import("next/headers")).cookies()).get("geo-content-batch-unavailable")?.value === "1") {
+    throw new Error("Private content batch fixture failure");
+  }
+  const dao = new ContentDao(db);`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
