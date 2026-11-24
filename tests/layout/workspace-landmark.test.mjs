@@ -114,6 +114,20 @@ test("content version keeps the next review action and recovery in the workspace
   assert.match(version, /whitespace-normal/);
 });
 
+test("content publication keeps the next check and recovery in the workspace canvas", () => {
+  const publication = read("../../src/features/content/publication-page.tsx");
+  assert.doesNotMatch(publication, /<main\b/);
+  assert.match(publication, /publicationTaskCheck/);
+  assert.match(publication, /publicationTaskLimited/);
+  assert.match(publication, /publicationTaskDraft/);
+  assert.match(publication, /publicationUnavailable/);
+  assert.match(publication, /relatedEntries/);
+  assert.match(publication, /runPublicCheck/);
+  assert.match(publication, /submitManualEvidence/);
+  assert.match(publication, /\[overflow-wrap:anywhere\]/);
+  assert.match(publication, /whitespace-normal/);
+});
+
 test("content brief keeps the next action and recovery in the workspace canvas", () => {
   const brief = read("../../src/features/content/brief-page.tsx");
   assert.doesNotMatch(brief, /<main\b/);

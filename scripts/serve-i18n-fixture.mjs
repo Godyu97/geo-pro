@@ -143,6 +143,23 @@ await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(v
   }
   const dao = new ContentDao(db);`));
 
+const publicationRead = `export async function readPublication(
+  db: DatabaseConnection,
+  ownerId: string,
+  publicationId: string,
+) {
+  const dao = new ContentDao(db);`;
+assert.ok((await readFile(briefCommands, "utf8")).includes(publicationRead));
+await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(publicationRead, `export async function readPublication(
+  db: DatabaseConnection,
+  ownerId: string,
+  publicationId: string,
+) {
+  if ((await (await import("next/headers")).cookies()).get("geo-content-publication-unavailable")?.value === "1") {
+    throw new Error("Private content publication fixture failure");
+  }
+  const dao = new ContentDao(db);`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
