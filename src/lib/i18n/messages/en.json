@@ -1095,6 +1095,7 @@
   },
   "evidence": {
     "title": "Answer evidence",
+    "detailLoading": "Loading answer evidence…",
     "description": "Inspect immutable answer text, citation completeness, and independent labels, and correct misjudgments.",
     "mockEvidenceNote": "Functional mock writes synthetic answers marked [FUNCTIONAL-MOCK] and one synthetic consumer record into the existing evidence contract. This is not provider text and not a real walkthrough.",
     "applyMockEvidence": "Write mock answer evidence",

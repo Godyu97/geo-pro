@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import postgres from "postgres";
 import { registerTestAccount } from "./auth-helpers";
 import { publishedRetentionVersion } from "./retention-version";
@@ -109,7 +109,13 @@ async function expectNoOverflow(page: Page) {
   expect(overflow).toBeNull();
 }
 
-test("answer list filters stay on the detail round trip in both locales", async ({ page, context }, testInfo) => {
+async function captureState(page: Page, testInfo: TestInfo, name: string) {
+  const path = testInfo.outputPath(`${name}.png`);
+  await page.screenshot({ path, animations: "disabled" });
+  await testInfo.attach(name, { path, contentType: "image/png" });
+}
+
+test("answer list filters and evidence detail recovery work in both locales", async ({ page, context, browser }, testInfo) => {
   test.setTimeout(120_000);
   page.setDefaultTimeout(20_000);
   const email = `answers-${randomBytes(8).toString("hex")}@example.invalid`;
@@ -195,10 +201,13 @@ test("answer list filters stay on the detail round trip in both locales", async 
       {
         locale: "zh-CN", title: "回答证据", related: "相关入口", back: "返回回答列表", raw: "回答原文",
         conditions: "采样条件", requested: "不要求联网", citations: "完整空引用（未引用）",
+        loading: "正在加载回答证据…", failure: "暂时无法读写证据，请稍后重试。", retry: "重新加载",
       },
       {
         locale: "en", title: "Answer evidence", related: "Related entries", back: "Back to answers", raw: "Answer text",
         conditions: "Sampling conditions", requested: "Network not requested", citations: "Complete empty citation set (not cited)",
+        loading: "Loading answer evidence…", failure: "Evidence is temporarily unavailable. Try again later.",
+        retry: "Reload",
       },
     ]) {
       if (view.locale === "en") {
@@ -212,16 +221,41 @@ test("answer list filters stay on the detail round trip in both locales", async 
       await expect(main.getByText(view.requested, { exact: true })).toBeVisible();
       await expect(main.getByText(view.citations, { exact: true })).toBeVisible();
       const back = main.getByRole("link", { name: view.back, exact: true });
+      const title = main.getByRole("heading", { level: 1, name: view.title, exact: true });
       for (const width of [375, 768, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         await page.evaluate(() => window.scrollTo(0, 0));
         await expect(back).toBeInViewport();
         await expectNoOverflow(page);
         if ((view.locale === "zh-CN" && width === 375) || (view.locale === "en" && width === 1440)) {
-          const screenshot = testInfo.outputPath(`evidence-${view.locale}-${width}.png`);
-          await page.screenshot({ path: screenshot, animations: "disabled" });
-          await testInfo.attach(`evidence-${view.locale}-${width}`, { path: screenshot, contentType: "image/png" });
+          await captureState(page, testInfo, `evidence-${view.locale}-${width}`);
         }
+
+        await context.addCookies([{ name: "geo-evidence-read", value: "slow-unavailable", url: baseURL }]);
+        await page.reload({ waitUntil: "commit" });
+        const loading = main.getByRole("status").filter({ hasText: view.loading });
+        await expect(loading).toBeInViewport();
+        await expect(title).toBeVisible();
+        await expectNoOverflow(page);
+        if (width === 375) await captureState(page, testInfo, `evidence-loading-${view.locale}-${width}`);
+
+        await expect(main.getByRole("alert")).toHaveText(view.failure);
+        await expect(title).toBeVisible();
+        await expect(main).not.toContainText("Private evidence fixture failure");
+        await expect(main.getByRole("region", { name: view.raw, exact: true })).toHaveCount(0);
+        const retry = main.getByRole("button", { name: view.retry, exact: true });
+        await expect(retry).toBeInViewport();
+        await expect(back).toHaveAttribute("href", "/dashboard/monitoring/answers");
+        await expectNoOverflow(page);
+        await context.clearCookies({ name: "geo-evidence-read" });
+        await back.focus();
+        await page.keyboard.press("Shift+Tab");
+        await expect(retry).toBeFocused();
+        expect(await retry.evaluate((button) => button.matches(":focus-visible"))).toBe(true);
+        if (width === 375) await captureState(page, testInfo, `evidence-failure-${view.locale}-${width}`);
+        await page.keyboard.press("Enter");
+        await expect(main.getByRole("heading", { name: view.conditions, exact: true })).toBeVisible();
+        await expect(page).toHaveURL(detailURL);
       }
       const raw = main.getByRole("region", { name: view.raw, exact: true }).locator("p");
       await expect.poll(() => raw.textContent()).toBe(installAnswer);
@@ -237,6 +271,53 @@ test("answer list filters stay on the detail round trip in both locales", async 
         await main.getByRole("link", { name: "查看证据", exact: true }).click();
       }
     }
+
+    const outsider = await browser.newContext({ baseURL });
+    const outsiderEmail = `evidence-outsider-${randomUUID()}@example.invalid`;
+    let outsiderId = "";
+    try {
+      const registered = await registerTestAccount(outsider, {
+        name: "Evidence outsider", email: outsiderEmail, password: randomBytes(24).toString("base64url"),
+      });
+      expect(registered.status()).toBe(200);
+      outsiderId = (await registered.json()).user.id as string;
+      const foreign = await outsider.newPage();
+      const missingURL = detailURL.replace(ids.install, randomUUID());
+      for (const [locale, title, unavailable, back] of [
+        ["zh-CN", "回答证据", "找不到该证据，或不属于你的品牌。", "返回回答列表"],
+        ["en", "Answer evidence", "Evidence was not found or does not belong to your brand.", "Back to answers"],
+      ]) {
+        await outsider.addCookies([{ name: "geo-locale", value: locale, url: baseURL }]);
+        const content = foreign.locator("main#main-content");
+        await foreign.goto(missingURL);
+        await expect(content.getByText(unavailable, { exact: true })).toBeVisible();
+        await foreign.goto(detailURL);
+        await expect(foreign.locator("html")).toHaveAttribute("lang", locale);
+        await expect(foreign.locator("main")).toHaveCount(1);
+        await expect(content.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
+        await expect(content.getByText(unavailable, { exact: true })).toBeVisible();
+        await expect(content).not.toContainText("如何安装这个设备");
+        await expect(content).not.toContainText(sha(ids.install));
+        const returnLink = content.getByRole("link", { name: back, exact: true });
+        for (const width of [1440, 768, 375]) {
+          await foreign.setViewportSize({ width, height: 900 });
+          await expect(returnLink).toBeInViewport();
+          await expectNoOverflow(foreign);
+        }
+        await returnLink.focus();
+        await foreign.keyboard.press("Tab");
+        await foreign.keyboard.press("Shift+Tab");
+        await expect(returnLink).toBeFocused();
+        expect(await returnLink.evaluate((link) => link.matches(":focus-visible"))).toBe(true);
+        await captureState(foreign, testInfo, `evidence-unavailable-${locale}-375`);
+        await foreign.keyboard.press("Enter");
+        await expect(foreign).toHaveURL(`${baseURL}/dashboard/monitoring/answers`);
+      }
+    } finally {
+      await outsider.close();
+      if (outsiderId) cleanupAccount(outsiderId, outsiderEmail);
+    }
+
     await page.getByLabel("Interface language", { exact: true }).selectOption("zh-CN");
     await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
     await expect(page).toHaveURL(new RegExp(`q=`));

@@ -1095,6 +1095,7 @@
   },
   "evidence": {
     "title": "回答证据",
+    "detailLoading": "正在加载回答证据…",
     "description": "查看不可变原文、引用完整性与独立判定，并可纠正误判。",
     "mockEvidenceNote": "功能性 mock 会把带 [FUNCTIONAL-MOCK] 的合成回答和一条合成消费者存证写入现有证据合同。这不是真实供应商原文，也不是真实走查。",
     "applyMockEvidence": "写入 mock 回答证据",

@@ -10,6 +10,7 @@ import { generateOptimizationAction } from "../optimization/actions";
 import { ActionDraftPanel } from "../optimization/draft-panel";
 import { AnalysisDraftPanel } from "./analysis-draft-form";
 import { readObservation } from "./commands";
+import { EvidenceDetailStatus } from "./detail-status";
 import { answerListFiltersFromSearch, answerListPath } from "./answer-list";
 import { overviewScopeForReturn, overviewScopePath } from "./overview-contracts";
 import { ReviseAnalysisForm } from "./revise-form";
@@ -36,7 +37,13 @@ export default async function EvidenceDetailPage({
   const t = await getTranslator("evidence");
   const overview = await getTranslator("evidenceOverview");
   const optimization = await getTranslator("optimization");
-  const detail = await readObservation(getConnection(), session.user.id, observationId);
+  let detail;
+  try {
+    detail = await readObservation(getConnection(), session.user.id, observationId);
+  } catch {
+    console.error("evidence-detail-read-unavailable");
+    return <EvidenceDetailStatus state="failed" />;
+  }
   if (!detail) notFound();
 
   const { observation, citations, analyses, latestAnalysis, citationPool, drafts, capture } = detail;

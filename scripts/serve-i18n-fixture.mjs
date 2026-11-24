@@ -79,6 +79,17 @@ await writeFile(brandService, (await readFile(brandService, "utf8")).replace(
   '    if ((await (await import("next/headers")).headers()).get("cookie")?.includes("geo-brands-slow=1")) await new Promise(resolve => setTimeout(resolve, 1500));\n    return { data: await read(new BrandDao(getConnection())) };',
 ));
 
+const evidenceCommands = path.join(fixture, "src/features/evidence/commands.ts");
+const evidenceSource = await readFile(evidenceCommands, "utf8");
+const evidenceRead = "  const observation = await dao.observationForOwner(ownerId, observationId);\n  if (!observation) return null;";
+assert.ok(evidenceSource.includes(evidenceRead));
+await writeFile(evidenceCommands, evidenceSource.replace(evidenceRead, `  const probe = (await (await import("next/headers")).cookies()).get("geo-evidence-read")?.value;
+  if (probe === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private evidence fixture failure");
+  }
+${evidenceRead}`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));
