@@ -298,6 +298,15 @@ await writeFile(syncAuthorizationsPage, syncAuthorizationsSource.replace(syncAut
     if (probe === "unavailable") throw new Error("Private sync authorizations fixture failure");
 ${syncAuthorizationLabels}`));
 
+const notificationsPage = path.join(fixture, "src/features/notification-endpoints/notifications-page.tsx");
+const notificationsSource = await readFile(notificationsPage, "utf8");
+const notificationLabels = "    const labels = await loadOwnedLabels(connection, workspace.brands.map((brand) => brand.id));";
+assert.ok(notificationsSource.includes(notificationLabels));
+await writeFile(notificationsPage, notificationsSource.replace(notificationLabels, `    const probe = (await (await import("next/headers")).cookies()).get("geo-notification-endpoints-read")?.value;
+    if (probe === "slow") await new Promise(resolve => setTimeout(resolve, 1800));
+    if (probe === "unavailable") throw new Error("Private notification endpoints fixture failure");
+${notificationLabels}`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";

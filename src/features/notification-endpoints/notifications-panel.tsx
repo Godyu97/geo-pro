@@ -1,11 +1,17 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { loginPath } from "@/lib/auth/return-to";
 import { useLocale } from "@/lib/i18n/client";
+import { formatDateTime } from "@/lib/i18n/format";
+import type { Locale } from "@/lib/i18n/locale";
 import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
 import {
@@ -15,33 +21,46 @@ import {
 } from "./contracts.ts";
 
 type Copy = Messages["notificationEndpoints"];
-type Translator = (key: keyof Copy) => string;
+type Translator = (key: keyof Copy, params?: Record<string, string | number>) => string;
+type Notice = NotificationEndpointError | "saved" | "revokedSaved" | "sent" | "notSent";
 
-const selectClass = "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm";
-const bodyClass = "min-h-24 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm";
+const path = "/dashboard/settings/notifications";
+const api = "/api/settings/notifications";
+const actionClass = "h-auto min-h-10 max-w-full py-2 whitespace-normal aria-disabled:opacity-50";
+const selectClass = "min-h-10 w-full min-w-0 scroll-mt-20 rounded-lg border border-input bg-transparent px-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm";
+const bodyClass = "min-h-24 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm";
 
-function noticeFrom(payload: unknown, t: Translator) {
-  if (!payload || typeof payload !== "object" || !("error" in payload)) return t("SERVICE_UNAVAILABLE");
+function isEndpointError(code: string): code is NotificationEndpointError {
+  return Object.hasOwn(notificationEndpointErrors, code);
+}
+
+function errorFrom(payload: unknown): NotificationEndpointError {
+  if (!payload || typeof payload !== "object" || !("error" in payload)) return "SERVICE_UNAVAILABLE";
   const error = payload.error;
-  if (!error || typeof error !== "object" || !("code" in error) || typeof error.code !== "string") return t("SERVICE_UNAVAILABLE");
-  return error.code in notificationEndpointErrors ? t(error.code as NotificationEndpointError) : t("SERVICE_UNAVAILABLE");
+  if (!error || typeof error !== "object" || !("code" in error) || typeof error.code !== "string") return "SERVICE_UNAVAILABLE";
+  return isEndpointError(error.code) ? error.code : "SERVICE_UNAVAILABLE";
 }
 
-function deliveryResult(payload: unknown) {
-  if (!payload || typeof payload !== "object" || !("endpoint" in payload)) return null;
-  const endpoint = payload.endpoint;
-  if (!endpoint || typeof endpoint !== "object" || !("deliveries" in endpoint)) return null;
-  const deliveries = endpoint.deliveries;
-  if (!Array.isArray(deliveries) || deliveries.length === 0) return null;
-  const last = deliveries[deliveries.length - 1];
-  if (!last || typeof last !== "object" || !("sent" in last) || typeof last.sent !== "boolean") return null;
-  return last.sent;
+function deliveryNotice(payload: unknown): Notice {
+  if (!payload || typeof payload !== "object" || !("delivery" in payload)) return "SERVICE_UNAVAILABLE";
+  const delivery = payload.delivery;
+  if (!delivery || typeof delivery !== "object" || !("sent" in delivery) || typeof delivery.sent !== "boolean") return "SERVICE_UNAVAILABLE";
+  return delivery.sent ? "sent" : "notSent";
 }
 
-export function NotificationsPanel({ brands, endpoints, labels, messages }: {
+function OperationNotice({ notice, t }: { notice: Notice | null; t: Translator }) {
+  return (
+    <div role="status">
+      {notice ? <p className={isEndpointError(notice) ? "text-sm leading-6 text-destructive" : "text-sm leading-6"}>{t(notice)}</p> : null}
+    </div>
+  );
+}
+
+export function NotificationsPanel({ brands, endpoints, labels, brandFieldId, messages }: {
   brands: { id: string }[];
   endpoints: NotificationEndpointView[];
   labels: { brandId: string; name: string }[];
+  brandFieldId: string;
   messages: Copy;
 }) {
   const { locale } = useLocale();
@@ -49,25 +68,29 @@ export function NotificationsPanel({ brands, endpoints, labels, messages }: {
   const labelFor = (brandId: string) => labels.find((label) => label.brandId === brandId)?.name ?? brandId;
 
   return (
-    <div className="min-w-0 space-y-6">
-      {brands.length === 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("noBrands")}</p> : (
-        <RegisterForm brands={brands} labelFor={labelFor} t={t} />
-      )}
-      {endpoints.length === 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("emptyEndpoints")}</p> : endpoints.map((endpoint) => (
-        <EndpointCard key={endpoint.id} endpoint={endpoint} label={labelFor(endpoint.brandId)} t={t} />
-      ))}
-    </div>
+    <>
+      <section aria-labelledby="notification-endpoint-records" className="min-w-0 space-y-3">
+        <h2 id="notification-endpoint-records" className="text-lg font-semibold">{t("recordsTitle")}</h2>
+        {endpoints.length === 0 ? (
+          <p className="rounded-xl border border-dashed bg-card p-4 text-sm leading-6 text-muted-foreground">{t("emptyEndpoints")}</p>
+        ) : endpoints.map((endpoint) => (
+          <EndpointCard key={endpoint.id} endpoint={endpoint} label={labelFor(endpoint.brandId)} locale={locale} t={t} />
+        ))}
+      </section>
+      {brands.length > 0 ? <RegisterForm brands={brands} brandFieldId={brandFieldId} labelFor={labelFor} t={t} /> : null}
+    </>
   );
 }
 
-function RegisterForm({ brands, labelFor, t }: {
+function RegisterForm({ brands, brandFieldId, labelFor, t }: {
   brands: { id: string }[];
+  brandFieldId: string;
   labelFor: (brandId: string) => string;
   t: Translator;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -77,7 +100,7 @@ function RegisterForm({ brands, labelFor, t }: {
     setPending(true);
     setNotice(null);
     try {
-      const response = await fetch("/api/settings/notifications", {
+      const response = await fetch(api, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -85,133 +108,176 @@ function RegisterForm({ brands, labelFor, t }: {
           label: String(data.get("label") ?? "").trim(),
         }),
       });
-      if (!response.ok) {
-        if (response.status === 401) {
-          window.location.replace(loginPath("/dashboard/settings/notifications", "session-required"));
-          return;
-        }
-        setNotice(noticeFrom(await response.json(), t));
+      if (response.status === 401) {
+        window.location.replace(loginPath(path, "session-required"));
         return;
       }
-      setNotice(t("saved"));
+      if (!response.ok) {
+        setNotice(errorFrom(await response.json()));
+        return;
+      }
+      setNotice("saved");
       form.reset();
       router.refresh();
     } catch {
-      setNotice(t("SERVICE_UNAVAILABLE"));
+      setNotice("SERVICE_UNAVAILABLE");
     } finally {
       setPending(false);
     }
   }
 
   return (
-    <form onSubmit={submit} className="min-w-0 space-y-4 rounded-xl border bg-card p-5">
-      <h2 className="font-medium">{t("register")}</h2>
-      {notice && <p role="status" className="text-sm leading-6">{notice}</p>}
-      <label className="block space-y-1 text-sm">
+    <form onSubmit={submit} aria-labelledby="notification-endpoint-registration" className="min-w-0 space-y-4 rounded-xl border bg-card p-4">
+      <h2 id="notification-endpoint-registration" className="text-lg font-semibold">{t("register")}</h2>
+      <label className="block min-w-0 space-y-1 text-sm">
         <span>{t("brand")}</span>
-        <select name="brandId" required className={selectClass} defaultValue={brands[0]?.id}>
+        <select id={brandFieldId} name="brandId" required className={selectClass} defaultValue={brands[0]?.id}>
           {brands.map((brand) => <option key={brand.id} value={brand.id}>{labelFor(brand.id)}</option>)}
         </select>
       </label>
-      <label className="block space-y-1 text-sm">
-        <span>{t("label")}</span>
-        <Input name="label" required maxLength={80} autoComplete="off" />
-        <span className="block text-muted-foreground">{t("labelHint")}</span>
-      </label>
-      <Button type="submit" disabled={pending}>{pending ? t("registering") : t("register")}</Button>
+      <div className="min-w-0 space-y-1 text-sm">
+        <label htmlFor="notification-endpoint-label">{t("label")}</label>
+        <Input id="notification-endpoint-label" name="label" required maxLength={80} autoComplete="off"
+          className="min-h-10" aria-describedby="notification-endpoint-label-hint" />
+        <p id="notification-endpoint-label-hint" className="text-muted-foreground">{t("labelHint")}</p>
+      </div>
+      <Button type="submit" aria-disabled={pending} className={actionClass}>{pending ? t("registering") : t("register")}</Button>
+      <OperationNotice notice={notice} t={t} />
     </form>
   );
 }
 
-function EndpointCard({ endpoint, label, t }: {
+function EndpointCard({ endpoint, label, locale, t }: {
   endpoint: NotificationEndpointView;
   label: string;
+  locale: Locale;
   t: Translator;
 }) {
   const router = useRouter();
-  const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [pending, setPending] = useState<"revoke" | "deliveries" | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const revokedOnClose = useRef(false);
+  const titleId = `notification-endpoint-${endpoint.id}`;
+  const revoked = endpoint.status === "revoked";
 
-  async function post(path: string, body: string, form?: HTMLFormElement) {
+  async function post(action: "revoke" | "deliveries", form?: HTMLFormElement) {
     if (pending) return;
-    setPending(true);
+    const body = form ? { body: String(new FormData(form).get("body") ?? "") } : {};
+    setPending(action);
     setNotice(null);
     try {
-      const response = await fetch(path, {
+      const response = await fetch(`${api}/${endpoint.id}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body,
+        body: JSON.stringify(body),
       });
-      if (!response.ok) {
-        if (response.status === 401) {
-          window.location.replace(loginPath("/dashboard/settings/notifications", "session-required"));
-          return;
-        }
-        setNotice(noticeFrom(await response.json(), t));
+      if (response.status === 401) {
+        window.location.replace(loginPath(path, "session-required"));
         return;
       }
-      const payload: unknown = await response.json();
-      const sent = deliveryResult(payload);
-      setNotice(sent === null ? t("saved") : sent ? t("sent") : t("notSent"));
-      form?.reset();
+      if (!response.ok) {
+        setNotice(errorFrom(await response.json()));
+        return;
+      }
+      if (action === "revoke") {
+        setNotice("revokedSaved");
+        revokedOnClose.current = true;
+        setConfirming(false);
+      } else {
+        setNotice(deliveryNotice(await response.json()));
+        form?.reset();
+      }
       router.refresh();
     } catch {
-      setNotice(t("SERVICE_UNAVAILABLE"));
+      setNotice("SERVICE_UNAVAILABLE");
     } finally {
-      setPending(false);
+      setPending(null);
     }
   }
 
   return (
-    <section className="min-w-0 space-y-4 rounded-xl border bg-card p-5">
+    <article aria-labelledby={titleId} className="min-w-0 space-y-4 rounded-xl border bg-card p-4">
       <div className="space-y-1">
-        <h2 className="font-medium break-words">{endpoint.label}</h2>
-        <p className="text-sm text-muted-foreground">{label}</p>
-        <p className="text-sm">{t("status")}: {endpoint.status === "verified" ? t("statusVerified") : t("statusRevoked")}</p>
+        <h3 id={titleId} ref={heading} tabIndex={-1}
+          className="scroll-mt-20 rounded-sm font-medium [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-ring">
+          {endpoint.label}
+        </h3>
+        <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">{label}</p>
       </div>
-      {notice && <p role="status" className="text-sm leading-6">{notice}</p>}
-      {endpoint.status === "revoked" ? <p className="text-sm leading-6 text-muted-foreground">{t("revokedNote")}</p> : (
-        <Button type="button" variant="outline" disabled={pending} onClick={() => void post(`/api/settings/notifications/${endpoint.id}/revoke`, "{}")}>
-          {t("revoke")}
-        </Button>
+      <dl className="space-y-1 text-sm">
+        <dt className="font-medium">{t("status")}</dt>
+        <dd><Badge variant={revoked ? "outline" : "secondary"}>{t(revoked ? "statusRevoked" : "statusVerified")}</Badge></dd>
+      </dl>
+      {revoked ? <p className="text-sm leading-6 text-muted-foreground">{t("revokedNote")}</p> : (
+        <Dialog open={confirming} onOpenChange={(open) => {
+          if (pending) return;
+          setNotice(null);
+          setConfirming(open);
+        }}>
+          <DialogTrigger asChild>
+            <Button type="button" variant="outline" aria-disabled={pending !== null} className={actionClass}>{t("revoke")}</Button>
+          </DialogTrigger>
+          <DialogContent showCloseButton={false} className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
+            onCloseAutoFocus={(event) => {
+              if (!revokedOnClose.current) return;
+              event.preventDefault();
+              heading.current?.focus();
+            }}>
+            <DialogHeader>
+              <DialogTitle>{t("revoke")}</DialogTitle>
+              <DialogDescription className="[overflow-wrap:anywhere]">{t("confirmDescription", { endpoint: endpoint.label })}</DialogDescription>
+            </DialogHeader>
+            <OperationNotice notice={notice} t={t} />
+            <DialogFooter className="flex-col">
+              <DialogClose asChild>
+                <Button type="button" variant="outline" aria-disabled={pending !== null} className={actionClass}>{t("cancel")}</Button>
+              </DialogClose>
+              <Button type="button" variant="destructive" aria-disabled={pending !== null} className={actionClass}
+                onClick={() => void post("revoke")}>
+                {pending === "revoke" ? t("registering") : t("confirmRevoke")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
-      <p className="text-sm leading-6 text-muted-foreground">{t("historyKept")}</p>
       <form
+        aria-label={t("requestDelivery")}
         className="space-y-3"
         onSubmit={(event) => {
           event.preventDefault();
-          const form = event.currentTarget;
-          const data = new FormData(form);
-          void post(
-            `/api/settings/notifications/${endpoint.id}/deliveries`,
-            JSON.stringify({ body: String(data.get("body") ?? "") }),
-            form,
-          );
+          void post("deliveries", event.currentTarget);
         }}
       >
-        <label className="block space-y-1 text-sm">
-          <span>{t("body")}</span>
-          <textarea name="body" required maxLength={400} className={bodyClass} autoComplete="off" />
-          <span className="block text-muted-foreground">{t("bodyHint")}</span>
-        </label>
-        <Button type="submit" disabled={pending}>{pending ? t("requesting") : t("requestDelivery")}</Button>
+        <div className="space-y-1 text-sm">
+          <label htmlFor={`${titleId}-body`}>{t("body")}</label>
+          <textarea id={`${titleId}-body`} name="body" required maxLength={400} className={bodyClass} autoComplete="off"
+            aria-describedby={`${titleId}-body-hint`} />
+          <p id={`${titleId}-body-hint`} className="text-muted-foreground">{t("bodyHint")}</p>
+        </div>
+        <Button type="submit" aria-disabled={pending !== null} className={actionClass}>
+          {pending === "deliveries" ? t("requesting") : t("requestDelivery")}
+        </Button>
       </form>
+      <OperationNotice notice={confirming ? null : notice} t={t} />
       <div className="space-y-2">
-        <h3 className="text-sm font-medium">{t("deliveries")}</h3>
-        <p className="text-sm leading-6 text-muted-foreground">{t("localOnly")}</p>
+        <h4 className="text-sm font-medium">{t("deliveries")}</h4>
         {endpoint.deliveries.length === 0 ? <p className="text-sm text-muted-foreground">{t("emptyDeliveries")}</p> : (
-          <ul className="space-y-3">
+          <ol className="space-y-3">
             {endpoint.deliveries.map((delivery) => (
               <li key={delivery.id} className="min-w-0 space-y-1 rounded-lg border p-3 text-sm">
-                <p>{delivery.sent ? t("sent") : t("notSent")}</p>
+                <Badge variant={delivery.sent ? "secondary" : "outline"}>{t(delivery.sent ? "sent" : "notSent")}</Badge>
                 <p>{delivery.bodyHasCustomerText ? t("customerText") : t("noCustomerText")}</p>
-                <p className="break-all">{t("bodyHash")}: <code>{delivery.bodyHash}</code></p>
-                <p className="text-muted-foreground">{t("createdAt")}: <time dateTime={delivery.createdAt}>{delivery.createdAt}</time></p>
+                <p className="[overflow-wrap:anywhere]">{t("bodyHash")} <code>{delivery.bodyHash}</code></p>
+                <p className="text-muted-foreground">
+                  {t("createdAt")} <time dateTime={delivery.createdAt}>{formatDateTime(locale, new Date(delivery.createdAt), "UTC")}</time> UTC
+                </p>
               </li>
             ))}
-          </ul>
+          </ol>
         )}
       </div>
-    </section>
+    </article>
   );
 }

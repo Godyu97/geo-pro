@@ -11,6 +11,7 @@ import {
   revokeNotificationEndpoint,
 } from "../../src/features/notification-endpoints/commands.ts";
 import {
+  notificationDeliveryListLimit,
   notificationEndpointErrors,
   registerNotificationEndpointSchema,
   requestNotificationDeliverySchema,
@@ -68,11 +69,13 @@ test("notification input rejects credentials and classifies customer text withou
 test("notification copy tells both locales that revocation stops the next send and customer text is not stored", async () => {
   const zhCN = JSON.parse(await readFile(new URL("../../src/lib/i18n/messages/zh-CN.json", import.meta.url)));
   const en = JSON.parse(await readFile(new URL("../../src/lib/i18n/messages/en.json", import.meta.url)));
-  for (const phrase of ["撤销", "停止发送", "历史", "客户原文", "customer text", "哈希", "原文", "本地允许", "访问令牌"]) {
-    assert.match(zhCN.notificationEndpoints.description, new RegExp(phrase));
-  }
-  for (const phrase of ["revok", "stop", "history", "客户原文", "customer text", "hash", "original", "locally allowed", "access token"]) {
-    assert.match(en.notificationEndpoints.description, new RegExp(phrase, "i"));
+  for (const [copy, revoked, refused, localOnly] of [
+    [zhCN.notificationEndpoints, /撤销.*停止.*历史/, /客户原文.*customer text.*拒绝.*仅保存正文哈希/, /不向外部通道发送/],
+    [en.notificationEndpoints, /revok.*stop.*history/i, /客户原文.*customer text.*refused.*only the hash/i, /nothing to external channels/],
+  ]) {
+    assert.match(copy.confirmDescription, revoked);
+    assert.match(copy.bodyHint, refused);
+    assert.match(copy.fixtureNote, localOnly);
   }
   assert.equal(zhCN.settings.openNotificationEndpoints.length > 0, true);
   assert.equal(en.settings.openNotificationEndpoints.length > 0, true);
@@ -182,6 +185,7 @@ for (const kind of ["sqlite", "postgresql"]) {
         const allowedWatch = watch(db);
         const allowed = await requestNotificationDelivery(allowedWatch.connection, owner, endpointId, { body: clean }, clock);
         const allowedRow = allowed.endpoint.deliveries.at(-1);
+        assert.deepEqual(allowed.delivery, allowedRow);
         assert.equal(allowedRow.sent, true);
         assert.equal(allowedRow.bodyHasCustomerText, false);
         assert.equal(allowedRow.bodyHash, hash(clean));
@@ -324,6 +328,22 @@ for (const kind of ["sqlite", "postgresql"]) {
           assert.doesNotMatch(endpointPlan, /Seq Scan on notification_endpoint/);
           assert.doesNotMatch(deliveryPlan, /Seq Scan on notification_delivery/);
         }
+
+        const older = "2026-11-23T09:00:00.000Z";
+        const history = Array.from({ length: notificationDeliveryListLimit }, () => randomUUID());
+        await queryWithParameters(db, `INSERT INTO notification_delivery (
+          id, endpoint_id, brand_id, owner_id, sent, body_has_customer_text, body_hash, created_at
+        ) VALUES ${history.map(() => "(?, ?, ?, ?, 1, 0, ?, ?)").join(", ")}`,
+        history.flatMap((id) => [id, endpointId, brand, owner, hex, older]));
+        const afterLimit = "another local reminder after revoking";
+        const limited = await requestNotificationDelivery(db, owner, endpointId, { body: afterLimit }, clock);
+        assert.equal(limited.endpoint.deliveries.length, notificationDeliveryListLimit);
+        assert.equal(limited.endpoint.deliveries.every((delivery) => delivery.sent), true);
+        assert.equal(limited.delivery.sent, false);
+        assert.equal(limited.delivery.bodyHash, hash(afterLimit));
+        const [newAttempt] = await queryWithParameters(db,
+          "SELECT sent, body_hash FROM notification_delivery WHERE id = ?", [limited.delivery.id]);
+        assert.deepEqual({ ...newAttempt }, { sent: 0, body_hash: hash(afterLimit) });
       } finally {
         await ddl.cleanup();
       }

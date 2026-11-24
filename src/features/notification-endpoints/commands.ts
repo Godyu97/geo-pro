@@ -20,6 +20,7 @@ import { classifyNoticeBody } from "./rules.ts";
 
 type Clock = () => string;
 type EndpointResult = { endpoint: NotificationEndpointView } | { error: "NOT_FOUND" | "INVALID_INPUT" };
+type DeliveryResult = { endpoint: NotificationEndpointView; delivery: NotificationDeliveryView } | { error: "NOT_FOUND" | "INVALID_INPUT" };
 type RegisterResult = { endpoint: NotificationEndpointView } | { error: "NOT_FOUND" | "INVALID_INPUT" };
 
 const systemClock: Clock = () => new Date().toISOString();
@@ -131,7 +132,7 @@ export async function requestNotificationDelivery(
   endpointId: string,
   input: unknown,
   clock: Clock = systemClock,
-): Promise<EndpointResult> {
+): Promise<DeliveryResult> {
   const parsed = requestNotificationDeliverySchema.safeParse(input);
   if (!parsed.success) return { error: "INVALID_INPUT" };
   return db.transaction(async (tx) => {
@@ -143,8 +144,7 @@ export async function requestNotificationDelivery(
       revoked: endpoint.status === "revoked",
       bodyHasCustomerText: classified.bodyHasCustomerText,
     });
-    const now = clock();
-    await dao.insertDelivery({
+    const delivery: NotificationDeliveryRecord = {
       id: randomUUID(),
       endpointId: endpoint.id,
       brandId: endpoint.brandId,
@@ -152,9 +152,10 @@ export async function requestNotificationDelivery(
       sent: bit(decision.send && !decision.historyDeleted),
       bodyHasCustomerText: bit(classified.bodyHasCustomerText),
       bodyHash: classified.bodyHash,
-      createdAt: now,
-    });
+      createdAt: clock(),
+    };
+    await dao.insertDelivery(delivery);
     const deliveries = await dao.deliveriesForEndpoint(ownerId, endpoint.id);
-    return { endpoint: toEndpoint(endpoint, deliveries) };
+    return { endpoint: toEndpoint(endpoint, deliveries), delivery: toDelivery(delivery) };
   });
 }
