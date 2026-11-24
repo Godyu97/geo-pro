@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +10,11 @@ import {
   exportChannelVariantAction,
   saveChannelVariantAction,
 } from "./actions";
+
+export type ChannelVariantNext = {
+  kind: "empty" | "diverged" | "unapproved" | "export" | "master" | "blocked" | "readonly";
+  channel: string;
+};
 
 export type ChannelVariantView = {
   id: string;
@@ -55,16 +61,82 @@ type Copy = {
   errors: Record<string, string>;
 };
 
-const inputClass = "h-10 w-full rounded-md border bg-background px-3";
-const areaClass = "w-full rounded-md border bg-background px-3 py-2";
+const inputClass = "h-10 w-full min-w-0 max-w-full rounded-md border bg-background px-3";
+const areaClass = "w-full min-w-0 max-w-full overflow-x-auto rounded-md border bg-background px-3 py-2";
+const buttonClass = "h-auto max-w-full whitespace-normal";
 
 // Locale refresh replaces server copy but must not remount this editor.
 // The map keeps unsubmitted bodies if the client tree is reconciled again.
 const draftMemory = new Map<string, { channel: string; drafts: Record<string, string>; pins: Record<string, string> }>();
 
+export function ChannelVariantPrimary({
+  next,
+  brandId,
+  versionId,
+  versionHref,
+  className,
+  copy,
+}: {
+  next: ChannelVariantNext;
+  brandId: string;
+  versionId: string;
+  versionHref: string;
+  className: string;
+  copy: { save: string; approve: string; export: string; back: string; errors: Record<string, string> };
+}) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (next.kind === "empty" || next.kind === "diverged") {
+    return <Button type="submit" form="channel-variant-form" className={className}>{copy.save}</Button>;
+  }
+  if (next.kind === "master" || next.kind === "blocked" || next.kind === "readonly") {
+    return (
+      <Button asChild className={className}>
+        <Link href={versionHref} prefetch={false}>{copy.back}</Link>
+      </Button>
+    );
+  }
+  const action = next.kind === "unapproved" ? approveChannelVariantAction : exportChannelVariantAction;
+  const label = next.kind === "unapproved" ? copy.approve : copy.export;
+  return (
+    <div className="min-w-0 space-y-2">
+      <Button
+        type="button"
+        className={className}
+        disabled={pending || next.channel.length === 0}
+        onClick={() => {
+          if (pending) return;
+          setPending(true);
+          setError(null);
+          const formData = new FormData();
+          formData.set("brandId", brandId);
+          formData.set("versionId", versionId);
+          formData.set("channel", next.channel);
+          void action(formData).then((result) => {
+            if (!result.ok) {
+              setError(copy.errors[result.error] ?? copy.errors.INVALID_INPUT ?? result.error);
+              return;
+            }
+            router.refresh();
+          }).catch(() => {
+            setError(copy.errors.SERVICE_UNAVAILABLE ?? copy.errors.INVALID_INPUT ?? "");
+          }).finally(() => {
+            setPending(false);
+          });
+        }}
+      >
+        {label}
+      </Button>
+      {error ? <p role="alert" className="break-words text-sm text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
 export function ChannelVariantEditor({
   versionId,
   brandId,
+  next,
   variants,
   profiles,
   readOnly,
@@ -72,6 +144,7 @@ export function ChannelVariantEditor({
 }: {
   versionId: string;
   brandId: string;
+  next: ChannelVariantNext;
   variants: ChannelVariantView[];
   profiles: ProfileOption[];
   readOnly: boolean;
@@ -81,7 +154,7 @@ export function ChannelVariantEditor({
   const serverDrafts = Object.fromEntries(variants.map((item) => [item.channel, item.bodyMarkdown]));
   const serverPins = Object.fromEntries(variants.flatMap((item) => item.channelProfileVersionId ? [[item.channel, item.channelProfileVersionId]] : []));
   const remembered = draftMemory.get(versionId);
-  const initialChannel = remembered?.channel ?? variants[0]?.channel ?? "";
+  const initialChannel = remembered?.channel ?? (next.channel || variants[0]?.channel || "");
   const [channel, setChannel] = useState(initialChannel);
   const [drafts, setDrafts] = useState<Record<string, string>>(remembered?.drafts ?? serverDrafts);
   const [pins, setPins] = useState<Record<string, string>>(remembered?.pins ?? serverPins);
@@ -154,15 +227,21 @@ export function ChannelVariantEditor({
     }
   }
 
+  const primarySaves = next.kind === "empty" || next.kind === "diverged";
+  const showSecondaryApprove = Boolean(saved)
+    && next.kind !== "unapproved"
+    && saved?.rejection != null
+    && saved.rejection !== "channel_blocked";
+
   return (
-    <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">{copy.hint}</p>
-      {variants.length === 0 ? <p className="text-sm text-muted-foreground">{copy.empty}</p> : (
-        <ul className="space-y-3">
+    <div className="min-w-0 max-w-full space-y-6">
+      <p className="max-w-2xl break-words text-sm leading-6 text-muted-foreground">{copy.hint}</p>
+      {variants.length === 0 ? <p className="rounded-xl border border-dashed px-4 py-5 text-sm leading-6 text-muted-foreground">{copy.empty}</p> : (
+        <ul className="min-w-0 space-y-3">
           {variants.map((item) => (
-            <li key={item.id} className="rounded-2xl border p-4 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <button type="button" className="font-medium underline-offset-4 hover:underline" onClick={() => updateChannel(item.channel)}>
+            <li key={item.id} className="min-w-0 rounded-2xl border bg-card p-4 text-sm">
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                <button type="button" className="max-w-full break-all text-left font-medium underline-offset-4 hover:underline" onClick={() => updateChannel(item.channel)}>
                   {item.channel}
                 </button>
                 <span>{item.approvalStatus === "approved" ? copy.approved : copy.draft}</span>
@@ -180,7 +259,8 @@ export function ChannelVariantEditor({
       )}
 
       <form
-        className="grid gap-3 rounded-2xl border p-5"
+        id="channel-variant-form"
+        className="grid min-w-0 max-w-full gap-3 rounded-2xl border bg-card p-5"
         onSubmit={(event) => {
           event.preventDefault();
           void run(saveChannelVariantAction, "save");
@@ -240,18 +320,21 @@ export function ChannelVariantEditor({
         </p>
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
         {feedback ? <p role="status" className="text-sm">{feedback}</p> : null}
-        {readOnly ? null : (
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" disabled={pending}>{copy.save}</Button>
-            <Button type="button" variant="outline" disabled={pending || !saved} onClick={() => void run(approveChannelVariantAction, "approve")}>
-              {copy.approve}
-            </Button>
-            <Button type="button" variant="outline" disabled={pending || !saved} onClick={() => void run(blockChannelVariantAction, "block")}>
-              {copy.block}
-            </Button>
-            <Button type="button" variant="secondary" disabled={pending || !saved} onClick={() => void run(exportChannelVariantAction, "export")}>
-              {copy.export}
-            </Button>
+        {readOnly || (!primarySaves && !showSecondaryApprove && !saved) ? null : (
+          <div className="flex min-w-0 flex-wrap gap-2">
+            {primarySaves ? null : (
+              <Button type="submit" disabled={pending} className={buttonClass}>{copy.save}</Button>
+            )}
+            {showSecondaryApprove ? (
+              <Button type="button" variant="outline" disabled={pending || !saved} className={buttonClass} onClick={() => void run(approveChannelVariantAction, "approve")}>
+                {copy.approve}
+              </Button>
+            ) : null}
+            {saved ? (
+              <Button type="button" variant="outline" disabled={pending} className={buttonClass} onClick={() => void run(blockChannelVariantAction, "block")}>
+                {copy.block}
+              </Button>
+            ) : null}
           </div>
         )}
       </form>

@@ -114,6 +114,22 @@ test("content version keeps the next review action and recovery in the workspace
   assert.match(version, /whitespace-normal/);
 });
 
+test("channel variants keep the next approval action and recovery in the workspace canvas", () => {
+  const page = read("../../src/features/content/channel-variants-page.tsx");
+  assert.doesNotMatch(page, /<main\b/);
+  assert.match(page, /channelVariantTaskDiverged/);
+  assert.match(page, /channelVariantTaskUnapproved/);
+  assert.match(page, /channelVariantTaskExport/);
+  assert.match(page, /channelVariantTaskBlocked/);
+  assert.match(page, /channelVariantUnavailable/);
+  assert.match(page, /relatedEntries/);
+  assert.match(page, /saveChannelVariant/);
+  assert.match(page, /approveChannelVariant/);
+  assert.match(page, /exportChannelVariant/);
+  assert.match(page, /\[overflow-wrap:anywhere\]/);
+  assert.match(page, /whitespace-normal/);
+});
+
 test("content calendar keeps the next maintenance action and recovery in the workspace canvas", () => {
   const calendar = read("../../src/features/content/calendar-page.tsx");
   assert.doesNotMatch(calendar, /<main\b/);

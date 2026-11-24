@@ -178,6 +178,23 @@ await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(p
   }
   const dao = new ContentDao(db);`));
 
+const variantRead = `export async function readChannelVariants(
+  db: DatabaseConnection,
+  ownerId: string,
+  versionId: string,
+) {
+  const dao = new ContentDao(db);`;
+assert.ok((await readFile(briefCommands, "utf8")).includes(variantRead));
+await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(variantRead, `export async function readChannelVariants(
+  db: DatabaseConnection,
+  ownerId: string,
+  versionId: string,
+) {
+  if ((await (await import("next/headers")).cookies()).get("geo-content-variant-unavailable")?.value === "1") {
+    throw new Error("Private channel variant fixture failure");
+  }
+  const dao = new ContentDao(db);`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
