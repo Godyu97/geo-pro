@@ -14,6 +14,9 @@ import { answerListFiltersFromSearch, answerListPath } from "./answer-list";
 import { overviewScopeForReturn, overviewScopePath } from "./overview-contracts";
 import { ReviseAnalysisForm } from "./revise-form";
 
+const panelClass = "min-w-0 space-y-3 rounded-2xl border bg-card p-4 sm:p-5";
+const returnActionClass = "h-auto min-h-10 max-w-full px-3 py-2 text-left whitespace-normal";
+
 export async function generateMetadata() {
   const t = await getTranslator("evidence");
   return { title: t("title"), robots: { index: false, follow: false } };
@@ -65,24 +68,42 @@ export default async function EvidenceDetailPage({
       : t("costPending");
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+    <div className="min-w-0 space-y-6">
+      <header className="min-w-0 space-y-3">
+        <h1 className="wrap-anywhere text-2xl font-semibold tracking-tight">{t("title")}</h1>
+        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+        <nav aria-label={overview("relatedEntries")} className="flex flex-wrap gap-2">
+          <Button asChild className={returnActionClass}>
+            <Link href={answersHref} prefetch={false}>{overview("backAnswers")}</Link>
+          </Button>
+          <Button asChild variant="outline" className={returnActionClass}>
+            <Link href={overviewHref} prefetch={false}>{overview("backOverview")}</Link>
+          </Button>
+        </nav>
+      </header>
+      <div className={panelClass}>
+        <section className="space-y-2">
+          <h2 className="font-semibold">{t("question")}</h2>
+          <p className="wrap-anywhere text-sm leading-6">{observation.questionText}</p>
+        </section>
+        <section aria-labelledby="answer-text-heading" className="space-y-2">
+          <h2 id="answer-text-heading" className="font-semibold">{t("rawAnswer")}</h2>
+          <p className="wrap-anywhere whitespace-pre-wrap rounded-lg border bg-background p-3 text-sm leading-6">{observation.answerText}</p>
+        </section>
+        <dl className="grid gap-3 text-sm sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+          <div>
+            <dt className="text-muted-foreground">{t("evidenceState")}</dt>
+            <dd>{t(observation.evidenceState)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">{t("fingerprint")}</dt>
+            <dd className="wrap-anywhere">{observation.fingerprint}</dd>
+          </div>
+        </dl>
       </div>
-      <dl className="grid gap-3 text-sm sm:grid-cols-2">
-        <div>
-          <dt className="text-muted-foreground">{t("evidenceState")}</dt>
-          <dd>{t(observation.evidenceState)}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">{t("fingerprint")}</dt>
-          <dd className="break-all">{observation.fingerprint}</dd>
-        </div>
-      </dl>
-      <section className="space-y-2">
-        <h2 className="font-medium">{t("samplingConditions")}</h2>
-        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+      <section className={panelClass}>
+        <h2 className="font-semibold">{t("samplingConditions")}</h2>
+        <dl className="grid gap-3 text-sm wrap-anywhere sm:grid-cols-2">
           <div>
             <dt className="text-muted-foreground">{t("targetRegion")}</dt>
             <dd>{observation.targetRegion}</dd>
@@ -113,32 +134,26 @@ export default async function EvidenceDetailPage({
           </div>
         </dl>
       </section>
-      <section className="space-y-2">
-        <h2 className="font-medium">{t("question")}</h2>
-        <p className="wrap-anywhere text-sm">{observation.questionText}</p>
-      </section>
-      <section className="space-y-2">
-        <h2 className="font-medium">{t("rawAnswer")}</h2>
-        <p className="wrap-anywhere whitespace-pre-wrap rounded-lg border p-3 text-sm">{observation.answerText}</p>
-      </section>
-      <section className="space-y-2">
-        <h2 className="font-medium">{t("citationPool")}</h2>
-        <p className="text-sm">
+      <section className={panelClass}>
+        <h2 className="font-semibold">{t("citationPool")}</h2>
+        <p className="wrap-anywhere text-sm">
           {citationPool.inC
             ? citationPool.cited
               ? t("cited")
               : t("notCited")
             : t("notInC", { reason: citationPool.reason ?? observation.citationSetState })}
         </p>
-        <ul className="space-y-2 text-sm">
-          {citations.map((item) => (
-            <li key={item.id} className="rounded-lg border p-3 wrap-anywhere">
-              <p>{item.citationOrigin}</p>
-              <p>{item.normalizedUrl}</p>
-              <p>{item.ownership} · {item.pageStatus}</p>
-            </li>
-          ))}
-        </ul>
+        {citations.length > 0 && (
+          <ul className="space-y-2 text-sm">
+            {citations.map((item) => (
+              <li key={item.id} className="wrap-anywhere rounded-lg border p-3">
+                <p>{item.citationOrigin}</p>
+                <p>{item.normalizedUrl}</p>
+                <p>{item.ownership} · {item.pageStatus}</p>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
       <AnalysisDraftPanel
         locale={locale}
@@ -148,11 +163,11 @@ export default async function EvidenceDetailPage({
         messages={getMessages(locale).evidence}
       />
       {latestAnalysis && (
-        <section className="space-y-2">
-          <h2 className="font-medium">{t("analysisHistory")}</h2>
+        <section className={panelClass}>
+          <h2 className="font-semibold">{t("analysisHistory")}</h2>
           <ul className="space-y-2 text-sm">
             {analyses.map((item) => (
-              <li key={item.id} className="rounded-lg border p-3">
+              <li key={item.id} className="wrap-anywhere rounded-lg border p-3">
                 <p>{t("version", { version: item.version })} · {item.status}</p>
                 <p>{t("mentioned")}: {label(item.mentioned)}</p>
                 <p>{t("recommended")}: {label(item.recommended)}</p>
@@ -189,17 +204,9 @@ export default async function EvidenceDetailPage({
         <form action={generateOptimizationAction} className="rounded-2xl border px-4 py-4">
           <input type="hidden" name="brandId" value={observation.brandId} />
           <input type="hidden" name="observationId" value={observation.id} />
-          <Button type="submit">{t("generateOptimization")}</Button>
+          <Button type="submit" className="h-auto max-w-full text-left whitespace-normal">{t("generateOptimization")}</Button>
         </form>
       ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Button asChild variant="outline">
-          <Link href={answersHref} prefetch={false}>{overview("backAnswers")}</Link>
-        </Button>
-        <Button asChild variant="outline">
-          <Link href={overviewHref} prefetch={false}>{overview("backOverview")}</Link>
-        </Button>
-      </div>
     </div>
   );
 }

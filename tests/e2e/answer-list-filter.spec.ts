@@ -9,6 +9,7 @@ const baseURL = "http://localhost:3100";
 const day = "2026-11-20T08:00:00.000Z";
 const from = "2026-11-20T00:00:00.000Z";
 const to = "2026-11-20T23:59:59.999Z";
+const installAnswer = `按说明书固定\n${"fixture-installation-reference-".repeat(16)}`;
 
 function localDatabaseURL() {
   const databaseURL = process.env.DATABASE_URL;
@@ -67,7 +68,7 @@ async function insertListFixture(input: {
         ${JSON.stringify(content)}, ${day}
       )`;
     const rows = [
-      { id: input.ids.install, questionText: "如何安装这个设备", answerText: "按说明书固定", mentioned: "true", recommended: "true", officialSiteCited: "false" },
+      { id: input.ids.install, questionText: "如何安装这个设备", answerText: installAnswer, mentioned: "true", recommended: "true", officialSiteCited: "false" },
       { id: input.ids.maintain, questionText: "日常维护怎么做", answerText: "定期清洁", mentioned: "true", recommended: "false", officialSiteCited: "true" },
       { id: input.ids.budget, questionText: "预算大概多少", answerText: "暂无明确报价", mentioned: "true", recommended: "unknown", officialSiteCited: "false" },
       { id: input.ids.parts, questionText: "配件是否通用", answerText: "需要核对密封圈型号", mentioned: "unknown", recommended: "true", officialSiteCited: "unknown" },
@@ -108,7 +109,7 @@ async function expectNoOverflow(page: Page) {
   expect(overflow).toBeNull();
 }
 
-test("answer list filters stay on the detail round trip in both locales", async ({ page, context }) => {
+test("answer list filters stay on the detail round trip in both locales", async ({ page, context }, testInfo) => {
   test.setTimeout(120_000);
   page.setDefaultTimeout(20_000);
   const email = `answers-${randomBytes(8).toString("hex")}@example.invalid`;
@@ -188,7 +189,56 @@ test("answer list filters stay on the detail round trip in both locales", async 
     await expect(page).toHaveURL(new RegExp(`/evidence/${ids.install}`));
     await expect(page).toHaveURL(/q=/);
     await expect(page).toHaveURL(/region=CN/);
-    await page.getByRole("link", { name: "返回回答列表", exact: true }).click();
+    const detailURL = page.url();
+    const main = page.locator("main#main-content");
+    for (const view of [
+      {
+        locale: "zh-CN", title: "回答证据", related: "相关入口", back: "返回回答列表", raw: "回答原文",
+        conditions: "采样条件", requested: "不要求联网", citations: "完整空引用（未引用）",
+      },
+      {
+        locale: "en", title: "Answer evidence", related: "Related entries", back: "Back to answers", raw: "Answer text",
+        conditions: "Sampling conditions", requested: "Network not requested", citations: "Complete empty citation set (not cited)",
+      },
+    ]) {
+      if (view.locale === "en") {
+        await page.getByLabel("界面语言", { exact: true }).selectOption("en");
+      }
+      await expect(page.locator("html")).toHaveAttribute("lang", view.locale);
+      await expect(page).toHaveURL(detailURL);
+      await expect(page.locator("main")).toHaveCount(1);
+      await expect(main.getByRole("heading", { name: view.title, exact: true })).toBeVisible();
+      await expect(main.getByRole("heading", { name: view.conditions, exact: true })).toBeVisible();
+      await expect(main.getByText(view.requested, { exact: true })).toBeVisible();
+      await expect(main.getByText(view.citations, { exact: true })).toBeVisible();
+      const back = main.getByRole("link", { name: view.back, exact: true });
+      for (const width of [375, 768, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await expect(back).toBeInViewport();
+        await expectNoOverflow(page);
+        if ((view.locale === "zh-CN" && width === 375) || (view.locale === "en" && width === 1440)) {
+          const screenshot = testInfo.outputPath(`evidence-${view.locale}-${width}.png`);
+          await page.screenshot({ path: screenshot, animations: "disabled" });
+          await testInfo.attach(`evidence-${view.locale}-${width}`, { path: screenshot, contentType: "image/png" });
+        }
+      }
+      const raw = main.getByRole("region", { name: view.raw, exact: true }).locator("p");
+      await expect.poll(() => raw.textContent()).toBe(installAnswer);
+      await expect(main.getByRole("navigation", { name: view.related, exact: true }).getByRole("link").first()).toHaveText(view.back);
+      await back.focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(back).toBeFocused();
+      expect(await back.evaluate((link) => link.matches(":focus-visible"))).toBe(true);
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL(new RegExp(`#answer-${ids.install}$`));
+      if (view.locale === "zh-CN") {
+        await main.getByRole("link", { name: "查看证据", exact: true }).click();
+      }
+    }
+    await page.getByLabel("Interface language", { exact: true }).selectOption("zh-CN");
+    await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
     await expect(page).toHaveURL(new RegExp(`q=`));
     await expect(page).toHaveURL(/region=CN/);
     await expect(page).toHaveURL(/requestedNetworkMode=off/);
