@@ -280,6 +280,15 @@ await writeFile(connectorEventsPage, connectorEventsSource.replace(connectorEven
     if (probe === "unavailable") throw new Error("Private connector events fixture failure");
 ${connectorEventLabels}`));
 
+const dataConnectionsPage = path.join(fixture, "src/features/data-connections/preview-page.tsx");
+const dataConnectionsSource = await readFile(dataConnectionsPage, "utf8");
+const dataConnectionLabels = "    const labels = await loadOwnedLabels(connection, workspace.brands.map((brand) => brand.id));";
+assert.ok(dataConnectionsSource.includes(dataConnectionLabels));
+await writeFile(dataConnectionsPage, dataConnectionsSource.replace(dataConnectionLabels, `    const probe = (await (await import("next/headers")).cookies()).get("geo-data-connections-read")?.value;
+    if (probe === "slow") await new Promise(resolve => setTimeout(resolve, 1800));
+    if (probe === "unavailable") throw new Error("Private data connections fixture failure");
+${dataConnectionLabels}`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";

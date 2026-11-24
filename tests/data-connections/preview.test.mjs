@@ -63,8 +63,8 @@ test("data connection copy shows preview and approved states in both languages",
   assert.equal(en.dataConnections.statusApproved, "Approved");
   assert.equal(zhCN.settings.openDataConnections.length > 0, true);
   assert.equal(en.settings.openDataConnections.length > 0, true);
-  const page = await readFile(new URL("../../src/features/data-connections/preview-page.tsx", import.meta.url), "utf8");
-  assert.equal(page.includes("statusPreview") && page.includes("statusApproved"), true);
+  const panel = await readFile(new URL("../../src/features/data-connections/preview-panel.tsx", import.meta.url), "utf8");
+  assert.equal(panel.includes("statusPreview") && panel.includes("statusApproved"), true);
 });
 
 function watch(db) {
