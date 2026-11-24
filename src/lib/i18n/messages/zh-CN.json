@@ -1928,6 +1928,8 @@
     "noBrand": "先完成一个活跃品牌的建档，再查看质量提醒。",
     "openBrand": "去建档",
     "backOverview": "返回监测概览",
+    "relatedEntries": "相关入口",
+    "backPlans": "返回采样计划",
     "empty": "还没有质量提醒。覆盖不足时只提示数据质量，不会宣称品牌表现下滑。",
     "inAppOnly": "这些提醒只在站内显示，不会发送邮件或 Webhook。",
     "kindDataQuality": "数据质量",

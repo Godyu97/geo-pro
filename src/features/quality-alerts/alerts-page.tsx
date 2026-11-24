@@ -11,6 +11,10 @@ import { listQualityAlerts } from "./commands";
 import type { QualityAlertView } from "./commands";
 
 const knownErrors = ["NOT_FOUND", "INVALID_INPUT", "ALERT_STATE_CONFLICT"] as const;
+const linkClass = "inline-flex min-h-10 min-w-0 max-w-full items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 break-words outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const panelClass = "min-w-0 space-y-3 rounded-2xl border bg-card p-4 sm:p-5";
+const emptyClass = "min-w-0 rounded-2xl border border-dashed bg-card px-4 py-8 text-sm leading-7 break-words text-muted-foreground";
+const actionClass = "h-auto min-h-9 max-w-full whitespace-normal";
 
 function isKnownError(value: string | undefined): value is (typeof knownErrors)[number] {
   return knownErrors.some((code) => code === value);
@@ -51,77 +55,87 @@ export default async function QualityAlertsPage({
     mode_changed: t("reasonMode"),
     recommendation_drop: t("reasonTrend"),
   } as const;
+  const related = (
+    <nav aria-label={t("relatedEntries")} className="flex min-w-0 flex-wrap gap-2">
+      <Link href="/dashboard/monitoring/plans" prefetch={false} className={linkClass}>{t("backPlans")}</Link>
+      <Link href="/dashboard/monitoring/overview" prefetch={false} className={linkClass}>{t("backOverview")}</Link>
+    </nav>
+  );
 
   if (!active) {
     return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>
-        <Button asChild><Link href="/dashboard/brands" prefetch={false}>{t("openBrand")}</Link></Button>
+      <div className="min-w-0 space-y-6">
+        <header className="min-w-0 space-y-3">
+          <h1 className="text-2xl font-semibold tracking-tight wrap-anywhere">{t("title")}</h1>
+          <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>
+          {related}
+        </header>
+        <Button asChild className={actionClass}>
+          <Link href="/dashboard/brands" prefetch={false}>{t("openBrand")}</Link>
+        </Button>
       </div>
     );
   }
 
   const listed = await listQualityAlerts(connection, session.user.id, active.id);
+  const failed = "error" in listed ? listed.error : undefined;
   const alerts: QualityAlertView[] = "error" in listed ? [] : listed.alerts;
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
-        </div>
-        <Button asChild variant="outline">
-          <Link href="/dashboard/monitoring/overview" prefetch={false}>{t("backOverview")}</Link>
-        </Button>
-      </div>
+    <div className="min-w-0 space-y-6">
+      <header className="min-w-0 space-y-3">
+        <h1 className="text-2xl font-semibold tracking-tight wrap-anywhere">{t("title")}</h1>
+        <p className="text-sm font-medium wrap-anywhere">{active.name}</p>
+      </header>
 
       {isKnownError(errorCode) ? (
-        <p role="alert" className="rounded-xl border border-dashed px-4 py-3 text-sm">{t(errorCode)}</p>
+        <p role="alert" className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm leading-6 wrap-anywhere">{t(errorCode)}</p>
       ) : null}
-      {"error" in listed && listed.error ? (
-        <p role="alert" className="rounded-xl border border-dashed px-4 py-3 text-sm">{t(listed.error)}</p>
+      {failed ? (
+        <p role="alert" className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm leading-6 wrap-anywhere">{t(failed)}</p>
       ) : null}
 
-      <p className="text-sm text-muted-foreground">{active.name}</p>
-      <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("inAppOnly")}</p>
-
-      {alerts.length === 0 ? (
-        <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">{t("empty")}</p>
+      {failed ? null : alerts.length === 0 ? (
+        <p className={emptyClass}>{t("empty")}</p>
       ) : alerts.map((alert) => (
-        <section key={alert.id} className="space-y-3 rounded-2xl border p-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h2 className="text-lg font-semibold">{kindLabel[alert.kind]}</h2>
+        <section key={alert.id} aria-labelledby={`alert-${alert.id}`} className={panelClass}>
+          <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-3">
+            <h2 id={`alert-${alert.id}`} className="text-lg font-semibold">{kindLabel[alert.kind]}</h2>
             <p className="text-sm">{statusLabel[alert.status]}</p>
           </div>
-          <p className="text-sm leading-7">{reasonLabel[alert.reason]}</p>
+          <p className="text-sm leading-7 wrap-anywhere">{reasonLabel[alert.reason]}</p>
           {alert.claimBrandDecline ? null : (
-            <p className="text-sm leading-7 text-muted-foreground">{t("noDecline")}</p>
+            <p className="text-sm leading-7 text-muted-foreground wrap-anywhere">{t("noDecline")}</p>
           )}
-          <p className="text-sm text-muted-foreground">{t("window", { id: alert.windowId })}</p>
+          <p className="font-mono text-sm text-muted-foreground [overflow-wrap:anywhere]">{t("window", { id: alert.windowId })}</p>
           <p className="text-sm">{t("occurrences", { count: formatNumber(locale, alert.events.length) })}</p>
-          <ul className="space-y-1 text-sm text-muted-foreground">
+          <ul className="min-w-0 space-y-1 text-sm text-muted-foreground">
             {alert.events.map((event) => (
-              <li key={event.id}>{t("occurredAt", { time: showTime(locale, event.occurredAt) })}</li>
+              <li key={event.id} className="[overflow-wrap:anywhere]">{t("occurredAt", { time: showTime(locale, event.occurredAt) })}</li>
             ))}
           </ul>
           <div className="flex flex-wrap gap-2">
             {alert.status === "open" ? (
               <form action={acknowledgeQualityAlertAction}>
                 <input type="hidden" name="alertId" value={alert.id} />
-                <Button type="submit">{t("acknowledge")}</Button>
+                <Button type="submit" className={actionClass}>{t("acknowledge")}</Button>
               </form>
             ) : null}
             {alert.status === "open" || alert.status === "acknowledged" ? (
               <form action={snoozeQualityAlertAction}>
                 <input type="hidden" name="alertId" value={alert.id} />
-                <Button type="submit" variant="outline">{t("snooze")}</Button>
+                <Button type="submit" variant="outline" className={actionClass}>{t("snooze")}</Button>
               </form>
             ) : null}
           </div>
         </section>
       ))}
+
+      <div className="min-w-0 space-y-3">
+        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t("description")}</p>
+        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t("inAppOnly")}</p>
+        {related}
+      </div>
     </div>
   );
 }

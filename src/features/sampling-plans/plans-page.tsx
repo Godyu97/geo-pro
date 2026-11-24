@@ -94,11 +94,14 @@ export default async function SamplingPlansPage({
           <p className="mt-2 text-sm font-medium [overflow-wrap:anywhere]">{active.name}</p>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{t("description")}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant={plans.length === 0 ? "default" : "outline"}>
+        <div className="flex max-w-full flex-wrap gap-2">
+          <Button asChild variant={plans.length === 0 ? "default" : "outline"} className="h-auto min-h-8 max-w-full whitespace-normal">
             <a href="#new-sampling-plan">{t("createTitle")}</a>
           </Button>
-          <Button asChild variant="outline">
+          <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
+            <Link href="/dashboard/monitoring/alerts" prefetch={false}>{t("openAlerts")}</Link>
+          </Button>
+          <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
             <Link href="/dashboard/monitoring/overview" prefetch={false}>{t("backOverview")}</Link>
           </Button>
         </div>
@@ -184,11 +187,6 @@ export default async function SamplingPlansPage({
               {reading.coverageSufficient ? null : <p>{t("readingCoverage")}</p>}
             </div>
           ))}
-          <p>
-            <Link href="/dashboard/monitoring/alerts" prefetch={false} className="text-sm underline-offset-4 hover:underline">
-              {t("openAlerts")}
-            </Link>
-          </p>
           {plan.phase === "active" ? (
             <form action={driveDueSamplingWindowAction} className="space-y-3 rounded-xl border p-4">
               <h3 className="text-sm font-medium">{t("driveTitle")}</h3>

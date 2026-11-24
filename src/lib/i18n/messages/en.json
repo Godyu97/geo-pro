@@ -1928,6 +1928,8 @@
     "noBrand": "Finish an active brand before reviewing quality alerts.",
     "openBrand": "Set up a brand",
     "backOverview": "Back to monitoring overview",
+    "relatedEntries": "Related entries",
+    "backPlans": "Back to sampling plans",
     "empty": "No quality alerts yet. Insufficient coverage only raises a data-quality notice and does not claim a brand decline.",
     "inAppOnly": "These alerts stay in the product. They are not sent by email or webhook.",
     "kindDataQuality": "Data quality",
