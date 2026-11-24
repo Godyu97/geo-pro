@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { requireSession } from "@/lib/auth/session";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
@@ -18,7 +19,7 @@ import { listSamplingPlans } from "./commands";
 import type { SamplingPlanView } from "./commands";
 import { listSamplingDueWindows, manualSheetsForBrand } from "./due-commands";
 
-const fieldClass = "h-10 w-full rounded-md border bg-background px-3";
+const fieldClass = "h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const knownErrors = ["PLAN_PHASE_CONFLICT", "NOT_FOUND", "INVALID_INPUT", "VERSION_CONFLICT"] as const;
 const phases = ["draft", "active", "paused", "ended"] as const;
 const statuses = ["scheduled", "completed", "failed", "paused"] as const;
@@ -46,6 +47,7 @@ export default async function SamplingPlansPage({
   const params = await searchParams;
   const locale = await getLocale();
   const t = await getTranslator("samplingPlans");
+  const monitoring = await getTranslator("monitoring");
   const errorCode = typeof params.error === "string" ? params.error : undefined;
   const connection = getConnection();
   const active = await new BrandDao(connection).active(session.user.id);
@@ -85,16 +87,22 @@ export default async function SamplingPlansPage({
   const sheetByRun = new Map(sheets.map((sheet) => [sheet.runId, sheet]));
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+    <div className="min-w-0 space-y-6">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+          <p className="mt-2 text-sm font-medium [overflow-wrap:anywhere]">{active.name}</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{t("description")}</p>
         </div>
-        <Button asChild variant="outline">
-          <Link href="/dashboard/monitoring/overview" prefetch={false}>{t("backOverview")}</Link>
-        </Button>
-      </div>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant={plans.length === 0 ? "default" : "outline"}>
+            <a href="#new-sampling-plan">{t("createTitle")}</a>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/dashboard/monitoring/overview" prefetch={false}>{t("backOverview")}</Link>
+          </Button>
+        </div>
+      </header>
 
       {isKnownError(errorCode) ? (
         <p role="alert" className="rounded-xl border border-dashed px-4 py-3 text-sm">{t(errorCode)}</p>
@@ -103,88 +111,29 @@ export default async function SamplingPlansPage({
         <p role="alert" className="rounded-xl border border-dashed px-4 py-3 text-sm">{t(listed.error)}</p>
       ) : null}
 
-      <p className="text-sm text-muted-foreground">{active.name}</p>
-      <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("recordedSpend")}</p>
-      <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("consumerNote")}</p>
-
-      <form action={createSamplingPlanAction} className="space-y-4 rounded-2xl border bg-card p-5">
-        <input type="hidden" name="brandId" value={active.id} />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <label className="text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("phase")}</span>
-            <select name="phase" defaultValue="active" className={fieldClass}>
-              {phases.map((phase) => <option key={phase} value={phase}>{phaseLabel[phase]}</option>)}
-            </select>
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("currency")}</span>
-            <input name="currency" required maxLength={3} placeholder="CNY" className={fieldClass} />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("budgetMinor")}</span>
-            <input name="budgetMinor" required inputMode="numeric" className={fieldClass} />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("spentMinor")}</span>
-            <input name="spentMinor" required inputMode="numeric" className={fieldClass} />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("pendingMinor")}</span>
-            <input name="pendingMinor" required inputMode="numeric" className={fieldClass} />
-          </label>
-          <label className="text-sm sm:col-span-2 lg:col-span-3">
-            <span className="mb-1 block text-muted-foreground">{t("nextAt")}</span>
-            <input name="nextAt" required placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />
-            <span className="mt-1 block text-xs text-muted-foreground">{t("windowHint")}</span>
-          </label>
-        </div>
-        <div className="space-y-3">
-          {[0, 1, 2, 3].map((index) => (
-            <fieldset key={index} className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2 lg:grid-cols-5">
-              <legend className="px-1 text-xs text-muted-foreground">{t("slotLegend", { index: index + 1 })}</legend>
-              <label className="text-sm">
-                <span className="mb-1 block text-muted-foreground">{t("channel")}</span>
-                <input name="channelId" maxLength={64} className={fieldClass} />
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-muted-foreground">{t("slotAt")}</span>
-                <input name="at" placeholder="2026-11-20T04:05:06.000Z" className={fieldClass} />
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-muted-foreground">{t("status")}</span>
-                <select name="status" defaultValue="scheduled" className={fieldClass}>
-                  {statuses.map((status) => <option key={status} value={status}>{statusLabel[status]}</option>)}
-                </select>
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-muted-foreground">{t("manual")}</span>
-                <select name="manual" defaultValue="1" className={fieldClass}>
-                  <option value="1">{t("manualYes")}</option>
-                  <option value="0">{t("manualNo")}</option>
-                </select>
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-muted-foreground">{t("costMinor")}</span>
-                <input name="costMinor" inputMode="numeric" className={fieldClass} />
-              </label>
-            </fieldset>
-          ))}
-        </div>
-        <Button type="submit">{t("savePlan")}</Button>
-      </form>
-
       {plans.length === 0 ? (
-        <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">{t("empty")}</p>
+        "error" in listed ? null : (
+          <p className="rounded-xl border border-dashed bg-card px-4 py-5 text-sm text-muted-foreground">{t("empty")}</p>
+        )
       ) : plans.map((plan) => (
-        <section key={plan.id} className="space-y-4 rounded-2xl border p-5">
+        <section key={plan.id} aria-labelledby={`plan-${plan.id}`} className="min-w-0 space-y-4 rounded-2xl border bg-card p-4 sm:p-5">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h2 className="text-lg font-semibold">{t("currentVersion", { version: plan.version })}</h2>
-            <p className="text-sm">{phaseLabel[plan.phase]} · {amount(plan.currency, plan.budgetMinor)}</p>
+            <h2 id={`plan-${plan.id}`} className="text-lg font-semibold">{t("currentVersion", { version: plan.version })}</h2>
+            <Badge variant="secondary">{phaseLabel[plan.phase]}</Badge>
           </div>
+          <dl className="grid gap-3 rounded-xl bg-muted/50 p-3 sm:grid-cols-3">
+            {([
+              [t("budgetMinor"), plan.budgetMinor],
+              [t("spentMinor"), plan.spentMinor],
+              [t("pendingMinor"), plan.pendingMinor],
+            ] as const).map(([label, minor]) => (
+              <div key={label}>
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="mt-1 text-sm font-medium tabular-nums">{amount(plan.currency, minor)}</dd>
+              </div>
+            ))}
+          </dl>
           <p className="text-xs text-muted-foreground">{t("minorUnit")}</p>
-          <p className="text-sm text-muted-foreground">
-            {t("spentMinor")} {amount(plan.currency, plan.spentMinor)} · {t("pendingMinor")} {amount(plan.currency, plan.pendingMinor)}
-          </p>
           <ul className="space-y-1 text-sm">
             {plan.versions.map((item) => (
               <li key={item.version}>{t("versionBudget", { version: item.version, amount: amount(item.currency, item.budgetMinor) })}</li>
@@ -193,24 +142,31 @@ export default async function SamplingPlansPage({
           <p className="text-sm">{t("coverageLine", { count: plan.coverageSlotIds.length })}</p>
           {due.runs.filter((run) => run.planId === plan.id).map((run) => (
             run.kind === "manual" ? (
-              <div key={run.id} className="space-y-2 text-sm">
-                <p>{t("dueSheet", { slot: run.slotId })}</p>
+              <div key={run.id} className="space-y-2 rounded-xl border p-3 text-sm">
+                <p className="font-medium [overflow-wrap:anywhere]">{t("dueSheet", { slot: run.slotId })}</p>
                 <ul className="space-y-2">
                   {(sheetByRun.get(run.id)?.lines ?? []).map((line, index) => (
                     <li key={`${run.id}-${index}`} className="rounded-xl border px-3 py-2">
                       <p>{t("dueSheetManual")}</p>
                       <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{line.id}</p>
-                      <p className="mt-1 whitespace-pre-wrap break-words">{line.missing ? t("duePromptMissing") : line.text}</p>
+                      <p className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{line.missing ? t("duePromptMissing") : line.text}</p>
                     </li>
                   ))}
                 </ul>
               </div>
             ) : (
-              <p key={run.id} className="text-sm">
-                {run.status === "accepted"
-                  ? t("dueOfficial", { slot: run.slotId, run: run.monitoringRunId ?? "", amount: amount(plan.currency, run.chargedMinor) })
-                  : t("dueReserved", { slot: run.slotId })}
-              </p>
+              <div key={run.id} className="space-y-3 rounded-xl border p-3 text-sm [overflow-wrap:anywhere]">
+                {run.status === "accepted" && run.monitoringRunId ? (
+                  <>
+                    <p>{t("dueOfficial", { slot: run.slotId, run: run.monitoringRunId, amount: amount(plan.currency, run.chargedMinor) })}</p>
+                    <Button asChild variant="outline">
+                      <Link href={`/dashboard/monitoring/runs/${encodeURIComponent(run.monitoringRunId)}`} prefetch={false}>
+                        {monitoring("openRun", { id: run.monitoringRunId.slice(0, 8) })}
+                      </Link>
+                    </Button>
+                  </>
+                ) : <p>{t("dueReserved", { slot: run.slotId })}</p>}
+              </div>
             )
           ))}
           {due.readings.filter((reading) => reading.planId === plan.id).map((reading) => (
@@ -256,7 +212,8 @@ export default async function SamplingPlansPage({
               <Button type="submit" variant="outline">{t("driveWindow")}</Button>
             </form>
           ) : null}
-          <div className="overflow-x-auto rounded-xl border">
+          <div role="region" aria-label={t("slotSchedule")} tabIndex={0}
+            className="max-w-full overflow-x-auto rounded-xl border outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <table className="min-w-full text-left text-sm">
               <thead className="bg-secondary/50 text-muted-foreground">
                 <tr>
@@ -270,18 +227,18 @@ export default async function SamplingPlansPage({
               <tbody>
                 {plan.slots.map((slot) => (
                   <tr key={slot.id} className="border-t">
-                    <td className="px-4 py-3">{showTime(locale, slot.at)}</td>
-                    <td className="px-4 py-3">{slot.channelId}</td>
-                    <td className="px-4 py-3">{statusLabel[slot.status]}</td>
-                    <td className="px-4 py-3">{slot.manual ? t("manualYes") : t("manualNo")}</td>
-                    <td className="px-4 py-3">{amount(plan.currency, slot.costMinor)}</td>
+                    <td className="whitespace-nowrap px-4 py-3">{showTime(locale, slot.at)}</td>
+                    <td className="min-w-36 max-w-48 px-4 py-3 [overflow-wrap:anywhere]">{slot.channelId}</td>
+                    <td className="whitespace-nowrap px-4 py-3">{statusLabel[slot.status]}</td>
+                    <td className="whitespace-nowrap px-4 py-3">{slot.manual ? t("manualYes") : t("manualNo")}</td>
+                    <td className="whitespace-nowrap px-4 py-3 tabular-nums">{amount(plan.currency, slot.costMinor)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          <form action={reviseSamplingBudgetAction} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+          <form action={reviseSamplingBudgetAction} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
             <input type="hidden" name="planId" value={plan.id} />
             <label className="text-sm">
               <span className="mb-1 block text-muted-foreground">{t("newBudget")}</span>
@@ -307,7 +264,7 @@ export default async function SamplingPlansPage({
 
           <form action={arriveSamplingPlanAction} className="flex flex-wrap items-end gap-3">
             <input type="hidden" name="planId" value={plan.id} />
-            <label className="min-w-64 flex-1 text-sm">
+            <label className="min-w-0 flex-1 basis-60 text-sm">
               <span className="mb-1 block text-muted-foreground">{t("arrive")}</span>
               <input name="nextAt" required placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />
             </label>
@@ -320,7 +277,7 @@ export default async function SamplingPlansPage({
               <span className="mb-1 block text-muted-foreground">{t("channelId")}</span>
               <input name="channelId" required maxLength={64} className={fieldClass} />
             </label>
-            <label className="min-w-64 flex-1 text-sm">
+            <label className="min-w-0 flex-1 basis-60 text-sm">
               <span className="mb-1 block text-muted-foreground">{t("nextAt")}</span>
               <input name="nextAt" required placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />
             </label>
@@ -328,6 +285,76 @@ export default async function SamplingPlansPage({
           </form>
         </section>
       ))}
+
+      <form id="new-sampling-plan" aria-labelledby="new-sampling-plan-title" action={createSamplingPlanAction}
+        className="min-w-0 scroll-mt-20 space-y-4 rounded-2xl border bg-card p-4 sm:p-5">
+        <h2 id="new-sampling-plan-title" className="text-lg font-semibold">{t("createTitle")}</h2>
+        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t("recordedSpend")}</p>
+        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t("consumerNote")}</p>
+        <input type="hidden" name="brandId" value={active.id} />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <label className="text-sm">
+            <span className="mb-1 block text-muted-foreground">{t("phase")}</span>
+            <select name="phase" defaultValue="active" className={fieldClass}>
+              {phases.map((phase) => <option key={phase} value={phase}>{phaseLabel[phase]}</option>)}
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-muted-foreground">{t("currency")}</span>
+            <input name="currency" required maxLength={3} placeholder="CNY" className={fieldClass} />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-muted-foreground">{t("budgetMinor")}</span>
+            <input name="budgetMinor" required inputMode="numeric" className={fieldClass} />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-muted-foreground">{t("spentMinor")}</span>
+            <input name="spentMinor" required inputMode="numeric" className={fieldClass} />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-muted-foreground">{t("pendingMinor")}</span>
+            <input name="pendingMinor" required inputMode="numeric" className={fieldClass} />
+          </label>
+          <label className="text-sm sm:col-span-2 lg:col-span-3">
+            <span className="mb-1 block text-muted-foreground">{t("nextAt")}</span>
+            <input name="nextAt" required placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />
+            <span className="mt-1 block text-xs text-muted-foreground">{t("windowHint")}</span>
+          </label>
+        </div>
+        <div className="space-y-3">
+          {[0, 1, 2, 3].map((index) => (
+            <fieldset key={index} className="grid min-w-0 gap-3 rounded-xl border p-3 sm:grid-cols-2 xl:grid-cols-5">
+              <legend className="px-1 text-xs text-muted-foreground">{t("slotLegend", { index: index + 1 })}</legend>
+              <label className="text-sm">
+                <span className="mb-1 block text-muted-foreground">{t("channel")}</span>
+                <input name="channelId" maxLength={64} className={fieldClass} />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-muted-foreground">{t("slotAt")}</span>
+                <input name="at" placeholder="2026-11-20T04:05:06.000Z" className={fieldClass} />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-muted-foreground">{t("status")}</span>
+                <select name="status" defaultValue="scheduled" className={fieldClass}>
+                  {statuses.map((status) => <option key={status} value={status}>{statusLabel[status]}</option>)}
+                </select>
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-muted-foreground">{t("manual")}</span>
+                <select name="manual" defaultValue="1" className={fieldClass}>
+                  <option value="1">{t("manualYes")}</option>
+                  <option value="0">{t("manualNo")}</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-muted-foreground">{t("costMinor")}</span>
+                <input name="costMinor" inputMode="numeric" className={fieldClass} />
+              </label>
+            </fieldset>
+          ))}
+        </div>
+        <Button type="submit">{t("savePlan")}</Button>
+      </form>
     </div>
   );
 }

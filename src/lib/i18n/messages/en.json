@@ -1853,6 +1853,8 @@
   },
   "samplingPlans": {
     "title": "Sampling plans",
+    "createTitle": "Create a sampling plan",
+    "slotSchedule": "Slot schedule",
     "description": "Save a brand sampling plan and its slots. A budget change adds a version and leaves the previous minor-unit budget in place. This does not start external sampling or charge a supplier.",
     "noBrand": "Finish an active brand profile before saving a sampling plan.",
     "openBrand": "Set up a brand",

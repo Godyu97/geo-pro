@@ -731,6 +731,35 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
       }
     }
     await outsider.close();
+
+    expect(fixture("link-plan-run", { ownerId: userId, brandId, runId, channelId: channelIds[0] }).linked).toBe(true);
+    for (const [locale, entry, title, linkName, receipt] of [
+      ["zh-CN", "查看采样计划", "采样计划", `查看运行 ${runId.slice(0, 8)}`, `已登记运行 ${runId}，费用 CNY 3`],
+      ["en", "View sampling plans", "Sampling plans", `View run ${runId.slice(0, 8)}`, `registered to run ${runId}, charge CNY 3`],
+    ] as const) {
+      await context.addCookies([{ name: "geo-locale", value: locale, url: baseURL }]);
+      await page.goto("/dashboard/monitoring/overview");
+      await page.getByRole("link", { name: entry, exact: true }).press("Enter");
+      await expect(page).toHaveURL("/dashboard/monitoring/plans");
+      await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+      const openRun = page.getByRole("link", { name: linkName, exact: true });
+      for (const width of [1440, 768, 375]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expect(page.getByText(receipt, { exact: false })).toBeVisible();
+        await expect(openRun).toHaveAttribute("href", new URL(runURL).pathname);
+        await expectNoOverflow(page);
+      }
+      await openRun.focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(openRun).toBeFocused();
+      expect(await openRun.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`sampling-plan-run-${locale}-375.png`) });
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL(runURL);
+      await expect(page.getByRole("heading", { name: runCopy[locale].title, exact: true })).toBeVisible();
+      await expect(page.getByText(runCopy[locale].progress, { exact: true })).toBeVisible();
+    }
     expect(errors).toEqual([]);
   } finally {
     if (channelIds.length || userId) fixture("cleanup", { userId, email, channelIds });

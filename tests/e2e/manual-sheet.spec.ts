@@ -6,7 +6,7 @@ import { registerTestAccount } from "./auth-helpers";
 import { publishedRetentionVersion } from "./retention-version";
 
 const baseURL = "http://localhost:3100";
-const latestText = "门店如何安排设备巡检";
+const latestText = "门店如何安排设备巡检\n" + "question-reference-".repeat(12);
 const secondText = "离线巡检的产品怎么比较";
 const oldText = "旧版门店巡检题目不该显示";
 const deletedText = "已从最新题集删除的题目";
@@ -57,7 +57,7 @@ async function dueCounts(brandId: string) {
   }
 }
 
-test("a due manual sheet lists frozen questions and stays manual in English", async ({ page, context }) => {
+test("sampling plans show due manual work and budget pauses in both languages", async ({ page, context }, testInfo) => {
   test.setTimeout(120_000);
   page.setDefaultTimeout(20_000);
   const email = `sheet-${randomBytes(8).toString("hex")}@example.invalid`;
@@ -120,11 +120,14 @@ test("a due manual sheet lists frozen questions and stays manual in English", as
     }
 
     await page.goto("/dashboard/monitoring/plans");
+    await expect(page.getByText("还没有采样计划。", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "新建采样计划", exact: true }).press("Enter");
+    await expect(page).toHaveURL(/#new-sampling-plan$/);
     await page.getByLabel("币种", { exact: true }).fill("CNY");
-    await page.getByLabel("预算（最小货币单位）", { exact: true }).fill("100");
+    await page.getByLabel("预算（最小货币单位）", { exact: true }).fill("5");
     await page.getByLabel("已花费", { exact: true }).fill("0");
     await page.getByLabel("待对账", { exact: true }).fill("0");
-    await page.locator('input[name="nextAt"]').fill("2026-12-01T00:00:00.000Z");
+    await page.locator('input[name="nextAt"]').fill("2099-12-02T00:00:00.000Z");
     const manual = page.getByRole("group", { name: "槽位 1", exact: true });
     await manual.getByRole("textbox", { name: "通道", exact: true }).fill("consumer-sheet");
     await manual.getByRole("textbox", { name: "槽位时间", exact: true }).fill("2026-11-20T02:00:00.000Z");
@@ -134,11 +137,32 @@ test("a due manual sheet lists frozen questions and stays manual in English", as
     await official.getByRole("textbox", { name: "槽位时间", exact: true }).fill("2026-11-20T02:00:00.000Z");
     await official.getByRole("combobox", { name: "人工", exact: true }).selectOption("0");
     await official.getByRole("textbox", { name: "槽位费用", exact: true }).fill("10");
+    const failed = page.getByRole("group", { name: "槽位 3", exact: true });
+    await failed.getByRole("textbox", { name: "通道", exact: true }).fill("failed-official");
+    await failed.getByRole("textbox", { name: "槽位时间", exact: true }).fill("2026-11-20T02:00:00.000Z");
+    await failed.getByRole("combobox", { name: "状态", exact: true }).selectOption("failed");
+    await failed.getByRole("combobox", { name: "人工", exact: true }).selectOption("0");
+    await failed.getByRole("textbox", { name: "槽位费用", exact: true }).fill("2");
+    const futureChannel = "future-official-" + "a".repeat(48);
+    const future = page.getByRole("group", { name: "槽位 4", exact: true });
+    await future.getByRole("textbox", { name: "通道", exact: true }).fill(futureChannel);
+    await future.getByRole("textbox", { name: "槽位时间", exact: true }).fill("2099-12-01T00:00:00.000Z");
+    await future.getByRole("combobox", { name: "人工", exact: true }).selectOption("0");
+    await future.getByRole("textbox", { name: "槽位费用", exact: true }).fill("10");
     await page.getByRole("button", { name: "保存计划", exact: true }).click();
     await expect(page.getByRole("heading", { name: "当前版本 1", exact: true })).toBeVisible();
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto("/dashboard/monitoring/plans");
+    await expect(page.getByRole("heading", { name: "当前版本 1", exact: true })).toBeInViewport();
+    await expect(page.getByRole("row").filter({ hasText: futureChannel })).toContainText("待执行");
 
+    const processWindow = page.getByRole("button", { name: "处理到期窗口", exact: true });
+    await page.getByLabel("时区", { exact: true }).fill("Invalid/Timezone");
+    await processWindow.press("Enter");
+    await expect(page.getByRole("alert").filter({ hasText: "请核对币种、金额、时段和槽位后再保存。" })).toBeVisible();
+    await page.getByLabel("时区", { exact: true }).fill("Asia/Shanghai");
     await page.getByLabel("人工题单的问题编号", { exact: true }).fill(`${currentA} ${currentB} ${deletedId}`);
-    await page.getByRole("button", { name: "处理到期窗口", exact: true }).click();
+    await processWindow.press("Enter");
     await expect(page.getByText(latestText, { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(secondText, { exact: true })).toBeVisible();
     await expect(page.getByText(deletedId, { exact: true })).toBeVisible();
@@ -151,6 +175,15 @@ test("a due manual sheet lists frozen questions and stays manual in English", as
     const first = await dueCounts(brandId!);
     expect(first.runs).toEqual([{ kind: "manual", count: 1 }]);
     expect(first.attempts).toBe(0);
+    const listed = await page.request.get(`/api/monitoring/plans?brandId=${brandId}`, { headers: { Origin: baseURL } });
+    expect(listed.ok()).toBe(true);
+    const { plans: [plan] } = await listed.json();
+    expect(plan).toMatchObject({ currency: "CNY", budgetMinor: 5, spentMinor: 0, pendingMinor: 0 });
+    expect(plan.slots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ channelId: futureChannel, status: "paused", manual: false }),
+      expect.objectContaining({ channelId: "failed-official", status: "failed" }),
+    ]));
+    expect(plan.coverageSlotIds).toEqual([plan.slots.find((slot: { channelId: string }) => slot.channelId === "failed-official").id]);
 
     await page.getByLabel("人工题单的问题编号", { exact: true }).fill(randomUUID());
     await page.getByRole("button", { name: "处理到期窗口", exact: true }).click();
@@ -160,25 +193,39 @@ test("a due manual sheet lists frozen questions and stays manual in English", as
     expect(second.runs).toEqual([{ kind: "manual", count: 1 }]);
     expect(second.attempts).toBe(0);
 
-    await page.setViewportSize({ width: 768, height: 900 });
-    await expectNoOverflow(page);
-    await page.setViewportSize({ width: 375, height: 800 });
-    await expectNoOverflow(page);
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await context.addCookies([{ name: "geo-locale", value: "en", url: baseURL }]);
-    await page.reload();
-    await expect(page.getByRole("heading", { name: "Sampling plans", exact: true })).toBeVisible();
-    const sheet = page.locator("#main-content");
-    await expect(sheet.getByRole("listitem").filter({ hasText: latestText })).toHaveCount(1);
-    await expect(sheet.getByRole("listitem").filter({ hasText: secondText })).toHaveCount(1);
-    await expect(sheet.getByRole("listitem").filter({ hasText: "Question missing" })).toHaveCount(1);
-    await expect(sheet.getByText("Manual, not automatic collection", { exact: true })).toHaveCount(3);
-    await expect(sheet.getByText(oldText, { exact: true })).toHaveCount(0);
-    await expectNoOverflow(page);
-    await page.setViewportSize({ width: 768, height: 900 });
-    await expectNoOverflow(page);
-    await page.setViewportSize({ width: 375, height: 800 });
-    await expectNoOverflow(page);
+    for (const [locale, title, schedule, paused, missing, manualLabel] of [
+      ["zh-CN", "采样计划", "槽位安排", "已暂停", "题目缺失", "人工，非自动采集"],
+      ["en", "Sampling plans", "Slot schedule", "Paused", "Question missing", "Manual, not automatic collection"],
+    ]) {
+      await context.addCookies([{ name: "geo-locale", value: locale, url: baseURL }]);
+      await page.reload();
+      const main = page.getByRole("main");
+      const slots = main.getByRole("region", { name: schedule, exact: true });
+      for (const width of [1440, 768, 375]) {
+        await page.setViewportSize({ width, height: 800 });
+        await expect(main).toHaveCount(1);
+        await expect(main.getByRole("heading", { name: title, exact: true })).toBeVisible();
+        await expect(main.getByText(latestText, { exact: true })).toHaveCSS("white-space", "pre-wrap");
+        await expect(main.getByText(secondText, { exact: true })).toBeVisible();
+        await expect(main.getByText(missing, { exact: true })).toHaveCount(1);
+        await expect(main.getByText(manualLabel, { exact: true })).toHaveCount(3);
+        await expect(main.getByText(oldText, { exact: true })).toHaveCount(0);
+        await expect(slots.getByRole("row").filter({ hasText: futureChannel })).toContainText(paused);
+        const channelCell = slots.getByRole("cell", { name: futureChannel, exact: true });
+        expect(await channelCell.evaluate((cell) => cell.getBoundingClientRect().height)).toBeLessThan(140);
+        await expectNoOverflow(page);
+      }
+      await slots.focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(slots).toBeFocused();
+      expect(await slots.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+      await page.keyboard.press("ArrowRight");
+      await expect.poll(() => slots.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+      await page.screenshot({ path: testInfo.outputPath(`sampling-plans-${locale}-375.png`) });
+      await main.getByText(latestText, { exact: true }).scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath(`sampling-plan-sheet-${locale}-375.png`) });
+    }
   } finally {
     if (userId) cleanupAccount(userId, email);
   }

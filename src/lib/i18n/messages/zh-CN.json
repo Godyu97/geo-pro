@@ -1853,6 +1853,8 @@
   },
   "samplingPlans": {
     "title": "采样计划",
+    "createTitle": "新建采样计划",
+    "slotSchedule": "槽位安排",
     "description": "保存品牌采样计划与槽位。预算调整会新增版本，不改写旧版本的最小单位预算。这里不启动外部采样，也不向供应商扣款。",
     "noBrand": "先完成一个活跃品牌的建档，再保存采样计划。",
     "openBrand": "去建档",

@@ -3,6 +3,8 @@ import { recordCapability } from "../src/features/capabilities/commands.ts";
 import { changeMaintenanceGrant } from "../src/features/maintenance/core.ts";
 import { executeMonitoringRun } from "../src/features/monitoring/execution.ts";
 import { updateQuota } from "../src/features/quotas/commands.ts";
+import { saveSamplingPlan } from "../src/features/sampling-plans/commands.ts";
+import { driveDueSamplingWindow } from "../src/features/sampling-plans/due-commands.ts";
 import { getConnection, queryWithParameters } from "../src/lib/db/connection.ts";
 
 const [command, payloadText] = process.argv.slice(2);
@@ -95,6 +97,25 @@ try {
     const failed = executed.slots.filter((slot) => slot.status === "failed").length;
     if (succeeded !== 3 || failed !== 1) throw new Error(`Expected 3 succeeded and 1 failed, got ${succeeded} and ${failed}`);
     process.stdout.write(JSON.stringify({ succeeded, failed, synthetic: true }));
+  } else if (command === "link-plan-run") {
+    const { ownerId, brandId, runId, channelId } = payload;
+    const [run] = await queryWithParameters(db,
+      "SELECT id FROM monitoring_run WHERE id = ? AND owner_id = ? AND brand_id = ?",
+      [runId, ownerId, brandId]);
+    if (!run) throw new Error("Monitoring run was not found for this fixture brand");
+    const at = "2026-11-20T02:00:00.000Z";
+    const plan = await saveSamplingPlan(db, ownerId, {
+      action: "create", brandId, phase: "active", currency: "CNY",
+      budgetMinor: 10, spentMinor: 0, pendingMinor: 0, nextAt: at,
+      slots: [{ id: randomUUID(), channelId, at, status: "scheduled", manual: false, costMinor: 10 }],
+    });
+    if (plan.error) throw new Error(`Fixture plan rejected: ${plan.error}`);
+    const due = await driveDueSamplingWindow(db, ownerId, {
+      planId: plan.plan.id, timezone: "Asia/Shanghai", now: "2026-11-21T00:00:00.000Z",
+      channels: [{ channelId, state: "eligible" }], promptIds: [],
+    }, async () => ({ runId, chargedMinor: 3 }));
+    if (due.error || due.runs[0]?.monitoringRunId !== runId) throw new Error("Could not link the fixture run");
+    process.stdout.write(JSON.stringify({ linked: true }));
   } else if (command === "cleanup") {
     for (const channelId of payload.channelIds ?? []) {
       await queryWithParameters(db, `DELETE FROM sampling_answer_network WHERE channel_id = ?`, [channelId]);
