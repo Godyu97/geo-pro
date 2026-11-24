@@ -262,6 +262,15 @@ await writeFile(leadSuggestionCommands, leadSuggestionSource
     '  } : {};',
   ].join("\n")));
 
+const crawlerPage = path.join(fixture, "src/features/data-connections/crawler-page.tsx");
+const crawlerSource = await readFile(crawlerPage, "utf8");
+const crawlerLabels = "    const labels = await loadOwnedLabels(connection, workspace.brands.map((brand) => brand.id));";
+assert.ok(crawlerSource.includes(crawlerLabels));
+await writeFile(crawlerPage, crawlerSource.replace(crawlerLabels, `    const probe = (await (await import("next/headers")).cookies()).get("geo-crawler-visits-read")?.value;
+    if (probe === "slow") await new Promise(resolve => setTimeout(resolve, 1800));
+    if (probe === "unavailable") throw new Error("Private crawler visits fixture failure");
+${crawlerLabels}`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
