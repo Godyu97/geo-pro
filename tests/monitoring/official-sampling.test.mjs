@@ -402,11 +402,23 @@ for (const kind of ["sqlite", "postgresql"]) {
     const withCode = (code) => slots.filter((slot) => slotCode.get(slot.id) === code);
     for (const code of ["Q01", "Q02", "Q03", "Q04", "Q05", "Q06"]) assert.equal(withCode(code).every((slot) => slot.status === "succeeded"), true, code);
     for (const code of ["Q07", "Q08", "Q09", "Q10"]) assert.equal(withCode(code).every((slot) => slot.status === "reconciliation_required"), true, code);
-    const attempts = await queryWithParameters(db, "SELECT slot_id AS \"slotId\", transport, synthetic, disposition, actual_minor AS \"actualMinor\", cost_state AS \"costState\", raw_text AS \"rawText\" FROM monitoring_attempt WHERE run_id = ? AND kind = 'sampling'", [accepted.id]);
+    const attempts = await queryWithParameters(db, "SELECT slot_id AS \"slotId\", transport, synthetic, disposition, actual_minor AS \"actualMinor\", cost_state AS \"costState\", raw_text AS \"rawText\", receipt FROM monitoring_attempt WHERE run_id = ? AND kind = 'sampling'", [accepted.id]);
     assert.equal(attempts.every((row) => row.transport === "official_api" && Number(row.synthetic) === 0), true);
     assert.equal(attempts.filter((row) => slotCode.get(row.slotId) === "Q01").every((row) => Number(row.actualMinor) === 11 && row.costState === "known"), true);
     assert.equal(attempts.filter((row) => slotCode.get(row.slotId) === "Q08").every((row) => row.actualMinor === null && row.costState === "unknown"), true);
     assert.equal(attempts.filter((row) => slotCode.get(row.slotId) === "Q07").every((row) => row.costState === "unknown" && row.actualMinor === null && row.rawText === null), true);
+    const receipts = attempts.map((attempt) => {
+      const receipt = parseOfficialReceipt(attempt.receipt);
+      assert.ok(receipt, `Missing receipt for ${attempt.slotId}`);
+      return { code: slotCode.get(attempt.slotId), receipt };
+    });
+    assert.deepEqual(receipts.filter(({ code }) => code === "Q01").map(({ receipt }) => receipt), Array(2).fill({
+      responseId: "resp-Q01", modelVersion: "fixture-model", networkTrigger: "triggered", citationSetState: "complete",
+      citations: [{ url: "https://example.com/Q01", title: "来源", position: 1 }],
+    }));
+    assert.deepEqual(receipts.filter(({ code }) => code === "Q08").map(({ receipt }) => receipt), Array(2).fill({
+      responseId: null, modelVersion: null, networkTrigger: "unknown", citationSetState: "missing", citations: [],
+    }));
     const networks = await queryWithParameters(db, "SELECT actual_network AS \"actualNetwork\", qualifies_required_search AS \"qualifies\" FROM sampling_answer_network WHERE brand_id = ?", [brand]);
     assert.equal(networks.filter((row) => row.actualNetwork === "unknown").length, 6);
     assert.equal(networks.filter((row) => row.actualNetwork === "unknown").every((row) => Number(row.qualifies) === 0), true);
