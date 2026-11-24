@@ -233,6 +233,15 @@ await writeFile(leadCommands, leadSource.replace(leadList, `${leadList}
     throw new Error("Private leads fixture failure");
   }`));
 
+const leadQualityCommands = path.join(fixture, "src/features/business-feedback/quality-commands.ts");
+const leadQualitySource = await readFile(leadQualityCommands, "utf8");
+const leadQualityList = "export async function listLeadQuality(db: DatabaseConnection, ownerId: string, brandId: string) {";
+assert.ok(leadQualitySource.includes(leadQualityList));
+await writeFile(leadQualityCommands, leadQualitySource.replace(leadQualityList, `${leadQualityList}
+  if ((await (await import("next/headers")).cookies()).get("geo-lead-quality-unavailable")?.value === "1") {
+    throw new Error("Private lead quality fixture failure");
+  }`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
