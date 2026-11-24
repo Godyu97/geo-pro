@@ -1,7 +1,9 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
+import { brandIdSchema } from "../brands/contracts";
 import { BrandDao } from "../brands/dao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +12,18 @@ import { checkPagesAction } from "./actions";
 import { listPrioritizedTasks } from "./commands";
 import { ActionDraftPanel } from "./draft-panel";
 import { taskDisplayLabels } from "./task-labels.ts";
+
+const actionClass = "h-auto min-h-9 max-w-full whitespace-normal text-left";
+const fieldClass = "w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
+function OptimizationHeader({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <header className="min-w-0 space-y-3">
+      <h1 className="wrap-anywhere text-2xl font-semibold tracking-tight">{title}</h1>
+      {children}
+    </header>
+  );
+}
 
 export async function generateMetadata() {
   const t = await getTranslator("optimization");
@@ -30,14 +44,22 @@ export default async function OptimizationListPage({
   const brands = new BrandDao(connection);
   const active = await brands.active(session.user.id);
   const brandId = typeof params.brandId === "string" ? params.brandId : active?.id;
+  const brandsAction = (
+    <Button asChild className={actionClass}>
+      <Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link>
+    </Button>
+  );
 
-  if (!brandId) {
+  if (!brandId || !brandIdSchema.safeParse(brandId).success) {
     return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>
-        <Button asChild><Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link></Button>
-      </div>
+      <OptimizationHeader title={t("title")}>
+        {brandId ? (
+          <p role="alert" className="max-w-2xl text-sm leading-7">{t("NOT_FOUND")}</p>
+        ) : (
+          <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>
+        )}
+        {brandsAction}
+      </OptimizationHeader>
     );
   }
 
@@ -47,18 +69,60 @@ export default async function OptimizationListPage({
   ]);
   if ("error" in listed) {
     return (
-      <div role="alert" className="space-y-2 text-sm">
-        <p>{t(listed.error)}</p>
-      </div>
+      <OptimizationHeader title={t("title")}>
+        <p role="alert" className="max-w-2xl text-sm leading-7">{t(listed.error)}</p>
+        {brandsAction}
+      </OptimizationHeader>
     );
   }
 
+  const hasTasks = listed.tasks.length > 0;
+  const overviewHref = `/dashboard/monitoring/overview?brandId=${encodeURIComponent(brandId)}`;
+
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
-      </div>
+    <div className="min-w-0 space-y-8">
+      <OptimizationHeader title={t("title")}>
+        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+        <Button asChild variant={hasTasks ? "outline" : "default"} className={actionClass}>
+          <Link href={overviewHref} prefetch={false}>{t("viewEvidenceOverview")}</Link>
+        </Button>
+      </OptimizationHeader>
+
+      <section aria-labelledby="optimization-open-tasks" className="min-w-0 space-y-3">
+        <h2 id="optimization-open-tasks" className="text-lg font-semibold">{t("openTasks")}</h2>
+        {hasTasks ? (
+          <ul className="space-y-3">
+            {listed.tasks.map((task) => {
+              const labels = taskDisplayLabels(messages.evidenceOverview, task);
+              return (
+                <li key={task.id} className="min-w-0 rounded-2xl border bg-card px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 max-w-full flex-1 basis-64 wrap-anywhere">
+                      <Link
+                        href={`/dashboard/optimization/${task.id}`}
+                        prefetch={false}
+                        className="inline-block max-w-full rounded-sm font-medium text-primary underline underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                      >
+                        {task.title}
+                      </Link>
+                      <p className="mt-2 text-xs text-muted-foreground">{task.targetPage}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{t(task.gapType)}</p>
+                    </div>
+                    <div className="flex max-w-full flex-wrap gap-2">
+                      <Badge variant="outline">{labels.priority}</Badge>
+                      <Badge variant="secondary">{labels.status}</Badge>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="rounded-2xl border border-dashed bg-card px-4 py-5 text-sm leading-6 text-muted-foreground">
+            {t("empty")}
+          </p>
+        )}
+      </section>
 
       {"error" in drafts ? (
         <p role="alert" className="text-sm">{t(drafts.error)}</p>
@@ -71,7 +135,7 @@ export default async function OptimizationListPage({
         />
       )}
 
-      <section className="space-y-3 rounded-2xl border p-5">
+      <section className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">
         <h2 className="text-lg font-semibold">{t("checkPagesTitle")}</h2>
         <p className="text-sm text-muted-foreground">{t("checkPagesHint")}</p>
         <form action={checkPagesAction} className="space-y-3">
@@ -82,61 +146,24 @@ export default async function OptimizationListPage({
               name="urls"
               rows={3}
               required
-              className="w-full rounded-md border bg-background px-3 py-2"
+              className={fieldClass}
               placeholder="https://example.com/page"
             />
           </label>
           <label className="block text-sm">
             <span className="mb-1 block text-muted-foreground">{t("fixtureStatus")}</span>
-            <select name="fixtureStatus" defaultValue="ok" className="h-10 rounded-md border bg-background px-3">
-              <option value="ok">ok</option>
-              <option value="restricted">restricted</option>
-              <option value="error">error</option>
+            <select name="fixtureStatus" defaultValue="ok" className={fieldClass}>
+              <option value="ok">{t("fixtureReachable")}</option>
+              <option value="restricted">{t("fixtureRestricted")}</option>
+              <option value="error">{t("fixtureReadError")}</option>
             </select>
           </label>
           <label className="block text-sm">
             <span className="mb-1 block text-muted-foreground">{t("fixtureBody")}</span>
-            <textarea name="fixtureBody" rows={3} className="w-full rounded-md border bg-background px-3 py-2" />
+            <textarea name="fixtureBody" rows={3} className={fieldClass} />
           </label>
-          <Button type="submit">{t("runCheck")}</Button>
+          <Button type="submit" variant="outline" className={actionClass}>{t("runCheck")}</Button>
         </form>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">{t("openTasks")}</h2>
-        {listed.tasks.length === 0 ? (
-          <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">
-            {t("empty")}
-          </p>
-        ) : (
-          <ul className="space-y-3">
-            {listed.tasks.map((task) => {
-              const labels = taskDisplayLabels(messages.evidenceOverview, task);
-              return (
-                <li key={task.id} className="rounded-2xl border px-4 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <Link
-                        href={`/dashboard/optimization/${task.id}`}
-                        prefetch={false}
-                        className="font-medium underline-offset-4 hover:underline"
-                      >
-                        {task.title}
-                      </Link>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        {task.targetPage} · {task.gapType}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Badge variant="outline">{labels.priority}</Badge>
-                      <Badge variant="secondary">{labels.status}</Badge>
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
       </section>
     </div>
   );
