@@ -464,6 +464,7 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     const paths = [
       `/dashboard/monitoring/runs/${runId}`,
       "/dashboard/monitoring/overview",
+      "/dashboard/monitoring/answers?sourceMode=consumer_ui",
       "/dashboard/content",
       "/dashboard/reports",
     ];
@@ -483,6 +484,17 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
             await expect(page.getByText(locale === "en" ? "loop yes" : "闭环 是")).toBeVisible();
             if (width === 375) {
               const entry = page.getByRole("link", { name: locale === "en" ? "Open the observation plan" : "打开观察计划" });
+              await entry.focus();
+              await expect(entry).toBeFocused();
+            }
+          }
+          if (path.startsWith("/dashboard/monitoring/answers")) {
+            await expect(page.locator("main")).toHaveCount(1);
+            await expect(page.getByRole("heading", { name: locale === "en" ? "AI answer list" : "AI 回答列表" })).toBeVisible();
+            await expect(page.getByRole("navigation", { name: locale === "en" ? "Related entries" : "相关入口" })).toBeVisible();
+            await expect(page.getByRole("link", { name: locale === "en" ? "View evidence" : "查看证据" }).first()).toBeVisible();
+            if (width === 375) {
+              const entry = page.getByRole("link", { name: locale === "en" ? "Back to overview" : "返回概览" });
               await entry.focus();
               await expect(entry).toBeFocused();
             }
@@ -551,6 +563,19 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     await outsiderPage.goto("/dashboard/content");
     await expect(outsiderPage.getByRole("heading", { name: "Content plans and drafts", exact: true })).toBeVisible();
     await expect(outsiderPage.getByRole("link", { name: "Go to brands", exact: true })).toBeVisible();
+    await expectNoOverflow(outsiderPage);
+    await outsider.addCookies([{ name: "geo-locale", value: "zh-CN", url: baseURL }]);
+    await outsiderPage.goto("/dashboard/monitoring/answers");
+    await expect(outsiderPage.getByRole("heading", { name: "AI 回答列表", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("link", { name: "前往品牌资料", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("navigation", { name: "相关入口" })).toBeVisible();
+    await expect(outsiderPage.locator("main")).toHaveCount(1);
+    await expectNoOverflow(outsiderPage);
+    await outsider.addCookies([{ name: "geo-locale", value: "en", url: baseURL }]);
+    await outsiderPage.goto("/dashboard/monitoring/answers");
+    await expect(outsiderPage.getByRole("heading", { name: "AI answer list", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("link", { name: "Go to brands", exact: true })).toBeVisible();
+    await expect(outsiderPage.getByRole("navigation", { name: "Related entries" })).toBeVisible();
     await expectNoOverflow(outsiderPage);
     await outsider.addCookies([{ name: "geo-locale", value: "zh-CN", url: baseURL }]);
     // The run route has a loading boundary, so the document status is committed

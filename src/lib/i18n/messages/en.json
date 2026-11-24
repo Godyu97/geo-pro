@@ -1180,6 +1180,7 @@
     "description": "Review equal-weight metrics under one frozen filter set and drill into answer evidence. No composite GEO score and no cross-track averages.",
     "answersTitle": "AI answer list",
     "answersDescription": "The list uses the same brand, track, target region, requested network, and capture time as the overview. A blank condition does not narrow that dimension.",
+    "answersNoBrand": "No brand is available yet. Complete brand setup before opening the answer list.",
     "noBrand": "No brand is available yet. Complete brand setup before opening the overview.",
     "goBrands": "Go to brands",
     "invalidScope": "These filters are invalid. Check the track, a two-letter target region or unknown, requested network, and UTC start and end times with milliseconds.",

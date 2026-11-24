@@ -176,7 +176,20 @@ test("evidence scope stays on overview, answers and detail in both locales", asy
     }
     await page.getByRole("link", { name: "查看回答列表", exact: true }).click();
     await expect(page.getByText("当前范围 1 条回答", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "AI 回答列表", exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "相关入口" })).toBeVisible();
+    await expect(page.locator("main")).toHaveCount(1);
     await expect(page.getByRole("link", { name: "查看证据", exact: true })).toHaveAttribute("href", new RegExp(`${ids.officialOff}.*region=CN`));
+    for (const width of [375, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expectNoOverflow(page);
+      if (width === 375) {
+        const back = page.getByRole("link", { name: "返回概览", exact: true });
+        await back.focus();
+        await expect(back).toBeFocused();
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.getByRole("link", { name: "查看证据", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/evidence/${ids.officialOff}`));
     await expect(page).toHaveURL(/requestedNetworkMode=off/);
@@ -190,6 +203,9 @@ test("evidence scope stays on overview, answers and detail in both locales", asy
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page).toHaveURL(/sourceMode=model_api/);
     await expect(page).toHaveURL(/region=CN/);
+    await expect(page.getByRole("heading", { name: "AI answer list", exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Related entries" })).toBeVisible();
+    await expect(page.locator("main")).toHaveCount(1);
     await expect(page.getByText("1 answer in this scope", { exact: true })).toBeVisible();
     await expect(page.getByText("官方关联网", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "View evidence", exact: true })).toHaveAttribute("href", new RegExp(ids.officialOff));
@@ -198,12 +214,20 @@ test("evidence scope stays on overview, answers and detail in both locales", asy
     for (const width of [375, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await expectNoOverflow(page);
+      if (width === 375) {
+        const back = page.getByRole("link", { name: "Back to overview", exact: true });
+        await back.focus();
+        await expect(back).toBeFocused();
+      }
     }
 
     await page.locator("#main-content").getByRole("textbox", { name: "Target region", exact: true }).fill("JP");
     await page.getByRole("button", { name: "Apply filters", exact: true }).click();
     await expect(page.getByText("0 answers in this scope", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "AI answer list", exact: true })).toBeVisible();
     await expect(page.getByText("This scope has no samples. Change the track, target region, requested network, or time above.", { exact: true })).toBeVisible();
+    await page.setViewportSize({ width: 375, height: 900 });
+    await expectNoOverflow(page);
     await expect(page.getByLabel("Target region", { exact: true })).toBeVisible();
     await expect(page.getByText("官方关联网", { exact: true })).toHaveCount(0);
   } finally {
