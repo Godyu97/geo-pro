@@ -215,6 +215,15 @@ await writeFile(observationCommands, (await readFile(observationCommands, "utf8"
   }
   const owned = await new BrandDao(db).owned(ownerId, brandId);`));
 
+const interventionCommands = path.join(fixture, "src/features/formal-retest/intervention-commands.ts");
+const interventionSource = await readFile(interventionCommands, "utf8");
+const interventionList = "export async function listInterventionBatches(db: DatabaseConnection, ownerId: string, brandId: string): Promise<ListResult> {";
+assert.ok(interventionSource.includes(interventionList));
+await writeFile(interventionCommands, interventionSource.replace(interventionList, `${interventionList}
+  if ((await (await import("next/headers")).cookies()).get("geo-interventions-unavailable")?.value === "1") {
+    throw new Error("Private intervention fixture failure");
+  }`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
