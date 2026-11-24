@@ -208,10 +208,8 @@ export class PromptDao {
   }
 
   async latestClusterSource() {
-    const [row] = await this.query(
-      `SELECT id, content FROM prompt_set WHERE brand_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
-      [this.brandId],
-    );
+    const query = latestPromptSetQuery(this.brandId);
+    const [row] = await this.query(query.sql, query.values);
     if (!row) return null;
     return parseClusterSource(z.object({ id: brandIdSchema, content: z.string() }).parse(row));
   }
@@ -222,6 +220,13 @@ export class PromptDao {
     [status, this.brandId, ownerId, id]);
     return rows.length === 1;
   }
+}
+
+export function latestPromptSetQuery(brandId: string) {
+  return {
+    sql: `SELECT id, content FROM prompt_set WHERE brand_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
+    values: [brandId] as QueryValue[],
+  };
 }
 
 export type PromptClusterSource = {

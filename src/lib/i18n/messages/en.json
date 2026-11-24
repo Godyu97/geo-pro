@@ -1869,6 +1869,8 @@
     "driveWindow": "Process the due window",
     "dueOfficial": "Official slot {slot} is registered to run {run}, charge {amount}.",
     "dueSheet": "Manual sheet {slot} is ready and is not automatic collection.",
+    "dueSheetManual": "Manual, not automatic collection",
+    "duePromptMissing": "Question missing",
     "dueReserved": "Official slot {slot} is reserved for the controlled run.",
     "readingLine": "{window}: planned {planned}, eligible {eligible}.",
     "readingWaiting": "{count} comparable windows. The trend alert is still waiting.",

@@ -98,3 +98,24 @@ export function consumerSheet(promptIds: readonly string[]) {
     promptIds: [...promptIds],
   };
 }
+
+export type ManualSheetLine = {
+  id: string;
+  text: string | null;
+  missing: boolean;
+};
+
+/** Keep the saved sheet order. An id with no frozen text stays listed and is not replaced. */
+export function manualSheetLines(promptIds: readonly string[], savedTexts: ReadonlyMap<string, string>) {
+  const sheet = consumerSheet(promptIds);
+  return {
+    execution: sheet.execution,
+    automaticCollection: sheet.automaticCollection,
+    lines: sheet.promptIds.map((id) => {
+      const text = savedTexts.get(id);
+      return text === undefined
+        ? { id, text: null, missing: true }
+        : { id, text, missing: false };
+    }),
+  };
+}

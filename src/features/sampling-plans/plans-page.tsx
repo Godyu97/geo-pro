@@ -16,7 +16,7 @@ import {
 } from "./actions";
 import { listSamplingPlans } from "./commands";
 import type { SamplingPlanView } from "./commands";
-import { listSamplingDueWindows } from "./due-commands";
+import { listSamplingDueWindows, manualSheetsForBrand } from "./due-commands";
 
 const fieldClass = "h-10 w-full rounded-md border bg-background px-3";
 const knownErrors = ["PLAN_PHASE_CONFLICT", "NOT_FOUND", "INVALID_INPUT", "VERSION_CONFLICT"] as const;
@@ -81,6 +81,8 @@ export default async function SamplingPlansPage({
   const due = plans.length === 0
     ? { runs: [], readings: [] }
     : await listSamplingDueWindows(connection, session.user.id, plans.map((plan) => plan.id));
+  const sheets = await manualSheetsForBrand(connection, active.id, due.runs);
+  const sheetByRun = new Map(sheets.map((sheet) => [sheet.runId, sheet]));
 
   return (
     <div className="space-y-8">
@@ -190,13 +192,26 @@ export default async function SamplingPlansPage({
           </ul>
           <p className="text-sm">{t("coverageLine", { count: plan.coverageSlotIds.length })}</p>
           {due.runs.filter((run) => run.planId === plan.id).map((run) => (
-            <p key={run.id} className="text-sm">
-              {run.kind === "manual"
-                ? t("dueSheet", { slot: run.slotId })
-                : run.status === "accepted"
+            run.kind === "manual" ? (
+              <div key={run.id} className="space-y-2 text-sm">
+                <p>{t("dueSheet", { slot: run.slotId })}</p>
+                <ul className="space-y-2">
+                  {(sheetByRun.get(run.id)?.lines ?? []).map((line, index) => (
+                    <li key={`${run.id}-${index}`} className="rounded-xl border px-3 py-2">
+                      <p>{t("dueSheetManual")}</p>
+                      <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{line.id}</p>
+                      <p className="mt-1 whitespace-pre-wrap break-words">{line.missing ? t("duePromptMissing") : line.text}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p key={run.id} className="text-sm">
+                {run.status === "accepted"
                   ? t("dueOfficial", { slot: run.slotId, run: run.monitoringRunId ?? "", amount: amount(plan.currency, run.chargedMinor) })
                   : t("dueReserved", { slot: run.slotId })}
-            </p>
+              </p>
+            )
           ))}
           {due.readings.filter((reading) => reading.planId === plan.id).map((reading) => (
             <div key={reading.windowId} className="space-y-1 text-sm">
@@ -222,6 +237,7 @@ export default async function SamplingPlansPage({
             <form action={driveDueSamplingWindowAction} className="space-y-3 rounded-xl border p-4">
               <h3 className="text-sm font-medium">{t("driveTitle")}</h3>
               <p className="text-sm leading-6 text-muted-foreground">{t("driveHint")}</p>
+              <input type="hidden" name="planId" value={plan.id} />
               {plan.slots.map((slot) => <input key={slot.id} type="hidden" name="channelId" value={slot.channelId} />)}
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="text-sm">

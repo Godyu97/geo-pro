@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
+import { PromptDao } from "../prompts/dao.ts";
 import { recordQualityAlert } from "../quality-alerts/commands.ts";
 import type { SamplingPlanError, DriveDueWindowInput } from "./contracts.ts";
 import { driveDueWindowSchema } from "./contracts.ts";
@@ -15,7 +16,7 @@ import {
   type ObservationFact,
 } from "./due-window.ts";
 import { SamplingPlanDao, type SamplingPlanRecord, type SamplingSlotRecord } from "./dao.ts";
-import { coverageDenominator } from "./rules.ts";
+import { coverageDenominator, manualSheetLines } from "./rules.ts";
 
 type Failure = { error: SamplingPlanError };
 
@@ -292,6 +293,26 @@ async function loadFacts(
     facts.set(row.windowId, list);
   }
   return { facts, monitorSlots, accepted };
+}
+
+/** Resolve a saved manual sheet against this brand's latest frozen questions. Other brands are not read. */
+export async function manualSheetsForBrand(
+  db: DatabaseConnection,
+  brandId: string,
+  runs: readonly DueWindowRunView[],
+) {
+  const manuals = runs.filter((run) => run.kind === "manual");
+  const saved = new Map<string, string>();
+  if (manuals.some((run) => run.promptIds.length > 0)) {
+    const source = await new PromptDao(db, brandId).latestClusterSource();
+    for (const question of source?.questions ?? []) saved.set(question.id, question.text);
+  }
+  return manuals.map((run) => ({
+    runId: run.id,
+    planId: run.planId,
+    slotId: run.slotId,
+    ...manualSheetLines(run.promptIds, saved),
+  }));
 }
 
 export async function listSamplingDueWindows(db: DatabaseConnection, ownerId: string, planIds: readonly string[]) {
