@@ -87,6 +87,20 @@ test("competitor analysis keeps the task, share table and recovery in the worksp
   assert.match(page, /saveSet/);
 });
 
+test("content brief keeps the next action and recovery in the workspace canvas", () => {
+  const brief = read("../../src/features/content/brief-page.tsx");
+  assert.doesNotMatch(brief, /<main\b/);
+  assert.match(brief, /briefTaskReady/);
+  assert.match(brief, /briefTaskGaps/);
+  assert.match(brief, /briefUnavailable/);
+  assert.match(brief, /relatedEntries/);
+  assert.match(brief, /confirmBrief/);
+  assert.match(brief, /gapActionAudience/);
+  assert.match(brief, /\[overflow-wrap:anywhere\]/);
+  assert.match(brief, /whitespace-normal/);
+  assert.match(brief, /gapFields\[gap\.code\]\.text/);
+});
+
 test("report entry stays inside the workspace canvas", () => {
   const reports = read("../../src/features/reports/list-page.tsx");
   assert.doesNotMatch(reports, /<main\b/);

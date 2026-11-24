@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
@@ -7,11 +8,66 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { confirmBriefAction, saveBriefAction } from "./actions";
 import { readBriefDetail } from "./commands";
+import type { ContentGapCode } from "./contracts";
 import { FactDraftButton } from "./fact-draft-button";
+
+const actionClass = "h-auto max-w-full whitespace-normal";
+const relatedClass = "inline-flex min-h-10 min-w-0 max-w-full items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 break-words outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const fieldClass = "h-10 w-full min-w-0 max-w-full rounded-md border bg-background px-3 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const areaClass = "w-full min-w-0 max-w-full rounded-md border bg-background px-3 py-2 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
+type Translate = Awaited<ReturnType<typeof getTranslator<"content">>>;
+
+const gapFields = {
+  audienceMissing: { text: "gapAudienceMissing", action: "gapActionAudience", field: "brief-audience" },
+  targetGapMissing: { text: "gapTargetGapMissing", action: "gapActionTargetGap", field: "brief-target-gap" },
+  boundaryMissing: { text: "gapBoundaryMissing", action: "gapActionBoundary", field: "brief-boundary" },
+  sourceMissing: { text: "gapSourceMissing", action: "gapActionFacts", field: "brief-facts" },
+  primaryPageMissing: { text: "gapPrimaryPageMissing", action: "gapActionPrimaryPage", field: "brief-primary-page" },
+  conversionActionMissing: { text: "gapConversionMissing", action: "gapActionConversion", field: "brief-conversion" },
+  templateMissing: { text: "gapTemplateMissing", action: "gapActionTemplate", field: "brief-template" },
+  titlesMissing: { text: "gapTitlesMissing", action: "gapActionTitles", field: "brief-titles" },
+  factsMissing: { text: "gapFactsMissing", action: "gapActionFacts", field: "brief-facts" },
+  competitorSourceMissing: { text: "gapCompetitorMissing", action: "gapActionCompetitor", field: "brief-competitor" },
+} as const satisfies Record<ContentGapCode, { text: Parameters<Translate>[0]; action: Parameters<Translate>[0]; field: string }>;
 
 export async function generateMetadata() {
   const t = await getTranslator("content");
   return { title: t("briefDetail"), robots: { index: false, follow: false } };
+}
+
+function BriefCanvas({
+  title,
+  summary,
+  primary,
+  relatedLabel,
+  related,
+  children,
+}: {
+  title: string;
+  summary?: ReactNode;
+  primary?: ReactNode;
+  relatedLabel: string;
+  related: ReadonlyArray<{ href: string; label: string }>;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="min-w-0 space-y-8">
+      <header className="min-w-0 space-y-3">
+        <h1 className="break-words text-2xl font-semibold tracking-tight">{title}</h1>
+        {summary}
+        {primary}
+        <nav aria-label={relatedLabel} className="flex min-w-0 flex-wrap gap-2">
+          {related.map((item) => (
+            <Link key={item.href} href={item.href} prefetch={false} className={relatedClass}>
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </header>
+      {children}
+    </div>
+  );
 }
 
 export default async function ContentBriefPage({
@@ -22,119 +78,161 @@ export default async function ContentBriefPage({
   const session = await requireSession();
   const { briefId } = await params;
   const t = await getTranslator("content");
-  const detail = await readBriefDetail(getConnection(), session.user.id, briefId);
-  if ("error" in detail) notFound();
+  const href = `/dashboard/content/briefs/${briefId}`;
+  const related = [
+    { href: "/dashboard/content", label: t("backToList") },
+  ];
+  let detail: Awaited<ReturnType<typeof readBriefDetail>>;
+  try {
+    detail = await readBriefDetail(getConnection(), session.user.id, briefId);
+  } catch {
+    console.error("content-brief-read-failed", { briefId });
+    detail = { error: "SERVICE_UNAVAILABLE" };
+  }
+  if ("error" in detail) {
+    if (detail.error === "NOT_FOUND") notFound();
+    return (
+      <BriefCanvas
+        title={t("briefDetail")}
+        summary={<p role="alert" className="max-w-2xl break-words text-sm leading-7">{t("briefUnavailable")}</p>}
+        primary={(
+          <Button asChild className={actionClass}>
+            <a href={href}>{t("reload")}</a>
+          </Button>
+        )}
+        relatedLabel={t("relatedEntries")}
+        related={related}
+      />
+    );
+  }
 
   const { brief, version, gaps, fields } = detail;
+  const heading = fields?.titleCandidates.find((item) => item.trim()) || t("briefDetail");
+  const task = gaps.length > 0
+    ? t("briefTaskGaps")
+    : brief.status === "confirmed"
+      ? t("briefTaskConfirmed")
+      : t("briefTaskReady");
+  const firstGap = gaps[0] ? gapFields[gaps[0].code] : null;
+  const links = [
+    ...related,
+    { href: `/dashboard/brands/${brief.brandId}/facts`, label: t("brandFactsLink") },
+    { href: `/dashboard/content/sources?brandId=${encodeURIComponent(brief.brandId)}`, label: t("sourcesLink") },
+  ];
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            <Link href="/dashboard/content" prefetch={false} className="underline-offset-4 hover:underline">
-              {t("backToList")}
-            </Link>
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">{t("briefDetail")}</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{brief.id}</p>
+    <BriefCanvas
+      title={heading}
+      summary={(
+        <div className="max-w-2xl space-y-3">
+          <p className="break-words text-sm leading-7 text-muted-foreground">{task}</p>
+          <Badge variant="secondary">{brief.status}</Badge>
         </div>
-        <Badge variant="secondary">{brief.status}</Badge>
-      </div>
-
+      )}
+      primary={firstGap ? (
+        <Button asChild className={actionClass}>
+          <a href={`#${firstGap.field}`}>{t(firstGap.action)}</a>
+        </Button>
+      ) : brief.status !== "confirmed" ? (
+        <form action={confirmBriefAction}>
+          <input type="hidden" name="brandId" value={brief.brandId} />
+          <input type="hidden" name="briefId" value={brief.id} />
+          <Button type="submit" className={actionClass}>{t("confirmBrief")}</Button>
+        </form>
+      ) : (
+        <FactDraftButton
+          brandId={brief.brandId}
+          briefId={brief.id}
+          label={t("generateFactDraft")}
+          pendingLabel={t("generatingFactDraft")}
+          readyLabel={t("factDraftReady")}
+          openLabel={t("openVersion")}
+          fallbackError={t("AI_FAILED")}
+        />
+      )}
+      relatedLabel={t("relatedEntries")}
+      related={links}
+    >
       {gaps.length > 0 ? (
-        <section className="rounded-2xl border border-dashed px-4 py-4 text-sm">
+        <section className="min-w-0 rounded-2xl border border-dashed bg-card px-4 py-4 text-sm">
           <p className="font-medium">{t("gapsTitle")}</p>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-            {gaps.map((gap) => <li key={gap.code}>{gap.code}</li>)}
+          <ul className="mt-2 list-disc space-y-1 pl-5 break-words text-muted-foreground">
+            {gaps.map((gap) => <li key={gap.code}>{t(gapFields[gap.code].text)}</li>)}
           </ul>
         </section>
       ) : null}
 
-      <section className="space-y-3 rounded-2xl border p-5">
+      <section className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">
         <h2 className="text-lg font-semibold">{t("editBrief")}</h2>
-        <form action={saveBriefAction} className="grid gap-3 sm:grid-cols-2">
+        {fields?.primaryPage ? (
+          <p className="[overflow-wrap:anywhere] text-sm leading-6 text-muted-foreground">{fields.primaryPage}</p>
+        ) : null}
+        <form action={saveBriefAction} className="grid min-w-0 gap-3 sm:grid-cols-2">
           <input type="hidden" name="brandId" value={brief.brandId} />
           <input type="hidden" name="briefId" value={brief.id} />
-          <label className="block text-sm">
+          <label className="block min-w-0 text-sm break-words" htmlFor="brief-audience">
             <span className="mb-1 block text-muted-foreground">{t("audience")}</span>
-            <input name="audience" defaultValue={fields?.audience ?? ""} className="h-10 w-full rounded-md border bg-background px-3" />
+            <input id="brief-audience" name="audience" defaultValue={fields?.audience ?? ""} className={`${fieldClass} scroll-mt-28`} />
           </label>
-          <label className="block text-sm">
+          <label className="block min-w-0 text-sm break-words" htmlFor="brief-target-gap">
             <span className="mb-1 block text-muted-foreground">{t("targetGap")}</span>
-            <input name="targetGap" defaultValue={fields?.targetGap ?? ""} className="h-10 w-full rounded-md border bg-background px-3" />
+            <input id="brief-target-gap" name="targetGap" defaultValue={fields?.targetGap ?? ""} className={`${fieldClass} scroll-mt-28`} />
           </label>
-          <label className="block text-sm">
+          <label className="block min-w-0 text-sm break-words" htmlFor="brief-boundary">
             <span className="mb-1 block text-muted-foreground">{t("boundary")}</span>
-            <input name="applicableBoundary" defaultValue={fields?.applicableBoundary ?? ""} className="h-10 w-full rounded-md border bg-background px-3" />
+            <input id="brief-boundary" name="applicableBoundary" defaultValue={fields?.applicableBoundary ?? ""} className={`${fieldClass} scroll-mt-28`} />
           </label>
-          <label className="block text-sm">
+          <label className="block min-w-0 text-sm break-words" htmlFor="brief-primary-page">
             <span className="mb-1 block text-muted-foreground">{t("primaryPage")}</span>
-            <input name="primaryPage" defaultValue={fields?.primaryPage ?? ""} className="h-10 w-full rounded-md border bg-background px-3" />
+            <input id="brief-primary-page" name="primaryPage" defaultValue={fields?.primaryPage ?? ""} className={`${fieldClass} scroll-mt-28`} />
           </label>
-          <label className="block text-sm">
+          <label className="block min-w-0 text-sm break-words" htmlFor="brief-conversion">
             <span className="mb-1 block text-muted-foreground">{t("conversionAction")}</span>
-            <input name="conversionAction" defaultValue={fields?.conversionAction ?? ""} className="h-10 w-full rounded-md border bg-background px-3" />
+            <input id="brief-conversion" name="conversionAction" defaultValue={fields?.conversionAction ?? ""} className={`${fieldClass} scroll-mt-28`} />
           </label>
-          <label className="block text-sm">
+          <label className="block min-w-0 text-sm break-words" htmlFor="brief-template">
             <span className="mb-1 block text-muted-foreground">{t("templateKind")}</span>
-            <select name="templateKind" defaultValue={fields?.templateKind ?? "fact_faq"} className="h-10 w-full rounded-md border bg-background px-3">
+            <select id="brief-template" name="templateKind" defaultValue={fields?.templateKind ?? "fact_faq"} className={`${fieldClass} scroll-mt-28`}>
               <option value="fact_faq">fact_faq</option>
               <option value="scenario_solution">scenario_solution</option>
               <option value="verifiable_comparison">verifiable_comparison</option>
             </select>
           </label>
-          <label className="block text-sm sm:col-span-2">
+          <label className="block min-w-0 text-sm break-words sm:col-span-2" htmlFor="brief-titles">
             <span className="mb-1 block text-muted-foreground">{t("titles")}</span>
             <textarea
+              id="brief-titles"
               name="titleCandidates"
               rows={2}
               defaultValue={(fields?.titleCandidates ?? []).join("\n")}
-              className="w-full rounded-md border bg-background px-3 py-2"
+              className={`${areaClass} scroll-mt-28`}
             />
           </label>
-          <label className="block text-sm sm:col-span-2">
+          <label className="block min-w-0 text-sm break-words sm:col-span-2" htmlFor="brief-facts">
             <span className="mb-1 block text-muted-foreground">{t("factIds")}</span>
             <textarea
+              id="brief-facts"
               name="factVersionIds"
               rows={2}
               defaultValue={(fields?.factVersionIds ?? []).join("\n")}
-              className="w-full rounded-md border bg-background px-3 py-2"
+              className={`${areaClass} scroll-mt-28 [overflow-wrap:anywhere]`}
             />
           </label>
-          <label className="block text-sm sm:col-span-2">
+          <label className="block min-w-0 text-sm break-words sm:col-span-2" htmlFor="brief-competitor">
             <span className="mb-1 block text-muted-foreground">{t("competitorSource")}</span>
-            <input name="competitorSource" defaultValue={fields?.competitorSource ?? ""} className="h-10 w-full rounded-md border bg-background px-3" />
+            <input id="brief-competitor" name="competitorSource" defaultValue={fields?.competitorSource ?? ""} className={`${fieldClass} scroll-mt-28`} />
           </label>
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <Button type="submit">{t("saveBrief")}</Button>
+          <div className="sm:col-span-2">
+            <Button type="submit" className={actionClass}>{t("saveBrief")}</Button>
           </div>
         </form>
-        {brief.status !== "confirmed" && gaps.length === 0 ? (
-          <form action={confirmBriefAction} className="mt-3">
-            <input type="hidden" name="brandId" value={brief.brandId} />
-            <input type="hidden" name="briefId" value={brief.id} />
-            <Button type="submit" variant="outline">{t("confirmBrief")}</Button>
-          </form>
-        ) : null}
-        <div className="mt-4 space-y-2 border-t pt-4">
-          <p className="text-sm text-muted-foreground">{t("factDraftHint")}</p>
-          <FactDraftButton
-            brandId={brief.brandId}
-            briefId={brief.id}
-            label={t("generateFactDraft")}
-            pendingLabel={t("generatingFactDraft")}
-            readyLabel={t("factDraftReady")}
-            openLabel={t("openVersion")}
-            fallbackError={t("AI_FAILED")}
-          />
-        </div>
+        <p className="break-all text-xs leading-5 text-muted-foreground">{brief.id}</p>
         {version ? (
-          <p className="mt-4 text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             rev {version.revision} · {version.templateKind}
           </p>
         ) : null}
       </section>
-    </div>
+    </BriefCanvas>
   );
 }

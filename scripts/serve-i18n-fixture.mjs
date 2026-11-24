@@ -90,6 +90,25 @@ await writeFile(evidenceCommands, evidenceSource.replace(evidenceRead, `  const 
   }
 ${evidenceRead}`));
 
+const briefCommands = path.join(fixture, "src/features/content/commands.ts");
+const briefSource = await readFile(briefCommands, "utf8");
+const briefRead = `export async function readBriefDetail(
+  db: DatabaseConnection,
+  ownerId: string,
+  briefId: string,
+) {
+  const dao = new ContentDao(db);`;
+assert.ok(briefSource.includes(briefRead));
+await writeFile(briefCommands, briefSource.replace(briefRead, `export async function readBriefDetail(
+  db: DatabaseConnection,
+  ownerId: string,
+  briefId: string,
+) {
+  if ((await (await import("next/headers")).cookies()).get("geo-content-brief-unavailable")?.value === "1") {
+    throw new Error("Private content brief fixture failure");
+  }
+  const dao = new ContentDao(db);`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
