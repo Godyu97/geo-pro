@@ -174,6 +174,23 @@ test("content brief keeps the next action and recovery in the workspace canvas",
   assert.match(brief, /gapFields\[gap\.code\]\.text/);
 });
 
+test("observation plan keeps the next checkpoint action and recovery in the workspace canvas", () => {
+  const page = read("../../src/features/formal-retest/observations-page.tsx");
+  assert.doesNotMatch(page, /<main\b/);
+  assert.match(page, /taskEmpty/);
+  assert.match(page, /taskPending/);
+  assert.match(page, /taskProgress/);
+  assert.match(page, /taskExploratory/);
+  assert.match(page, /taskFormal/);
+  assert.match(page, /requestFormal/);
+  assert.match(page, /viewExcluded/);
+  assert.match(page, /viewHistory/);
+  assert.match(page, /relatedEntries/);
+  assert.match(page, /SERVICE_UNAVAILABLE/);
+  assert.match(page, /\[overflow-wrap:anywhere\]/);
+  assert.match(page, /whitespace-normal/);
+});
+
 test("report entry keeps the current snapshot action and recovery in the workspace canvas", () => {
   const reports = read("../../src/features/reports/list-page.tsx");
   assert.doesNotMatch(reports, /<main\b/);

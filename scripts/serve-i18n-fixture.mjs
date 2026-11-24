@@ -205,6 +205,16 @@ await writeFile(reportCommands, (await readFile(reportCommands, "utf8")).replace
   }
   const brand = await requireOwnedBrand(db, ownerId, brandId);`));
 
+const observationCommands = path.join(fixture, "src/features/formal-retest/commands.ts");
+const observationList = `export async function listFormalObservations(db: DatabaseConnection, ownerId: string, brandId: string) {
+  const owned = await new BrandDao(db).owned(ownerId, brandId);`;
+assert.ok((await readFile(observationCommands, "utf8")).includes(observationList));
+await writeFile(observationCommands, (await readFile(observationCommands, "utf8")).replace(observationList, `export async function listFormalObservations(db: DatabaseConnection, ownerId: string, brandId: string) {
+  if ((await (await import("next/headers")).cookies()).get("geo-observations-unavailable")?.value === "1") {
+    throw new Error("Private observation fixture failure");
+  }
+  const owned = await new BrandDao(db).owned(ownerId, brandId);`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
