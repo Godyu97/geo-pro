@@ -30,8 +30,9 @@ import {
 } from "./cost.ts";
 import { compareWindows, computeD7DueAt, resolveLoopGate } from "./rules.ts";
 import { readSnapshotBusiness, summarizeBusinessFeedback, type SnapshotBusinessView } from "./business-feedback.ts";
+import { readExecution, readMetricConclusions, readVisits, type ExecutionReading, type MetricConclusion, type VisitReading } from "./reading.ts";
 import { buildSnapshotDocument, fingerprintBytes, renderSnapshotHtml } from "./snapshot.ts";
-import { loadSnapshotComparisons } from "./snapshot-comparisons.ts";
+import { loadSnapshotComparisons, type SnapshotMetric } from "./snapshot-comparisons.ts";
 
 type Clock = () => string;
 const defaultClock: Clock = () => new Date().toISOString().replace(/\.\d{3}Z$/, ".000Z");
@@ -576,6 +577,18 @@ type SnapshotBodyView = {
   comparisons?: z.infer<typeof savedOverview>["comparisons"];
   excluded: SnapshotExclusion[];
   business: SnapshotBusinessView;
+  conclusions: Partial<Record<SnapshotMetric, MetricConclusion>>;
+  execution: ExecutionReading;
+  visits: VisitReading;
+};
+
+const unreadSnapshotBody = {
+  cost: { state: "unavailable" as const },
+  excluded: [],
+  business: { state: "unavailable" as const },
+  conclusions: {},
+  execution: { state: "unavailable" as const },
+  visits: { state: "unavailable" as const },
 };
 
 export type SnapshotSourceView = {
@@ -786,9 +799,12 @@ function parseSnapshotView(json: string): SnapshotBodyView {
       comparisons: summary.data?.comparisons,
       excluded: excludedQueries(saved),
       business: readSnapshotBusiness(saved),
+      conclusions: readMetricConclusions(saved),
+      execution: readExecution(saved),
+      visits: readVisits(saved),
     };
   } catch {
-    return { cost: { state: "unavailable" }, excluded: [], business: { state: "unavailable" } };
+    return unreadSnapshotBody;
   }
 }
 
@@ -805,9 +821,7 @@ export async function snapshotViews(
   for (const snapshot of snapshots) {
     const source = sources.get(snapshot.id) ?? snapshotSourceView(snapshot.sourceMissing, undefined, new Set());
     const item = loaded.get(snapshot.id);
-    const body = item?.status === "ready"
-      ? parseSnapshotView(item.text)
-      : { cost: { state: "unavailable" as const }, excluded: [], business: { state: "unavailable" as const } };
+    const body = item?.status === "ready" ? parseSnapshotView(item.text) : unreadSnapshotBody;
     views.set(snapshot.id, { ...body, source });
   }
   return views;

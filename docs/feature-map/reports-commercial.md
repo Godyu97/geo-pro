@@ -2,7 +2,7 @@
 
 | 产品叫法 | 路径 | 核心功能与关键弹窗/抽屉 | 对应业务模块/Service |
 | --- | --- | --- | --- |
-| 复测与报告总览 | `/dashboard/reports` · `src/app/(dashboard)/dashboard/reports/page.tsx` | 同口径对比、D+7 待办、快照生成与后继修订；新快照写入业务反馈层，缺少该层的历史文件仍按原字节读取；源观察清除后快照卡片标明不可复核且不改文件字节；`src/features/reports/report-entry-panel.tsx`；阶段门禁试算 `src/features/functional-mock/run-buttons.tsx` | `src/features/reports/`（`list-page.tsx`、`actions.ts`、`saved-retest.ts`、`commands.ts`、`dao.ts`）· `src/app/api/reports/` |
+| 复测与报告总览 | `/dashboard/reports` · `src/app/(dashboard)/dashboard/reports/page.tsx` | 同口径对比、D+7 待办、快照生成与后继修订；新快照写入业务反馈层，缺少该层的历史文件仍按原字节读取；报告页按已保存结论显示观察改善、观察下降、无变化或无法判断，并分开阅读执行成果、可见性、站点访问和业务反馈；源观察清除后快照卡片标明不可复核且不改文件字节；`src/features/reports/report-entry-panel.tsx`；阶段门禁试算 `src/features/functional-mock/run-buttons.tsx` | `src/features/reports/`（`list-page.tsx`、`actions.ts`、`saved-retest.ts`、`commands.ts`、`dao.ts`）· `src/app/api/reports/` |
 | 观察计划（正式复测） | `/dashboard/reports/observations` · `src/app/(dashboard)/dashboard/reports/observations/page.tsx` | D7 观察窗口、对照与混杂因素管理（Server Component） | `src/features/formal-retest/`（`observations-page.tsx`、`actions.ts`、`commands.ts`）· `src/app/api/reports/observations/` |
 | 干预批次 | `/dashboard/reports/interventions` · `src/app/(dashboard)/dashboard/reports/interventions/page.tsx` | 干预页面与批次登记（Server Component） | `src/features/formal-retest/`（`interventions-page.tsx`、`intervention-actions.ts`、`intervention-commands.ts`）· `src/app/api/reports/interventions/` |
 | 脱敏线索 | `/dashboard/reports/leads` · `src/app/(dashboard)/dashboard/reports/leads/page.tsx` | 脱敏 CSV 上传或粘贴后先预览去重、主分类升级和拒绝行，确认后才写入；`src/features/business-feedback/import-form.tsx` | `src/features/business-feedback/`（`leads-page.tsx`、`commands.ts`）· `src/app/api/reports/leads/` |

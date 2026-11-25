@@ -5,6 +5,7 @@ import { isLocale } from "../../lib/i18n/locale.ts";
 import { createTranslator } from "../../lib/i18n/translate.ts";
 import { businessFeedbackLines, type SnapshotBusinessFeedback } from "./business-feedback.ts";
 import { presentSnapshotCost } from "./cost-copy.ts";
+import { conclusionSentence, executionSentence, readExecution, readVisits, visitSentences } from "./reading.ts";
 import type { SnapshotCost, SnapshotLabor } from "./cost.ts";
 import { snapshotMetrics, type SnapshotComparisons, type SnapshotMetric } from "./snapshot-comparisons.ts";
 import type { ReportGrade } from "./types.ts";
@@ -152,6 +153,7 @@ export function renderSnapshotHtml(document: ReturnType<typeof buildSnapshotDocu
     <h2>${escape(t(snapshotMetricLabels[metric]))}</h2>
     <p>${escape(t("comparisonCounts", { common: block.common_query_count, frozen: block.frozen_query_count, before: block.before_sample_count, after: block.after_sample_count }))}</p>
     <p>${escape(t("comparisonValues", { before: rate(block.before), after: rate(block.after), delta: block.delta_pp === null ? "N/A" : `${points.format(block.delta_pp)}pp` }))}</p>
+    <p>${escape(conclusionSentence(locale, block.conclusion))}</p>
     <p>${escape(t(block.reason ? "comparisonInsufficient" : "comparisonExploratory"))}</p>
     ${rows ? `<table><thead><tr><th scope="col">${escape(t("comparisonQuestion"))}</th><th scope="col">${escape(t("comparisonBefore"))}</th><th scope="col">${escape(t("comparisonAfter"))}</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
     ${excluded.length ? `<h3>${escape(t("comparisonExcluded"))}</h3><ul>${excluded.join("")}</ul>` : ""}
@@ -159,12 +161,13 @@ export function renderSnapshotHtml(document: ReturnType<typeof buildSnapshotDocu
   }).join("\n  ");
   const cost = presentSnapshotCost(locale, document.cost, document.labor);
   const reason = cost.reason ? `<p>${escape(cost.reason)}</p>` : "";
-  const business = document.business_feedback
-    ? `<section id="business-feedback">
-    <h2>${escape(t("businessHeading"))}</h2>
-    ${businessFeedbackLines(locale, document.business_feedback).map((line) => `<p>${escape(line)}</p>`).join("\n    ")}
-  </section>`
-    : "";
+  const execution = executionSentence(locale, readExecution(document));
+  const visits = visitSentences(locale, document.business_feedback
+    ? readVisits(document)
+    : { state: "absent" });
+  const inquiries = document.business_feedback
+    ? businessFeedbackLines(locale, document.business_feedback)
+    : [t("businessAbsent")];
   return `<!doctype html>
 <html lang="${locale}">
 <head><meta charset="utf-8"/><title>Report ${escape(document.report_id)}</title></head>
@@ -172,8 +175,20 @@ export function renderSnapshotHtml(document: ReturnType<typeof buildSnapshotDocu
   <h1>Report ${escape(document.report_id)}</h1>
   <p>Brand: ${escape(document.brand.name)} · Entity v${escape(document.brand.entity_version)}</p>
   <p>Grade: ${escape(document.grade)} · Intent: ${escape(document.intent)} · Loop completed: ${document.loop_completed}</p>
+  <section id="execution">
+    <h2>${escape(t("layerExecution"))}</h2>
+    <p>${escape(execution)}</p>
+  </section>
+  <h2>${escape(t("layerVisibility"))}</h2>
   ${comparisons}
-  ${business}
+  <section id="crawler-visits">
+    <h2>${escape(t("layerVisits"))}</h2>
+    ${visits.map((line) => `<p>${escape(line)}</p>`).join("\n    ")}
+  </section>
+  <section id="business-feedback">
+    <h2>${escape(t("businessHeading"))}</h2>
+    ${inquiries.map((line) => `<p>${escape(line)}</p>`).join("\n    ")}
+  </section>
   <section id="snapshot-cost">
     <h2>${escape(cost.heading)}</h2>
     <p>${escape(cost.known)}</p>

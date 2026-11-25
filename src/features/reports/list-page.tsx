@@ -15,6 +15,7 @@ import { generateSavedSnapshotAction, reviseSavedSnapshotAction } from "./action
 import { businessFeedbackLines } from "./business-feedback";
 import { presentSnapshotCost } from "./cost-copy";
 import { listReports, snapshotViews, type SnapshotCostView, type SnapshotExclusion, type SnapshotSourceView, type SnapshotView } from "./commands";
+import { conclusionSentence, executionSentence, visitSentences } from "./reading";
 import { ReportEntryPanel, type ReportPublicationOption } from "./report-entry-panel";
 import { readSavedWindows, readTodoProgress } from "./window-observations";
 import { m0StageGate } from "./m0-stage-gate";
@@ -56,16 +57,15 @@ function SnapshotBusinessLines({
   t: Awaited<ReturnType<typeof getTranslator<"reports">>>;
 }) {
   if (!view || view.state === "unavailable") {
-    return <p className="mt-2 break-words text-muted-foreground">{t("businessUnavailable")}</p>;
+    return <p className="break-words leading-6 text-muted-foreground">{t("businessUnavailable")}</p>;
   }
   if (view.state === "absent") {
-    return <p className="mt-2 break-words text-muted-foreground">{t("businessAbsent")}</p>;
+    return <p className="break-words leading-6 text-muted-foreground">{t("businessAbsent")}</p>;
   }
   return (
-    <div className="mt-3 space-y-1 break-words">
-      <p className="font-medium">{t("businessHeading")}</p>
+    <div className="space-y-1 break-words">
       {businessFeedbackLines(locale, view.feedback).map((line) => (
-        <p key={line} className="text-muted-foreground">{line}</p>
+        <p key={line} className="leading-6 text-muted-foreground">{line}</p>
       ))}
     </div>
   );
@@ -156,28 +156,76 @@ function SnapshotMetrics({ view, locale, t }: {
     const comparisons = view.comparisons;
     const points = new Intl.NumberFormat(locale, { signDisplay: "exceptZero", minimumFractionDigits: 1, maximumFractionDigits: 1 });
     return (
-      <dl className="mt-3 space-y-1 break-words">
+      <dl className="space-y-2 break-words">
         {snapshotMetrics.map((metric) => {
           const { common_query_count, delta_pp } = comparisons[metric];
+          const label = t(snapshotMetricLabels[metric]);
           return (
-            <div key={metric} className="flex flex-wrap gap-x-2">
-              <dt>{t(snapshotMetricLabels[metric])}</dt>
-              <dd className="text-muted-foreground">
-                {t(common_query_count === 1 ? "snapshotMetricCountOne" : "snapshotMetricCount", {
-                  common: common_query_count, delta: delta_pp === null ? "N/A" : `${points.format(delta_pp)}pp`,
-                })}
-              </dd>
+            <div key={metric} role="group" aria-label={label} className="min-w-0">
+              <div className="flex flex-wrap gap-x-2">
+                <dt>{label}</dt>
+                <dd className="text-muted-foreground tabular-nums">
+                  {t(common_query_count === 1 ? "snapshotMetricCountOne" : "snapshotMetricCount", {
+                    common: common_query_count, delta: delta_pp === null ? "N/A" : `${points.format(delta_pp)}pp`,
+                  })}
+                </dd>
+              </div>
+              <p className="break-words leading-6 text-muted-foreground">
+                {conclusionSentence(locale, view.conclusions[metric] ?? "missing")}
+              </p>
             </div>
           );
         })}
       </dl>
     );
   }
-  if (!view?.metric) return null;
-  const label = Object.hasOwn(snapshotMetricLabels, view.metric)
+  const label = view?.metric && Object.hasOwn(snapshotMetricLabels, view.metric)
     ? t(snapshotMetricLabels[view.metric as SnapshotMetric])
-    : view.metric;
-  return <p className="mt-2 break-words text-muted-foreground">{t("snapshotLegacyMetric", { metric: label })}</p>;
+    : view?.metric;
+  return (
+    <div className="space-y-1">
+      {label ? <p className="break-words text-muted-foreground">{t("snapshotLegacyMetric", { metric: label })}</p> : null}
+      <p className="break-words leading-6 text-muted-foreground">{t("visibilityAbsent")}</p>
+    </div>
+  );
+}
+
+function SnapshotReading({
+  id,
+  view,
+  locale,
+  t,
+}: {
+  id: string;
+  view: SnapshotView | undefined;
+  locale: Locale;
+  t: Awaited<ReturnType<typeof getTranslator<"reports">>>;
+}) {
+  const execution = view?.execution ?? { state: "unavailable" as const };
+  const visits = view?.visits ?? { state: "unavailable" as const };
+  return (
+    <div className="mt-3 space-y-4">
+      <section aria-labelledby={`${id}-execution`} className="min-w-0 space-y-1">
+        <h3 id={`${id}-execution`} className="font-medium">{t("layerExecution")}</h3>
+        <p className="break-words leading-6 text-muted-foreground">{executionSentence(locale, execution)}</p>
+      </section>
+      <section aria-labelledby={`${id}-visibility`} className="min-w-0 space-y-1">
+        <h3 id={`${id}-visibility`} className="font-medium">{t("layerVisibility")}</h3>
+        <SnapshotMetrics view={view} locale={locale} t={t} />
+        <SnapshotExclusions excluded={view?.excluded ?? []} t={t} />
+      </section>
+      <section aria-labelledby={`${id}-visits`} className="min-w-0 space-y-1">
+        <h3 id={`${id}-visits`} className="font-medium">{t("layerVisits")}</h3>
+        {visitSentences(locale, visits).map((line) => (
+          <p key={line} className="break-words leading-6 text-muted-foreground">{line}</p>
+        ))}
+      </section>
+      <section aria-labelledby={`${id}-feedback`} className="min-w-0 space-y-1">
+        <h3 id={`${id}-feedback`} className="font-medium">{t("businessHeading")}</h3>
+        <SnapshotBusinessLines view={view?.business} locale={locale} t={t} />
+      </section>
+    </div>
+  );
 }
 
 function nextSnapshot(snapshots: readonly ReportSnapshotRow[]) {
@@ -432,9 +480,7 @@ export default async function ReportsListPage({
                   {item.predecessorId ? ` · ${t("snapshotPrevious", { id: item.predecessorId })}` : ""}
                 </p>
                 <SnapshotSourceNote source={views.get(item.id)?.source ?? result.sources[item.id]} t={t} />
-                <SnapshotMetrics view={views.get(item.id)} locale={locale} t={t} />
-                <SnapshotBusinessLines view={views.get(item.id)?.business} locale={locale} t={t} />
-                <SnapshotExclusions excluded={views.get(item.id)?.excluded ?? []} t={t} />
+                <SnapshotReading id={item.id} view={views.get(item.id)} locale={locale} t={t} />
                 {item.status === "created" && views.get(item.id)?.comparisons ? (
                   <form action={reviseSavedSnapshotAction} className="mt-3">
                     <input type="hidden" name="brandId" value={brandId} />

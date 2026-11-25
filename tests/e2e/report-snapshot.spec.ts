@@ -34,6 +34,15 @@ const copy = {
     metrics: ["提及率", "推荐率", "官网引用率"],
     citationCount: "1 道共同题 · N/A",
     legacyMetric: "历史快照指标 推荐率",
+    execution: "执行成果",
+    visibility: "可见性观察",
+    visits: "站点访问",
+    feedback: "业务反馈",
+    diagnostic: "诊断复跑。没有核验生效点，经营闭环未完成。",
+    executionAbsent: "执行成果缺失。这份快照没有保存核验发布或诊断复跑。",
+    visibilityAbsent: "可见性比较缺失。历史指标保持原样，没有可见性结论。",
+    visitsAbsent: "站点访问缺失。这份快照没有保存爬虫访问。",
+    forbidden: "无效果",
   },
   en: {
     title: "Retest & reports",
@@ -58,8 +67,42 @@ const copy = {
     metrics: ["Mention rate", "Recommendation rate", "Official site citation rate"],
     citationCount: "1 common question · N/A",
     legacyMetric: "Historical snapshot metric: Recommendation rate",
+    execution: "Execution record",
+    visibility: "Visibility observations",
+    visits: "Site visits",
+    feedback: "Business feedback",
+    diagnostic: "Diagnostic rerun. There is no verified effective time, and the business loop is not complete.",
+    executionAbsent: "The execution record is missing. This snapshot has no saved verification or diagnostic rerun.",
+    visibilityAbsent: "Visibility comparisons are missing. The historical metric stays as saved, with no visibility conclusion.",
+    visitsAbsent: "Site visits are missing. This snapshot has no saved crawler visits.",
+    forbidden: "no effect",
   },
 } as const;
+
+const conclusionCopy = {
+  "zh-CN": {
+    improved: "观察改善。不建立因果。",
+    declined: "观察下降。不建立因果。",
+    unchanged: "无变化。不建立因果。",
+    inconclusive: "无法判断。不建立因果。",
+    incomparable: "不可比较。不建立因果。",
+    missing: "可见性结论缺失。已保存的百分点差仍按原数值显示。",
+  },
+  en: {
+    improved: "Observed improvement. This does not establish causality.",
+    declined: "Observed decline. This does not establish causality.",
+    unchanged: "Unchanged. This does not establish causality.",
+    inconclusive: "Inconclusive. This does not establish causality.",
+    incomparable: "Not comparable. This does not establish causality.",
+    missing: "The visibility conclusion is missing. The saved point difference stays as recorded.",
+  },
+} as const;
+
+function conclusionLabel(locale: keyof typeof conclusionCopy, value: unknown) {
+  const found = Object.entries(conclusionCopy[locale]).find(([key]) => key === value);
+  if (!found) throw new Error("unexpected conclusion");
+  return found[1];
+}
 
 function firstSnapshotObservationId(document: { comparisons?: Record<string, { queries?: Array<{ before?: { observation_ids?: string[] }; after?: { observation_ids?: string[] } }> }> }) {
   for (const block of Object.values(document.comparisons ?? {})) {
@@ -177,6 +220,9 @@ test("report snapshots keep the current download readable and recoverable", asyn
     expect(report.loopCompleted).toBe(false);
 
     const href = `/dashboard/reports?brandId=${brandId}`;
+    const seededBody = await (await context.request.get(`/api/reports/snapshots/${snapshotId}?format=json`)).body();
+    const seeded = JSON.parse(seededBody.toString("utf8"));
+    const metricKeys = ["mention_rate", "recommendation_rate", "official_site_citation_rate"] as const;
     await page.setViewportSize({ width: 375, height: 800 });
     await page.goto(href);
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -203,15 +249,25 @@ test("report snapshots keep the current download readable and recoverable", asyn
         await expect(main.getByText(current.noCharge, { exact: true })).toBeVisible();
         await expect(main.getByText(current.known, { exact: true })).toBeVisible();
         for (const metric of current.metrics) await expect(main.getByText(metric, { exact: true })).toBeVisible();
-        await expect(main.getByText(current.businessInquiries, { exact: true })).toBeVisible();
-        await expect(main.getByText(current.businessRate, { exact: true })).toBeVisible();
-        await expect(main.getByText(current.businessCrawler, { exact: true })).toBeVisible();
-        await expect(main.getByText(current.citationCount, { exact: true })).toBeVisible();
+        const card = main.getByRole("listitem").filter({ has: page.locator(`a[href="/api/reports/snapshots/${snapshotId}?format=json"]`) });
+        await expect(card.getByRole("heading", { name: current.execution, exact: true })).toBeVisible();
+        await expect(card.getByRole("heading", { name: current.visibility, exact: true })).toBeVisible();
+        await expect(card.getByRole("heading", { name: current.visits, exact: true })).toBeVisible();
+        await expect(card.getByRole("heading", { name: current.feedback, exact: true })).toBeVisible();
+        await expect(card.getByText(current.diagnostic, { exact: true })).toBeVisible();
+        await expect(card.getByText(current.businessInquiries, { exact: true })).toBeVisible();
+        await expect(card.getByText(current.businessRate, { exact: true })).toBeVisible();
+        await expect(card.getByText(current.businessCrawler, { exact: true })).toBeVisible();
+        await expect(card.getByText(current.citationCount, { exact: true })).toBeVisible();
+        await expect(card.getByText(current.forbidden)).toHaveCount(0);
+        for (const [index, metric] of metricKeys.entries()) {
+          const group = card.getByRole("group", { name: current.metrics[index], exact: true });
+          await expect(group).toContainText(conclusionLabel(locale, seeded.comparisons[metric].conclusion));
+        }
         await expect(main.getByRole("navigation", { name: current.related })).toBeVisible();
         if (width === 375) {
           await expect(download).toBeInViewport();
           await page.screenshot({ path: `${shots}/report-snapshot-current-${locale}-375.png`, fullPage: false });
-          const card = main.getByRole("listitem").filter({ has: page.locator(`a[href="/api/reports/snapshots/${snapshotId}?format=json"]`) });
           await card.locator("dl").screenshot({ path: `${shots}/report-snapshot-metrics-${locale}-375.png` });
         }
         await expectNoOverflow(page);
@@ -244,7 +300,26 @@ test("report snapshots keep the current download readable and recoverable", asyn
     });
     expect(firstHtml).toContain("called_included: false");
     expect(firstHtml).not.toContain("已被 AI 收录");
+    expect(firstHtml).not.toContain("无效果");
+    expect(firstHtml).not.toContain("没有效果");
     expect(firstHtml).not.toContain("13800138000");
+    const htmlSection = (id: string) => {
+      const start = firstHtml.indexOf(`<section id="${id}">`);
+      return firstHtml.slice(start, firstHtml.indexOf("</section>", start));
+    };
+    const executionHtml = htmlSection("execution");
+    const visitsHtml = htmlSection("crawler-visits");
+    const feedbackHtml = htmlSection("business-feedback");
+    expect(executionHtml).toContain("诊断复跑");
+    expect(executionHtml).not.toContain("观察改善");
+    expect(visitsHtml).toContain("爬虫访问观察 1");
+    expect(visitsHtml).not.toContain("去重咨询");
+    expect(visitsHtml).not.toContain("已被 AI 收录");
+    expect(feedbackHtml).toContain("可识别引荐转化率 N/A。没有可靠会话分母");
+    expect(feedbackHtml).not.toContain("爬虫访问");
+    for (const metric of metricKeys) {
+      expect(firstHtml).toContain(conclusionLabel("zh-CN", first.comparisons[metric].conclusion));
+    }
 
     await page.setViewportSize({ width: 375, height: 800 });
     await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
@@ -302,6 +377,10 @@ test("report snapshots keep the current download readable and recoverable", asyn
         const historyRow = main.getByRole("listitem").filter({ has: page.locator(`a[href="/api/reports/snapshots/${legacy.id}?format=json"]`) });
         await expect(historyRow.getByText(current.legacyMetric, { exact: true })).toBeVisible();
         await expect(historyRow.getByText(current.businessAbsent, { exact: true })).toBeVisible();
+        await expect(historyRow.getByText(current.executionAbsent, { exact: true })).toBeVisible();
+        await expect(historyRow.getByText(current.visibilityAbsent, { exact: true })).toBeVisible();
+        await expect(historyRow.getByText(current.visitsAbsent, { exact: true })).toBeVisible();
+        await expect(historyRow.getByText(conclusionLabel(locale, "improved"))).toHaveCount(0);
         await expect(historyRow.getByText(current.metrics[2], { exact: true })).toHaveCount(0);
         if (width === 375) {
           await expect(download).toBeInViewport();

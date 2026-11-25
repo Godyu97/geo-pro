@@ -136,9 +136,6 @@ export function businessFeedbackLines(locale: Locale, feedback: SnapshotBusiness
     conversion.rate === null
       ? t("businessRateNa")
       : t("businessRate", { rate: percent.format(conversion.rate) }),
-    t("businessCrawler", { count: number.format(feedback.crawler_visits.count) }),
-    t("businessCrawlerNote"),
-    t("businessCitations", { count: number.format(feedback.answer_citations) }),
     t("businessCausality"),
   ];
 }

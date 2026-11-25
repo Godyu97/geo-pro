@@ -356,6 +356,13 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(views.get(currentId).source.missingObservationCount, 2);
     assert.equal(views.get(historical.id).metric, "recommendation_rate");
     assert.equal(views.get(historical.id).source.missingObservationCount, 1);
+    assert.equal(views.get(historical.id).execution.state, "absent");
+    assert.equal(views.get(historical.id).visits.state, "absent");
+    assert.equal(views.get(historical.id).business.state, "absent");
+    assert.deepEqual(views.get(historical.id).conclusions, {});
+    assert.equal(views.get(currentId).conclusions.recommendation_rate, "missing");
+    assert.equal(views.get(currentId).conclusions.mention_rate, "missing");
+    assert.notEqual(views.get(currentId).conclusions.recommendation_rate, "improved");
 
     const opened = await readSnapshot(db, owner, currentId, options);
     assert.equal(opened.json, currentJson);

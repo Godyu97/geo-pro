@@ -254,11 +254,20 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.match(section, /有效咨询 1/);
     assert.match(section, /可识别引荐转化率 N\/A/);
     assert.match(section, /没有可靠会话分母/);
-    assert.match(section, /爬虫访问观察 1/);
-    assert.match(section, /called_included: false/);
-    assert.match(section, /回答引用 0/);
+    assert.equal(section.includes("爬虫访问"), false);
     assert.equal(section.includes("已被 AI 收录"), false);
     assert.equal(section.includes("因果增量"), true);
+    const visitsStart = opened.html.indexOf('<section id="crawler-visits">');
+    const visitsEnd = opened.html.indexOf("</section>", visitsStart);
+    const visits = opened.html.slice(visitsStart, visitsEnd);
+    assert.match(visits, /爬虫访问观察 1/);
+    assert.match(visits, /called_included: false/);
+    assert.match(visits, /回答引用 0/);
+    assert.equal(visits.includes("已被 AI 收录"), false);
+    assert.equal(visits.includes("去重咨询"), false);
+    assert.equal(opened.html.includes("无效果"), false);
+    assert.match(opened.html, /不可比较。不建立因果。/);
+    assert.equal(opened.html.includes("观察改善"), false);
     const preserved = opened.json;
 
     const observed = await recordLeadObservation(db, owner, {
@@ -288,7 +297,10 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(next.business_feedback.ai_referral_conversion.rate, 0.4);
     assert.equal(next.business_feedback.self_reported_over_visits, null);
     assert.equal(next.business_feedback.crawler_visits.called_included, false);
-    assert.match((await readSnapshot(db, owner, second.snapshot.id, options)).html, /Identified-referral conversion 40\.0%/);
+    const secondHtml = (await readSnapshot(db, owner, second.snapshot.id, options)).html;
+    assert.match(secondHtml, /Identified-referral conversion 40\.0%/);
+    assert.match(secondHtml, /Not comparable\. This does not establish causality\./);
+    assert.equal(secondHtml.includes("no effect"), false);
     assert.equal(readSnapshotBusiness(JSON.parse(preserved)).state, "ready");
     const withoutLayer = JSON.parse(preserved);
     delete withoutLayer.business_feedback;
