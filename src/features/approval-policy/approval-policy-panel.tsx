@@ -19,15 +19,16 @@ export function ApprovalPolicyPanel({ labels, policies, messages }: {
   const t = createTranslator(locale, messages);
   const labelFor = (brandId: string) => labels.find((label) => label.brandId === brandId)?.name ?? brandId;
 
-  if (policies.length === 0) return <p className="text-sm leading-6 text-muted-foreground">{t("noBrands")}</p>;
+  if (policies.length === 0) return <p className="rounded-xl border border-dashed bg-card p-4 text-sm leading-6 text-muted-foreground">{t("noBrands")}</p>;
 
   return (
-    <div className="space-y-6">
+    <section id="approval-policies" tabIndex={-1} aria-label={t("viewPolicies")}
+      className="min-w-0 scroll-mt-5 space-y-6 rounded-xl focus-visible:outline-2 focus-visible:outline-ring">
       <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{t("historicalNote")}</p>
       {policies.map((policy) => (
         <PolicyForm key={`${policy.brandId}:${policy.version}`} label={labelFor(policy.brandId)} policy={policy} t={t} />
       ))}
-    </div>
+    </section>
   );
 }
 
@@ -80,9 +81,9 @@ function PolicyForm({ label, policy, t }: {
   }
 
   return (
-    <form onSubmit={save} className="space-y-4 rounded-xl border bg-card p-5">
+    <form onSubmit={save} className="min-w-0 space-y-4 rounded-xl border bg-card p-5">
       <div className="space-y-1">
-        <h2 className="font-medium">{label}</h2>
+        <h2 className="font-medium wrap-anywhere">{label}</h2>
         <p className="text-sm text-muted-foreground">{t("version")}: {policy.version}</p>
       </div>
       {notice && <p role="status" className="text-sm leading-6">{notice}</p>}
@@ -96,7 +97,7 @@ function PolicyForm({ label, policy, t }: {
       <ul className="space-y-2 text-sm">
         {duties.length === 0 ? <li className="text-muted-foreground">{t("empty")}</li> : duties.map((duty) => (
           <li key={duty.userId} className="flex flex-wrap items-center gap-2">
-            <span>{duty.userId}</span>
+            <span className="min-w-0 wrap-anywhere">{duty.userId}</span>
             <span className="text-muted-foreground">{duty.factApprover ? t("factApprover") : t("factClosed")}</span>
             <span className="text-muted-foreground">{duty.contentApprover ? t("contentApprover") : t("contentClosed")}</span>
             <Button type="button" variant="outline" onClick={() => setDuties(duties.filter((item) => item.userId !== duty.userId))}>

@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { WorkspaceJump } from "@/components/layout/workspace-jump";
 import { Button } from "@/components/ui/button";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { loadOwnedLabels } from "../team-access/commands.ts";
 import { brandStoresUnavailable, listBrandStores } from "./store-commands.ts";
-import { BrandStoreJump, BrandStoresPanel } from "./stores-panel";
+import { BrandStoresPanel } from "./stores-panel";
 
 const retryHref = "/dashboard/brands/stores";
 const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center";
@@ -122,11 +123,11 @@ export default async function BrandStoresPage() {
         <div className="flex flex-wrap gap-2">
           {hasStores ? (
             <Button asChild className={actionClass}>
-              <BrandStoreJump href="#brand-store-list">{messages.viewStores}</BrandStoreJump>
+              <WorkspaceJump href="#brand-store-list">{messages.viewStores}</WorkspaceJump>
             </Button>
           ) : (
             <Button asChild className={actionClass}>
-              <BrandStoreJump href="#brand-store-name">{messages.fillStore}</BrandStoreJump>
+              <WorkspaceJump href="#brand-store-name">{messages.fillStore}</WorkspaceJump>
             </Button>
           )}
           <Button asChild variant="outline" className={actionClass}>

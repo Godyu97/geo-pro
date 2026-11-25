@@ -6,10 +6,19 @@ import { registerTestAccount } from "./auth-helpers";
 import { publishedRetentionVersion } from "./retention-version";
 
 const baseURL = "http://localhost:3100";
-const soloAt = "2026-11-18T08:00:00.000Z";
-const pendingAt = "2026-11-20T02:00:00.000Z";
-const ownedAt = "2026-11-20T03:30:00.000Z";
-const emptyAt = "2026-11-20T04:30:00.000Z";
+// Keep the unstarted slot inside the filter window and ahead of the server clock.
+const reference = new Date();
+reference.setUTCHours(0, 0, 0, 0);
+function fixtureTime(days: number, hours = 0) {
+  return new Date(reference.getTime() + (days * 24 + hours) * 3_600_000).toISOString();
+}
+const soloFrom = fixtureTime(-7);
+const soloAt = fixtureTime(-7, 8);
+const planFrom = fixtureTime(-5);
+const planTo = fixtureTime(2);
+const pendingAt = fixtureTime(-5, 2);
+const ownedAt = fixtureTime(-5, 3.5);
+const emptyAt = fixtureTime(-5, 4.5);
 const answer = "隔离覆盖回答，不得用于真实营销。";
 
 function localDatabaseURL() {
@@ -83,7 +92,7 @@ async function insertCoverageFixture(input: {
         id, plan_id, plan_version, brand_id, owner_id, channel_id, window_id, slot_id, timezone,
         kind, status, monitoring_run_id, charged_minor, prompt_ids_json, created_at
       ) values (
-        ${randomUUID()}, ${planId}, 1, ${input.brandId}, ${input.ownerId}, ${input.channelId}, '2026-11-20', ${planSlotId},
+        ${randomUUID()}, ${planId}, 1, ${input.brandId}, ${input.ownerId}, ${input.channelId}, ${pendingAt.slice(0, 10)}, ${planSlotId},
         'Asia/Shanghai', 'official', 'accepted', ${runId}, 0, null, ${at}
       )`;
     await sql`
@@ -130,7 +139,7 @@ async function insertCoverageFixture(input: {
         sop_summary, verified_at, expires_at, public_visible, changed_at
       ) values (
         ${input.channelId}, 1, ${randomUUID()}, ${"c".repeat(64)}, ${input.ownerId}, 'verification', 'verified', 'API', 'entry', 'mode',
-        'model', 'up', 0, 'complete', 'CN', 'CN', 'limits', 'sop', '2026-10-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z', 1, ${soloAt}
+        'model', 'up', 0, 'complete', 'CN', 'CN', 'limits', 'sop', ${fixtureTime(-50)}, ${fixtureTime(-30)}, 1, ${soloAt}
       )`;
     await sql`
       insert into monitoring_run (
@@ -176,11 +185,11 @@ async function insertCoverageFixture(input: {
         ${planId}, 1, ${input.brandId}, ${input.ownerId}, 'active', 'CNY', 100, 0, 0, ${pendingAt}
       )`;
     const slots = [
-      [randomUUID(), "2026-11-20T01:00:00.000Z", "failed"],
+      [randomUUID(), fixtureTime(-5, 1), "failed"],
       [randomUUID(), pendingAt, "completed"],
       [randomUUID(), ownedAt, "completed"],
       [randomUUID(), emptyAt, "completed"],
-      [randomUUID(), "2026-11-25T01:00:00.000Z", "scheduled"],
+      [randomUUID(), fixtureTime(1, 1), "scheduled"],
     ] as const;
     for (const [id, at, status] of slots) {
       await sql`
@@ -262,7 +271,7 @@ test("overview shows coverage, owned citations, capture time, and localized task
       taskId: randomUUID(),
     });
 
-    await page.goto(`/dashboard/monitoring/overview?brandId=${brandId}&sourceMode=model_api&from=2026-11-18T00:00:00.000Z&to=2026-11-18T23:59:59.999Z`);
+    await page.goto(`/dashboard/monitoring/overview?brandId=${brandId}&sourceMode=model_api&from=${encodeURIComponent(soloFrom)}&to=${encodeURIComponent(fixtureTime(-6))}`);
     const overview = page.locator("#main-content");
     await expect(overview.getByRole("heading", { name: "可解释概览", exact: true })).toBeVisible();
     const soloCoverage = overview.getByRole("region", { name: "计划覆盖" });
@@ -275,10 +284,10 @@ test("overview shows coverage, owned citations, capture time, and localized task
     await expect(overview).not.toContainText("urgent");
     await expect(overview).not.toContainText("todo");
 
-    await page.locator("#overview-from").fill("2026-11-20T00:00:00.000Z");
-    await page.locator("#overview-to").fill("2026-11-30T00:00:00.000Z");
+    await page.locator("#overview-from").fill(planFrom);
+    await page.locator("#overview-to").fill(planTo);
     await page.getByRole("button", { name: "应用筛选", exact: true }).click();
-    await expect(page).toHaveURL(/from=2026-11-20/);
+    await expect(page).toHaveURL((url) => url.searchParams.get("from") === planFrom);
     const windowCoverage = overview.getByRole("region", { name: "计划覆盖" });
     await expect(windowCoverage).toContainText("2/4");
     await expect(windowCoverage).toContainText("50.0%");

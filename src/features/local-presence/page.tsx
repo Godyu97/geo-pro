@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { WorkspaceJump } from "@/components/layout/workspace-jump";
 import { Button } from "@/components/ui/button";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { loadOwnedLabels } from "../team-access/commands.ts";
 import { listLocalObservations, localObservationsUnavailable } from "./commands.ts";
-import { LocalObservationJump, LocalObservationsPanel } from "./panel";
+import { LocalObservationsPanel } from "./panel";
 
 const retryHref = "/dashboard/brands/local-observations";
 const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center";
@@ -109,11 +110,11 @@ export default async function LocalObservationsPage() {
         <div className="flex flex-wrap gap-2">
           {hasObservations ? (
             <Button asChild className={actionClass}>
-              <LocalObservationJump href="#local-observation-list">{messages.viewObservations}</LocalObservationJump>
+              <WorkspaceJump href="#local-observation-list">{messages.viewObservations}</WorkspaceJump>
             </Button>
           ) : (
             <Button asChild className={actionClass}>
-              <LocalObservationJump href="#local-observation-target">{messages.fillObservation}</LocalObservationJump>
+              <WorkspaceJump href="#local-observation-target">{messages.fillObservation}</WorkspaceJump>
             </Button>
           )}
           <Button asChild variant="outline" className={actionClass}>

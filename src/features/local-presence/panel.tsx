@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition, type ComponentProps, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,20 +30,6 @@ const returnPath = "/dashboard/brands/local-observations";
 
 function isLocalObservationError(code: string): code is LocalObservationError {
   return Object.hasOwn(localObservationErrors, code);
-}
-
-export function LocalObservationJump({ href, children, onClick, ...props }: ComponentProps<"a"> & { href: string; children: ReactNode }) {
-  return (
-    <a {...props} href={href} onClick={(event) => {
-      onClick?.(event);
-      const root = document.getElementById("main-content") ?? document;
-      const target = root.querySelector<HTMLElement>(href);
-      if (!target) return;
-      event.preventDefault();
-      target.focus();
-      target.scrollIntoView({ block: "nearest" });
-    }}>{children}</a>
-  );
 }
 
 function NoticeBanner({ notice }: { notice: Notice | null }) {

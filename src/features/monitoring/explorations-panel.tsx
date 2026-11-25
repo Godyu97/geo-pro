@@ -18,7 +18,7 @@ import {
 type Copy = Messages["explorations"];
 type Translator = (key: keyof Copy, params?: Record<string, string | number>) => string;
 
-const fieldClass = "w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm";
+const fieldClass = "w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-2 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm";
 const returnPath = "/dashboard/monitoring/explorations";
 
 function isExplorationError(code: string): code is ExplorationError {
@@ -47,18 +47,19 @@ export function ExplorationsPanel({ brands, observations, labels, selectedBrandI
 
   return (
     <div className="space-y-6">
-      {brands.length === 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("noBrands")}</p> : (
+      {brands.length === 0 ? <p className="rounded-xl border border-dashed bg-card p-4 text-sm leading-6 text-muted-foreground">{t("noBrands")}</p> : (
         <CreateForm brands={brands} labelFor={labelFor} selectedBrandId={selectedBrandId} t={t} />
       )}
-      {idle ? <p className="text-sm leading-6 text-muted-foreground">{t("pickBrand")}</p> : null}
+      {idle && brands.length > 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("pickBrand")}</p> : null}
       {selectedBrandId && observations.length === 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("empty")}</p> : null}
       {observations.length > 0 ? (
-        <ul className="space-y-3">
+        <ul id="exploration-observations" tabIndex={-1} aria-label={t("viewObservations")}
+          className="scroll-mt-5 space-y-3 rounded-xl focus-visible:outline-2 focus-visible:outline-ring">
           {observations.map((observation) => (
             <li key={observation.id} className="min-w-0 space-y-2 rounded-xl border bg-card p-5">
-              <p className="break-words text-sm leading-6 text-muted-foreground">{labelFor(observation.brandId)}</p>
-              <p className="break-words text-sm leading-6">{observation.questionText}</p>
-              <p className="break-words text-sm leading-6">{observation.answerText}</p>
+              <p className="wrap-anywhere whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{labelFor(observation.brandId)}</p>
+              <p className="wrap-anywhere whitespace-pre-wrap text-sm leading-6">{observation.questionText}</p>
+              <p className="wrap-anywhere whitespace-pre-wrap text-sm leading-6">{observation.answerText}</p>
               <p className="text-sm leading-6">{t("reason")} {t("reasonValue")}</p>
               <p className="text-sm leading-6">{t("excludedLine")}</p>
               <p className="text-sm leading-6 text-muted-foreground">{t("createdAt", { time: when.format(new Date(observation.createdAt)) })}</p>
@@ -130,13 +131,13 @@ function CreateForm({ brands, labelFor, selectedBrandId, t }: {
       {notice ? <p role="status" className="text-sm leading-6">{notice}</p> : null}
       <label className="block min-w-0 space-y-1 text-sm">
         <span>{t("brand")}</span>
-        <select className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm" name="brandId" defaultValue={initialBrand}>
+        <select className={fieldClass} name="brandId" defaultValue={initialBrand}>
           {brands.map((brand) => <option key={brand.id} value={brand.id}>{labelFor(brand.id)}</option>)}
         </select>
       </label>
       <label className="block min-w-0 space-y-1 text-sm">
         <span>{t("question")}</span>
-        <textarea className={fieldClass} name="questionText" required maxLength={4000} rows={3} />
+        <textarea id="exploration-question" className={`${fieldClass} scroll-mt-5`} name="questionText" required maxLength={4000} rows={3} />
       </label>
       <label className="block min-w-0 space-y-1 text-sm">
         <span>{t("answer")}</span>

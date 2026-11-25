@@ -169,11 +169,11 @@ export function TeamPanel({ labels, workspace, messages }: {
 
       <section aria-labelledby="grant-heading" className="space-y-3 rounded-xl border bg-card p-5">
         <h2 id="grant-heading" className="font-medium">{t("ownerBrands")}</h2>
-        {labels.length === 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("noBrands")}</p> : (
-          <form onSubmit={grant} className="grid gap-3 sm:grid-cols-2">
+        {labels.length === 0 ? <p className="rounded-xl border border-dashed bg-card p-4 text-sm leading-6 text-muted-foreground">{t("noBrands")}</p> : (
+          <form onSubmit={grant} className="grid gap-3 sm:grid-cols-[repeat(2,minmax(0,1fr))]">
             <label className="space-y-1 text-sm">
               <span className="font-medium">{t("brand")}</span>
-              <select name="brandId" required className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
+              <select name="brandId" required className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
                 {labels.map((label) => <option key={label.brandId} value={label.brandId}>{label.name}</option>)}
               </select>
             </label>
@@ -183,7 +183,7 @@ export function TeamPanel({ labels, workspace, messages }: {
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium">{t("role")}</span>
-              <select name="role" required className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm" defaultValue="member">
+              <select name="role" required className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" defaultValue="member">
                 <option value="member">{t("roleMember")}</option>
                 <option value="owner">{t("roleOwner")}</option>
               </select>
@@ -201,19 +201,19 @@ export function TeamPanel({ labels, workspace, messages }: {
       </section>
 
       <section aria-labelledby="invitations-heading" className="space-y-3 rounded-xl border bg-card p-5">
-        <h2 id="invitations-heading" className="font-medium">{t("invitations")}</h2>
+        <h2 id="invitations-heading" tabIndex={-1} className="scroll-mt-5 font-medium focus-visible:outline-2 focus-visible:outline-ring">{t("invitations")}</h2>
         <p className="text-sm leading-6 text-muted-foreground">{t("invitationHint")}</p>
         {labels.length === 0 ? null : (
-          <form onSubmit={invite} className="grid gap-3 sm:grid-cols-2">
+          <form onSubmit={invite} className="grid gap-3 sm:grid-cols-[repeat(2,minmax(0,1fr))]">
             <label className="space-y-1 text-sm">
               <span className="font-medium">{t("brand")}</span>
-              <select name="brandId" required className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm">
+              <select name="brandId" required className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
                 {labels.map((label) => <option key={label.brandId} value={label.brandId}>{label.name}</option>)}
               </select>
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium">{t("memberUser")}</span>
-              <Input name="userId" required autoComplete="off" spellCheck={false} maxLength={128} />
+              <Input id="team-invite-user" className="scroll-mt-5" name="userId" required autoComplete="off" spellCheck={false} maxLength={128} />
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium">{t("expiresAt")}</span>

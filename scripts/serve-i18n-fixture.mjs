@@ -769,6 +769,37 @@ await writeFile(mediaCommands, mediaSource.replace(mediaRead, `${mediaRead}
     throw new Error("Private media review fixture failure");
   }`));
 
+const workspaceReadPages = [
+  ["local-presence/industry-packs-page.tsx", "industry-packs"],
+  ["monitoring/explorations-page.tsx", "explorations"],
+  ["approval-policy/approval-policy-page.tsx", "approval-policy"],
+  ["team-access/team-page.tsx", "team"],
+];
+for (const [feature, name] of workspaceReadPages) {
+  const page = path.join(fixture, "src/features", feature);
+  const source = await readFile(page, "utf8");
+  const read = "  try {\n    const db = getConnection();";
+  assert.ok(source.includes(read));
+  await writeFile(page, source.replace(read, `  try {
+    if ((await (await import("next/headers")).cookies()).get("geo-workspace-read")?.value === ${JSON.stringify(name)}) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      throw new Error("Private workspace read fixture failure");
+    }
+    const db = getConnection();`));
+}
+
+const industryPackCommands = path.join(fixture, "src/features/local-presence/industry-pack-commands.ts");
+const industryPackSource = await readFile(industryPackCommands, "utf8");
+const industryPackEnv = "  const env = options.env ?? process.env;";
+assert.ok(industryPackSource.includes(industryPackEnv));
+await writeFile(industryPackCommands, industryPackSource.replace(industryPackEnv, `
+  const port = Number((await (await import("next/headers")).cookies()).get("geo-industry-pack-mock-port")?.value);
+  const env = Number.isInteger(port) && port >= 1024 && port <= 65535 ? {
+    OPENAI_BASE_URL: "http://127.0.0.1:" + port + "/v1",
+    OPENAI_API_KEY: "fixture-only",
+    OPENAI_MODEL: "industry-pack-fixture",
+  } : {};`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

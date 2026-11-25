@@ -30,6 +30,9 @@ export default async function CapabilityMaintenancePage() {
       {access.status !== "allowed" ? (
         <section role={access.status === "unavailable" ? "alert" : "status"} className="rounded-xl border bg-card p-5">
           <p className="font-medium">{t(access.status === "unavailable" ? "SERVICE_UNAVAILABLE" : "FORBIDDEN")}</p>
+          {access.status === "unavailable" && (
+            <div className="mt-3"><CapabilityRetryButton label={t("retry")} /></div>
+          )}
           <p className="mt-2 break-all text-xs text-muted-foreground">{t("trace", { id: access.traceId })}</p>
         </section>
       ) : !result || !result.items ? (
