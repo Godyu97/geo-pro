@@ -40,6 +40,7 @@
     "test:support": "node --conditions=react-server --test tests/support/*.test.mjs",
     "verify:prompts": "node --conditions=react-server scripts/verify-prompts.mjs",
     "check:i18n": "node scripts/check-i18n.mjs",
+    "check:feature-map": "node scripts/check-feature-map.mjs",
     "test:i18n": "node --test tests/i18n/*.test.mjs",
     "test:ai": "node --conditions=react-server --test tests/ai/*.test.mjs tests/auth/*.test.mjs",
     "test:storage": "node --conditions=react-server --test tests/storage/*.test.mjs",

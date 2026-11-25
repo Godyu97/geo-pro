@@ -39,6 +39,7 @@ GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、P
   - 页面文案、表单校验、导航、SSR、Metadata、格式化或本地化缓存 → [Web 多语言设计与兼容规范](docs/architecture/i18n.md)
   - 认证、输入校验、环境变量或依赖 → [.agents/governance/security.md](.agents/governance/security.md)
   - 质量检查、测试与验收判定 → [.agents/governance/quality-gates.md](.agents/governance/quality-gates.md)
+  - 按业务域定位页面、弹窗/交互组件或 Service/API → [功能地图索引](docs/feature-map/README.md)（按需只读目标域单表，禁止全量读取）
   - 普通开发任务闭环 → [.agents/workflows/task-lifecycle.md](.agents/workflows/task-lifecycle.md)
   - GitHub Issue 驱动开发 → [.agents/workflows/issue-lifecycle.md](.agents/workflows/issue-lifecycle.md)
   - 规范冲突或重大取舍 → [.agents/governance/principles.md](.agents/governance/principles.md)
@@ -55,6 +56,7 @@ GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、P
 - 认证或数据库 Schema 变更：按需执行 `pnpm db:auth-schema` / `pnpm db:generate` / `pnpm db:migrate`，并在本地开发数据库上运行 `pnpm verify:auth`。
 - Schema/migration 变更：同步执行 `pnpm db:ddl` 更新 PostgreSQL / SQLite 全量 DDL，并以 `pnpm db:ddl:check` 核对。
 - 产品文档变更或核验：`python docs/tools/validate_docs.py`。
+- 功能地图同步与校验：新增/删除页面、重构模块目录、增删重要弹窗/抽屉时，顺手更新 `docs/feature-map/` 对应 1 行并运行 `pnpm check:feature-map`。
 
 ## 交付报告要求
 

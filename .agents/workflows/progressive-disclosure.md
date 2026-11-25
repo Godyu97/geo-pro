@@ -28,6 +28,7 @@ Agent 启动或接收任意任务时仅加载：
 | 文案、校验、导航、SSR、Metadata、格式化或本地化缓存 | [Web 多语言规范](../../docs/architecture/i18n.md) |
 | 认证、会话、输入校验、环境变量、敏感数据或依赖变更 | [security.md](../governance/security.md) |
 | 运行检查、验证交付或补充测试 | [quality-gates.md](../governance/quality-gates.md) |
+| 按业务域定位页面、弹窗/交互组件或 Service/API | [功能地图索引](../../docs/feature-map/README.md)（只读目标域单表） |
 | 普通开发任务（通用执行闭环） | [task-lifecycle.md](task-lifecycle.md) |
 | GitHub Issue 驱动开发（含 `docs/tasks/` 任务） | [issue-lifecycle.md](issue-lifecycle.md) |
 | 出现规范冲突、重大取舍或需要追溯原则依据 | [principles.md](../governance/principles.md) |

@@ -1,0 +1,23 @@
+# 功能地图：公开入口、账号、品牌与每周助理
+
+| 产品叫法 | 路径 | 核心功能与关键弹窗/抽屉 | 对应业务模块/Service |
+| --- | --- | --- | --- |
+| 官网首页 | `/` · `src/app/(marketing)/page.tsx` | 公开展示与会话分流；`src/features/marketing/home-page.tsx` | `src/features/marketing/` · `src/features/capabilities/service.ts` |
+| 登录页 | `/login` · `src/app/(auth)/login/page.tsx` | 邮箱密码登录与找回入口；`src/components/layout/auth-form.tsx` | `src/lib/auth/` · `src/app/api/auth/[...all]/route.ts` |
+| 账号验证与找回 | `/account-access` · `src/app/(auth)/account-access/page.tsx` | 验证邮件与密码重设；`src/features/account/email/access-form.tsx` | `src/features/account/email/` · `src/app/api/account-email/route.ts` |
+| 工作台总览 | `/dashboard` · `src/app/(dashboard)/dashboard/page.tsx` | 通道状态与指标入口；`src/features/capabilities/settings-panel.tsx`、`retry-button.tsx` | `src/features/capabilities/service.ts` · `src/features/functional-mock/` |
+| 品牌列表 | `/dashboard/brands` · `src/app/(dashboard)/dashboard/brands/page.tsx` | 品牌台账与状态切换；`src/features/brands/pages.tsx`、`brand-status-button.tsx` | `src/features/brands/`（`commands.ts`、`service.ts`、`dao.ts`）· `src/app/api/brands/` |
+| 新建品牌 | `/dashboard/brands/new` · `src/app/(dashboard)/dashboard/brands/new/page.tsx` | 品牌建档与准入；`src/features/brands/brand-form.tsx` | `src/features/brands/`（`commands.ts`、`service.ts`、`dao.ts`）· `src/app/api/brands/route.ts` |
+| 品牌详情 | `/dashboard/brands/[id]` · `src/app/(dashboard)/dashboard/brands/[id]/page.tsx` | 实体编辑、保留策略与监测准备；`src/features/brands/brand-form.tsx` | `src/features/brands/` · `src/features/monitoring/service.ts` · `src/app/api/brands/[id]/` |
+| 品牌删除 | `/dashboard/brands/[id]/delete` · `src/app/(dashboard)/dashboard/brands/[id]/delete/page.tsx` | 冻结删除与保留确认；`src/features/brands/deletion-buttons.tsx` | `src/features/brands/`（`commands.ts`、`service.ts`、`dao.ts`） |
+| 品牌恢复 | `/dashboard/brands/[id]/recovery` · `src/app/(dashboard)/dashboard/brands/[id]/recovery/page.tsx` | 删除期恢复操作；`src/features/brands/deletion-buttons.tsx` | `src/features/brands/`（`commands.ts`、`service.ts`、`dao.ts`） |
+| 事实与材料 | `/dashboard/brands/[id]/facts` · `src/app/(dashboard)/dashboard/brands/[id]/facts/page.tsx` | 品牌事实录入审批与补证；`src/features/brand-facts/workspace.tsx` | `src/features/brand-facts/`（`service.ts`、`api.ts`）· `src/app/api/brands/[id]/facts/` |
+| 品牌问题集 | `/dashboard/brands/[id]/questions` · `src/app/(dashboard)/dashboard/brands/[id]/questions/page.tsx` | 购买问题簇配置与冻结；`src/features/prompts/workspace.tsx` | `src/features/prompts/`（`service.ts`、`suggestions-api.ts`）· `src/app/api/brands/[id]/questions/` |
+| 问题集入口跳转 | `/dashboard/brands/questions` · `src/app/(dashboard)/dashboard/brands/questions/page.tsx` | 按活跃品牌分流至问题集页（无独立客户端面板） | `src/features/brands/dao.ts` · `src/features/brands/intake.ts` |
+| 抽样错误率 | `/dashboard/brands/[id]/entity-reviews` · `src/app/(dashboard)/dashboard/brands/[id]/entity-reviews/page.tsx` | 实体抽样复核工作区；`src/features/entity-accuracy/reviews-workspace.tsx` | `src/features/entity-accuracy/`（`commands.ts`、`api.ts`、`dao.ts`）· `src/app/api/brands/[id]/entity-reviews/` |
+| 同名消歧与纠错 | `/dashboard/brands/[id]/entity-corrections` · `src/app/(dashboard)/dashboard/brands/[id]/entity-corrections/page.tsx` | 同名消歧确认与纠错流转；`src/features/entity-accuracy/corrections-workspace.tsx` | `src/features/entity-accuracy/`（`revisions.ts`、`actions.ts`、`correction-api.ts`、`dao.ts`）· `src/features/evidence/dao.ts` · `src/app/api/brands/[id]/entity-corrections/` |
+| 行业题包 | `/dashboard/brands/industry-packs` · `src/app/(dashboard)/dashboard/brands/industry-packs/page.tsx` | 行业题包浏览与引入；`src/features/local-presence/industry-packs-panel.tsx` | `src/features/local-presence/`（`industry-pack-commands.ts`）· `src/app/api/brands/industry-packs/` |
+| 本地观察 | `/dashboard/brands/local-observations` · `src/app/(dashboard)/dashboard/brands/local-observations/page.tsx` | 地区观察登记；`src/features/local-presence/panel.tsx` | `src/features/local-presence/`（`commands.ts`、`api.ts`）· `src/app/api/brands/local-observations/` |
+| 门店服务范围 | `/dashboard/brands/stores` · `src/app/(dashboard)/dashboard/brands/stores/page.tsx` | 门店与服务区域管理；`src/features/local-presence/stores-panel.tsx` | `src/features/local-presence/`（`store-commands.ts`、`store-api.ts`）· `src/app/api/brands/stores/` |
+| 每周行动草案 | `/dashboard/assistant` · `src/app/(dashboard)/dashboard/assistant/page.tsx` | 周度行动计划生成、确认与执行（服务端表单） | `src/features/assistant/`（`plans-page.tsx`、`actions.ts`、`commands.ts`）· `src/app/api/assistant/plans/` |
+| 策略模板 | `/dashboard/assistant/strategies` · `src/app/(dashboard)/dashboard/assistant/strategies/page.tsx` | 策略模板管理与草案生成（服务端表单） | `src/features/assistant/`（`strategies-page.tsx`、`strategy-actions.ts`、`strategy-commands.ts`）· `src/app/api/assistant/strategy-templates/` |

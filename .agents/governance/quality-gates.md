@@ -31,6 +31,7 @@
 | 通道能力 DAO | 双库升级、双轨版本、正式运行门禁与联网证据 | `pnpm test:capabilities` | SQLite 临时文件及本地 PostgreSQL 隔离库 |
 | 通道能力集成 | 维护接口、设置范围与运行确认 | `pnpm verify:capabilities` | 先 `pnpm build`，3108 端口、双方言隔离库和本机 Chrome |
 | 文档包核验 | 产品文档一致性检查 | `python docs/tools/validate_docs.py` | 仅当核对或变更 `docs/` 产品文档时运行（仅检查链接、映射与样例，不代表业务验收） |
+| 功能地图核验 | 路由覆盖与路径防漂移 | `pnpm check:feature-map` | 新增/删除页面、重构模块目录、增删重要弹窗或更新 `docs/feature-map/` 时运行 |
 | 多语言消息 | key / 参数完整性 | `pnpm check:i18n` | 消息目录、页面与本地化变更执行 |
 | 多语言基础测试 | Node.js 原生测试 | `pnpm test:i18n` | 覆盖解析、缺 key/参数负例、格式化、校验与返回地址 |
 | 多语言界面 E2E | Playwright + 本机 Chrome | `pnpm test:e2e` | 本地 PostgreSQL、完整认证环境和独立 3100 端口；副本触发加载/故障，临时账号自动清理 |
