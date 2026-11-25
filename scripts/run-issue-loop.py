@@ -21,8 +21,14 @@ from typing import Any
 from uuid import uuid4
 
 MAX_ROUNDS = 30
-DEFAULT_MODELS = {"codex": "gpt-6.2-sol", "cursor": "grok-4.7-high"}
+DEFAULT_MODELS = {
+    "codex": "gpt-6.2-sol",
+    "cursor": "grok-4.7-high",
+    "agy": "gemini-4-hydrogen-high",
+}
+DEFAULT_BINS = {"codex": "codex", "cursor": "cursor-agent", "agy": "agy"}
 DEFAULT_CODEX_REASONING_EFFORT = "high"
+DEFAULT_AGY_REASONING_EFFORT = "high"
 DEFAULT_ROUND_TIMEOUT = 0
 DEFAULT_MIN_BACKLOG = 1
 DEFAULT_REPLENISH_COUNT = 12
@@ -486,7 +492,7 @@ def run_preflight(workspace: Path, env: dict[str, str], probe_ai: bool = False) 
 def resolve_agent_bin(agent: str, explicit_bin: str | None, env: dict[str, str]) -> str:
     if explicit_bin:
         return explicit_bin
-    default_bin = "codex" if agent == "codex" else "cursor-agent"
+    default_bin = DEFAULT_BINS[agent]
     found = shutil.which(default_bin, path=env.get("PATH"))
     if found:
         return str(Path(found).absolute())
@@ -559,7 +565,13 @@ def run_round(
             agent_bin, "exec", "--json", "--model", model,
             "--sandbox", "danger-full-access", "-c", 'approval_policy="never"',
             "-c", f"model_reasoning_effort={json.dumps(reasoning_effort)}",
+            prompt,
         ]
+    elif agent == "agy":
+        cmd = [agent_bin, "--output-format", "stream-json", "--model", model]
+        if reasoning_effort:
+            cmd.extend(["--effort", reasoning_effort])
+        cmd.extend(["--dangerously-skip-permissions", "--print", prompt])
     else:
         session_id = create_cursor_session(agent_bin, workspace, env)
         cmd = [
@@ -568,7 +580,7 @@ def run_round(
         ]
         if approve_mcps:
             cmd.append("--approve-mcps")
-    cmd.append(prompt)
+        cmd.append(prompt)
 
     target_desc = f"#{target_issue}" if target_issue is not None else "backlog"
     print(
@@ -581,9 +593,10 @@ def run_round(
     result_text = None
     event_error = None
     pending = b""
+    agy_streaming_line = False
 
     def display_chunk(chunk: bytes) -> None:
-        nonlocal pending, session_id, result_text, event_error
+        nonlocal pending, session_id, result_text, event_error, agy_streaming_line
         lines = (pending + chunk).split(b"\n")
         pending = lines.pop()
         for raw_line in lines:
@@ -593,6 +606,9 @@ def run_round(
             try:
                 event = json.loads(line)
             except ValueError:
+                if agy_streaming_line:
+                    print(flush=True)
+                    agy_streaming_line = False
                 print(f"[round {round_index}] {line}", flush=True)
                 continue
             if not isinstance(event, dict):
@@ -610,6 +626,39 @@ def run_round(
                             print(message, flush=True)
                 elif event_type == "turn.failed":
                     event_error = "Codex 的 turn.failed 事件标记失败（详见轮次日志）"
+            elif agent == "agy":
+                agy_event = event.get("event")
+                if agy_event == "init":
+                    conv_id = event.get("conversation_id")
+                    if isinstance(conv_id, str) and conv_id:
+                        session_id = conv_id
+                elif agy_event == "step_update":
+                    step = event.get("step_update")
+                    if isinstance(step, dict) and step.get("step_type") == "agent_response":
+                        delta = step.get("text_delta")
+                        if isinstance(delta, str) and delta:
+                            print(delta, end="", flush=True)
+                            agy_streaming_line = not delta.endswith("\n")
+                elif agy_event == "result":
+                    if agy_streaming_line:
+                        print(flush=True)
+                        agy_streaming_line = False
+                    res = event.get("result")
+                    if isinstance(res, dict):
+                        conv_id = res.get("conversation_id")
+                        if not session_id and isinstance(conv_id, str) and conv_id:
+                            session_id = conv_id
+                        response = res.get("response")
+                        if isinstance(response, str) and response:
+                            result_text = response
+                        if res.get("status") != "SUCCESS":
+                            err_detail = res.get("error")
+                            if isinstance(err_detail, str) and err_detail:
+                                event_error = f"agy 的 result 事件标记失败：{err_detail}"
+                            else:
+                                event_error = "agy 的 result 事件标记失败（详见轮次日志）"
+                        else:
+                            event_error = None
             elif event_type == "result":
                 result_text = event.get("result")
                 failed = event.get("is_error") or event.get("subtype") != "success"
@@ -628,7 +677,8 @@ def run_round(
         started_at = time.monotonic()
         deadline = started_at + round_timeout if round_timeout is not None else None
         proc = subprocess.Popen(
-            cmd, cwd=workspace, env=env, stdin=subprocess.DEVNULL if agent == "codex" else None,
+            cmd, cwd=workspace, env=env,
+            stdin=subprocess.DEVNULL if agent in ("codex", "agy") else None,
             stdout=output, stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -655,6 +705,8 @@ def run_round(
                 break
             display_chunk(chunk)
         display_chunk(b"\n")
+        if agy_streaming_line:
+            print(flush=True)
 
     error = event_error
     if interrupt_signal is not None:
@@ -713,7 +765,7 @@ def parse_args() -> argparse.Namespace:
         "--agent",
         choices=tuple(DEFAULT_MODELS),
         default="codex",
-        help="Agent 通道（默认 codex，可选 cursor）",
+        help="Agent 通道（默认 codex，可选 cursor、agy）",
     )
     parser.add_argument(
         "--agent-bin",
@@ -724,11 +776,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        help=f"模型（Codex 默认 {DEFAULT_MODELS['codex']}，Cursor 默认 {DEFAULT_MODELS['cursor']}）",
+        help=(
+            f"模型（Codex 默认 {DEFAULT_MODELS['codex']}，"
+            f"Cursor 默认 {DEFAULT_MODELS['cursor']}，"
+            f"AGY 默认 {DEFAULT_MODELS['agy']}）"
+        ),
     )
     parser.add_argument(
         "--reasoning-effort",
-        help=f"Codex 推理强度（默认 {DEFAULT_CODEX_REASONING_EFFORT}）",
+        help=f"推理强度（Codex 与 AGY 默认 {DEFAULT_CODEX_REASONING_EFFORT}；仅支持 --agent codex 或 agy）",
     )
     parser.add_argument(
         "--round-timeout",
@@ -828,12 +884,15 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.model is None:
         args.model = DEFAULT_MODELS[args.agent]
+    if args.approve_mcps and args.agent != "cursor":
+        parser.error("--approve-mcps 仅支持 --agent cursor")
     if args.agent == "codex":
-        if args.approve_mcps:
-            parser.error("--approve-mcps 仅支持 --agent cursor")
         args.reasoning_effort = args.reasoning_effort or DEFAULT_CODEX_REASONING_EFFORT
+    elif args.agent == "agy":
+        if args.reasoning_effort is None and args.model == DEFAULT_MODELS["agy"]:
+            args.reasoning_effort = DEFAULT_AGY_REASONING_EFFORT
     elif args.reasoning_effort is not None:
-        parser.error("--reasoning-effort 仅支持 --agent codex")
+        parser.error("--reasoning-effort 仅支持 --agent codex 或 agy")
     for option in ("max-rounds", "replenish-count", "max-consecutive-failures",
                    "max-consecutive-noop", "max-same-issue-rounds"):
         if getattr(args, option.replace("-", "_")) < 1:

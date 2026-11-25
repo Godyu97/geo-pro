@@ -40,11 +40,16 @@ if Path(sys.argv[0]).name == "gh":
         sys.exit(2)
     sys.exit(0)
 
-is_codex = sys.argv[1] == "exec"
+cli_name = Path(sys.argv[0]).name
+is_codex = cli_name == "codex" and sys.argv[1] == "exec"
+is_agy = cli_name == "agy"
 if is_codex:
     (control / "codex-args.json").write_text(json.dumps(sys.argv[1:-1]))
     print(json.dumps({"type": "thread.started", "thread_id": "test-codex-session"}), flush=True)
     print(json.dumps({"type": "turn.started"}), flush=True)
+elif is_agy:
+    (control / "agy-args.json").write_text(json.dumps(sys.argv[1:-1]))
+    print(json.dumps({"event": "init", "conversation_id": "test-agy-session", "init": {"model": "gemini-4-hydrogen-high"}}), flush=True)
 elif sys.argv[1] == "create-chat":
     print("test-session")
     sys.exit(0)
@@ -145,6 +150,12 @@ if is_codex:
     print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": reply}}))
     event_type = "turn.failed" if scenario == "codex-failed" else "turn.completed"
     print(json.dumps({"type": event_type}), end="", flush=True)
+elif is_agy:
+    print(json.dumps({"event": "step_update", "step_update": {"step_type": "agent_response", "text_delta": reply}}))
+    if scenario == "agy-failed":
+        print(json.dumps({"event": "result", "result": {"conversation_id": "test-agy-session", "status": "ERROR", "response": "", "error": "fixture agy error"}}), end="", flush=True)
+    else:
+        print(json.dumps({"event": "result", "result": {"conversation_id": "test-agy-session", "status": "SUCCESS", "response": reply}}), end="", flush=True)
 elif scenario != "no-result":
     print(json.dumps({"type": "result", "subtype": "success", "result": reply}), end="", flush=True)
 '''
@@ -176,7 +187,7 @@ class IssueLoopTest(unittest.TestCase):
         self.git("commit", "-m", "Fixture baseline")
         self.git("push", "origin", "main")
 
-        for name in ("gh", "cursor-agent", "codex"):
+        for name in ("gh", "cursor-agent", "codex", "agy"):
             executable = self.root / name
             executable.write_text(f"#!{sys.executable}\n" + FAKE_CLI, encoding="utf-8")
             executable.chmod(0o700)
@@ -246,6 +257,46 @@ class IssueLoopTest(unittest.TestCase):
         self.assertEqual(result["exit_code"], 0)
         self.assertFalse(result["success"])
         self.assertIn("turn.failed", result["error_reason"])
+
+    def test_agy_dispatch_uses_session_defaults_and_records_reply(self):
+        self.run_loop("pushed", "--target-dev-commits", "1", agent="agy")
+        self.assertEqual(json.loads((self.root / "agy-args.json").read_text()), [
+            "--output-format", "stream-json",
+            "--model", "gemini-4-hydrogen-high",
+            "--effort", "high",
+            "--dangerously-skip-permissions",
+            "--print",
+        ])
+        summary = self.summary()
+        self.assertEqual(summary["agent"], "agy")
+        self.assertEqual(summary["model"], "gemini-4-hydrogen-high")
+        self.assertEqual(summary["reasoning_effort"], "high")
+        self.assertEqual(summary["dev_commits"], 1)
+        result, = summary["rounds"]
+        self.assertEqual(result["session_id"], "test-agy-session")
+        self.assertEqual(result["outcome"], "progressed")
+        self.assertEqual(result["result_text"], "已执行本轮检查。详情见工单评论。")
+
+    def test_agy_result_error_is_not_accepted_even_with_zero_exit(self):
+        self.run_loop("agy-failed", agent="agy", expected_exit=1)
+        result, = self.summary()["rounds"]
+        self.assertEqual(result["exit_code"], 0)
+        self.assertFalse(result["success"])
+        self.assertIn("fixture agy error", result["error_reason"])
+
+    def test_agy_custom_model_omits_conflicting_default_effort(self):
+        self.run_loop("acceptance", "--model", "gemini-3.8-flash-medium", agent="agy")
+        self.assertEqual(json.loads((self.root / "agy-args.json").read_text()), [
+            "--output-format", "stream-json",
+            "--model", "gemini-3.8-flash-medium",
+            "--dangerously-skip-permissions",
+            "--print",
+        ])
+        self.assertIsNone(self.summary()["reasoning_effort"])
+
+    def test_agy_rejects_approve_mcps(self):
+        proc = self.run_loop("acceptance", "--approve-mcps", agent="agy", expected_exit=2)
+        self.assertIn("--approve-mcps 仅支持 --agent cursor", proc.stderr)
 
     def test_continues_after_a_pushed_commit_with_extra_reply_text(self):
         self.run_loop("pushed-with-prose", "--prompt-mode", "dev", "--max-rounds", "2")
