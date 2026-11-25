@@ -2,9 +2,12 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { DatabaseConnection } from "../../lib/db/connection.ts";
+import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
+import { statisticsTimeZone } from "../../lib/i18n/format.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { SamplingProtocolDao } from "../monitoring/protocol-dao.ts";
 import { draftContent, primaryTypes } from "../prompts/contracts.ts";
+import { isTimeZone } from "../sampling-plans/due-window.ts";
 import {
   appendFormalConfounderSchema,
   formalCheckpointEvaluationSchema,
@@ -22,10 +25,13 @@ import {
   type SavedFormalSlotRow,
 } from "./dao.ts";
 import {
+  applyBaselineGate,
+  assessBaseline,
   checkpointDue,
   evaluateFormalCheckpointGate,
   recordConfounders,
   registerControlPage,
+  type BaselineAssessment,
   type Checkpoint,
   type ConfounderFactor,
   type FormalCheckpointEvaluation,
@@ -66,6 +72,16 @@ export type FormalControlView = {
   registeredAt: string;
 };
 
+export type FormalBaselineView = {
+  timeZone: string;
+  start: string;
+  end: string;
+  compliant: boolean;
+  rescheduleOn: string | null;
+  interventionCount: number;
+  publicationCount: number;
+};
+
 export type FormalObservationView = {
   id: string;
   brandId: string;
@@ -75,6 +91,7 @@ export type FormalObservationView = {
   status: FormalObservationRecord["status"];
   createdAt: string;
   updatedAt: string;
+  baseline: FormalBaselineView;
   checkpoints: FormalCheckpointView[];
   confounders: FormalConfounderView[];
   controls: FormalControlView[];
@@ -125,11 +142,45 @@ function toControl(row: FormalControlRecord): FormalControlView {
   };
 }
 
+function toBaselineView(assessment: BaselineAssessment): FormalBaselineView {
+  return {
+    timeZone: assessment.timeZone,
+    start: assessment.start,
+    end: assessment.end,
+    compliant: assessment.compliant,
+    rescheduleOn: assessment.rescheduleOn,
+    interventionCount: assessment.hits.filter((hit) => hit.kind === "intervention").length,
+    publicationCount: assessment.hits.filter((hit) => hit.kind === "publication").length,
+  };
+}
+
+async function loadBaselineContext(db: QueryConnection, ownerId: string, brandId: string) {
+  const dao = new FormalObservationDao(db);
+  const [protocol, interventions, publications] = await Promise.all([
+    new SamplingProtocolDao(db).latestFrozenForBrand(ownerId, brandId),
+    dao.effectiveInterventions(ownerId, brandId),
+    dao.verifiedPublications(ownerId, brandId),
+  ]);
+  const timeZone = protocol && isTimeZone(protocol.timezone) ? protocol.timezone : statisticsTimeZone;
+  return {
+    timeZone,
+    events: [
+      ...interventions.map((row) => ({ kind: "intervention" as const, id: row.id, effectiveAt: row.effectiveAt })),
+      ...publications.map((row) => ({ kind: "publication" as const, id: row.id, effectiveAt: row.effectiveAt })),
+    ],
+  };
+}
+
+function baselineFor(context: Awaited<ReturnType<typeof loadBaselineContext>>, effectiveOn: string) {
+  return toBaselineView(assessBaseline({ effectiveOn, timeZone: context.timeZone, events: context.events }));
+}
+
 function toObservation(
   row: FormalObservationRecord,
   checkpoints: readonly FormalCheckpointRecord[],
   confounders: readonly FormalConfounderRecord[] = [],
   controls: readonly FormalControlRecord[] = [],
+  baseline: FormalBaselineView,
 ): FormalObservationView {
   return {
     id: row.id,
@@ -140,6 +191,7 @@ function toObservation(
     status: row.status,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    baseline,
     checkpoints: checkpoints.filter((item) => item.observationId === row.id).map(toCheckpoint),
     confounders: confounders.filter((item) => item.observationId === row.id).map(toConfounder),
     controls: controls.filter((item) => item.observationId === row.id).map(toControl),
@@ -257,7 +309,16 @@ export async function listFormalObservations(db: DatabaseConnection, ownerId: st
   const checkpoints = await dao.checkpointsFor(ownerId, observationIds);
   const confounders = await dao.confoundersFor(ownerId, observationIds);
   const controls = await dao.controlsFor(ownerId, observationIds);
-  return { observations: observations.map((item) => toObservation(item, checkpoints, confounders, controls)) };
+  const baselineContext = await loadBaselineContext(db, ownerId, brandId);
+  return {
+    observations: observations.map((item) => toObservation(
+      item,
+      checkpoints,
+      confounders,
+      controls,
+      baselineFor(baselineContext, item.effectiveOn),
+    )),
+  };
 }
 
 export async function createFormalObservation(
@@ -270,6 +331,7 @@ export async function createFormalObservation(
     const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
     if (!owned) return { error: "NOT_FOUND" as const };
     const now = clock();
+    const baseline = baselineFor(await loadBaselineContext(tx, ownerId, input.brandId), input.effectiveOn);
     const observation: FormalObservationRecord = {
       id: randomUUID(),
       brandId: input.brandId,
@@ -282,7 +344,7 @@ export async function createFormalObservation(
       updatedAt: now,
     };
     await new FormalObservationDao(tx).insertObservations([observation]);
-    return { observation: toObservation(observation, []) };
+    return { observation: toObservation(observation, [], [], [], baseline) };
   });
 }
 
@@ -307,7 +369,8 @@ export async function recordFormalCheckpoint(
     const savedRows = due
       ? await dao.savedSlotsForFrozenSet(ownerId, observation.brandId, observation.frozenSetId)
       : [];
-    const decision = decideFormalCheckpoint({
+    const baseline = baselineFor(await loadBaselineContext(tx, ownerId, observation.brandId), observation.effectiveOn);
+    const decision = applyBaselineGate(decideFormalCheckpoint({
       effectiveOn: observation.effectiveOn,
       today: input.today,
       checkpoint: input.checkpoint,
@@ -315,7 +378,7 @@ export async function recordFormalCheckpoint(
       hasOfficialWebsite: resolveHasOfficialWebsite(savedRows),
       slots: mapSavedSlots(savedRows),
       excluded: input.excluded,
-    });
+    }), baseline.compliant);
     const now = clock();
     const checkpoint: FormalCheckpointInsert = {
       id: randomUUID(),
@@ -345,7 +408,7 @@ export async function recordFormalCheckpoint(
     const confounders = await dao.confoundersFor(ownerId, [observation.id]);
     const controls = await dao.controlsFor(ownerId, [observation.id]);
     return {
-      observation: toObservation({ ...observation, status, updatedAt }, checkpoints, confounders, controls),
+      observation: toObservation({ ...observation, status, updatedAt }, checkpoints, confounders, controls, baseline),
       checkpoint: toCheckpoint(checkpoint),
     };
   });

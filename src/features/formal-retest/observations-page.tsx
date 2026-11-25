@@ -107,9 +107,10 @@ function CreateFields({ t, form }: { t: Translate; form?: string }) {
         <span>{t("frozenSetId")}</span>
         <input name="frozenSetId" required maxLength={64} className={inputClass} {...associated(form)} />
       </label>
-      <label className="min-w-0 space-y-2 text-sm break-words">
+      <label className="min-w-0 space-y-2 text-sm break-words sm:col-span-2">
         <span>{t("effectiveOn")}</span>
         <input name="effectiveOn" type="date" required className={inputClass} {...associated(form)} />
+        <span className="block text-muted-foreground">{t("createBaselineHint")}</span>
       </label>
       <label className="min-w-0 space-y-2 text-sm break-words">
         <span>{t("frozenCount")}</span>
@@ -277,7 +278,15 @@ export default async function FormalObservationsPage({
       summary={(
         <div className="max-w-2xl space-y-2">
           {isKnownError(errorCode) ? <p role="alert" className="break-words text-sm leading-7">{t(errorCode)}</p> : null}
-          <p role="status" className="break-words text-sm leading-7 text-muted-foreground">{t(taskKey[next.kind])}</p>
+          <p role="status" className="break-words text-sm leading-7 text-muted-foreground">
+            {next.observation && !next.observation.baseline.compliant && next.observation.baseline.rescheduleOn
+              ? t("taskBaselineContaminated", {
+                start: next.observation.baseline.start,
+                end: next.observation.baseline.end,
+                date: next.observation.baseline.rescheduleOn,
+              })
+              : t(taskKey[next.kind])}
+          </p>
           <p className="break-words text-sm leading-7 text-muted-foreground">{t("description")}</p>
         </div>
       )}
@@ -311,6 +320,21 @@ export default async function FormalObservationsPage({
               <p className="text-sm">{statusLabel[observation.status]}</p>
             </div>
             <p className="text-sm tabular-nums">{t("effectiveLine", { date: observation.effectiveOn })}</p>
+            <p className="text-sm tabular-nums">{t("baselineWindow", {
+              start: observation.baseline.start,
+              end: observation.baseline.end,
+              timeZone: observation.baseline.timeZone,
+            })}</p>
+            {observation.baseline.compliant ? (
+              <p className="text-sm leading-7 text-muted-foreground">{t("baselineClear")}</p>
+            ) : (
+              <div className="space-y-2" role="status">
+                <p className="text-sm leading-7">{t("baselineContaminated")}</p>
+                {observation.baseline.rescheduleOn ? (
+                  <p className="text-sm leading-7">{t("baselineReschedule", { date: observation.baseline.rescheduleOn })}</p>
+                ) : null}
+              </div>
+            )}
             <p className="text-sm tabular-nums">{t("frozenLine", { count: digits(observation.frozenNonBrandCount) })}</p>
 
             <div className="min-w-0 space-y-4">

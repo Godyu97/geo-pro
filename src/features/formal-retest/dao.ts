@@ -255,6 +255,31 @@ export function formalSavedSlotsQuery(ownerId: string, brandId: string, frozenSe
   };
 }
 
+const baselineEventRow = z.object({
+  id: brandIdSchema,
+  effectiveAt: z.iso.datetime({ precision: 3 }),
+});
+
+export function effectiveInterventionQuery(ownerId: string, brandId: string) {
+  return {
+    sql: `SELECT id, effective_at AS "effectiveAt"
+      FROM intervention_batch
+      WHERE owner_id = ? AND brand_id = ? AND status = 'effective'`,
+    values: [ownerId, brandId] as QueryValue[],
+  };
+}
+
+export function verifiedPublicationQuery(ownerId: string, brandId: string) {
+  return {
+    sql: `SELECT id, effective_at AS "effectiveAt"
+      FROM content_publication
+      WHERE brand_id = ? AND owner_id = ?
+        AND status IN ('verified_public', 'verified_manual')
+        AND effective_at IS NOT NULL`,
+    values: [brandId, ownerId] as QueryValue[],
+  };
+}
+
 export class FormalObservationDao {
   private readonly db: QueryConnection;
 
@@ -384,6 +409,16 @@ export class FormalObservationDao {
     if (!query) return [];
     const rows = await queryWithParameters(this.db, query.sql, query.values);
     return z.array(controlRow).parse(rows);
+  }
+
+  async effectiveInterventions(ownerId: string, brandId: string) {
+    const query = effectiveInterventionQuery(ownerId, brandId);
+    return z.array(baselineEventRow).parse(await queryWithParameters(this.db, query.sql, query.values));
+  }
+
+  async verifiedPublications(ownerId: string, brandId: string) {
+    const query = verifiedPublicationQuery(ownerId, brandId);
+    return z.array(baselineEventRow).parse(await queryWithParameters(this.db, query.sql, query.values));
   }
 
   async markCheckpointDue(ownerId: string, observationId: string, updatedAt: string) {

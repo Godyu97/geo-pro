@@ -1,5 +1,6 @@
 import type { DraftContent, PromptQuestion } from "./contracts.ts";
 import { primaryTypes } from "./contracts.ts";
+import { activeQuestionLimit, isProfessionalDraft } from "./professional-template.ts";
 
 const leading = /推荐|哪家好|哪家更|最好|首选|必买|闭眼入|应该选|请帮我选|排名第一|最值得|指定答案|\b(?:recommend(?:ed|s)?|best|top pick|must[- ]buy|you should|number one)\b/iu;
 
@@ -194,7 +195,7 @@ export type DraftIssue =
   | { error: "duplicate"; questionIds: string[] }
   | { error: "similar"; questionIds: string[] }
   | { error: "deactivateRequired"; questionIds: string[] }
-  | { error: "notReady"; adjustments: Array<"trim" | "confirmQuestions" | "addPrimary" | "mixedScope"> };
+  | { error: "notReady"; adjustments: Array<"trim" | "professionalTrim" | "confirmQuestions" | "addPrimary" | "mixedScope"> };
 
 export function validateDraft(content: DraftContent, terms: readonly string[], referenced: readonly string[], mode: "save" | "freeze"): DraftIssue | {
   content: DraftContent;
@@ -207,7 +208,10 @@ export function validateDraft(content: DraftContent, terms: readonly string[], r
   if (clusterIds.size !== content.clusters.length || questionIds.size !== content.questions.length ||
     content.questions.some((question) => !clusterIds.has(question.clusterId))) return { error: "invalidInput" };
   const active = content.questions.filter((question) => question.status !== "inactive");
-  if (active.length > 10) return { error: "notReady", adjustments: ["trim"] };
+  const professional = isProfessionalDraft(content.questions);
+  if (active.length > activeQuestionLimit(content.questions)) {
+    return { error: "notReady", adjustments: [professional ? "professionalTrim" : "trim"] };
+  }
   const missing = referenced.filter((item) => !questionIds.has(item));
   if (missing.length) return { error: "deactivateRequired", questionIds: missing };
   for (const cluster of content.clusters) {

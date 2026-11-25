@@ -14,9 +14,11 @@ import {
   recordFormalCheckpointSchema,
 } from "../../src/features/formal-retest/contracts.ts";
 import {
+  effectiveInterventionQuery,
   formalCheckpointListQuery,
   formalObservationListQuery,
   formalSavedSlotsQuery,
+  verifiedPublicationQuery,
 } from "../../src/features/formal-retest/dao.ts";
 import { MonitoringDao } from "../../src/features/monitoring/dao.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
@@ -447,6 +449,119 @@ for (const kind of ["sqlite", "postgresql"]) {
       } finally {
         await ddl.cleanup();
       }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test(`${kind}: a verified intervention inside the 14-day baseline blocks a formal conclusion`, async () => {
+    const fixture = await testDatabase(kind);
+    try {
+      const db = fixture.connection;
+      const owner = await account(db);
+      const outsider = await account(db);
+      const cleanOwner = await account(db);
+      const zonedOwner = await account(db);
+      const brand = randomUUID();
+      const otherBrand = randomUUID();
+      const brands = new BrandDao(db);
+      await brands.insertBrand(owner, brand, time);
+      await brands.insertBrand(outsider, otherBrand, time);
+      const stamp = "2026-11-10T04:00:00.000Z";
+      await queryWithParameters(db, `INSERT INTO intervention_batch (
+        id, brand_id, owner_id, status, effective_at, created_at, updated_at
+      ) VALUES (?, ?, ?, 'effective', ?, ?, ?)`, [randomUUID(), brand, owner, stamp, time, time]);
+      await queryWithParameters(db, `INSERT INTO intervention_batch (
+        id, brand_id, owner_id, status, effective_at, created_at, updated_at
+      ) VALUES (?, ?, ?, 'pending', NULL, ?, ?)`, [randomUUID(), brand, owner, time, time]);
+      await queryWithParameters(db, `INSERT INTO intervention_batch (
+        id, brand_id, owner_id, status, effective_at, created_at, updated_at
+      ) VALUES (?, ?, ?, 'effective', ?, ?, ?)`, [randomUUID(), otherBrand, outsider, stamp, time, time]);
+
+      const created = await createFormalObservation(db, owner, {
+        brandId: brand,
+        frozenSetId: "frozen-baseline",
+        effectiveOn: "2026-11-17",
+        frozenNonBrandCount: 30,
+      }, () => "2026-11-26T00:00:00.000Z");
+      assert.equal(created.observation.status, "observing");
+      assert.equal(created.observation.baseline.compliant, false);
+      assert.equal(created.observation.baseline.timeZone, "Asia/Shanghai");
+      assert.equal(created.observation.baseline.start, "2026-11-03");
+      assert.equal(created.observation.baseline.end, "2026-11-17");
+      assert.equal(created.observation.baseline.interventionCount, 1);
+      assert.equal(created.observation.baseline.publicationCount, 0);
+      assert.equal(created.observation.baseline.rescheduleOn, "2026-11-25");
+
+      await seedWindowRun(db, { owner, brand, frozenSetId: "frozen-baseline", at: "2026-11-10T04:00:00.000Z" });
+      await seedWindowRun(db, { owner, brand, frozenSetId: "frozen-baseline", at: "2026-11-20T04:00:00.000Z" });
+      const blocked = await recordFormalCheckpoint(
+        db,
+        owner,
+        created.observation.id,
+        formalRequest("2026-12-02", 30, []),
+        () => "2026-12-02T00:00:00.000Z",
+      );
+      assert.equal(blocked.checkpoint.mode, "exploratory");
+      assert.equal(JSON.parse(blocked.checkpoint.conclusion).kind, "exploratory");
+      assert.equal(blocked.checkpoint.evaluation.insufficiencyReasons.includes("baseline_intervention"), true);
+      assert.equal(blocked.observation.baseline.compliant, false);
+      const stored = await queryWithParameters(
+        db,
+        `SELECT effective_on AS "effectiveOn", status FROM formal_observation WHERE id = ?`,
+        [created.observation.id],
+      );
+      assert.equal(stored[0].effectiveOn, "2026-11-17");
+
+      const cleanBrand = randomUUID();
+      await brands.insertBrand(cleanOwner, cleanBrand, time);
+      await queryWithParameters(db, `INSERT INTO intervention_batch (
+        id, brand_id, owner_id, status, effective_at, created_at, updated_at
+      ) VALUES (?, ?, ?, 'effective', ?, ?, ?)`, [randomUUID(), cleanBrand, cleanOwner, "2026-11-17T07:30:00.000Z", time, time]);
+      const clean = await createFormalObservation(db, cleanOwner, {
+        brandId: cleanBrand,
+        frozenSetId: "frozen-clean",
+        effectiveOn: "2026-11-17",
+        frozenNonBrandCount: 30,
+      }, () => "2026-11-26T01:00:00.000Z");
+      assert.equal(clean.observation.baseline.timeZone, "Asia/Shanghai");
+      assert.equal(clean.observation.baseline.compliant, true);
+
+      const zonedBrand = randomUUID();
+      await brands.insertBrand(zonedOwner, zonedBrand, time);
+      await queryWithParameters(db, `INSERT INTO sampling_protocol (
+        id, protocol_id, brand_id, owner_id, version, new_session_required, search_required,
+        target_region, timezone, status, fingerprint, operation_id, created_at
+      ) VALUES (?, ?, ?, ?, 1, 0, 0, 'CN', 'America/Los_Angeles', 'frozen', ?, ?, ?)`, [
+        randomUUID(), randomUUID(), zonedBrand, zonedOwner, "c".repeat(64), randomUUID(), time,
+      ]);
+      await queryWithParameters(db, `INSERT INTO intervention_batch (
+        id, brand_id, owner_id, status, effective_at, created_at, updated_at
+      ) VALUES (?, ?, ?, 'effective', ?, ?, ?)`, [randomUUID(), zonedBrand, zonedOwner, "2026-11-17T07:30:00.000Z", time, time]);
+      const zoned = await createFormalObservation(db, zonedOwner, {
+        brandId: zonedBrand,
+        frozenSetId: "frozen-zoned",
+        effectiveOn: "2026-11-17",
+        frozenNonBrandCount: 30,
+      }, () => "2026-11-26T02:00:00.000Z");
+      assert.equal(zoned.observation.baseline.timeZone, "America/Los_Angeles");
+      assert.equal(zoned.observation.baseline.compliant, false);
+      assert.equal(zoned.observation.baseline.rescheduleOn, "2026-12-01");
+
+      if (db.kind === "postgresql") {
+        await db.query("ANALYZE intervention_batch");
+        await db.query("ANALYZE content_publication");
+      }
+      const explain = db.kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN ";
+      const interventionQuery = effectiveInterventionQuery(owner, brand);
+      const publicationQuery = verifiedPublicationQuery(owner, brand);
+      const interventionPlan = JSON.stringify(await queryWithParameters(db, explain + interventionQuery.sql, interventionQuery.values));
+      const publicationPlan = JSON.stringify(await queryWithParameters(db, explain + publicationQuery.sql, publicationQuery.values));
+      assert.match(interventionQuery.sql, /owner_id = \? AND brand_id = \? AND status = 'effective'/);
+      assert.match(publicationQuery.sql, /verified_public/);
+      assert.match(publicationQuery.sql, /verified_manual/);
+      assert.match(interventionPlan, /intervention_batch_owner_idx|Seq Scan on intervention_batch|SCAN intervention_batch/);
+      assert.match(publicationPlan, /content_publication_brand_idx|content_publication_owner_idx|content_publication_operation_uidx|Seq Scan on content_publication|SCAN content_publication/);
     } finally {
       await fixture.cleanup();
     }

@@ -48,6 +48,7 @@ export const formalInsufficiencyReasons = [
   "citation_common_below_80",
   "citation_coverage_below_80",
   "no_official_website",
+  "baseline_intervention",
 ] as const;
 
 export const formalGateKeys = ["coverage", "mention", "recommendation", "citation"] as const;

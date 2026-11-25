@@ -26,6 +26,8 @@ const copy = {
     viewExcluded: "查看排除题",
     related: "相关入口",
     observing: "观察中",
+    baselineClear: "该窗口内没有已核验生效的干预批次或发布。",
+    baselineWindow: "基线窗口 2026-10-18（含）至 2026-11-01（不含），时区 Asia/Shanghai。生效日当天不计入基线。",
     recorded: "检查点已记录",
     progress: "进度",
     exploratory: "探索",
@@ -47,6 +49,8 @@ const copy = {
     viewExcluded: "Review excluded questions",
     related: "Related entries",
     observing: "Observing",
+    baselineClear: "This window has no verified intervention batch or publication.",
+    baselineWindow: "Baseline window 2026-10-18 inclusive to 2026-11-01 exclusive, time zone Asia/Shanghai. The effective day stays outside the baseline.",
     recorded: "Checkpoint recorded",
     progress: "Progress",
     exploratory: "Exploratory",
@@ -214,7 +218,9 @@ test("observation plans keep the next checkpoint readable and recoverable", asyn
         await expect(request).toHaveCount(1);
         await expect(main.getByText(frozenSetId, { exact: true })).toBeVisible();
         await expect(main.getByText(current.observing, { exact: true })).toBeVisible();
-        await expect(main.getByText(effectiveOn)).toBeVisible();
+        await expect(main.getByText(locale === "zh-CN" ? `生效日 ${effectiveOn}` : `Effective date ${effectiveOn}`)).toBeVisible();
+        await expect(main.getByText(current.baselineWindow, { exact: true })).toBeVisible();
+        await expect(main.getByText(current.baselineClear, { exact: true })).toBeVisible();
         if (width === 375) {
           await expect(request).toBeInViewport();
           const edge = await main.getByText(frozenSetId, { exact: true }).evaluate((element) => {

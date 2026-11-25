@@ -166,6 +166,9 @@ export async function PromptSetsPage({ params, searchParams }: {
           <Link href="/dashboard/monitoring/plans" prefetch={false} className={relatedLinkClass}>
             {messages.openPlans}
           </Link>
+          {!result.readOnly ? (
+            <a href="#prompt-professional" className={relatedLinkClass}>{messages.loadProfessional}</a>
+          ) : null}
         </nav>
       </header>
       <aside className="min-w-0 max-w-3xl space-y-2 rounded-xl border bg-muted/50 px-4 py-3 text-sm leading-6 text-muted-foreground">

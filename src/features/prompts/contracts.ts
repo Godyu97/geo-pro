@@ -56,7 +56,7 @@ export const promptQuestion = z.strictObject({
 
 export const draftContent = z.strictObject({
   clusters: z.array(promptCluster).max(10),
-  questions: z.array(promptQuestion).max(30),
+  questions: z.array(promptQuestion).max(80),
 });
 
 export const promptCommand = z.discriminatedUnion("action", [

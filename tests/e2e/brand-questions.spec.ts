@@ -24,6 +24,8 @@ const copy = {
     back: "返回品牌资料",
     related: "相关入口",
     browseCandidates: "浏览默认候选",
+    loadProfessional: "载入 40+10 专业题集",
+    professionalCounts: "非品牌核心 30，比较 5，品牌事实 5，探索 10。主指标 30。",
     browseVersions: "查看已冻结版本",
     addCandidate: "加入草稿",
     addQuestion: "手工加题",
@@ -52,6 +54,8 @@ const copy = {
     back: "Back to brand details",
     related: "Related entries",
     browseCandidates: "Browse default candidates",
+    loadProfessional: "Load the 40+10 professional set",
+    professionalCounts: "Non-brand core 30, comparison 5, brand facts 5, exploration 10. Primary metric 30.",
     browseVersions: "View frozen versions",
     addCandidate: "Add to draft",
     addQuestion: "Add a question manually",
@@ -171,6 +175,8 @@ test("brand questions keeps visual consistency, double-submit guard, isolation, 
         await expect(main.getByRole("navigation", { name: t.related })).toBeVisible();
         const browseCandidates = main.getByRole("link", { name: t.browseCandidates, exact: true });
         await expect(browseCandidates).toBeVisible();
+        await expect(main.getByRole("link", { name: t.loadProfessional, exact: true })).toBeVisible();
+        await expect(main.getByRole("button", { name: t.loadProfessional, exact: true })).toBeVisible();
         if (width === 375) {
           await expect(browseCandidates).toBeInViewport();
           await capture(page, screenshotDir, `empty-${locale}-375.png`);
@@ -178,6 +184,20 @@ test("brand questions keeps visual consistency, double-submit guard, isolation, 
         await expectNoOverflow(page);
       }
     }
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await page.goto(questionsHref);
+    const professionalMain = page.getByRole("main");
+    await professionalMain.getByRole("link", { name: copy["zh-CN"].loadProfessional, exact: true }).click();
+    await expect(professionalMain.getByRole("heading", { name: "专业题集模板", exact: true })).toBeVisible();
+    await professionalMain.getByRole("button", { name: copy["zh-CN"].loadProfessional, exact: true }).click();
+    await expect(professionalMain.getByText(copy["zh-CN"].professionalCounts, { exact: true })).toHaveCount(2);
+    const editedQuestion = professionalMain.getByLabel("题目 1 文本", { exact: true });
+    await editedQuestion.fill("公开资料里，适用边界和排除对象要怎样分开写？");
+    await expect(editedQuestion).toHaveValue("公开资料里，适用边界和排除对象要怎样分开写？");
+    await expect(professionalMain.getByText(copy["zh-CN"].professionalCounts, { exact: true })).toHaveCount(2);
+    await expectNoOverflow(page);
 
     // 2. Add candidates, cluster, manual long comparison question, duplicate check, slow double-Enter guard, freeze v1 & v2
     await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);

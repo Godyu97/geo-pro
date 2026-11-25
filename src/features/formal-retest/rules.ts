@@ -1,4 +1,4 @@
-import { isTimeZone, windowBounds } from "../sampling-plans/due-window.ts";
+import { isTimeZone, localWindowId, windowBounds } from "../sampling-plans/due-window.ts";
 
 export type Checkpoint = "d7" | "d14" | "d28";
 
@@ -33,7 +33,8 @@ export type FormalInsufficiencyReason =
   | "recommendation_coverage_below_80"
   | "citation_common_below_80"
   | "citation_coverage_below_80"
-  | "no_official_website";
+  | "no_official_website"
+  | "baseline_intervention";
 
 export type FormalSlotSample = {
   slotId: string;
@@ -627,4 +628,82 @@ export function batchEffectiveAt(verifiedAt: readonly (string | null)[]) {
     if (latest === null || value > latest) latest = value;
   }
   return latest;
+}
+
+export type BaselineEventKind = "intervention" | "publication";
+
+export type BaselineEvent = {
+  kind: BaselineEventKind;
+  id: string;
+  effectiveAt: string;
+};
+
+export type BaselineHit = BaselineEvent & { localDate: string };
+
+export type BaselineAssessment = {
+  timeZone: string;
+  start: string;
+  end: string;
+  compliant: boolean;
+  rescheduleOn: string | null;
+  hits: BaselineHit[];
+};
+
+/** Baseline is [D0-14d, D0) in the brand time zone. D0 itself stays outside. */
+export function assessBaseline(input: {
+  effectiveOn: string;
+  timeZone: string;
+  events: readonly BaselineEvent[];
+}): BaselineAssessment {
+  const start = addCalendarDays(input.effectiveOn, -14);
+  const end = input.effectiveOn;
+  const hits: BaselineHit[] = [];
+  let latest: string | null = null;
+  for (const event of input.events) {
+    const localDate = localWindowId(event.effectiveAt, input.timeZone);
+    if (!localDate) continue;
+    if (latest === null || localDate > latest) latest = localDate;
+    if (localDate >= start && localDate < end) hits.push({ ...event, localDate });
+  }
+  return {
+    timeZone: input.timeZone,
+    start,
+    end,
+    compliant: hits.length === 0,
+    rescheduleOn: hits.length === 0 || latest === null ? null : addCalendarDays(latest, 15),
+    hits,
+  };
+}
+
+function retagExploratoryConclusion(conclusion: string | null) {
+  if (!conclusion) return conclusion;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(conclusion);
+  } catch {
+    return conclusion;
+  }
+  if (!parsed || typeof parsed !== "object") return conclusion;
+  const next = JSON.stringify({ ...parsed, kind: "exploratory", baseline: "contaminated" });
+  if (next.length <= 400) return next;
+  const shorter = JSON.stringify({ ...parsed, kind: "exploratory" });
+  return shorter.length <= 400 ? shorter : conclusion;
+}
+
+/** A contaminated baseline cannot be stored as a formal conclusion. */
+export function applyBaselineGate<T extends {
+  mode: "progress" | "formal" | "exploratory";
+  conclusion: string | null;
+  evaluation: FormalCheckpointEvaluation | null;
+}>(decision: T, compliant: boolean): T {
+  if (compliant || decision.mode === "progress" || !decision.evaluation) return decision;
+  const reasons = decision.evaluation.insufficiencyReasons.includes("baseline_intervention")
+    ? decision.evaluation.insufficiencyReasons
+    : [...decision.evaluation.insufficiencyReasons, "baseline_intervention" as const];
+  return {
+    ...decision,
+    mode: "exploratory",
+    conclusion: retagExploratoryConclusion(decision.conclusion),
+    evaluation: { ...decision.evaluation, insufficiencyReasons: reasons },
+  };
 }

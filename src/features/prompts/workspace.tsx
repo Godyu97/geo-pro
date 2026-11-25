@@ -15,6 +15,9 @@ import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
 import { buyingStage, questionSource, questionStatus, questionType, type DraftContent, type PromptQuestion } from "./contracts";
 import { cursorValue } from "./params";
+import {
+  activeQuestionLimit, professionalCategoryPreview, professionalTemplate, professionalTemplateNote,
+} from "./professional-template";
 import { annotateDraft } from "./rules";
 import type { PromptWorkspace } from "./service";
 
@@ -54,6 +57,11 @@ export function PromptWorkspaceView({ brandId, locale, data, messages }: {
   const baseSetId = useRef(data.draft?.baseSetId ?? null);
   const view = annotateDraft(content, data.terms);
   const activeCount = content.questions.filter((question) => question.status !== "inactive").length;
+  const questionLimit = activeQuestionLimit(content.questions);
+  const professional = content.questions.some((question) => question.sourceNote === professionalTemplateNote);
+  const categories = professionalCategoryPreview(professional
+    ? view.questions
+    : professionalTemplate(data.brand.language).map((row) => ({ status: "candidate", type: row.type, brandTerm: false, primary: false })));
   const href = `/dashboard/brands/${brandId}/questions`;
 
   function updateQuestion(id: string, patch: Partial<PromptQuestion>) {
@@ -63,10 +71,41 @@ export function PromptWorkspaceView({ brandId, locale, data, messages }: {
     }));
   }
 
+  function loadProfessional() {
+    if (data.readOnly || inFlightRef.current) return;
+    const rows = professionalTemplate(data.brand.language);
+    setContent((current) => {
+      const clusters = current.clusters.length ? current.clusters : [emptyCluster()];
+      return {
+        clusters,
+        questions: rows.map((row) => ({
+          id: crypto.randomUUID(),
+          clusterId: clusters[0].id,
+          text: row.text,
+          source: row.source,
+          sourceNote: row.sourceNote,
+          type: row.type,
+          stage: row.stage,
+          region: data.brand.region,
+          language: data.brand.language,
+          status: "candidate" as const,
+          acceptSimilar: false,
+          primary: false,
+        })),
+      };
+    });
+    setNotice({ kind: "info", code: "professionalLoaded", text: t("professionalLoaded") });
+  }
+
+  function trimNotice() {
+    const code = questionLimit > 10 ? "professionalTrim" as const : "trim" as const;
+    setNotice({ kind: "error", code, text: t(code) });
+  }
+
   function addQuestion(question: Omit<PromptQuestion, "id" | "clusterId" | "primary" | "acceptSimilar" | "region" | "language"> & Partial<Pick<PromptQuestion, "region" | "language" | "acceptSimilar">>) {
     if (data.readOnly || inFlightRef.current) return;
-    if (activeCount >= 10) {
-      setNotice({ kind: "error", code: "trim", text: t("trim") });
+    if (activeCount >= questionLimit) {
+      trimNotice();
       return;
     }
     setContent((current) => {
@@ -209,7 +248,15 @@ export function PromptWorkspaceView({ brandId, locale, data, messages }: {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 id="prompt-summary" className="text-base font-semibold">{t("summary")}</h2>
               <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary" className={wrapBadgeClass}>{t("counts", { saved: formatNumber(locale, view.preview.saved), primary: formatNumber(locale, view.preview.primary) })}</Badge>
+                <Badge variant="secondary" className={wrapBadgeClass}>{professional
+                  ? t("professionalCounts", {
+                    core: formatNumber(locale, categories.nonBrandCore),
+                    comparison: formatNumber(locale, categories.comparison),
+                    brandFact: formatNumber(locale, categories.brandFact),
+                    exploration: formatNumber(locale, categories.exploration),
+                    primary: formatNumber(locale, categories.primary),
+                  })
+                  : t("counts", { saved: formatNumber(locale, view.preview.saved), primary: formatNumber(locale, view.preview.primary) })}</Badge>
               </div>
             </div>
             <p className="text-sm leading-6 [overflow-wrap:anywhere]">
@@ -228,6 +275,35 @@ export function PromptWorkspaceView({ brandId, locale, data, messages }: {
               </p>
             ))}
             {data.gaps.length > 0 && <p className="text-sm leading-6 text-muted-foreground">{t("briefGaps")}</p>}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section aria-labelledby="prompt-professional">
+        <Card className="min-w-0 py-0 shadow-none">
+          <CardContent className="space-y-4 p-4 sm:p-5">
+            <h2 id="prompt-professional" className="text-base font-semibold">{t("professionalTitle")}</h2>
+            <p className="text-sm leading-6 text-muted-foreground">{t("professionalIntro")}</p>
+            <p className="text-sm leading-6">{professional ? t("professionalDraftLabel") : t("professionalTemplateLabel")}</p>
+            <p className="text-sm leading-6 tabular-nums">{t("professionalCounts", {
+              core: formatNumber(locale, categories.nonBrandCore),
+              comparison: formatNumber(locale, categories.comparison),
+              brandFact: formatNumber(locale, categories.brandFact),
+              exploration: formatNumber(locale, categories.exploration),
+              primary: formatNumber(locale, categories.primary),
+            })}</p>
+            <Button
+              type="button"
+              className={actionClass}
+              disabled={data.readOnly}
+              aria-disabled={pending}
+              onClick={() => {
+                if (pending) return;
+                loadProfessional();
+              }}
+            >
+              {t("loadProfessional")}
+            </Button>
           </CardContent>
         </Card>
       </section>
@@ -367,7 +443,7 @@ export function PromptWorkspaceView({ brandId, locale, data, messages }: {
                 const lines = paste.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
                 setContent((current) => {
                   const clusters = current.clusters.length ? current.clusters : [emptyCluster()];
-                  const room = 10 - current.questions.filter((question) => question.status !== "inactive").length;
+                  const room = activeQuestionLimit(current.questions) - current.questions.filter((question) => question.status !== "inactive").length;
                   const additions = lines.slice(0, Math.max(room, 0)).map((text) => ({
                     id: crypto.randomUUID(), clusterId: clusters[0].id, text, source: "paste" as const, sourceNote: "line-paste",
                     type: "discovery" as const, stage: "consider" as const, region: data.brand.region, language: data.brand.language,
@@ -375,7 +451,7 @@ export function PromptWorkspaceView({ brandId, locale, data, messages }: {
                   }));
                   return { clusters, questions: [...current.questions, ...additions] };
                 });
-                if (lines.length > 10 - activeCount) setNotice({ kind: "error", code: "trim", text: t("trim") });
+                if (lines.length > questionLimit - activeCount) trimNotice();
                 setPaste("");
               }}
             >
