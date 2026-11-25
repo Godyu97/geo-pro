@@ -59,12 +59,16 @@ export const sourceInspection = pgTable("source_inspection", {
   uniqueIndex("source_inspection_citation_uidx").on(table.citationId),
   index("source_inspection_brand_idx").on(table.brandId, table.citationId),
   check("source_inspection_check", sql`${table.state} in ('observed', 'resolved', 'limited', 'unknown')
-    and ${table.support} in ('supports', 'unknown')
+    and ${table.support} in ('supports', 'does_not_support', 'unknown')
     and ${table.pageLive} in (0, 1)
     and ${table.readable} in (0, 1)
     and ${table.authorKnown} in (0, 1)
     and ${table.supportsBrand} in (0, 1)
-    and (${table.support} = 'unknown' or (${table.pageLive} = 1 and ${table.readable} = 1 and ${table.supportsBrand} = 1))`),
+    and (
+      ${table.support} = 'unknown'
+      or (${table.support} = 'supports' and ${table.pageLive} = 1 and ${table.readable} = 1 and ${table.authorKnown} = 1 and ${table.supportsBrand} = 1)
+      or (${table.support} = 'does_not_support' and ${table.pageLive} = 1 and ${table.readable} = 1 and ${table.authorKnown} = 1 and ${table.supportsBrand} = 0)
+    )`),
 ]);
 
 export const researchBrief = pgTable("research_brief", {

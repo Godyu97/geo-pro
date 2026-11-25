@@ -589,6 +589,13 @@
       "when": 1795612047797,
       "tag": "0083_motionless_wrecking_crew",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1795613043416,
+      "tag": "0084_fair_tyger_tiger",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,7 @@ import {
   orderedRankBreakdown,
   type MentionState,
 } from "../competitor-share/rules.ts";
-import { inspectCopiedBrief, inspectSource } from "../source-opportunities/rules.ts";
+import { inspectCopiedBrief, inspectSource, thirdPartySupportSummary } from "../source-opportunities/rules.ts";
 import type {
   BriefStatusInput,
   CompetitorError,
@@ -305,7 +305,8 @@ export async function readCitationSources(db: DatabaseConnection, ownerId: strin
   if (!await dao.ownedBrand(ownerId, brandId)) return denied("NOT_FOUND");
   const listed = await dao.listCitationSources(ownerId, brandId);
   const citations = listed.rows.map(presentCitation);
-  return { citations, hosts: citationHosts(citations), truncated: listed.truncated };
+  const supportSummary = listed.truncated ? thirdPartySupportSummary([]) : thirdPartySupportSummary(citations);
+  return { citations, hosts: citationHosts(citations), supportSummary, truncated: listed.truncated };
 }
 
 export async function proposeResearchBrief(
@@ -402,14 +403,17 @@ export async function readCompetitorWorkspace(
   const share = selected && !mentions.truncated
     ? shareFromMentions(labels, mentions.rows)
     : emptyShare(labels);
+  const citations = sources.rows.map(presentCitation);
+  const supportSummary = sources.truncated ? thirdPartySupportSummary([]) : thirdPartySupportSummary(citations);
   return {
     sets: sets.map((item) => ({ id: item.id, version: item.version, labels: labelsOf(item), createdAt: item.createdAt })),
     selected: selected ? { id: selected.id, version: selected.version, labels, createdAt: selected.createdAt } : null,
     ...share,
     truncated: mentions.truncated,
     observations,
-    citations: sources.rows.map(presentCitation),
+    citations,
     hosts: citationHosts(sources.rows),
+    supportSummary,
     sourcesTruncated: sources.truncated,
     briefs: briefs.map((row) => ({
       id: row.id,

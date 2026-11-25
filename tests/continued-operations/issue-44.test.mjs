@@ -10,6 +10,14 @@ test("a limited page keeps the citation and does not count as support", () => {
   const expired = inspectSource({ pageLive: false, readable: false, authorKnown: false, supportsBrand: true });
   assert.equal(expired.state, "observed");
   assert.equal(expired.citationKept, true);
+  const unknownAuthor = inspectSource({ pageLive: true, readable: true, authorKnown: false, supportsBrand: true });
+  assert.equal(unknownAuthor.state, "unknown");
+  assert.equal(unknownAuthor.support, "unknown");
+  assert.equal(unknownAuthor.citationKept, true);
+  const nonSupport = inspectSource({ pageLive: true, readable: true, authorKnown: true, supportsBrand: false });
+  assert.equal(nonSupport.state, "resolved");
+  assert.equal(nonSupport.support, "does_not_support");
+  assert.equal(nonSupport.citationKept, true);
 });
 
 test("a brief that only replaces the other brand is rejected", () => {

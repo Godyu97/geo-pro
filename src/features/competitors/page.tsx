@@ -521,6 +521,50 @@ export default async function CompetitorAnalysisPage({
 
       <section className="min-w-0 space-y-3">
         <h2 className="text-lg font-semibold">{t("sources")}</h2>
+        {workspace.sourcesTruncated ? (
+          <p className={emptyClass}>{t("sourcesTruncated")}</p>
+        ) : workspace.citations.length > 0 ? (
+          <div className={panelClass}>
+            <h3 className="text-base font-medium">{t("thirdPartySupportHeading")}</h3>
+            <p className="text-sm leading-6 text-muted-foreground">{t("thirdPartySupportNote")}</p>
+            <p className="text-sm font-medium tabular-nums">
+              {workspace.supportSummary.supportRate === null
+                ? t("supportRateNaLine", { na: t("shareNa") })
+                : t("supportRateLine", {
+                    rate: formatPercent(locale, workspace.supportSummary.supportRate),
+                    numerator: formatNumber(locale, workspace.supportSummary.supportsCount),
+                    denominator: formatNumber(locale, workspace.supportSummary.judgableCount),
+                  })}
+            </p>
+            {workspace.supportSummary.unavailableReason === "uninspected_only" ? (
+              <p className="text-sm leading-6 text-muted-foreground">{t("supportReasonUninspected")}</p>
+            ) : workspace.supportSummary.unavailableReason === "no_judgable_inspections" ? (
+              <p className="text-sm leading-6 text-muted-foreground">{t("supportReasonNoJudgable")}</p>
+            ) : null}
+            <p className="text-sm leading-6 text-muted-foreground tabular-nums">
+              {t("supportJudgableCounts", {
+                judgable: formatNumber(locale, workspace.supportSummary.judgableCount),
+                supports: formatNumber(locale, workspace.supportSummary.supportsCount),
+                doesNotSupport: formatNumber(locale, workspace.supportSummary.doesNotSupportCount),
+              })}
+            </p>
+            <p className="text-sm leading-6 text-muted-foreground tabular-nums">
+              {t("supportUnknownCounts", {
+                unknown: formatNumber(locale, workspace.supportSummary.unknownCount),
+              })}
+            </p>
+            {workspace.supportSummary.unknownCount > 0 ? (
+              <p className="text-xs leading-6 text-muted-foreground tabular-nums">
+                {t("supportUnknownReasons", {
+                  uninspected: formatNumber(locale, workspace.supportSummary.uninspectedCount),
+                  dead: formatNumber(locale, workspace.supportSummary.deadCount),
+                  limited: formatNumber(locale, workspace.supportSummary.limitedCount),
+                  other: formatNumber(locale, workspace.supportSummary.unknownAuthorOrLegacyCount),
+                })}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         {workspace.hosts.length > 0 ? (
           <ul className="min-w-0 text-sm leading-6 text-muted-foreground">
             {workspace.hosts.map((host) => (
@@ -528,16 +572,25 @@ export default async function CompetitorAnalysisPage({
             ))}
           </ul>
         ) : null}
-        {workspace.citations.length === 0 ? (
+        {workspace.citations.length === 0 && !workspace.sourcesTruncated ? (
           <p className={emptyClass}>{t("sourcesEmpty")}</p>
         ) : (
           <ul className="min-w-0 space-y-3">
             {workspace.citations.map((citation) => (
               <li key={citation.citationId} className="min-w-0 rounded-2xl border bg-card px-4 py-3 text-sm">
-                <p className="[overflow-wrap:anywhere]">{citation.rawUrl}</p>
+                <p className="font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                  {citation.citationId} · {citation.observationId}
+                </p>
+                <p className="mt-1 [overflow-wrap:anywhere]">{citation.rawUrl}</p>
                 <p className="mt-1 flex min-w-0 flex-wrap gap-x-2 text-muted-foreground">
                   <span>{t(sourceState[citation.state])}</span>
-                  <span>{citation.support === "supports" ? t("supportSupports") : t("supportUnknown")}</span>
+                  <span>
+                    {citation.support === "supports"
+                      ? t("supportSupports")
+                      : citation.support === "does_not_support"
+                        ? t("supportDoesNotSupport")
+                        : t("supportUnknown")}
+                  </span>
                 </p>
               </li>
             ))}
@@ -546,6 +599,7 @@ export default async function CompetitorAnalysisPage({
         {workspace.citations.length > 0 ? (
           <form action={inspectCitationAction} className={`${panelClass}`}>
             <h3 className="font-medium">{t("inspect")}</h3>
+            <p className="text-xs leading-6 text-muted-foreground">{t("inspectHint")}</p>
             <input type="hidden" name="brandId" value={brandId} />
             <label className="block min-w-0 text-sm">
               <span className="mb-1 block text-muted-foreground">{t("sources")}</span>

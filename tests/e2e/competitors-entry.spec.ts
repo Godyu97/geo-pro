@@ -524,3 +524,167 @@ test("ordered recommendations show appearance, first-place, and conditional mean
     }
   }
 });
+
+test("citation inspection records explicit non-support and shows third-party support rate", async ({ page, context, browser }) => {
+  test.setTimeout(240_000);
+  const ownerEmail = `support-rate-owner-${randomUUID()}@example.invalid`;
+  const outsiderEmail = `support-rate-outsider-${randomUUID()}@example.invalid`;
+  const outsider = await browser.newContext({ baseURL: origin, viewport: { width: 375, height: 800 } });
+  const accounts: Array<{ userId: string; email: string }> = [];
+  try {
+    accounts.push({ userId: await register(context, ownerEmail), email: ownerEmail });
+    accounts.push({ userId: await register(outsider, outsiderEmail), email: outsiderEmail });
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await page.goto("/dashboard/brands/new");
+    await page.getByLabel("品牌名称", { exact: true }).fill("支持率验收");
+    await page.getByLabel("一句话业务", { exact: true }).fill("合成品牌，仅用于第三方支持率验收。");
+    await page.getByLabel("官网地址", { exact: true }).fill("https://support-rate.example.com");
+    await page.getByRole("button", { name: "下一步", exact: true }).click();
+    await page.getByRole("button", { name: "下一步", exact: true }).click();
+    await page.getByRole("checkbox", { name: `我接受保留策略版本 ${publishedRetentionVersion()}`, exact: true }).check();
+    await page.getByRole("button", { name: "保存品牌", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "支持率验收", exact: true })).toBeVisible();
+    const brandId = new URL(page.url()).pathname.split("/").at(-1);
+    expect(brandId).toMatch(/^[0-9a-f-]{36}$/);
+
+    const urls = [
+      "https://positive.example.com/review-a",
+      "https://nonsupport.example.com/review-b",
+      "https://unreadable-1.example.com/review-c",
+      "https://unreadable-2.example.com/review-d",
+    ];
+    const saved = await context.request.post("/api/monitoring/answers", {
+      headers: { Origin: origin },
+      data: {
+        action: "submit-manual",
+        brandId,
+        operationId: randomUUID(),
+        questionText: "第三方页面如何评价该设备？",
+        answerText: "回答引用了四条第三方页面，用于核对正向、非支持与未知。",
+        region: "CN",
+        language: "zh-CN",
+        requestedNetworkMode: "unknown",
+        entityVersion: 1,
+        citationSetState: "complete",
+        citations: urls.map((url, idx) => ({
+          rawUrl: url,
+          citationOrigin: "consumer_visible",
+          ownership: idx < 3 ? "third_party" : "unknown",
+          pageStatus: idx < 2 ? "reachable" : "restricted",
+        })),
+        locatorRef: "fixture://competitors/support-rate",
+        collectorId: "fixture-operator",
+        contested: false,
+        brandName: "支持率验收",
+        aliases: [],
+        officialWebsite: "https://support-rate.example.com",
+        mentioned: "unknown",
+        recommended: "unknown",
+        officialSiteCited: "unknown",
+      },
+    });
+    expect(saved.status()).toBe(200);
+    const savedBody = (await saved.json()) as { citations: Array<{ id: string; rawUrl: string }> };
+    const citationIds = savedBody.citations.map((item) => item.id);
+    expect(citationIds).toHaveLength(4);
+
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto(`/dashboard/monitoring/competitors?brandId=${brandId}`);
+    const main = page.getByRole("main");
+
+    // URL-only before any review: N/A, never 0% or 100%, citation IDs visible
+    await expect(main.getByText("支持率：N/A", { exact: true })).toBeVisible();
+    await expect(main.getByText(/只出现 URL 不等于支持/)).toBeVisible();
+    await expect(main.getByText("可判断 0 条（正向支持 0 · 非支持 0）", { exact: true })).toBeVisible();
+    await expect(main.getByText("未知 4 条（不进入分子与分母，也不写成不支持）", { exact: true })).toBeVisible();
+    for (const id of citationIds) {
+      await expect(main.getByText(new RegExp(id))).toBeVisible();
+    }
+
+    const inspectForm = main.locator("form").filter({ has: page.getByRole("heading", { name: "复核引用", exact: true }) });
+    const citationSelect = inspectForm.locator("select[name=citationId]");
+    const submitInspection = async (citationId: string, opts: { live: boolean; readable: boolean; author: boolean; supports: boolean }) => {
+      await citationSelect.selectOption(citationId);
+      const setCheckbox = async (label: string, checked: boolean) => {
+        const box = inspectForm.getByRole("checkbox", { name: label, exact: true });
+        if (checked) await box.check();
+        else await box.uncheck();
+      };
+      await setCheckbox("页面仍可打开", opts.live);
+      await setCheckbox("正文可读", opts.readable);
+      await setCheckbox("作者或账号归属已知", opts.author);
+      await setCheckbox("正文支持本品牌", opts.supports);
+      await inspectForm.getByRole("button", { name: "保存复核", exact: true }).click();
+    };
+
+    // 1 positive, 1 explicit non-support, 2 unreadable
+    await submitInspection(citationIds[0], { live: true, readable: true, author: true, supports: true });
+    await expect(main.getByText("支持率：100.0% (1/1)", { exact: true })).toBeVisible();
+
+    await submitInspection(citationIds[1], { live: true, readable: true, author: true, supports: false });
+    await expect(main.getByText("支持率：50.0% (1/2)", { exact: true })).toBeVisible();
+
+    await submitInspection(citationIds[2], { live: true, readable: false, author: true, supports: false });
+    await expect(main.getByText("未进入分母明细：尚未复核 1 · 页面失效 0 · 正文受限 1 · 归属或历史未知 0", { exact: true })).toBeVisible();
+
+    await submitInspection(citationIds[3], { live: true, readable: false, author: false, supports: true });
+    await expect(main.getByText("未进入分母明细：尚未复核 0 · 页面失效 0 · 正文受限 2 · 归属或历史未知 0", { exact: true })).toBeVisible();
+
+    for (const copy of [
+      {
+        locale: "zh-CN",
+        rate: "支持率：50.0% (1/2)",
+        judgable: "可判断 2 条（正向支持 1 · 非支持 1）",
+        unknown: "未知 2 条（不进入分子与分母，也不写成不支持）",
+        reasons: "未进入分母明细：尚未复核 0 · 页面失效 0 · 正文受限 2 · 归属或历史未知 0",
+        posLabel: "页面支持品牌",
+        negLabel: "页面明确不支持",
+        unkLabel: "支持性未知",
+      },
+      {
+        locale: "en",
+        rate: "Support rate: 50.0% (1/2)",
+        judgable: "Judgable: 2 (1 supporting · 1 non-supporting)",
+        unknown: "Unknown: 2 (excluded from numerator and denominator, not counted as non-supporting)",
+        reasons: "Excluded breakdown: 0 unreviewed · 0 dead · 2 text limited · 0 unknown attribution or legacy unknown",
+        posLabel: "Page supports the brand",
+        negLabel: "Page does not support",
+        unkLabel: "Support unknown",
+      },
+    ]) {
+      await context.addCookies([{ name: "geo-locale", value: copy.locale, url: origin }]);
+      for (const width of [375, 768, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(`/dashboard/monitoring/competitors?brandId=${brandId}`);
+        await expect(main.getByText(copy.rate, { exact: true })).toBeVisible();
+        await expect(main.getByText(copy.judgable, { exact: true })).toBeVisible();
+        await expect(main.getByText(copy.unknown, { exact: true })).toBeVisible();
+        await expect(main.getByText(copy.reasons, { exact: true })).toBeVisible();
+        await expect(main.getByText(copy.posLabel, { exact: true })).toHaveCount(1);
+        await expect(main.getByText(copy.negLabel, { exact: true })).toHaveCount(1);
+        await expect(main.getByText(copy.unkLabel, { exact: true })).toHaveCount(2);
+        for (const id of citationIds) {
+          await expect(main.getByText(new RegExp(id))).toBeVisible();
+        }
+        await expectNoOverflow(page);
+      }
+    }
+
+    // Outsider cannot read citations or rate
+    await outsider.addCookies([{ name: "geo-locale", value: "en", url: origin }]);
+    const outsiderPage = await outsider.newPage();
+    await outsiderPage.goto(`/dashboard/monitoring/competitors?brandId=${brandId}`);
+    const outsiderMain = outsiderPage.getByRole("main");
+    await expect(outsiderMain.getByText("The resource was not found or is not yours.", { exact: true })).toBeVisible();
+    await expect(outsiderMain.getByText(urls[0])).toHaveCount(0);
+    await expect(outsiderMain.getByText("50.0% (1/2)")).toHaveCount(0);
+  } finally {
+    await outsider.close();
+    for (const { userId, email } of accounts) {
+      execFileSync(process.execPath, [
+        "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", "cleanup",
+        JSON.stringify({ userId, email }),
+      ], { stdio: "inherit" });
+    }
+  }
+});
