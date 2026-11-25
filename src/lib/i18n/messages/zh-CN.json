@@ -3323,12 +3323,11 @@
   "demoObservations": {
     "title": "演示空间",
     "demoBadge": "演示数据",
-    "description": "这里只保存带演示标志的观察。这些行固定为演示数据，真实概览和真实报告不会读取它们。",
+    "description": "在这里查看和保存演示数据。演示观察独立于真实概览和报告。",
     "notVerified": "这不是已验证的客户结果，也不能当成已验证渠道。",
     "fixtureNote": "保存演示观察不会写入自然回答，不会创建复测或正式报告样本，也不会生成推荐率、排名或提升比例。",
     "backMonitoring": "返回监测",
     "registerTitle": "保存演示观察",
-    "brand": "品牌",
     "question": "问题",
     "answer": "回答",
     "registerAction": "保存演示观察",
@@ -3336,8 +3335,6 @@
     "saved": "已保存。这条记录只属于演示空间，不进入真实统计。",
     "empty": "还没有演示观察。",
     "noBrands": "当前没有可保存演示观察的品牌。",
-    "pickBrand": "选择品牌后可以查看已保存的演示观察。",
-    "demoLine": "演示数据。不会进入真实统计。",
     "createdAt": "保存时间 {time}",
     "loading": "正在加载演示观察…",
     "SESSION_REQUIRED": "请先登录，再保存演示观察。",
@@ -3346,6 +3343,12 @@
     "INVALID_INPUT": "请检查品牌、问题和回答。",
     "COPY_REJECTED": "演示观察不能写入自然回答、复测或正式报告。",
     "OPERATION_CONFLICT": "同一次保存不能改成另一条演示观察。",
-    "SERVICE_UNAVAILABLE": "演示观察暂时不可用，请稍后重试。"
+    "SERVICE_UNAVAILABLE": "演示观察暂时不可用，请稍后重试。",
+    "openBrands": "前往品牌资料",
+    "viewCurrentBrand": "查看当前品牌",
+    "startRegistration": "填写演示观察",
+    "viewHistory": "查看历史",
+    "history": "演示记录",
+    "reload": "重新载入"
   }
 }

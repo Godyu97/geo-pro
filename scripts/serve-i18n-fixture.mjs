@@ -367,6 +367,17 @@ await writeFile(sharesPage, sharesSource.replace(sharesRead, `    const probe = 
     if (probe === "unavailable") throw new Error("Private white-label share fixture failure");
 ${sharesRead}`));
 
+const demoPage = path.join(fixture, "src/features/monitoring/demo-page.tsx");
+const demoSource = await readFile(demoPage, "utf8");
+const demoRead = "    const [currentBrand] = await listDemoBrands(connection, user.id);";
+assert.ok(demoSource.includes(demoRead));
+await writeFile(demoPage, demoSource.replace(demoRead, `    const probe = (await (await import("next/headers")).cookies()).get("geo-demo-read")?.value;
+    if (probe === "slow-unavailable") {
+      await new Promise(resolve => setTimeout(resolve, 1800));
+      throw new Error("Private demo fixture failure");
+    }
+${demoRead}`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";

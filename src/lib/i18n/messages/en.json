@@ -3323,12 +3323,11 @@
   "demoObservations": {
     "title": "Demo space",
     "demoBadge": "Demo data",
-    "description": "This page stores observations that carry a demo flag. These rows stay demo data. Real overviews and real reports do not read them.",
+    "description": "View and save demo data here. Demo observations stay separate from real overviews and reports.",
     "notVerified": "This is not a verified customer result and does not mean a channel is verified.",
     "fixtureNote": "Saving a demo observation does not write a natural answer, create a retest or a formal report sample, or produce a recommendation rate, ranking, or improvement percentage.",
     "backMonitoring": "Back to monitoring",
     "registerTitle": "Save a demo observation",
-    "brand": "Brand",
     "question": "Question",
     "answer": "Answer",
     "registerAction": "Save demo observation",
@@ -3336,8 +3335,6 @@
     "saved": "Saved. This record stays in the demo space and is left out of real statistics.",
     "empty": "No demo observations yet.",
     "noBrands": "There is no brand available for a demo observation.",
-    "pickBrand": "Choose a brand to see saved demo observations.",
-    "demoLine": "Demo data. It does not enter real statistics.",
     "createdAt": "Saved at {time}",
     "loading": "Loading demo observations…",
     "SESSION_REQUIRED": "Sign in before saving a demo observation.",
@@ -3346,6 +3343,12 @@
     "INVALID_INPUT": "Check the brand, question, and answer.",
     "COPY_REJECTED": "A demo observation cannot be copied into a natural answer, retest, or formal report.",
     "OPERATION_CONFLICT": "The same save cannot switch to a different demo observation.",
-    "SERVICE_UNAVAILABLE": "Demo observations are temporarily unavailable. Try again shortly."
+    "SERVICE_UNAVAILABLE": "Demo observations are temporarily unavailable. Try again shortly.",
+    "openBrands": "Go to brands",
+    "viewCurrentBrand": "View current brand",
+    "startRegistration": "Enter a demo observation",
+    "viewHistory": "View history",
+    "history": "Demo history",
+    "reload": "Reload"
   }
 }

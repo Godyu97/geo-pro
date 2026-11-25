@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,93 +11,62 @@ import { createTranslator } from "@/lib/i18n/translate";
 import {
   createDemoObservationSchema,
   demoErrors,
+  type CreateDemoObservationInput,
   type DemoError,
-  type DemoObservationView,
 } from "./demo-contracts.ts";
 
 type Copy = Messages["demoObservations"];
-type Translator = (key: keyof Copy, params?: Record<string, string | number>) => string;
 
-const fieldClass = "w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm";
+const fieldClass = "w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm aria-invalid:border-destructive";
 const returnPath = "/dashboard/monitoring/demo";
 
-function isDemoError(code: string): code is DemoError {
-  return Object.hasOwn(demoErrors, code);
+function errorFrom(payload: unknown): DemoError {
+  if (payload && typeof payload === "object" && "error" in payload) {
+    const error = payload.error;
+    if (error && typeof error === "object" && "code" in error && typeof error.code === "string" && Object.hasOwn(demoErrors, error.code)) {
+      return error.code as DemoError;
+    }
+  }
+  return "SERVICE_UNAVAILABLE";
 }
 
-function noticeFrom(payload: unknown, t: Translator) {
-  if (!payload || typeof payload !== "object" || !("error" in payload)) return t("SERVICE_UNAVAILABLE");
-  const error = payload.error;
-  if (!error || typeof error !== "object" || !("code" in error) || typeof error.code !== "string") return t("SERVICE_UNAVAILABLE");
-  return isDemoError(error.code) ? t(error.code) : t("SERVICE_UNAVAILABLE");
-}
-
-export function DemoObservationsPanel({ brands, observations, labels, selectedBrandId, idle, messages }: {
-  brands: { id: string }[];
-  observations: DemoObservationView[];
-  labels: { brandId: string; name: string }[];
-  selectedBrandId: string;
-  idle: boolean;
-  messages: Copy;
-}) {
+export function DemoObservationForm({ brandId, brandName, messages }: { brandId: string; brandName: string; messages: Copy }) {
+  const router = useRouter();
   const { locale } = useLocale();
   const t = createTranslator(locale, messages);
-  const labelFor = (brandId: string) => labels.find((label) => label.brandId === brandId)?.name ?? brandId;
-  const when = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" });
-
-  return (
-    <div className="space-y-6">
-      {brands.length === 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("noBrands")}</p> : (
-        <CreateForm brands={brands} labelFor={labelFor} selectedBrandId={selectedBrandId} t={t} />
-      )}
-      {idle ? <p className="text-sm leading-6 text-muted-foreground">{t("pickBrand")}</p> : null}
-      {selectedBrandId && observations.length === 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("empty")}</p> : null}
-      {observations.length > 0 ? (
-        <ul className="space-y-3">
-          {observations.map((observation) => (
-            <li key={observation.id} className="min-w-0 space-y-2 rounded-xl border bg-card p-5">
-              <Badge variant="outline">{t("demoBadge")}</Badge>
-              <p className="break-words text-sm leading-6 text-muted-foreground">{labelFor(observation.brandId)}</p>
-              <p className="break-words text-sm leading-6">{observation.questionText}</p>
-              <p className="break-words text-sm leading-6">{observation.answerText}</p>
-              <p className="text-sm leading-6">{t("demoLine")}</p>
-              <p className="text-sm leading-6 text-muted-foreground">{t("createdAt", { time: when.format(new Date(observation.createdAt)) })}</p>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
-  );
-}
-
-function CreateForm({ brands, labelFor, selectedBrandId, t }: {
-  brands: { id: string }[];
-  labelFor: (brandId: string) => string;
-  selectedBrandId: string;
-  t: Translator;
-}) {
-  const router = useRouter();
   const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const initialBrand = brands.some((brand) => brand.id === selectedBrandId) ? selectedBrandId : brands[0]?.id ?? "";
+  const [notice, setNotice] = useState<DemoError | "saved" | null>(null);
+  const [invalidField, setInvalidField] = useState<"questionText" | "answerText" | null>(null);
+  const inFlight = useRef(false);
+  const attempt = useRef<CreateDemoObservationInput | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending) return;
+    if (inFlight.current) return;
     const form = event.currentTarget;
     const data = new FormData(form);
-    const parsed = createDemoObservationSchema.safeParse({
-      operationId: crypto.randomUUID(),
-      brandId: String(data.get("brandId") ?? ""),
-      questionText: String(data.get("questionText") ?? ""),
-      answerText: String(data.get("answerText") ?? ""),
-    });
+    const questionText = String(data.get("questionText") ?? "").trim();
+    const answerText = String(data.get("answerText") ?? "").trim();
+    const previous = attempt.current;
+    const operationId = previous?.questionText === questionText && previous.answerText === answerText
+      ? previous.operationId
+      : crypto.randomUUID();
+    const parsed = createDemoObservationSchema.safeParse({ operationId, brandId, questionText, answerText });
     if (!parsed.success) {
-      setNotice(t("INVALID_INPUT"));
+      const field = parsed.error.issues[0]?.path[0];
+      if (field === "questionText" || field === "answerText") {
+        setInvalidField(field);
+        const control = form.elements.namedItem(field);
+        if (control instanceof HTMLTextAreaElement) control.focus();
+      }
+      setNotice("INVALID_INPUT");
       return;
     }
+    inFlight.current = true;
+    attempt.current = parsed.data;
     setPending(true);
     setNotice(null);
+    setInvalidField(null);
     try {
       const response = await fetch("/api/monitoring/demo-observations", {
         method: "POST",
@@ -106,51 +75,55 @@ function CreateForm({ brands, labelFor, selectedBrandId, t }: {
       });
       if (!response.ok) {
         if (response.status === 401) {
-          window.location.replace(loginPath(returnPath, "session-required"));
+          window.location.replace(loginPath(`${returnPath}?brandId=${brandId}`, "session-required"));
           return;
         }
-        setNotice(noticeFrom(await response.json(), t));
+        setNotice(errorFrom(await response.json()));
         return;
       }
       const saved = await response.json();
       if (!saved || typeof saved !== "object" || !("observation" in saved) || !saved.observation || saved.observation.is_demo !== true) {
-        setNotice(t("SERVICE_UNAVAILABLE"));
+        setNotice("SERVICE_UNAVAILABLE");
         return;
       }
-      setNotice(t("saved"));
+      attempt.current = null;
+      setNotice("saved");
       form.reset();
-      router.push(`${returnPath}?brandId=${parsed.data.brandId}`);
       router.refresh();
     } catch {
-      setNotice(t("SERVICE_UNAVAILABLE"));
+      setNotice("SERVICE_UNAVAILABLE");
     } finally {
+      inFlight.current = false;
       setPending(false);
     }
   }
 
   return (
-    <form onSubmit={submit} className="min-w-0 space-y-4 rounded-xl border bg-card p-5">
+    <form aria-labelledby="demo-observation-form-heading" noValidate onSubmit={submit} className="min-w-0 space-y-4 rounded-xl border bg-card p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="font-medium">{t("registerTitle")}</h2>
+        <h2 id="demo-observation-form-heading" className="text-lg font-semibold">{t("registerTitle")}</h2>
         <Badge variant="outline">{t("demoBadge")}</Badge>
       </div>
-      {notice ? <p role="status" className="text-sm leading-6">{notice}</p> : null}
-      <label className="block min-w-0 space-y-1 text-sm">
-        <span>{t("brand")}</span>
-        <select className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm" name="brandId" defaultValue={initialBrand}>
-          {brands.map((brand) => <option key={brand.id} value={brand.id}>{labelFor(brand.id)}</option>)}
-        </select>
-      </label>
-      <label className="block min-w-0 space-y-1 text-sm">
+      <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">{brandName}</p>
+      <p className="text-sm leading-6 text-muted-foreground">{t("fixtureNote")}</p>
+      {notice && (
+        <p id="demo-observation-feedback" role={notice === "saved" ? "status" : "alert"} className={notice === "saved" ? "text-sm leading-6" : "text-sm leading-6 text-destructive"}>
+          {t(notice)}
+        </p>
+      )}
+      <label className="block min-w-0 space-y-1 text-sm" htmlFor="demo-observation-question">
         <span>{t("question")}</span>
-        <textarea className={fieldClass} name="questionText" required maxLength={4000} rows={3} />
+        <textarea id="demo-observation-question" className={fieldClass} name="questionText" required maxLength={4000} rows={3} readOnly={pending}
+          aria-invalid={invalidField === "questionText"} aria-describedby={invalidField === "questionText" ? "demo-observation-feedback" : undefined} />
       </label>
-      <label className="block min-w-0 space-y-1 text-sm">
+      <label className="block min-w-0 space-y-1 text-sm" htmlFor="demo-observation-answer">
         <span>{t("answer")}</span>
-        <textarea className={fieldClass} name="answerText" required maxLength={8000} rows={4} />
+        <textarea id="demo-observation-answer" className={fieldClass} name="answerText" required maxLength={8000} rows={4} readOnly={pending}
+          aria-invalid={invalidField === "answerText"} aria-describedby={invalidField === "answerText" ? "demo-observation-feedback" : undefined} />
       </label>
-      <p className="text-sm leading-6 text-muted-foreground">{t("notVerified")}</p>
-      <Button type="submit" disabled={pending}>{pending ? t("registering") : t("registerAction")}</Button>
+      <Button type="submit" aria-disabled={pending} className="h-auto min-h-10 max-w-full whitespace-normal py-2 aria-disabled:opacity-50">
+        {pending ? t("registering") : t("registerAction")}
+      </Button>
     </form>
   );
 }
