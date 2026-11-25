@@ -472,19 +472,31 @@ export async function readSnapshot(
   ownerId: string,
   snapshotId: string,
   options: SnapshotStorageOptions = {},
-): Promise<{ error: ReportError } | { snapshot: ReportSnapshotRow; html: string; json: string }> {
+): Promise<{ error: ReportError } | { snapshot: ReportSnapshotRow; html: string; json: string; source: SnapshotSourceView }> {
   const snapshot = await new ReportDao(db).findSnapshot(ownerId, snapshotId);
   if (!snapshot) return { error: "NOT_FOUND" };
   // Download re-checks the current owner and rejects a frozen brand before any object read.
   const brand = await requireOwnedBrand(db, ownerId, snapshot.brandId);
   if (!brand) return { error: "NOT_FOUND" };
-  if (inlineSnapshot(snapshot)) return { snapshot, html: snapshot.htmlBytes, json: snapshot.jsonBytes };
-  const stored = await readStoredSnapshot(db, ownerId, snapshot, options);
-  if (!stored.ok) return { error: stored.error };
-  return { snapshot, html: stored.html, json: stored.json };
+  let html = snapshot.htmlBytes;
+  let json = snapshot.jsonBytes;
+  if (!inlineSnapshot(snapshot)) {
+    const stored = await readStoredSnapshot(db, ownerId, snapshot, options);
+    if (!stored.ok) return { error: stored.error };
+    html = stored.html;
+    json = stored.json;
+  }
+  const source = await sourceForSnapshot(db, ownerId, snapshot, parseSnapshotDocument(json));
+  return { snapshot, html, json, source };
 }
 
-export async function listReports(db: QueryConnection, ownerId: string, brandId: string, limit = 20) {
+export async function listReports(
+  db: QueryConnection,
+  ownerId: string,
+  brandId: string,
+  limit = 20,
+  options: SnapshotStorageOptions = {},
+) {
   const brand = await requireOwnedBrand(db, ownerId, brandId);
   if (!brand) return { error: "NOT_FOUND" as ReportError };
   const dao = new ReportDao(db);
@@ -493,7 +505,9 @@ export async function listReports(db: QueryConnection, ownerId: string, brandId:
     dao.listSnapshots(ownerId, brandId, limit),
     dao.listTodos(ownerId, brandId, limit),
   ]);
-  return { retests, snapshots, todos };
+  const loaded = await loadSnapshotDocuments(db, ownerId, snapshots, options);
+  const sources = Object.fromEntries(await snapshotSourceViews(db, ownerId, snapshots, documentsFromLoaded(loaded)));
+  return { retests, snapshots, todos, sources };
 }
 
 export type SnapshotCostView =
@@ -523,12 +537,188 @@ const excludedQuerySchema = z.object({
 
 export type SnapshotExclusion = z.infer<typeof excludedQuerySchema>;
 
-export type SnapshotView = {
+type SnapshotBodyView = {
   cost: SnapshotCostView;
   metric?: string;
   comparisons?: z.infer<typeof savedOverview>["comparisons"];
   excluded: SnapshotExclusion[];
 };
+
+export type SnapshotSourceView = {
+  sourceMissing: boolean;
+  missingObservationCount: number;
+};
+
+export type SnapshotView = SnapshotBodyView & {
+  source: SnapshotSourceView;
+};
+
+const observationIdValue = z.string().min(1).max(200);
+
+function observationIdsOf(value: unknown, ids: Set<string>) {
+  if (!value || typeof value !== "object" || !("observation_ids" in value)) return;
+  const parsed = z.array(observationIdValue).safeParse(value.observation_ids);
+  if (!parsed.success) return;
+  for (const id of parsed.data) ids.add(id);
+}
+
+function collectQueryIds(queries: unknown, ids: Set<string>) {
+  if (!Array.isArray(queries)) return;
+  for (const query of queries) {
+    if (!query || typeof query !== "object") continue;
+    if ("before" in query) observationIdsOf(query.before, ids);
+    if ("after" in query) observationIdsOf(query.after, ids);
+  }
+}
+
+/** report-v4 nests queries under each metric. Older files keep one query list. */
+export function referencedObservationIds(document: unknown): string[] {
+  const ids = new Set<string>();
+  if (!document || typeof document !== "object") return [];
+  if ("queries" in document) collectQueryIds(document.queries, ids);
+  if ("comparisons" in document && document.comparisons && typeof document.comparisons === "object") {
+    for (const block of Object.values(document.comparisons)) {
+      if (!block || typeof block !== "object" || !("queries" in block)) continue;
+      collectQueryIds(block.queries, ids);
+    }
+  }
+  return [...ids];
+}
+
+export function snapshotSourceView(
+  storedSourceMissing: number,
+  document: unknown | undefined,
+  presentIds: ReadonlySet<string>,
+): SnapshotSourceView {
+  if (document === undefined) {
+    return { sourceMissing: storedSourceMissing === 1, missingObservationCount: 0 };
+  }
+  let missingObservationCount = 0;
+  for (const id of referencedObservationIds(document)) {
+    if (!presentIds.has(id)) missingObservationCount += 1;
+  }
+  return {
+    sourceMissing: storedSourceMissing === 1 || missingObservationCount > 0,
+    missingObservationCount,
+  };
+}
+
+function parseSnapshotDocument(text: string): unknown | undefined {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+async function snapshotSourceViews(
+  db: QueryConnection,
+  ownerId: string,
+  snapshots: readonly ReportSnapshotRow[],
+  documents: ReadonlyMap<string, unknown | undefined>,
+) {
+  const idsByBrand = new Map<string, Set<string>>();
+  for (const snapshot of snapshots) {
+    const document = documents.get(snapshot.id);
+    if (document === undefined) continue;
+    const bucket = idsByBrand.get(snapshot.brandId) ?? new Set<string>();
+    for (const id of referencedObservationIds(document)) bucket.add(id);
+    if (bucket.size > 0) idsByBrand.set(snapshot.brandId, bucket);
+  }
+  const presentByBrand = new Map<string, ReadonlySet<string>>();
+  const dao = new ReportDao(db);
+  for (const [brandId, ids] of idsByBrand) {
+    presentByBrand.set(brandId, await dao.existingObservationIds(ownerId, brandId, [...ids]));
+  }
+  const views = new Map<string, SnapshotSourceView>();
+  for (const snapshot of snapshots) {
+    views.set(snapshot.id, snapshotSourceView(
+      snapshot.sourceMissing,
+      documents.get(snapshot.id),
+      presentByBrand.get(snapshot.brandId) ?? new Set(),
+    ));
+  }
+  return views;
+}
+
+async function sourceForSnapshot(
+  db: QueryConnection,
+  ownerId: string,
+  snapshot: ReportSnapshotRow,
+  document: unknown | undefined,
+) {
+  const views = await snapshotSourceViews(db, ownerId, [snapshot], new Map([[snapshot.id, document]]));
+  return views.get(snapshot.id) ?? snapshotSourceView(snapshot.sourceMissing, undefined, new Set());
+}
+
+type LoadedSnapshotJson = { status: "ready"; text: string } | { status: "unavailable" };
+
+async function loadSnapshotDocuments(
+  db: QueryConnection,
+  ownerId: string,
+  snapshots: readonly ReportSnapshotRow[],
+  options: SnapshotStorageOptions,
+) {
+  const loaded = new Map<string, LoadedSnapshotJson>();
+  const stored: ReportSnapshotRow[] = [];
+  for (const snapshot of snapshots) {
+    if (inlineSnapshot(snapshot)) loaded.set(snapshot.id, { status: "ready", text: snapshot.jsonBytes });
+    else stored.push(snapshot);
+  }
+  if (!stored.length) return loaded;
+
+  const storage = options.storage ?? createObjectStorage(options.env ? { env: options.env } : {});
+  const byBrand = new Map<string, ReportSnapshotRow[]>();
+  for (const snapshot of stored) {
+    const rows = byBrand.get(snapshot.brandId) ?? [];
+    rows.push(snapshot);
+    byBrand.set(snapshot.brandId, rows);
+  }
+
+  for (const [brandId, rows] of byBrand) {
+    const ids = rows.flatMap((row) => row.jsonObjectId ? [row.jsonObjectId] : []);
+    let objects: Awaited<ReturnType<typeof loadBrandObjectsByIds>>;
+    try {
+      objects = await loadBrandObjectsByIds(db, ownerId, brandId, ids);
+    } catch {
+      for (const row of rows) loaded.set(row.id, { status: "unavailable" });
+      continue;
+    }
+    const byId = new Map(objects.map((row) => [row.id, row]));
+    await Promise.all(rows.map(async (snapshot) => {
+      const row = snapshot.jsonObjectId ? byId.get(snapshot.jsonObjectId) : undefined;
+      if (!row || row.status !== "ready" || row.class !== "report-snapshot" || row.fileName !== reportJsonName
+        || row.sha256 !== snapshot.jsonSha256 || !row.objectKey) {
+        loaded.set(snapshot.id, { status: "unavailable" });
+        return;
+      }
+      try {
+        const loadedObject = await storage.getObject({ key: row.objectKey });
+        if (!loadedObject.ok || loadedObject.sha256 !== snapshot.jsonSha256) {
+          loaded.set(snapshot.id, { status: "unavailable" });
+          return;
+        }
+        const text = new TextDecoder().decode(loadedObject.body);
+        if (fingerprintBytes(text) !== snapshot.jsonSha256) {
+          loaded.set(snapshot.id, { status: "unavailable" });
+          return;
+        }
+        loaded.set(snapshot.id, { status: "ready", text });
+      } catch {
+        loaded.set(snapshot.id, { status: "unavailable" });
+      }
+    }));
+  }
+  return loaded;
+}
+
+function documentsFromLoaded(loaded: ReadonlyMap<string, LoadedSnapshotJson>) {
+  const documents = new Map<string, unknown | undefined>();
+  for (const [id, item] of loaded) {
+    documents.set(id, item.status === "ready" ? parseSnapshotDocument(item.text) : undefined);
+  }
+  return documents;
+}
 
 function excludedQueries(saved: unknown): SnapshotExclusion[] {
   if (!saved || typeof saved !== "object" || !("comparisons" in saved)) return [];
@@ -550,7 +740,7 @@ function excludedQueries(saved: unknown): SnapshotExclusion[] {
   return items;
 }
 
-function parseSnapshotView(json: string): SnapshotView {
+function parseSnapshotView(json: string): SnapshotBodyView {
   try {
     const saved = JSON.parse(json);
     const cost = snapshotCostSchema.safeParse(saved?.cost);
@@ -574,56 +764,16 @@ export async function snapshotViews(
   snapshots: readonly ReportSnapshotRow[],
   options: SnapshotStorageOptions = {},
 ): Promise<Map<string, SnapshotView>> {
+  const loaded = await loadSnapshotDocuments(db, ownerId, snapshots, options);
+  const sources = await snapshotSourceViews(db, ownerId, snapshots, documentsFromLoaded(loaded));
   const views = new Map<string, SnapshotView>();
-  const unavailable: SnapshotView = { cost: { state: "unavailable" }, excluded: [] };
-  const stored: ReportSnapshotRow[] = [];
   for (const snapshot of snapshots) {
-    if (inlineSnapshot(snapshot)) views.set(snapshot.id, parseSnapshotView(snapshot.jsonBytes));
-    else stored.push(snapshot);
-  }
-  if (!stored.length) return views;
-
-  const storage = options.storage ?? createObjectStorage(options.env ? { env: options.env } : {});
-  const byBrand = new Map<string, ReportSnapshotRow[]>();
-  for (const snapshot of stored) {
-    const rows = byBrand.get(snapshot.brandId) ?? [];
-    rows.push(snapshot);
-    byBrand.set(snapshot.brandId, rows);
-  }
-
-  for (const [brandId, rows] of byBrand) {
-    const ids = rows.flatMap((row) => row.jsonObjectId ? [row.jsonObjectId] : []);
-    let objects: Awaited<ReturnType<typeof loadBrandObjectsByIds>>;
-    try {
-      objects = await loadBrandObjectsByIds(db, ownerId, brandId, ids);
-    } catch {
-      for (const row of rows) views.set(row.id, unavailable);
-      continue;
-    }
-    const byId = new Map(objects.map((row) => [row.id, row]));
-    await Promise.all(rows.map(async (snapshot) => {
-      const row = snapshot.jsonObjectId ? byId.get(snapshot.jsonObjectId) : undefined;
-      if (!row || row.status !== "ready" || row.class !== "report-snapshot" || row.fileName !== reportJsonName
-        || row.sha256 !== snapshot.jsonSha256 || !row.objectKey) {
-        views.set(snapshot.id, unavailable);
-        return;
-      }
-      try {
-        const loaded = await storage.getObject({ key: row.objectKey });
-        if (!loaded.ok || loaded.sha256 !== snapshot.jsonSha256) {
-          views.set(snapshot.id, unavailable);
-          return;
-        }
-        const text = new TextDecoder().decode(loaded.body);
-        if (fingerprintBytes(text) !== snapshot.jsonSha256) {
-          views.set(snapshot.id, unavailable);
-          return;
-        }
-        views.set(snapshot.id, parseSnapshotView(text));
-      } catch {
-        views.set(snapshot.id, unavailable);
-      }
-    }));
+    const source = sources.get(snapshot.id) ?? snapshotSourceView(snapshot.sourceMissing, undefined, new Set());
+    const item = loaded.get(snapshot.id);
+    const body = item?.status === "ready"
+      ? parseSnapshotView(item.text)
+      : { cost: { state: "unavailable" as const }, excluded: [] };
+    views.set(snapshot.id, { ...body, source });
   }
   return views;
 }

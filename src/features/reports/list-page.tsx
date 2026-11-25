@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { ContentDao } from "@/features/content/dao";
 import { generateSavedSnapshotAction, reviseSavedSnapshotAction } from "./actions";
 import { presentSnapshotCost } from "./cost-copy";
-import { listReports, snapshotViews, type SnapshotCostView, type SnapshotExclusion, type SnapshotView } from "./commands";
+import { listReports, snapshotViews, type SnapshotCostView, type SnapshotExclusion, type SnapshotSourceView, type SnapshotView } from "./commands";
 import { ReportEntryPanel, type ReportPublicationOption } from "./report-entry-panel";
 import { readSavedWindows, readTodoProgress } from "./window-observations";
 import { m0StageGate } from "./m0-stage-gate";
@@ -102,6 +102,23 @@ function SnapshotExclusions({
       </ul>
     </div>
   );
+}
+
+function SnapshotSourceNote({
+  source,
+  t,
+}: {
+  source: SnapshotSourceView | undefined;
+  t: Awaited<ReturnType<typeof getTranslator<"reports">>>;
+}) {
+  if (!source?.sourceMissing) return null;
+  let text = t("snapshotSourceMissing");
+  if (source.missingObservationCount === 1) {
+    text = t("snapshotSourceMissingCountOne", { count: source.missingObservationCount });
+  } else if (source.missingObservationCount > 1) {
+    text = t("snapshotSourceMissingCount", { count: source.missingObservationCount });
+  }
+  return <p className="mt-2 break-words leading-6" role="note">{text}</p>;
 }
 
 function SnapshotMetrics({ view, locale, t }: {
@@ -387,6 +404,7 @@ export default async function ReportsListPage({
                   {t("snapshotStatus", { status: item.status })}
                   {item.predecessorId ? ` · ${t("snapshotPrevious", { id: item.predecessorId })}` : ""}
                 </p>
+                <SnapshotSourceNote source={views.get(item.id)?.source ?? result.sources[item.id]} t={t} />
                 <SnapshotMetrics view={views.get(item.id)} locale={locale} t={t} />
                 <SnapshotExclusions excluded={views.get(item.id)?.excluded ?? []} t={t} />
                 {item.status === "created" && views.get(item.id)?.comparisons ? (

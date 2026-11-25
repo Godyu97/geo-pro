@@ -53,6 +53,16 @@ const copy = {
   },
 } as const;
 
+function firstSnapshotObservationId(document: { comparisons?: Record<string, { queries?: Array<{ before?: { observation_ids?: string[] }; after?: { observation_ids?: string[] } }> }> }) {
+  for (const block of Object.values(document.comparisons ?? {})) {
+    for (const query of block.queries ?? []) {
+      const id = query.before?.observation_ids?.[0] ?? query.after?.observation_ids?.[0];
+      if (id) return id;
+    }
+  }
+  return "";
+}
+
 function localDatabaseURL() {
   const databaseURL = process.env.DATABASE_URL;
   if (!databaseURL || !["localhost", "127.0.0.1", "[::1]"].includes(new URL(databaseURL).hostname)) {
@@ -322,6 +332,44 @@ test("report snapshots keep the current download readable and recoverable", asyn
     await activateFromKeyboard(page, reload);
     await expect(page.getByRole("main").getByRole("status")).toHaveText(copy.en.currentTask);
     await expect(page.getByRole("link", { name: copy.en.downloadCurrent, exact: true })).toHaveAttribute("href", `/api/reports/snapshots/${nextId}?format=json`);
+
+    const preservedJson = Buffer.from(await (await context.request.get(`${origin}/api/reports/snapshots/${nextId}?format=json`)).body());
+    const preservedHtml = Buffer.from(await (await context.request.get(`${origin}/api/reports/snapshots/${nextId}?format=html`)).body());
+    const removedId = firstSnapshotObservationId(JSON.parse(preservedJson.toString("utf8")));
+    expect(removedId).toMatch(/^[0-9a-f-]{36}$/);
+    const probe = postgres(localDatabaseURL(), { max: 1 });
+    try {
+      const deleted = await probe`delete from answer_observation where id = ${removedId} and brand_id = ${brandId} returning id`;
+      expect(deleted).toHaveLength(1);
+    } finally {
+      await probe.end();
+    }
+    const listed = await context.request.get(`${origin}/api/reports?brandId=${encodeURIComponent(brandId)}`, {
+      headers: { Origin: origin },
+    });
+    expect(listed.ok()).toBeTruthy();
+    const listBody = await listed.json();
+    expect(listBody.sources[nextId].sourceMissing).toBe(true);
+    expect(listBody.sources[nextId].missingObservationCount).toBeGreaterThan(0);
+    expect(Buffer.from(await (await context.request.get(`${origin}/api/reports/snapshots/${nextId}?format=json`)).body()).equals(preservedJson)).toBe(true);
+    expect(Buffer.from(await (await context.request.get(`${origin}/api/reports/snapshots/${nextId}?format=html`)).body()).equals(preservedHtml)).toBe(true);
+    const sourceCopy = {
+      "zh-CN": "部分源证据已清除，历史快照不可复核原证据",
+      en: "Some source evidence has been cleared",
+    } as const;
+    for (const locale of ["zh-CN", "en"] as const) {
+      await context.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+      for (const width of [375, 768, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(href);
+        await page.evaluate(() => window.scrollTo(0, 0));
+        const card = page.getByRole("main").getByRole("listitem").filter({
+          has: page.locator(`a[href="/api/reports/snapshots/${nextId}?format=json"]`),
+        });
+        await expect(card.getByRole("note")).toContainText(sourceCopy[locale]);
+        await expectNoOverflow(page);
+      }
+    }
 
     const stranger = await outsider.newPage();
     await outsider.addCookies([{ name: "geo-locale", value: "en", url: origin }]);

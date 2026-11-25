@@ -251,5 +251,32 @@ for (const kind of ["sqlite", "postgresql"]) {
         snapshot: snapshotPlan.natural,
       },
     }));
+
+    const presenceIds = [...modelIds.slice(0, 80), ...otherIds.slice(0, 40)];
+    traced.queries.length = 0;
+    const present = await new ReportDao(traced.connection).existingObservationIds(ownerId, brandId, presenceIds);
+    assert.equal(traced.queries.length, 2);
+    assert.equal(present.size, 80);
+    assert.match(traced.queries[0].sql, /owner_id = \?|owner_id = \$1/);
+    assert.match(traced.queries[0].sql, /brand_id = \?|brand_id = \$2/);
+    assert.match(traced.queries[0].sql, /id IN \(/);
+    const presencePlan = await plansFor(db, traced.queries[0]);
+    const presenceText = JSON.stringify(presencePlan.indexed);
+    if (kind === "sqlite") {
+      assert.match(presenceText, /USING INDEX/);
+      assert.doesNotMatch(presenceText, /SCAN answer_observation/);
+    } else {
+      assert.match(presenceText, /Index (Only )?Scan|Bitmap Index Scan/);
+      assert.match(presenceText, /answer_observation/);
+    }
+    console.log(JSON.stringify({
+      event: "report-source-presence-plan",
+      kind,
+      synthetic: true,
+      requested: presenceIds.length,
+      present: present.size,
+      statements: traced.queries.length,
+      indexed: presencePlan.indexed,
+    }));
   });
 }

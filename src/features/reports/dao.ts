@@ -82,6 +82,9 @@ const todoColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", retest_id
   due_at AS "dueAt", progress_json AS "progressJson", auto_charge AS "autoCharge",
   created_at AS "createdAt", updated_at AS "updatedAt"`;
 
+const observationLookupChunk = 100;
+const observationPresenceRow = z.object({ id: z.string() });
+
 const snapshotColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", retest_id AS "retestId", status, grade, intent,
   loop_completed AS "loopCompleted", predecessor_id AS "predecessorId", entity_version AS "entityVersion",
   timezone, locale, source_missing AS "sourceMissing", json_bytes AS "jsonBytes", html_bytes AS "htmlBytes",
@@ -234,5 +237,26 @@ export class ReportDao {
       [ownerId, brandId, limit],
     );
     return z.array(retestRow).parse(rows);
+  }
+
+  /** Existence only, inside the caller's brand. Other brands' rows stay invisible. */
+  async existingObservationIds(ownerId: string, brandId: string, ids: readonly string[]) {
+    const present = new Set<string>();
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      unique.push(id);
+    }
+    for (let offset = 0; offset < unique.length; offset += observationLookupChunk) {
+      const group = unique.slice(offset, offset + observationLookupChunk);
+      const rows = await this.query(
+        `SELECT id FROM answer_observation WHERE owner_id = ? AND brand_id = ? AND id IN (${group.map(() => "?").join(", ")})`,
+        [ownerId, brandId, ...group],
+      );
+      for (const row of z.array(observationPresenceRow).parse(rows)) present.add(row.id);
+    }
+    return present;
   }
 }
