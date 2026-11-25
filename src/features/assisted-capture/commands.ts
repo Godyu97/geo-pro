@@ -94,6 +94,24 @@ function toSheet(row: CaptureSheetRecord, attempts: readonly CaptureAttemptRecor
   };
 }
 
+export type CaptureWorkspaceView =
+  | { brand: { id: string; name: string } | null; sheets: CaptureSheetView[] }
+  | { error: "NOT_FOUND" };
+
+export async function readCaptureWorkspace(db: DatabaseConnection, ownerId: string): Promise<CaptureWorkspaceView> {
+  return db.transaction(async (tx) => {
+    const active = await new BrandDao(tx).active(ownerId);
+    if (!active) return { brand: null, sheets: [] };
+    const dao = new CaptureDao(tx);
+    const sheets = await dao.sheetsForBrand(ownerId, active.id);
+    const attempts = await dao.attemptsForSheets(ownerId, sheets.map((sheet) => sheet.id));
+    return {
+      brand: { id: active.id, name: active.name },
+      sheets: sheets.map((sheet) => toSheet(sheet, attempts)),
+    };
+  });
+}
+
 export async function listCaptureSheets(db: DatabaseConnection, ownerId: string, brandId: string): Promise<ListResult> {
   return db.transaction(async (tx) => {
     const owned = await new BrandDao(tx).owned(ownerId, brandId);

@@ -260,3 +260,25 @@ test("monitoring run confirmation keeps header actions, shared cards, wrapping, 
   assert.match(form, /\[overflow-wrap:anywhere\]/);
   assert.match(form, /whitespace-normal/);
 });
+
+test("assisted capture keeps header actions, shared cards, wrapping, and read recovery in the workspace canvas", () => {
+  const page = read("../../src/features/assisted-capture/capture-page.tsx");
+  const panel = read("../../src/features/assisted-capture/capture-panel.tsx");
+  assert.doesNotMatch(page, /<main\b/);
+  assert.doesNotMatch(panel, /<main\b/);
+  assert.match(page, /<header\b/);
+  assert.match(page, /SERVICE_UNAVAILABLE/);
+  assert.match(page, /reload/);
+  assert.match(page, /backOverview/);
+  assert.match(page, /openBrand/);
+  assert.match(page, /whitespace-normal/);
+  assert.match(page, /\[overflow-wrap:anywhere\]/);
+  assert.match(panel, /<Card/);
+  assert.match(panel, /<CardContent/);
+  assert.match(panel, /<Badge/);
+  assert.match(panel, /<Input/);
+  assert.match(panel, /<Label/);
+  assert.match(panel, /aria-disabled=\{pending\}/);
+  assert.match(panel, /\[overflow-wrap:anywhere\]/);
+  assert.match(panel, /whitespace-normal/);
+});

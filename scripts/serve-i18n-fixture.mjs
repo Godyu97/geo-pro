@@ -485,6 +485,27 @@ await writeFile(capabilityService, capabilitySource.replace(capabilityRead, `${c
       throw new Error("Private monitoring-new fixture failure");
     }`));
 
+const captureCommands = path.join(fixture, "src/features/assisted-capture/commands.ts");
+const captureSource = await readFile(captureCommands, "utf8");
+const captureRead = "export async function readCaptureWorkspace(db: DatabaseConnection, ownerId: string): Promise<CaptureWorkspaceView> {";
+const captureWrite = `export async function createCaptureSheet(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: CreateCaptureSheetInput,
+  clock: Clock = systemClock,
+): Promise<SheetResult> {`;
+assert.ok(captureSource.includes(captureRead) && captureSource.includes(captureWrite));
+await writeFile(captureCommands, captureSource
+  .replace(captureRead, `${captureRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-capture-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private assisted capture fixture failure");
+  }`)
+  .replace(captureWrite, `${captureWrite}
+  if ((await (await import("next/headers")).cookies()).get("geo-capture-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));
