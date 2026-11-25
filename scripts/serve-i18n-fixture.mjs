@@ -522,6 +522,22 @@ await writeFile(factService, factSource
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 
+const promptService = path.join(fixture, "src/features/prompts/service.ts");
+const promptSource = await readFile(promptService, "utf8");
+const promptRead = "export async function readPromptWorkspace(db: QueryConnection, scope: PromptScope, query: ReadQuery) {";
+const promptWrite = "export async function executePromptCommand(db: DatabaseConnection, inputScope: unknown, input: unknown, clock = clockNow) {";
+assert.ok(promptSource.includes(promptRead) && promptSource.includes(promptWrite));
+await writeFile(promptService, promptSource
+  .replace(promptRead, `${promptRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-brand-questions-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private brand questions fixture failure");
+  }`)
+  .replace(promptWrite, `${promptWrite}
+  if ((await (await import("next/headers")).cookies()).get("geo-brand-questions-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

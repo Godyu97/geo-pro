@@ -38,6 +38,7 @@ export async function readPromptWorkspace(db: QueryConnection, scope: PromptScop
   const draftExclusion = base ? changedQuestionIds(base.content.questions, editor.questions) : [];
     const last = versions[pageSize - 1];
     return {
+    brandName: brand.fields.name,
     readOnly: brand.status !== "active",
     brand: fallback,
     terms,
