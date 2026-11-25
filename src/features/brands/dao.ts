@@ -130,6 +130,13 @@ export class BrandDao {
     return row ? brandRowSchema.parse(row) : null;
   }
 
+  async ownedSummary(ownerId: string, id: string) {
+    const [row] = await this.query(`SELECT ${brandColumns},
+      (SELECT v.name FROM brand_version v WHERE v.brand_id = b.id AND v.version = b.entity_version) AS name
+      FROM brand b WHERE b.owner_id = ? AND b.id = ? AND b.frozen_at IS NULL`, [ownerId, id]);
+    return row ? summarySchema.parse(row) : null;
+  }
+
   async deletionState(ownerId: string, id: string) {
     const [row] = await this.query(`SELECT ${brandColumns}, b.frozen_at AS "frozenAt", b.restore_until AS "restoreUntil"
       FROM brand b WHERE b.owner_id = ? AND b.id = ?`, [ownerId, id]);

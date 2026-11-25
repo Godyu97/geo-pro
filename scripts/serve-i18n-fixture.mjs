@@ -506,6 +506,22 @@ await writeFile(captureCommands, captureSource
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 
+const factService = path.join(fixture, "src/features/brand-facts/service.ts");
+const factSource = await readFile(factService, "utf8");
+const factRead = "export async function readFactWorkspace(db: QueryConnection, scope: FactScope, query: WorkspaceQuery, clock = clockNow) {";
+const factWrite = "export async function executeFactCommand(db: DatabaseConnection, inputScope: unknown, input: unknown, clock = clockNow) {";
+assert.ok(factSource.includes(factRead) && factSource.includes(factWrite));
+await writeFile(factService, factSource
+  .replace(factRead, `${factRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-brand-facts-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private brand facts fixture failure");
+  }`)
+  .replace(factWrite, `${factWrite}
+  if ((await (await import("next/headers")).cookies()).get("geo-brand-facts-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

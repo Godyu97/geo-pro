@@ -27,7 +27,7 @@ function page<T extends { id: string; createdAt: string }>(items: T[]) {
 }
 
 export async function readFactWorkspace(db: QueryConnection, scope: FactScope, query: WorkspaceQuery, clock = clockNow) {
-  const brand = await new BrandDao(db).owned(scope.ownerId, scope.brandId);
+  const brand = await new BrandDao(db).ownedSummary(scope.ownerId, scope.brandId);
   if (!brand) return null;
   const dao = new FactDao(db, scope);
   const [versions, pastes, fact, paste, impacts, successor] = await Promise.all([
@@ -42,6 +42,7 @@ export async function readFactWorkspace(db: QueryConnection, scope: FactScope, q
   const conflict = fact && prior && prior.fields.claim !== fact.fields.claim ? prior : null;
   const today = clock().toISOString().slice(0, 10);
   return {
+    brandName: brand.name,
     versions: page(versions.map((item) => ({
       id: item.id, createdAt: item.createdAt, version: item.version, title: item.fields.title, status: factStatus(item, today),
     }))),

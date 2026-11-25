@@ -78,7 +78,7 @@ async function acceptance(browser, db) {
     const page = await owner.context.newPage();
     const field = (name) => page.getByLabel(name).filter({ visible: true });
     await page.goto(root);
-    await page.getByRole("link", { name: "事实与材料" }).click();
+    await page.getByRole("link", { name: "事实与材料", exact: true }).click();
     await expect(page.getByRole("heading", { name: "事实与材料" })).toBeVisible();
     await expect(page.getByText(/还没有事实记录/)).toBeVisible();
     await checkLayout(page);
