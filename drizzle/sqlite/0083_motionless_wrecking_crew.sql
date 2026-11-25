@@ -1,0 +1,1 @@
+ALTER TABLE `formal_checkpoint` ADD `evaluation_json` text;

@@ -1,10 +1,13 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { draftContent, primaryTypes } from "../prompts/contracts.ts";
 import {
   appendFormalConfounderSchema,
+  formalCheckpointEvaluationSchema,
   registerFormalControlSchema,
   type CreateFormalObservationInput,
   type RecordFormalCheckpointInput,
@@ -16,14 +19,17 @@ import {
   type FormalConfounderRecord,
   type FormalControlRecord,
   type FormalObservationRecord,
+  type SavedFormalSlotRow,
 } from "./dao.ts";
 import {
   checkpointDue,
-  formalComparison,
+  evaluateFormalCheckpointGate,
   recordConfounders,
   registerControlPage,
   type Checkpoint,
   type ConfounderFactor,
+  type FormalCheckpointEvaluation,
+  type FormalSlotSample,
 } from "./rules.ts";
 
 type Clock = () => string;
@@ -38,6 +44,7 @@ export type FormalCheckpointView = {
   mode: CheckpointMode;
   comparableCount: number;
   excluded: string[];
+  evaluation: FormalCheckpointEvaluation | null;
   conclusion: string | null;
   evaluatedOn: string;
   createdAt: string;
@@ -78,6 +85,11 @@ function excludedIds(excludedJson: string) {
   return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
 }
 
+function parseEvaluation(evaluationJson: string | null): FormalCheckpointEvaluation | null {
+  if (!evaluationJson) return null;
+  return formalCheckpointEvaluationSchema.parse(JSON.parse(evaluationJson));
+}
+
 function toCheckpoint(row: FormalCheckpointRecord): FormalCheckpointView {
   return {
     id: row.id,
@@ -86,6 +98,7 @@ function toCheckpoint(row: FormalCheckpointRecord): FormalCheckpointView {
     mode: row.mode,
     comparableCount: row.comparableCount,
     excluded: excludedIds(row.excludedJson),
+    evaluation: parseEvaluation(row.evaluationJson),
     conclusion: row.conclusion,
     evaluatedOn: row.evaluatedOn,
     createdAt: row.createdAt,
@@ -142,29 +155,97 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+const brandWebsiteSchema = z.object({ website: z.string().nullable().optional() });
+
+function resolveHasOfficialWebsite(rows: readonly SavedFormalSlotRow[]) {
+  const brandContents = rows.map((row) => row.brandContent).filter((value): value is string => value !== null);
+  if (brandContents.length === 0) return true;
+  return brandContents.some((raw) => {
+    const parsed = brandWebsiteSchema.safeParse(JSON.parse(raw));
+    return Boolean(parsed.success && parsed.data.website?.trim());
+  });
+}
+
+function mapSavedSlots(rows: readonly SavedFormalSlotRow[]): FormalSlotSample[] {
+  const promptCache = new Map<string, z.infer<typeof draftContent>>();
+  return rows.map((row) => {
+    let naturalQuestion = row.naturalQuestion === 1;
+    if (naturalQuestion && row.promptContent) {
+      let prompt = promptCache.get(row.promptContent);
+      if (!prompt) {
+        const parsed = draftContent.safeParse(JSON.parse(row.promptContent));
+        if (parsed.success) {
+          prompt = parsed.data;
+          promptCache.set(row.promptContent, prompt);
+        }
+      }
+      const question = prompt?.questions.find((item) => item.id === row.questionId);
+      if (question) {
+        naturalQuestion = question.primary && primaryTypes.has(question.type) && question.status === "confirmed";
+      }
+    }
+    return {
+      slotId: row.slotId,
+      runId: row.runId,
+      questionId: row.questionId,
+      naturalQuestion,
+      slotStatus: row.slotStatus,
+      slotCreatedAt: row.slotCreatedAt,
+      timezone: row.protocolTimezone ?? "UTC",
+      observation: row.observationId && row.capturedAt && row.evidenceState && row.citationSetState
+        && row.requestedNetworkMode && row.networkTrigger && row.newSession
+        && row.targetRegion && row.observedRegion && row.entityVersion !== null
+        ? {
+            id: row.observationId,
+            capturedAt: row.capturedAt,
+            evidenceState: row.evidenceState,
+            citationSetState: row.citationSetState,
+            requestedNetworkMode: row.requestedNetworkMode,
+            networkTrigger: row.networkTrigger,
+            newSession: row.newSession,
+            targetRegion: row.targetRegion,
+            observedRegion: row.observedRegion,
+            entityVersion: row.entityVersion,
+            searchRequired: row.searchRequired === 1,
+            newSessionRequired: row.newSessionRequired === 1,
+            protocolRegion: row.protocolRegion,
+          }
+        : null,
+      analysis: row.analysisId && row.analysisVersion !== null && row.analysisEntityVersion !== null
+        && row.analysisRuleVersion && row.analysisStatus && row.mentioned && row.recommended && row.officialSiteCited
+        ? {
+            id: row.analysisId,
+            version: row.analysisVersion,
+            entityVersion: row.analysisEntityVersion,
+            ruleVersion: row.analysisRuleVersion,
+            status: row.analysisStatus,
+            mentioned: row.mentioned,
+            recommended: row.recommended,
+            officialSiteCited: row.officialSiteCited,
+          }
+        : null,
+    };
+  });
+}
+
 export function decideFormalCheckpoint(input: {
   effectiveOn: string;
   today: string;
   checkpoint: Checkpoint;
-  comparableQuestions: number;
   frozenQuestions: number;
-  excluded: readonly string[];
+  hasOfficialWebsite?: boolean;
+  slots?: readonly FormalSlotSample[];
+  excluded?: readonly string[];
 }) {
-  const due = checkpointDue({ effectiveOn: input.effectiveOn, today: input.today, checkpoint: input.checkpoint });
-  const comparison = formalComparison({
-    comparableQuestions: input.comparableQuestions,
-    frozenQuestions: input.frozenQuestions,
-    excluded: input.excluded,
+  return evaluateFormalCheckpointGate({
+    effectiveOn: input.effectiveOn,
+    today: input.today,
+    checkpoint: input.checkpoint,
+    frozenNonBrandCount: input.frozenQuestions,
+    hasOfficialWebsite: input.hasOfficialWebsite ?? true,
+    slots: input.slots ?? [],
+    callerExcluded: input.excluded ?? [],
   });
-  if (!due) {
-    return { mode: "progress" as const, conclusion: null, excluded: comparison.excluded };
-  }
-  const conclusion = JSON.stringify({
-    kind: comparison.mode,
-    comparableQuestions: input.comparableQuestions,
-    frozenQuestions: input.frozenQuestions,
-  });
-  return { mode: comparison.mode, conclusion, excluded: comparison.excluded };
 }
 
 export async function listFormalObservations(db: DatabaseConnection, ownerId: string, brandId: string) {
@@ -218,13 +299,21 @@ export async function recordFormalCheckpoint(
     if (!observation) return { error: "NOT_FOUND" as const };
     const owned = await new BrandDao(tx).owned(ownerId, observation.brandId);
     if (!owned) return { error: "NOT_FOUND" as const };
-    if (input.comparableQuestions > observation.frozenNonBrandCount) return { error: "INVALID_INPUT" as const };
+    const due = checkpointDue({
+      effectiveOn: observation.effectiveOn,
+      today: input.today,
+      checkpoint: input.checkpoint,
+    });
+    const savedRows = due
+      ? await dao.savedSlotsForFrozenSet(ownerId, observation.brandId, observation.frozenSetId)
+      : [];
     const decision = decideFormalCheckpoint({
       effectiveOn: observation.effectiveOn,
       today: input.today,
       checkpoint: input.checkpoint,
-      comparableQuestions: input.comparableQuestions,
       frozenQuestions: observation.frozenNonBrandCount,
+      hasOfficialWebsite: resolveHasOfficialWebsite(savedRows),
+      slots: mapSavedSlots(savedRows),
       excluded: input.excluded,
     });
     const now = clock();
@@ -235,8 +324,9 @@ export async function recordFormalCheckpoint(
       ownerId,
       checkpoint: input.checkpoint,
       mode: decision.mode,
-      comparableCount: input.comparableQuestions,
+      comparableCount: decision.comparableCount,
       excludedJson: JSON.stringify(decision.excluded),
+      evaluationJson: decision.evaluation ? JSON.stringify(decision.evaluation) : null,
       conclusion: decision.conclusion,
       evaluatedOn: input.today,
       createdAt: now,

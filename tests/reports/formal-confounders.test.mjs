@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { safeReturnTo } from "../../src/lib/auth/return-to.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
+import { EvidenceDao } from "../../src/features/evidence/dao.ts";
+import { MonitoringDao } from "../../src/features/monitoring/dao.ts";
 import {
   appendFormalConfounder,
   listFormalConfounders,
@@ -92,6 +94,50 @@ async function observationStamp(db, observationId) {
   return row;
 }
 
+async function seedFormalSamples(db, owner, brand, frozenSetId) {
+  const monitoring = new MonitoringDao(db);
+  const evidence = new EvidenceDao(db);
+  const channelId = randomUUID();
+  for (const [windowIndex, at] of ["2026-09-20T12:00:00.000Z", "2026-10-05T12:00:00.000Z"].entries()) {
+    const runId = randomUUID();
+    await monitoring.insertRun({
+      id: runId, brandId: brand, ownerId: owner, operationId: randomUUID(),
+      fingerprint: String(windowIndex).repeat(64), track: "model_api",
+      promptSetId: frozenSetId, promptSetVersion: 1, repeatCount: 1,
+      questionCount: 30, naturalCount: 30, channelCount: 1, slotCount: 30,
+      region: "CN", language: "zh-CN", requestedNetworkMode: "off", currency: "CNY",
+      upperMinor: 0, estimateHighMinor: 0, createdAt: at,
+    });
+    const slots = Array.from({ length: 30 }, (_, index) => ({
+      id: randomUUID(), runId, brandId: brand, questionId: `q${String(index + 1).padStart(2, "0")}`,
+      natural: 1, channelId, channelVersion: 1, repeatIndex: 1, reservationId: null, createdAt: at,
+    }));
+    await monitoring.insertSlots(slots);
+    await queryWithParameters(
+      db,
+      `UPDATE monitoring_slot SET status = 'succeeded', adopted_attempt_id = id WHERE run_id = ?`,
+      [runId],
+    );
+    for (const slot of slots) {
+      const obsId = randomUUID();
+      await evidence.insertObservation({
+        id: obsId, brandId: brand, ownerId: owner, slotId: slot.id, attemptId: null,
+        sourceMode: "model_api", captureMethod: "isolated", questionText: `Question ${slot.questionId}?`,
+        answerText: "Synthetic answer", fingerprint: "a".repeat(64),
+        region: "CN", targetRegion: "CN", observedRegion: "unknown", newSession: "unknown", productMode: "unknown",
+        networkTrigger: "not_triggered", language: "zh-CN", requestedNetworkMode: "off", entityVersion: 1,
+        citationSetState: "complete", evidenceState: "complete",
+        locatorRef: null, collectorId: null, missingReason: null, capturedAt: at, createdAt: at,
+      });
+      await evidence.insertAnalysis({
+        id: randomUUID(), observationId: obsId, brandId: brand, version: 1, entityVersion: 1,
+        ruleVersion: "rule-v1", mentioned: "true", recommended: "false", officialSiteCited: "true",
+        evidenceSpan: null, status: "classified", revisedFrom: null, reason: null, reviewerId: null, createdAt: at,
+      });
+    }
+  }
+}
+
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: confounders append in a stable order without rewriting checkpoints or thresholds`, async () => {
     const fixture = await testDatabase(kind);
@@ -103,6 +149,7 @@ for (const kind of ["sqlite", "postgresql"]) {
         const [owner, outsider] = await Promise.all([account(db), account(db)]);
         const brand = randomUUID();
         await new BrandDao(db).insertBrand(owner, brand, time);
+        await seedFormalSamples(db, owner, brand, "frozen-core");
         const created = await createFormalObservation(db, owner, {
           brandId: brand,
           frozenSetId: "frozen-core",

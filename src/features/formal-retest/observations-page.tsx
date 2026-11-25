@@ -28,6 +28,11 @@ function digits(value: number) {
   return String(value);
 }
 
+function formatRatio(value: number | null, naLabel: string) {
+  if (value === null) return naLabel;
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 function reportsHref(brandId?: string) {
   return brandId ? `/dashboard/reports?brandId=${encodeURIComponent(brandId)}` : "/dashboard/reports";
 }
@@ -138,15 +143,6 @@ function CheckpointFields({
         <span>{t("today")}</span>
         <input name="today" type="date" required className={inputClass} {...associated(form)} />
         <span className="block text-muted-foreground">{t("todayHint")}</span>
-      </label>
-      <label className="min-w-0 space-y-2 text-sm break-words">
-        <span>{t("comparable")}</span>
-        <input name="comparableQuestions" type="number" required min={0} max={500} inputMode="numeric" className={`${inputClass} tabular-nums`} {...associated(form)} />
-      </label>
-      <label className="min-w-0 space-y-2 text-sm break-words sm:col-span-2">
-        <span>{t("excluded")}</span>
-        <textarea name="excluded" className={areaClass} {...associated(form)} />
-        <span className="block text-muted-foreground">{t("excludedHint")}</span>
       </label>
     </>
   );
@@ -365,8 +361,10 @@ export default async function FormalObservationsPage({
               {observation.checkpoints.length === 0 ? null : (
                 <>
                   <h3 className="text-base font-semibold">{t("history")}</h3>
-                  {observation.checkpoints.map((checkpoint) => (
-                    <article key={checkpoint.id} id={checkpoint.id === excludedAnchor ? `excluded-${observation.id}` : undefined} className="min-w-0 scroll-mt-28 space-y-2 rounded-xl border border-dashed p-4">
+                  {observation.checkpoints.map((checkpoint) => {
+                    const evaluation = checkpoint.evaluation;
+                    return (
+                    <article key={checkpoint.id} id={checkpoint.id === excludedAnchor ? `excluded-${observation.id}` : undefined} className="min-w-0 scroll-mt-28 space-y-3 rounded-xl border border-dashed p-4">
                       <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-3">
                         <p className="text-sm font-medium">{checkpointLabel[checkpoint.checkpoint]}</p>
                         <p className="text-sm">{modeLabel[checkpoint.mode]}</p>
@@ -377,9 +375,140 @@ export default async function FormalObservationsPage({
                       })}</p>
                       <p className="text-sm tabular-nums">{t("evaluatedLine", { date: checkpoint.evaluatedOn })}</p>
                       <p className="text-sm leading-7">{conclusionLabel[checkpoint.mode]}</p>
+                      {checkpoint.mode !== "progress" && evaluation ? (
+                        <div className="space-y-3 border-t pt-3">
+                          {evaluation.missingSamples ? (
+                            <p className="text-sm leading-7">{t("missingSamplesNotice")}</p>
+                          ) : null}
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">
+                              {t("coverageHeading")} · {evaluation.coverage.passed ? t("gatePassed") : t("gateInsufficient")}
+                            </p>
+                            <p className="text-sm tabular-nums">{t("coverageWindowLine", {
+                              window: t("windowBefore"),
+                              eligible: digits(evaluation.coverage.before.eligible),
+                              planned: digits(evaluation.coverage.before.planned),
+                              rate: formatRatio(evaluation.coverage.before.rate, t("na")),
+                            })}</p>
+                            <p className="text-sm tabular-nums">{t("coverageWindowLine", {
+                              window: t("windowAfter"),
+                              eligible: digits(evaluation.coverage.after.eligible),
+                              planned: digits(evaluation.coverage.after.planned),
+                              rate: formatRatio(evaluation.coverage.after.rate, t("na")),
+                            })}</p>
+                          </div>
+                          <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+                            <div className="min-w-0 space-y-1 rounded-lg border p-3">
+                              <p className="text-sm font-medium">
+                                {t("metricMention")} · {evaluation.metrics.mention.passed ? t("gatePassed") : t("gateInsufficient")}
+                              </p>
+                              <p className="text-xs tabular-nums text-muted-foreground">{t("metricCommonLine", {
+                                comparable: digits(evaluation.metrics.mention.comparableCount),
+                                frozen: digits(evaluation.metrics.mention.frozenNonBrandCount),
+                              })}</p>
+                              <p className="text-xs tabular-nums">{t("metricJudgableLine", {
+                                window: t("windowBefore"),
+                                symbol: "Jm/E",
+                                judged: digits(evaluation.metrics.mention.before.judged),
+                                eligible: digits(evaluation.metrics.mention.before.eligible),
+                                rate: formatRatio(evaluation.metrics.mention.before.rate, t("na")),
+                              })}</p>
+                              <p className="text-xs tabular-nums">{t("metricJudgableLine", {
+                                window: t("windowAfter"),
+                                symbol: "Jm/E",
+                                judged: digits(evaluation.metrics.mention.after.judged),
+                                eligible: digits(evaluation.metrics.mention.after.eligible),
+                                rate: formatRatio(evaluation.metrics.mention.after.rate, t("na")),
+                              })}</p>
+                            </div>
+                            <div className="min-w-0 space-y-1 rounded-lg border p-3">
+                              <p className="text-sm font-medium">
+                                {t("metricRecommendation")} · {evaluation.metrics.recommendation.passed ? t("gatePassed") : t("gateInsufficient")}
+                              </p>
+                              <p className="text-xs tabular-nums text-muted-foreground">{t("metricCommonLine", {
+                                comparable: digits(evaluation.metrics.recommendation.comparableCount),
+                                frozen: digits(evaluation.metrics.recommendation.frozenNonBrandCount),
+                              })}</p>
+                              <p className="text-xs tabular-nums">{t("metricJudgableLine", {
+                                window: t("windowBefore"),
+                                symbol: "Jr/E",
+                                judged: digits(evaluation.metrics.recommendation.before.judged),
+                                eligible: digits(evaluation.metrics.recommendation.before.eligible),
+                                rate: formatRatio(evaluation.metrics.recommendation.before.rate, t("na")),
+                              })}</p>
+                              <p className="text-xs tabular-nums">{t("metricJudgableLine", {
+                                window: t("windowAfter"),
+                                symbol: "Jr/E",
+                                judged: digits(evaluation.metrics.recommendation.after.judged),
+                                eligible: digits(evaluation.metrics.recommendation.after.eligible),
+                                rate: formatRatio(evaluation.metrics.recommendation.after.rate, t("na")),
+                              })}</p>
+                            </div>
+                            <div className="min-w-0 space-y-1 rounded-lg border p-3">
+                              <p className="text-sm font-medium">
+                                {t("metricCitation")} · {!evaluation.metrics.citation.applicable
+                                  ? t("na")
+                                  : evaluation.metrics.citation.passed ? t("gatePassed") : t("gateInsufficient")}
+                              </p>
+                              <p className="text-xs tabular-nums text-muted-foreground">{t("metricCommonLine", {
+                                comparable: digits(evaluation.metrics.citation.comparableCount),
+                                frozen: digits(evaluation.metrics.citation.frozenNonBrandCount),
+                              })}</p>
+                              <p className="text-xs tabular-nums">{t("citationWindowLine", {
+                                window: t("windowBefore"),
+                                jc: digits(evaluation.metrics.citation.before.judged),
+                                c: digits(evaluation.metrics.citation.before.completeCitations),
+                                e: digits(evaluation.metrics.citation.before.eligible),
+                                jcOverE: formatRatio(evaluation.metrics.citation.before.jcOverE, t("na")),
+                                cOverE: formatRatio(evaluation.metrics.citation.before.cOverE, t("na")),
+                                jcOverC: formatRatio(evaluation.metrics.citation.before.jcOverC, t("na")),
+                              })}</p>
+                              <p className="text-xs tabular-nums">{t("citationWindowLine", {
+                                window: t("windowAfter"),
+                                jc: digits(evaluation.metrics.citation.after.judged),
+                                c: digits(evaluation.metrics.citation.after.completeCitations),
+                                e: digits(evaluation.metrics.citation.after.eligible),
+                                jcOverE: formatRatio(evaluation.metrics.citation.after.jcOverE, t("na")),
+                                cOverE: formatRatio(evaluation.metrics.citation.after.cOverE, t("na")),
+                                jcOverC: formatRatio(evaluation.metrics.citation.after.jcOverC, t("na")),
+                              })}</p>
+                            </div>
+                          </div>
+                          {evaluation.insufficiencyReasons.length > 0 ? (
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium">{t("insufficientHeading")}</p>
+                              <ul className="space-y-1 text-sm">
+                                {evaluation.insufficiencyReasons.map((reason) => (
+                                  <li key={`${checkpoint.id}-reason-${reason}`} className="break-words">{t(`insufficiency_${reason}`)}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          {evaluation.slotIds.length > 0 ? (
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium">{t("matchedSlotsHeading", { count: digits(evaluation.slotIds.length) })}</p>
+                              <ul className="flex flex-wrap gap-2 text-xs">
+                                {evaluation.slotIds.map((slotId) => (
+                                  <li key={`${checkpoint.id}-slot-${slotId}`} className="[overflow-wrap:anywhere] tabular-nums">{slotId}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <div>
                         <p className="text-sm font-medium">{t("excludedHeading")}</p>
-                        {checkpoint.excluded.length === 0 ? (
+                        {evaluation && evaluation.excludedQuestions.length > 0 ? (
+                          <ul className="mt-1 space-y-1 text-sm">
+                            {evaluation.excludedQuestions.map((item) => (
+                              <li key={`${checkpoint.id}-ex-${item.questionId}`} className="[overflow-wrap:anywhere] tabular-nums">
+                                <span>{item.questionId}</span>
+                                <span>{" · "}</span>
+                                <span>{item.reasons.map((reason) => t(`exclusion_${reason}`)).join(t("reasonSeparator"))}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : checkpoint.excluded.length === 0 ? (
                           <p className="text-sm text-muted-foreground">{t("noExcluded")}</p>
                         ) : (
                           <ul className="mt-1 space-y-1 text-sm">
@@ -390,7 +519,8 @@ export default async function FormalObservationsPage({
                         )}
                       </div>
                     </article>
-                  ))}
+                    );
+                  })}
                 </>
               )}
             </div>

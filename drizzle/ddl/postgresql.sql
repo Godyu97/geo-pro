@@ -1650,6 +1650,7 @@ CREATE TABLE "formal_checkpoint" (
 	"conclusion" text,
 	"evaluated_on" text NOT NULL,
 	"created_at" text NOT NULL,
+	"evaluation_json" text,
 	CONSTRAINT "formal_checkpoint_state_check" CHECK ("formal_checkpoint"."checkpoint" in ('d7', 'd14', 'd28')
     and "formal_checkpoint"."mode" in ('progress', 'formal', 'exploratory')
     and "formal_checkpoint"."comparable_count" between 0 and 500

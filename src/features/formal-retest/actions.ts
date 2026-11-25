@@ -16,10 +16,6 @@ function finish(error?: string): never {
   redirect(error && pageErrors.has(error) ? `${observationsPath}?error=${error}` : observationsPath);
 }
 
-function excludedIds(value: FormDataEntryValue | null) {
-  return String(value ?? "").split(/[\s,]+/).map((item) => item.trim()).filter((item) => item.length > 0);
-}
-
 function wholeNumber(value: FormDataEntryValue | null) {
   const parsed = zNumber(String(value ?? ""));
   return parsed;
@@ -49,8 +45,6 @@ export async function recordFormalCheckpointAction(formData: FormData) {
   const command = recordFormalCheckpointSchema.safeParse({
     checkpoint: formData.get("checkpoint"),
     today: formData.get("today"),
-    comparableQuestions: wholeNumber(formData.get("comparableQuestions")),
-    excluded: excludedIds(formData.get("excluded")),
     requestedMode: "formal",
   });
   if (!observationId.success || !command.success) finish("INVALID_INPUT");

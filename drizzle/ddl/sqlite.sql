@@ -1931,6 +1931,7 @@ CREATE TABLE `formal_checkpoint` (
 	`conclusion` text,
 	`evaluated_on` text NOT NULL,
 	`created_at` text NOT NULL,
+	`evaluation_json` text,
 	FOREIGN KEY (`observation_id`) REFERENCES `formal_observation`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "formal_checkpoint_state_check" CHECK("formal_checkpoint"."checkpoint" in ('d7', 'd14', 'd28')

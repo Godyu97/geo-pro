@@ -18,6 +18,7 @@ export const calendarDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(
 });
 
 const countSchema = z.number().int().min(0).max(500);
+const slotCountSchema = z.number().int().min(0).max(50000);
 
 export const createFormalObservationSchema = z.strictObject({
   brandId: brandIdSchema,
@@ -26,11 +27,112 @@ export const createFormalObservationSchema = z.strictObject({
   frozenNonBrandCount: countSchema.refine((value) => value >= 1),
 });
 
+export const formalExclusionReasons = [
+  "missing_window",
+  "low_eligible_coverage",
+  "low_mention_coverage",
+  "low_recommendation_coverage",
+  "incomplete_citations",
+  "low_citation_coverage",
+  "no_official_website",
+  "caller_excluded",
+] as const;
+
+export const formalInsufficiencyReasons = [
+  "missing_samples",
+  "overall_coverage_below_90",
+  "mention_common_below_80",
+  "mention_coverage_below_80",
+  "recommendation_common_below_80",
+  "recommendation_coverage_below_80",
+  "citation_common_below_80",
+  "citation_coverage_below_80",
+  "no_official_website",
+] as const;
+
+export const formalGateKeys = ["coverage", "mention", "recommendation", "citation"] as const;
+
+const exclusionReasonSchema = z.enum(formalExclusionReasons);
+const insufficiencyReasonSchema = z.enum(formalInsufficiencyReasons);
+const gateKeySchema = z.enum(formalGateKeys);
+const rateSchema = z.number().min(0).max(1).nullable();
+
+const windowCoverageReadingSchema = z.object({
+  planned: slotCountSchema,
+  valid: slotCountSchema,
+  eligible: slotCountSchema,
+  rate: rateSchema,
+});
+
+const metricJudgmentReadingSchema = z.object({
+  judged: slotCountSchema,
+  eligible: slotCountSchema,
+  rate: rateSchema,
+});
+
+const citationJudgmentReadingSchema = z.object({
+  judged: slotCountSchema,
+  completeCitations: slotCountSchema,
+  eligible: slotCountSchema,
+  jcOverE: rateSchema,
+  cOverE: rateSchema,
+  jcOverC: rateSchema,
+});
+
+const metricExcludedItemSchema = z.object({
+  questionId: questionIdSchema,
+  reason: exclusionReasonSchema,
+});
+
+export const formalCheckpointEvaluationSchema = z.object({
+  missingSamples: z.boolean(),
+  hasOfficialWebsite: z.boolean(),
+  slotIds: z.array(questionIdSchema),
+  coverage: z.object({
+    before: windowCoverageReadingSchema,
+    after: windowCoverageReadingSchema,
+    passed: z.boolean(),
+  }),
+  metrics: z.object({
+    mention: z.object({
+      passed: z.boolean(),
+      comparableCount: countSchema,
+      frozenNonBrandCount: countSchema,
+      before: metricJudgmentReadingSchema,
+      after: metricJudgmentReadingSchema,
+      excluded: z.array(metricExcludedItemSchema),
+    }),
+    recommendation: z.object({
+      passed: z.boolean(),
+      comparableCount: countSchema,
+      frozenNonBrandCount: countSchema,
+      before: metricJudgmentReadingSchema,
+      after: metricJudgmentReadingSchema,
+      excluded: z.array(metricExcludedItemSchema),
+    }),
+    citation: z.object({
+      passed: z.boolean(),
+      applicable: z.boolean(),
+      comparableCount: countSchema,
+      frozenNonBrandCount: countSchema,
+      before: citationJudgmentReadingSchema,
+      after: citationJudgmentReadingSchema,
+      excluded: z.array(metricExcludedItemSchema),
+    }),
+  }),
+  insufficientMetrics: z.array(gateKeySchema),
+  insufficiencyReasons: z.array(insufficiencyReasonSchema),
+  excludedQuestions: z.array(z.object({
+    questionId: questionIdSchema,
+    reasons: z.array(exclusionReasonSchema),
+  })),
+});
+
 export const recordFormalCheckpointSchema = z.strictObject({
   checkpoint: checkpointSchema,
   today: calendarDaySchema,
-  comparableQuestions: countSchema,
-  excluded: z.array(questionIdSchema).max(40),
+  comparableQuestions: countSchema.optional().default(0),
+  excluded: z.array(questionIdSchema).max(40).optional().default([]),
   requestedMode: z.literal("formal"),
 });
 

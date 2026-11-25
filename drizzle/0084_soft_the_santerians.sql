@@ -1,0 +1,1 @@
+ALTER TABLE "formal_checkpoint" ADD COLUMN "evaluation_json" text;

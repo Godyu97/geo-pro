@@ -20,7 +20,7 @@ const copy = {
     emptyTask: "还没有观察记录。冻结题集不会被改写，也不会创建采样运行。下一步是保存观察。",
     pendingTask: "这份观察还没有检查点。对照页可以在第一个检查点之前登记，标签只能是观察。下一步是记录检查点。未到期只记进度，完整结论留空。",
     progressTask: "最近一次检查点尚未到期。完整观察结论为空。这不是正式对比。下一步仍是记录检查点。",
-    exploratoryTask: "窗口已到期，但可比题低于 80% 门槛。这是探索记录，排除题原样保留。不要把它写成正式结论。下一步是查看排除题。",
+    exploratoryTask: "窗口已到期，但已保存槽位的覆盖或指标门槛未全部达标。这是探索记录，不足指标与排除原因已保留。下一步是查看排除题。",
     save: "保存观察",
     requestFormal: "请求正式结论",
     viewExcluded: "查看排除题",
@@ -30,7 +30,7 @@ const copy = {
     progress: "进度",
     exploratory: "探索",
     emptyConclusion: "完整观察结论为空。",
-    exploratoryConclusion: "窗口已到期，但可比题低于 80% 门槛。这是探索记录。",
+    exploratoryConclusion: "窗口已到期，已保存槽位的覆盖或指标门槛未全部达标。这是探索记录。",
     unavailable: "暂时无法读取或保存观察记录，请稍后重试。",
     reload: "重新载入",
     missing: "找不到这条观察，或它不属于当前账号。",
@@ -40,8 +40,8 @@ const copy = {
     title: "Observation plan",
     emptyTask: "No observation has been saved. The frozen question set is not rewritten, and no sampling run is created. Save an observation next.",
     pendingTask: "This observation has no checkpoint yet. A control page can be registered before the first checkpoint, and its label stays observation. Record a checkpoint next. Before the window is due, only progress is stored and the full conclusion stays empty.",
-    progressTask: "The latest checkpoint is not due yet. The full observation conclusion is empty. This is not a formal comparison. Record a checkpoint next.",
-    exploratoryTask: "The window is due, but comparable questions are under the 80% threshold. This is an exploratory record and the excluded questions stay as entered. Do not treat it as a formal conclusion. Review the excluded questions next.",
+    progressTask: "The latest checkpoint is not due yet. The full observation conclusion is empty. This is not a full comparison. Record a checkpoint next.",
+    exploratoryTask: "The window is due, but saved slots did not pass every coverage or metric threshold. This is an exploratory record with insufficient metrics and exclusion reasons kept. Review the excluded questions next.",
     save: "Save observation",
     requestFormal: "Request a formal conclusion",
     viewExcluded: "Review excluded questions",
@@ -51,7 +51,7 @@ const copy = {
     progress: "Progress",
     exploratory: "Exploratory",
     emptyConclusion: "The full observation conclusion is empty.",
-    exploratoryConclusion: "The window is due, but comparable questions are under the 80% threshold. This is an exploratory record.",
+    exploratoryConclusion: "The window is due, but saved slots did not pass every coverage or metric threshold. This is an exploratory record.",
     unavailable: "Observations cannot be read or saved right now. Try again later.",
     reload: "Reload",
     missing: "This observation was not found, or it belongs to another account.",
@@ -232,7 +232,6 @@ test("observation plans keep the next checkpoint readable and recoverable", asyn
     await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
     await page.goto(href);
     await page.locator("input[name='today']").fill(earlyDay);
-    await page.locator("input[name='comparableQuestions']").fill("30");
     await page.evaluate(() => window.scrollTo(0, 0));
     await activateFromKeyboard(page, page.getByRole("main").getByRole("button", { name: copy["zh-CN"].requestFormal, exact: true }));
     await expect(page.getByText(copy["zh-CN"].progressTask, { exact: true })).toBeVisible();
@@ -265,12 +264,73 @@ test("observation plans keep the next checkpoint readable and recoverable", asyn
       }
     }
 
+    const seededSlotIds: string[] = [];
+    const seedDb = postgres(localDatabaseURL(), { max: 1 });
+    try {
+      const channelId = randomUUID();
+      for (const [winIndex, at] of ["2026-10-20T12:00:00.000Z", "2026-11-05T12:00:00.000Z"].entries()) {
+        const runId = randomUUID();
+        await seedDb`
+          insert into monitoring_run (
+            id, brand_id, owner_id, operation_id, fingerprint, track, prompt_set_id, prompt_set_version,
+            repeat_count, question_count, natural_count, channel_count, slot_count, region, language,
+            requested_network_mode, currency, upper_minor, estimate_high_minor, customer_payable_minor,
+            status, sampling_complete, created_at
+          ) values (
+            ${runId}, ${brandId}, ${accounts[0]!.userId}, ${randomUUID()}, ${String(winIndex).repeat(64)},
+            'model_api', ${frozenSetId}, 1, 1, 30, 30, 1, 30, 'CN', 'zh-CN', 'off', 'CNY', 0, 0, 0,
+            'succeeded', 1, ${at}
+          )`;
+        for (let i = 1; i <= 30; i += 1) {
+          const slotId = randomUUID();
+          seededSlotIds.push(slotId);
+          const qId = `q${String(i).padStart(2, "0")}`;
+          await seedDb`
+            insert into monitoring_slot (
+              id, run_id, brand_id, question_id, natural_question, channel_id, channel_version,
+              repeat_index, reservation_id, status, adopted_attempt_id, late, created_at
+            ) values (
+              ${slotId}, ${runId}, ${brandId}, ${qId}, 1, ${channelId}, 1,
+              1, null, 'succeeded', ${slotId}, 0, ${at}
+            )`;
+          const obsId = randomUUID();
+          const partialCitation = winIndex === 1 && i > 24;
+          const unknownCitation = winIndex === 1 && i > 21 && i <= 24;
+          const unknownRec = winIndex === 1 && i >= 24;
+          await seedDb`
+            insert into answer_observation (
+              id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method,
+              question_text, answer_text, fingerprint, captured_at, region, language,
+              requested_network_mode, entity_version, citation_set_state, evidence_state,
+              locator_ref, collector_id, missing_reason, created_at, target_region,
+              observed_region, new_session, product_mode, network_trigger
+            ) values (
+              ${obsId}, ${brandId}, ${accounts[0]!.userId}, ${slotId}, null, 'model_api', 'isolated',
+              ${`Question ${qId}?`}, 'Synthetic answer', ${"b".repeat(64)}, ${at}, 'CN', 'zh-CN',
+              'off', 1, ${partialCitation ? "partial" : "complete"}, 'complete',
+              null, null, null, ${at}, 'CN', 'unknown', 'unknown', 'unknown', 'not_triggered'
+            )`;
+          await seedDb`
+            insert into answer_analysis_version (
+              id, observation_id, brand_id, version, entity_version, rule_version,
+              mentioned, recommended, official_site_cited, evidence_span, status,
+              revised_from, reason, reviewer_id, created_at
+            ) values (
+              ${randomUUID()}, ${obsId}, ${brandId}, 1, 1, 'rule-v1',
+              'true', ${unknownRec ? "unknown" : "false"},
+              ${partialCitation || unknownCitation ? "unknown" : "true"},
+              null, 'classified', null, null, null, ${at}
+            )`;
+        }
+      }
+    } finally {
+      await seedDb.end();
+    }
+
     await page.setViewportSize({ width: 375, height: 800 });
     await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
     await page.goto(href);
     await page.locator("input[name='today']").fill(dueDay);
-    await page.locator("input[name='comparableQuestions']").fill("23");
-    await page.locator("textarea[name='excluded']").fill(excluded.join("\n"));
     await page.evaluate(() => window.scrollTo(0, 0));
     await activateFromKeyboard(page, page.getByRole("main").getByRole("button", { name: copy["zh-CN"].requestFormal, exact: true }));
     await expect(page.getByText(copy["zh-CN"].exploratoryTask, { exact: true })).toBeVisible();
@@ -279,8 +339,8 @@ test("observation plans keep the next checkpoint readable and recoverable", asyn
     const due = exploratory.observations[0]?.checkpoints.find((item) => item.evaluatedOn === dueDay);
     if (!due) throw new Error("missing due checkpoint");
     expect(due.mode).toBe("exploratory");
-    expect(due.comparableCount).toBe(23);
-    expect(due.excluded).toEqual(excluded);
+    expect(due.comparableCount).toBe(21);
+    expect(due.excluded).toEqual(["q22", "q23", "q24", "q25", "q26", "q27", "q28", "q29", "q30"]);
     expect(due.conclusion).toContain("exploratory");
     expect(exploratory.observations[0].status).toBe("checkpoint_due");
 
@@ -301,7 +361,12 @@ test("observation plans keep the next checkpoint readable and recoverable", asyn
         await expect(main.getByText(current.exploratory, { exact: true })).toBeVisible();
         await expect(main.getByText(current.exploratoryConclusion, { exact: true })).toBeVisible();
         await expect(main.getByText(current.progress, { exact: true })).toBeVisible();
-        for (const id of excluded) await expect(main.getByText(id, { exact: true })).toBeVisible();
+        const dueCard = main.locator("article").filter({ hasText: dueDay });
+        await expect(dueCard).not.toContainText(/\bformal\b/i);
+        await expect(dueCard).toContainText("C/E");
+        await expect(dueCard).toContainText("Jc/C");
+        await expect(dueCard).toContainText(seededSlotIds[0]!);
+        for (const id of excluded) await expect(dueCard).toContainText(id);
         if (width === 375) {
           await expect(review).toBeInViewport();
           await page.screenshot({ path: `${shots}/observation-plan-exploratory-${locale}-375.png`, fullPage: false });

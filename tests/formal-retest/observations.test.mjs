@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
+import { EvidenceDao } from "../../src/features/evidence/dao.ts";
 import {
   createFormalObservation,
   listFormalObservations,
@@ -12,7 +13,12 @@ import {
   formalObservationErrors,
   recordFormalCheckpointSchema,
 } from "../../src/features/formal-retest/contracts.ts";
-import { formalCheckpointListQuery, formalObservationListQuery } from "../../src/features/formal-retest/dao.ts";
+import {
+  formalCheckpointListQuery,
+  formalObservationListQuery,
+  formalSavedSlotsQuery,
+} from "../../src/features/formal-retest/dao.ts";
+import { MonitoringDao } from "../../src/features/monitoring/dao.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { structure, testDatabase } from "../maintenance/helpers.mjs";
 
@@ -44,6 +50,11 @@ test("checkpoint requests reject a caller-supplied conclusion and an impossible 
     requestedMode: "formal",
     conclusion: "完整观察结论",
   }).success, false);
+  assert.equal(recordFormalCheckpointSchema.safeParse({
+    checkpoint: "d14",
+    today: "2026-11-22",
+    requestedMode: "formal",
+  }).success, true);
 });
 
 function watch(db) {
@@ -79,7 +90,7 @@ async function account(db) {
   return id;
 }
 
-function formalRequest(today, comparableQuestions, ids = excluded) {
+function formalRequest(today, comparableQuestions = 0, ids = []) {
   return {
     checkpoint: "d14",
     today,
@@ -89,8 +100,78 @@ function formalRequest(today, comparableQuestions, ids = excluded) {
   };
 }
 
+async function seedWindowRun(db, {
+  owner,
+  brand,
+  frozenSetId,
+  at,
+  count = 30,
+  exploreCount = 0,
+  override = () => ({}),
+}) {
+  const monitoring = new MonitoringDao(db);
+  const evidence = new EvidenceDao(db);
+  const runId = randomUUID();
+  const channelId = randomUUID();
+  const totalSlots = count + exploreCount;
+  await monitoring.insertRun({
+    id: runId, brandId: brand, ownerId: owner, operationId: randomUUID(),
+    fingerprint: randomUUID().replaceAll("-", "").padEnd(64, "a").slice(0, 64),
+    track: "model_api", promptSetId: frozenSetId, promptSetVersion: 1, repeatCount: 1,
+    questionCount: totalSlots, naturalCount: count, channelCount: 1, slotCount: totalSlots,
+    region: "CN", language: "zh-CN", requestedNetworkMode: "off", currency: "CNY",
+    upperMinor: 0, estimateHighMinor: 0, createdAt: at,
+  });
+  const slots = [];
+  for (let i = 1; i <= count; i += 1) {
+    slots.push({
+      id: randomUUID(), runId, brandId: brand, questionId: `q${String(i).padStart(2, "0")}`,
+      natural: 1, channelId, channelVersion: 1, repeatIndex: 1, reservationId: null, createdAt: at,
+    });
+  }
+  for (let i = 1; i <= exploreCount; i += 1) {
+    slots.push({
+      id: randomUUID(), runId, brandId: brand, questionId: `ex${String(i).padStart(2, "0")}`,
+      natural: 0, channelId, channelVersion: 1, repeatIndex: 1, reservationId: null, createdAt: at,
+    });
+  }
+  await monitoring.insertSlots(slots);
+  for (const [index, slot] of slots.entries()) {
+    const config = slot.natural === 0 ? { slotStatus: "failed" } : override(index + 1);
+    const status = config.slotStatus ?? "succeeded";
+    if (status !== "succeeded") {
+      await queryWithParameters(db, `UPDATE monitoring_slot SET status = ? WHERE id = ?`, [status, slot.id]);
+      continue;
+    }
+    await queryWithParameters(
+      db,
+      `UPDATE monitoring_slot SET status = 'succeeded', adopted_attempt_id = ? WHERE id = ?`,
+      [slot.id, slot.id],
+    );
+    const obsId = randomUUID();
+    await evidence.insertObservation({
+      id: obsId, brandId: brand, ownerId: owner, slotId: slot.id, attemptId: null,
+      sourceMode: "model_api", captureMethod: "isolated", questionText: `Question ${slot.questionId}?`,
+      answerText: "Synthetic answer", fingerprint: "b".repeat(64),
+      region: "CN", targetRegion: "CN", observedRegion: "unknown", newSession: "unknown", productMode: "unknown",
+      networkTrigger: "not_triggered", language: "zh-CN", requestedNetworkMode: "off", entityVersion: 1,
+      citationSetState: config.citationSetState ?? "complete", evidenceState: config.evidenceState ?? "complete",
+      locatorRef: null, collectorId: null, missingReason: null, capturedAt: at, createdAt: at,
+    });
+    await evidence.insertAnalysis({
+      id: randomUUID(), observationId: obsId, brandId: brand, version: 1, entityVersion: 1,
+      ruleVersion: "rule-v1",
+      mentioned: config.mentioned ?? "true",
+      recommended: config.recommended ?? "false",
+      officialSiteCited: config.officialSiteCited ?? "true",
+      evidenceSpan: null, status: "classified", revisedFrom: null, reason: null, reviewerId: null, createdAt: at,
+    });
+  }
+  return slots;
+}
+
 for (const kind of ["sqlite", "postgresql"]) {
-  test(`${kind}: an early D+14 stays progress and a short comparable set stays exploratory`, async () => {
+  test(`${kind}: checkpoints use saved brand+set slots, reject manual override, and never rewrite rows`, async () => {
     const fixture = await testDatabase(kind);
     try {
       const ddl = await testDatabase(kind, { ddl: true });
@@ -109,6 +190,8 @@ for (const kind of ["sqlite", "postgresql"]) {
           "2026-01-02T00:00:00.000Z",
           "2026-01-03T00:00:00.000Z",
           "2026-01-04T00:00:00.000Z",
+          "2026-01-05T00:00:00.000Z",
+          "2026-01-06T00:00:00.000Z",
         ]);
 
         const hidden = await createFormalObservation(db, outsider, {
@@ -119,6 +202,10 @@ for (const kind of ["sqlite", "postgresql"]) {
         }, clock);
         assert.deepEqual(hidden, { error: "NOT_FOUND" });
         assert.equal(JSON.stringify(hidden).includes("frozen-core"), false);
+
+        // Outsider owns full passing runs on the same frozenSetId; they must never enter owner's calculation.
+        await seedWindowRun(db, { owner: outsider, brand: otherBrand, frozenSetId: "frozen-core", at: "2026-09-20T12:00:00.000Z" });
+        await seedWindowRun(db, { owner: outsider, brand: otherBrand, frozenSetId: "frozen-core", at: "2026-10-05T12:00:00.000Z" });
 
         const earlyWatch = watch(db);
         const early = await createFormalObservation(earlyWatch.connection, owner, {
@@ -139,6 +226,7 @@ for (const kind of ["sqlite", "postgresql"]) {
         );
         assert.equal(earlyPoint.checkpoint.mode, "progress");
         assert.equal(earlyPoint.checkpoint.conclusion, null);
+        assert.equal(earlyPoint.checkpoint.evaluation, null);
         assert.equal(earlyPoint.checkpoint.evaluatedOn, "2026-11-22");
         assert.equal(earlyPoint.checkpoint.createdAt, "2026-01-01T00:00:00.000Z");
         assert.equal(earlyPoint.observation.status, "observing");
@@ -153,57 +241,119 @@ for (const kind of ["sqlite", "postgresql"]) {
         assert.deepEqual(deniedPoint, { error: "NOT_FOUND" });
         assert.equal(JSON.stringify(deniedPoint).includes("frozen-core"), false);
 
+        // Due observation with NO matching slots for owner -> manual comparableQuestions=30 cannot make it formal!
         const baseline = await createFormalObservation(db, owner, {
           brandId: brand,
           frozenSetId: "frozen-core",
           effectiveOn: "2026-10-01",
           frozenNonBrandCount: 30,
         }, clock);
-        const exploratory = await recordFormalCheckpoint(
+        const missing = await recordFormalCheckpoint(
           db,
           owner,
           baseline.observation.id,
-          formalRequest("2026-11-22", 23),
+          formalRequest("2026-11-22", 30, excluded),
           clock,
         );
-        assert.equal(exploratory.checkpoint.mode, "exploratory");
-        assert.equal(exploratory.checkpoint.conclusion.includes("formal"), false);
-        assert.deepEqual(exploratory.checkpoint.excluded, excluded);
-        assert.equal(exploratory.observation.status, "checkpoint_due");
-        const storedExcluded = await queryWithParameters(
-          db,
-          `SELECT excluded_json AS "excludedJson", mode, conclusion FROM formal_checkpoint WHERE id = ?`,
-          [exploratory.checkpoint.id],
-        );
-        assert.deepEqual(JSON.parse(storedExcluded[0].excludedJson), excluded);
-        assert.equal(storedExcluded[0].mode, "exploratory");
+        assert.equal(missing.checkpoint.mode, "exploratory");
+        assert.equal(missing.checkpoint.comparableCount, 0);
+        assert.equal(missing.checkpoint.conclusion.includes("formal"), false);
+        assert.equal(missing.checkpoint.evaluation?.missingSamples, true);
+        assert.deepEqual(missing.checkpoint.evaluation?.insufficiencyReasons, ["missing_samples"]);
+        assert.deepEqual(missing.checkpoint.excluded, excluded);
+        assert.equal(missing.observation.status, "checkpoint_due");
 
+        // Now seed owner's saved slots for an observation where only 23/30 are comparable on recommendation
+        // and citation Jc/E is below 80%.
+        const partialSet = "frozen-partial-metrics";
+        const partialObs = await createFormalObservation(db, owner, {
+          brandId: brand,
+          frozenSetId: partialSet,
+          effectiveOn: "2026-10-01",
+          frozenNonBrandCount: 30,
+        }, clock);
+        await seedWindowRun(db, { owner, brand, frozenSetId: partialSet, at: "2026-09-20T12:00:00.000Z" });
+        await seedWindowRun(db, {
+          owner,
+          brand,
+          frozenSetId: partialSet,
+          at: "2026-10-05T12:00:00.000Z",
+          override: (i) => {
+            if (i >= 24) return { recommended: "unknown", citationSetState: "partial", officialSiteCited: "unknown" };
+            return {};
+          },
+        });
+        const insufficient = await recordFormalCheckpoint(
+          db,
+          owner,
+          partialObs.observation.id,
+          formalRequest("2026-11-22", 30, []),
+          clock,
+        );
+        assert.equal(insufficient.checkpoint.mode, "exploratory");
+        assert.equal(insufficient.checkpoint.comparableCount, 23);
+        assert.equal(insufficient.checkpoint.evaluation?.metrics.mention.comparableCount, 30);
+        assert.equal(insufficient.checkpoint.evaluation?.metrics.recommendation.comparableCount, 23);
+        assert.equal(insufficient.checkpoint.evaluation?.metrics.citation.comparableCount, 23);
+        assert.equal(insufficient.checkpoint.evaluation?.metrics.citation.after.cOverE, 23 / 30);
+        assert.equal(insufficient.checkpoint.evaluation?.metrics.citation.after.jcOverC, 1);
+        assert.deepEqual(insufficient.checkpoint.excluded, excluded);
+
+        // Now seed owner's saved slots for baseline ("frozen-core") meeting all coverage + 3 metric gates,
+        // plus 2 failing exploration slots (natural_question = 0) that must NOT block formal.
+        await seedWindowRun(db, { owner, brand, frozenSetId: "frozen-core", at: "2026-09-20T12:00:00.000Z", exploreCount: 2 });
+        await seedWindowRun(db, { owner, brand, frozenSetId: "frozen-core", at: "2026-10-05T12:00:00.000Z", exploreCount: 2 });
         const formal = await recordFormalCheckpoint(
           db,
           owner,
           baseline.observation.id,
-          formalRequest("2026-11-22", 24, []),
+          formalRequest("2026-11-22", 0, []),
           clock,
         );
         assert.equal(formal.checkpoint.mode, "formal");
+        assert.equal(formal.checkpoint.comparableCount, 30);
+        assert.equal(formal.checkpoint.evaluation?.metrics.citation.before.cOverE, 1);
+        assert.equal(formal.checkpoint.evaluation?.metrics.citation.before.jcOverC, 1);
+        assert.equal(formal.checkpoint.evaluation?.metrics.citation.after.cOverE, 1);
+        assert.equal(formal.checkpoint.evaluation?.metrics.citation.after.jcOverC, 1);
+        assert.equal(formal.checkpoint.evaluation?.slotIds.length, 60);
         assert.notEqual(formal.checkpoint.conclusion, null);
         assert.equal(formal.observation.checkpoints.length, 2);
-        const previous = formal.observation.checkpoints.find((item) => item.id === exploratory.checkpoint.id);
+        const previous = formal.observation.checkpoints.find((item) => item.id === missing.checkpoint.id);
         assert.equal(previous.mode, "exploratory");
         assert.deepEqual(previous.excluded, excluded);
+
+        // Submitting again must not rewrite the previously stored formal checkpoint row.
+        const formalRowBefore = await queryWithParameters(
+          db,
+          `SELECT id, mode, comparable_count AS "comparableCount", excluded_json AS "excludedJson",
+                  evaluation_json AS "evaluationJson", conclusion
+           FROM formal_checkpoint WHERE id = ?`,
+          [formal.checkpoint.id],
+        );
+        await recordFormalCheckpoint(db, owner, baseline.observation.id, formalRequest("2026-11-23", 1, ["q01"]), clock);
+        const formalRowAfter = await queryWithParameters(
+          db,
+          `SELECT id, mode, comparable_count AS "comparableCount", excluded_json AS "excludedJson",
+                  evaluation_json AS "evaluationJson", conclusion
+           FROM formal_checkpoint WHERE id = ?`,
+          [formal.checkpoint.id],
+        );
+        assert.deepEqual(formalRowAfter, formalRowBefore);
+
         const rows = await queryWithParameters(
           db,
           `SELECT id, mode FROM formal_checkpoint WHERE observation_id = ? ORDER BY created_at ASC, id ASC`,
           [baseline.observation.id],
         );
-        assert.deepEqual(rows.map((row) => row.mode), ["exploratory", "formal"]);
+        assert.deepEqual(rows.map((row) => row.mode), ["exploratory", "formal", "formal"]);
 
         const outsiderList = await listFormalObservations(db, outsider, brand);
         assert.deepEqual(outsiderList, { error: "NOT_FOUND" });
         assert.equal(JSON.stringify(outsiderList).includes("q24"), false);
         const listWatch = watch(db);
         const ownedList = await listFormalObservations(listWatch.connection, owner, brand);
-        assert.equal(ownedList.observations.length, 2);
+        assert.equal(ownedList.observations.length, 3);
         assert.equal(listWatch.captured.filter((item) => item.sql.includes("FROM formal_observation")).length, 1);
         assert.equal(listWatch.captured.filter((item) => item.sql.includes("FROM formal_checkpoint")).length, 1);
         const progress = ownedList.observations.find((item) => item.id === early.observation.id);
@@ -255,20 +405,43 @@ for (const kind of ["sqlite", "postgresql"]) {
           ) VALUES ${extraBrands.map(() => "(?, ?, ?, ?, 'd14', 'exploratory', 23, ?, ?, '2026-11-22', ?)").join(", ")}`,
           extraBrands.flatMap((id) => [randomUUID(), id, id, outsider, JSON.stringify(excluded), JSON.stringify({ kind: "exploratory", comparableQuestions: 23, frozenQuestions: 30 }), time]),
         );
+        await queryWithParameters(
+          db,
+          `INSERT INTO monitoring_run (
+            id, brand_id, owner_id, operation_id, fingerprint, track, prompt_set_id, prompt_set_version,
+            repeat_count, question_count, natural_count, channel_count, slot_count, region, language,
+            requested_network_mode, currency, upper_minor, estimate_high_minor, customer_payable_minor,
+            status, sampling_complete, created_at
+          ) VALUES ${extraBrands.map(() => "(?, ?, ?, ?, ?, 'model_api', 'frozen-core', 1, 1, 1, 1, 1, 1, 'CN', 'zh-CN', 'off', 'CNY', 0, 0, 0, 'queued', 0, ?)").join(", ")}`,
+          extraBrands.flatMap((id) => [id, id, outsider, id, "d".repeat(64), time]),
+        );
+        await queryWithParameters(
+          db,
+          `INSERT INTO monitoring_slot (
+            id, run_id, brand_id, question_id, natural_question, channel_id, channel_version,
+            repeat_index, reservation_id, status, adopted_attempt_id, late, created_at
+          ) VALUES ${extraBrands.map(() => "(?, ?, ?, 'q01', 1, ?, 1, 1, NULL, 'queued', NULL, 0, ?)").join(", ")}`,
+          extraBrands.flatMap((id) => [id, id, id, id, time]),
+        );
         if (db.kind === "postgresql") {
           await db.query("ANALYZE formal_observation");
           await db.query("ANALYZE formal_checkpoint");
+          await db.query("ANALYZE monitoring_run");
+          await db.query("ANALYZE monitoring_slot");
         }
         const explain = db.kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN ";
         const listQuery = formalObservationListQuery(owner, brand);
         const pointQuery = formalCheckpointListQuery(owner, [baseline.observation.id]);
+        const slotsQuery = formalSavedSlotsQuery(owner, brand, "frozen-core");
         const listPlan = JSON.stringify(await queryWithParameters(db, explain + listQuery.sql, listQuery.values));
         const pointPlan = JSON.stringify(await queryWithParameters(db, explain + pointQuery.sql, pointQuery.values));
+        const slotsPlan = JSON.stringify(await queryWithParameters(db, explain + slotsQuery.sql, slotsQuery.values));
         assert.match(listPlan, /formal_observation_owner_idx/);
         assert.match(pointPlan, /formal_checkpoint_observation_idx/);
+        assert.match(slotsPlan, /monitoring_slot_brand_idx|monitoring_slot_reservation_idx|monitoring_run_brand_recent_idx/);
         const scaled = watch(db);
         const scaledList = await listFormalObservations(scaled.connection, owner, brand);
-        assert.equal(scaledList.observations.length, 2);
+        assert.equal(scaledList.observations.length, 3);
         assert.equal(scaled.captured.filter((item) => item.sql.includes("FROM formal_checkpoint")).length, 1);
         assert.equal(scaled.captured.filter((item) => item.sql.includes("FROM formal_observation")).length, 1);
       } finally {

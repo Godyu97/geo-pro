@@ -35,6 +35,7 @@ export const formalCheckpoint = sqliteTable("formal_checkpoint", {
   conclusion: text("conclusion"),
   evaluatedOn: text("evaluated_on").notNull(),
   createdAt: text("created_at").notNull(),
+  evaluationJson: text("evaluation_json"),
 }, (table) => [
   index("formal_checkpoint_observation_idx").on(table.ownerId, table.observationId, table.createdAt, table.id),
   check("formal_checkpoint_state_check", sql`${table.checkpoint} in ('d7', 'd14', 'd28')
