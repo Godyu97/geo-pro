@@ -673,6 +673,28 @@ await writeFile(assistantCommands, assistantSource
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 
+const strategyCommands = path.join(fixture, "src/features/assistant/strategy-commands.ts");
+const strategySource = await readFile(strategyCommands, "utf8");
+const strategyRead = `export async function readStrategyWorkspace(db: DatabaseConnection, ownerId: string) {`;
+const strategySave = `export async function saveStrategyTemplate(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: SaveStrategyTemplateInput,
+  options: TemplateOptions = {},
+) {`;
+assert.ok(strategySource.includes(strategyRead));
+assert.ok(strategySource.includes(strategySave));
+await writeFile(strategyCommands, strategySource
+  .replace(strategyRead, `${strategyRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-strategy-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private strategy fixture failure");
+  }`)
+  .replace(strategySave, `${strategySave}
+  if ((await (await import("next/headers")).cookies()).get("geo-strategy-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

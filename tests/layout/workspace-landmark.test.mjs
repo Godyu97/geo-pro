@@ -521,3 +521,38 @@ test("weekly action drafts keep the next action, plan text, and read recovery", 
   assert.match(loading, /role="status"/);
   assert.match(loading, /t\("loading"\)/);
 });
+
+test("strategy templates keep the next action, observation text, and read recovery", () => {
+  const page = read("../../src/features/assistant/strategies-page.tsx");
+  const workspace = read("../../src/features/assistant/strategies-workspace.tsx");
+  const commands = read("../../src/features/assistant/strategy-commands.ts");
+  const loading = read("../../src/app/(dashboard)/dashboard/assistant/strategies/loading.tsx");
+  assert.doesNotMatch(page, /<main\b/);
+  assert.doesNotMatch(workspace, /<main\b/);
+  assert.match(page, /<header\b/);
+  assert.match(page, /emptyTask/);
+  assert.match(page, /savedTask/);
+  assert.match(page, /fillTemplate/);
+  assert.match(page, /viewTemplates/);
+  assert.match(page, /relatedEntries/);
+  assert.match(page, /SERVICE_UNAVAILABLE/);
+  assert.match(page, /messages\.reload/);
+  assert.match(page, /t\("trace"/);
+  assert.match(page, /readStrategyWorkspace/);
+  assert.match(page, /whitespace-normal/);
+  assert.match(page, /\[overflow-wrap:anywhere\]/);
+  assert.match(commands, /export async function readStrategyWorkspace/);
+  assert.match(workspace, /<Card/);
+  assert.match(workspace, /<CardContent/);
+  assert.match(workspace, /<Badge/);
+  assert.match(workspace, /<Input/);
+  assert.match(workspace, /<Label/);
+  assert.match(workspace, /aria-disabled=\{pending === "save"\}/);
+  assert.match(workspace, /aria-disabled=\{pending === "draft"\}/);
+  assert.match(workspace, /whitespace-normal/);
+  assert.match(workspace, /\[overflow-wrap:anywhere\]/);
+  assert.match(workspace, /id="strategy-list"/);
+  assert.match(workspace, /idPrefix="strategy"/);
+  assert.match(loading, /role="status"/);
+  assert.match(loading, /t\("loading"\)/);
+});

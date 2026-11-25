@@ -13,9 +13,10 @@ import {
   type DraftStrategyTemplateInput,
   type SaveStrategyTemplateInput,
   type StrategyTemplateError,
+  type StrategyTemplateView,
 } from "./strategy-contracts.ts";
 import { StrategyTemplateDao, type StrategyTemplateRecord } from "./strategy-dao.ts";
-import { observationMarker, stripGuaranteeSentences, type EvidenceStrength } from "./strategy-template.ts";
+import { observationMarker, stripGuaranteeSentences } from "./strategy-template.ts";
 
 const instructions = [
   "You draft an observation note for a strategy template.",
@@ -39,21 +40,6 @@ type TemplateOptions = {
   clock?: () => string;
   env?: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
-};
-
-export type StrategyTemplateView = {
-  id: string;
-  brandId: string;
-  industry: string;
-  samplingCondition: string;
-  evidenceStrength: EvidenceStrength;
-  failureCase: string;
-  explanation: string;
-  label: "observation";
-  guaranteed: 0;
-  successes: number;
-  createdAt: string;
-  updatedAt: string;
 };
 
 function failed(error: StrategyTemplateError, traceId?: string): Failure {
@@ -153,6 +139,28 @@ export async function listStrategyTemplates(db: DatabaseConnection, ownerId: str
   if (!brand) return failed("NOT_FOUND");
   const templates = await new StrategyTemplateDao(db).templatesForBrand(ownerId, brand.id);
   return { templates: templates.map(toView) };
+}
+
+export function strategyWorkspaceUnavailable(error: unknown) {
+  const traceId = randomUUID();
+  console.error("strategy-templates-page-unavailable", {
+    traceId,
+    message: error instanceof Error ? error.message : "unknown",
+  });
+  return { error: "SERVICE_UNAVAILABLE" as const, traceId };
+}
+
+export async function readStrategyWorkspace(db: DatabaseConnection, ownerId: string) {
+  const active = await new BrandDao(db).active(ownerId);
+  if (!active) return { kind: "no-brand" as const };
+  const listed = await listStrategyTemplates(db, ownerId, active.id);
+  if ("error" in listed) throw new Error("strategy-templates-unavailable");
+  return {
+    kind: "ready" as const,
+    brandId: active.id,
+    brandName: active.name,
+    templates: listed.templates,
+  };
 }
 
 export async function readStrategyTemplate(db: DatabaseConnection, ownerId: string, templateId: string) {

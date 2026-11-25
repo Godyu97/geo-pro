@@ -55,3 +55,19 @@ export const strategyTemplateErrors = {
 export type StrategyTemplateError = keyof typeof strategyTemplateErrors;
 export type SaveStrategyTemplateInput = z.infer<typeof saveStrategyTemplateSchema>;
 export type DraftStrategyTemplateInput = z.infer<typeof draftStrategyTemplateSchema>;
+export type EvidenceStrength = z.infer<typeof evidenceStrengthSchema>;
+
+export type StrategyTemplateView = {
+  id: string;
+  brandId: string;
+  industry: string;
+  samplingCondition: string;
+  evidenceStrength: EvidenceStrength;
+  failureCase: string;
+  explanation: string;
+  label: "observation";
+  guaranteed: 0;
+  successes: number;
+  createdAt: string;
+  updatedAt: string;
+};
