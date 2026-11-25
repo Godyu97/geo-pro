@@ -3,8 +3,8 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { CacheStore } from "../../lib/cache/store.ts";
 import { openCache } from "../../lib/cache/store.ts";
-import type { DatabaseConnection } from "../../lib/db/connection.ts";
-import { BrandDao } from "../brands/dao.ts";
+import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
+import { BrandDao, type BrandRecord } from "../brands/dao.ts";
 import { EvidenceDao } from "../evidence/dao.ts";
 import { invalidateEvidenceOverview } from "../evidence/overview-cache.ts";
 import { entityCorrectionWriteSchema, entityDisambiguationWriteSchema } from "./contracts.ts";
@@ -69,6 +69,21 @@ export function presentEntityRevisions(
   };
 }
 
+export type EntityRevisionWorkspace = {
+  brandName: string;
+  brandStatus: BrandRecord["status"];
+  board: EntityRevisionBoard;
+};
+
+export function entityRevisionUnavailable(error: unknown) {
+  const traceId = randomUUID();
+  console.error("entity-corrections-page-unavailable", {
+    traceId,
+    message: error instanceof Error ? error.message : "unknown",
+  });
+  return { error: "SERVICE_UNAVAILABLE" as const, traceId };
+}
+
 export async function listEntityRevisions(db: DatabaseConnection, ownerId: string, brandId: string) {
   const owned = await new BrandDao(db).owned(ownerId, brandId);
   if (!owned) return { error: "NOT_FOUND" as const };
@@ -76,6 +91,25 @@ export async function listEntityRevisions(db: DatabaseConnection, ownerId: strin
   const disambiguations = await dao.disambiguationsForBrand(ownerId, brandId);
   const corrections = await dao.correctionsForBrand(ownerId, brandId);
   return { board: presentEntityRevisions(disambiguations, corrections) };
+}
+
+export async function readEntityRevisionWorkspace(
+  db: QueryConnection,
+  ownerId: string,
+  brandId: string,
+): Promise<EntityRevisionWorkspace | { error: "NOT_FOUND" }> {
+  const owned = await new BrandDao(db).ownedSummary(ownerId, brandId);
+  if (!owned) return { error: "NOT_FOUND" as const };
+  const dao = new EntityRevisionDao(db);
+  const [disambiguations, corrections] = await Promise.all([
+    dao.disambiguationsForBrand(ownerId, brandId),
+    dao.correctionsForBrand(ownerId, brandId),
+  ]);
+  return {
+    brandName: owned.name,
+    brandStatus: owned.status,
+    board: presentEntityRevisions(disambiguations, corrections),
+  };
 }
 
 export async function confirmEntityDisambiguation(

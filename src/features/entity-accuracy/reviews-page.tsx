@@ -1,15 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
-import { getTranslator } from "@/lib/i18n/server";
+import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts.ts";
-import { recordEntityReviewAction } from "./actions";
-import { listEntityReviews } from "./commands";
-import type { EntityReviewBoard } from "./commands";
+import { entityReviewUnavailable, readEntityReviewWorkspace } from "./commands";
+import { ReviewsWorkspace } from "./reviews-workspace";
 
 const knownErrors = ["INVALID_INPUT", "NOT_FOUND", "SERVICE_UNAVAILABLE"] as const;
+const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center";
+const relatedLinkClass = "inline-flex min-h-10 min-w-0 max-w-full items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 whitespace-normal [overflow-wrap:anywhere] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 function isKnownError(value: string | undefined): value is (typeof knownErrors)[number] {
   return knownErrors.some((code) => code === value);
@@ -28,95 +30,101 @@ export default async function EntityReviewsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await requireSession();
-  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const [locale, { id }, query] = await Promise.all([getLocale(), params, searchParams]);
   const brandId = brandIdSchema.safeParse(id);
   if (!brandId.success) notFound();
+
   const t = await getTranslator("entityReviews");
+  const messages = getMessages(locale).entityReviews;
   const errorCode = typeof query.error === "string" ? query.error : undefined;
-  let listed: { board: EntityReviewBoard } | { error: "NOT_FOUND" | "SERVICE_UNAVAILABLE" };
-  try {
-    const result = await listEntityReviews(getConnection(), session.user.id, brandId.data);
-    listed = "error" in result ? { error: "NOT_FOUND" } : { board: result.board };
-  } catch {
-    listed = { error: "SERVICE_UNAVAILABLE" };
-  }
-  if ("error" in listed && listed.error === "NOT_FOUND") notFound();
-  const board = "board" in listed ? listed.board : null;
   const href = `/dashboard/brands/${brandId.data}`;
+  const currentHref = `${href}/entity-reviews`;
+
+  const result = await Promise.resolve()
+    .then(() => readEntityReviewWorkspace(getConnection(), session.user.id, brandId.data))
+    .catch(entityReviewUnavailable);
+
+  if ("error" in result && result.error === "NOT_FOUND") notFound();
+
+  if ("error" in result) {
+    return (
+      <div className="min-w-0 space-y-6">
+        <header className="min-w-0 space-y-3">
+          <h1 className="text-2xl font-semibold tracking-tight">{messages.title}</h1>
+          <p role="alert" className="max-w-2xl text-sm leading-7 text-destructive">
+            {messages.SERVICE_UNAVAILABLE}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild className={actionClass}>
+              <a href={currentHref}>{messages.reload}</a>
+            </Button>
+            <Button asChild variant="outline" className={actionClass}>
+              <Link href={href} prefetch={false}>{messages.back}</Link>
+            </Button>
+          </div>
+          <p className="break-all text-xs text-muted-foreground">{t("trace", { id: result.traceId })}</p>
+        </header>
+      </div>
+    );
+  }
+
+  const primaryActions = result.board.label === "sample" ? (
+    <>
+      <Button asChild className={actionClass}>
+        <a href="#entity-review-summary">{messages.viewSampleSummary}</a>
+      </Button>
+      <Button asChild variant="outline" className={actionClass}>
+        <a href="#entity-review-form">{messages.appendReviewAction}</a>
+      </Button>
+    </>
+  ) : (
+    <Button asChild className={actionClass}>
+      <a href="#entity-review-form">{messages.appendReviewAction}</a>
+    </Button>
+  );
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+    <div className="min-w-0 space-y-6">
+      <header className="min-w-0 space-y-3">
+        <h1 className="text-2xl font-semibold tracking-tight">{messages.title}</h1>
+        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{messages.description}</p>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">{messages.activeBrandLabel}</span>
+          <span className="[overflow-wrap:anywhere]">{result.brandName}</span>
+          {result.brandStatus === "archived" ? (
+            <Badge variant="secondary">{messages.archivedBadge}</Badge>
+          ) : null}
         </div>
-        <Button asChild variant="outline">
-          <Link href={href} prefetch={false}>{t("back")}</Link>
-        </Button>
-      </div>
+        <div className="flex flex-wrap gap-2">
+          {primaryActions}
+          <Button asChild variant="outline" className={actionClass}>
+            <Link href={href} prefetch={false}>{messages.back}</Link>
+          </Button>
+        </div>
+        <nav aria-label={messages.relatedEntries} className="flex min-w-0 flex-wrap gap-2">
+          <Link href={`${href}/entity-corrections`} prefetch={false} className={relatedLinkClass}>
+            {messages.openCorrections}
+          </Link>
+          <Link href="/dashboard/monitoring/answers" prefetch={false} className={relatedLinkClass}>
+            {messages.openAnswers}
+          </Link>
+          <Link href={`${href}/facts`} prefetch={false} className={relatedLinkClass}>
+            {messages.openFacts}
+          </Link>
+          <Link href="/dashboard/brands" prefetch={false} className={relatedLinkClass}>
+            {messages.allBrands}
+          </Link>
+        </nav>
+      </header>
 
-      {isKnownError(errorCode) ? (
-        <p role="alert" className="rounded-xl border border-dashed px-4 py-3 text-sm">{t(errorCode)}</p>
-      ) : null}
-      {"error" in listed ? (
-        <p role="alert" className="rounded-xl border border-dashed px-4 py-3 text-sm">{t(listed.error)}</p>
-      ) : null}
-
-      {board?.label === "sample" && board.errorLabel && board.coverage ? (
-        <section className="space-y-2 rounded-2xl border p-5">
-          <p className="text-lg font-semibold">{t("sample", { errorLabel: board.errorLabel })}</p>
-          <p className="text-sm leading-7">{t("coverage", { coverage: board.coverage })}</p>
-          {board.method ? <p className="text-sm text-muted-foreground">{t("method", { method: board.method })}</p> : null}
-        </section>
-      ) : board ? (
-        <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">{t("insufficient")}</p>
-      ) : null}
-
-      <section className="space-y-3 rounded-2xl border p-5">
-        <h2 className="text-lg font-semibold">{t("formTitle")}</h2>
-        <p className="text-sm leading-7 text-muted-foreground">{t("hint")}</p>
-        <form action={recordEntityReviewAction} className="grid gap-3 sm:grid-cols-2">
-          <input type="hidden" name="brandId" value={brandId.data} />
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("observationId")}</span>
-            <input name="observationId" required className="w-full rounded-md border bg-background px-3 py-2" />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("analysisVersionId")}</span>
-            <input name="analysisVersionId" required className="w-full rounded-md border bg-background px-3 py-2" />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("population")}</span>
-            <input name="population" type="number" min={1} max={100000} step={1} required className="w-full rounded-md border bg-background px-3 py-2" />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("methodLabel")}</span>
-            <input name="method" required maxLength={200} className="w-full rounded-md border bg-background px-3 py-2" />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("fact")}</span>
-            <select name="fact" defaultValue="active" className="h-10 w-full rounded-md border bg-background px-3">
-              <option value="active">{t("factActive")}</option>
-              <option value="expired">{t("factExpired")}</option>
-              <option value="conflict">{t("factConflict")}</option>
-            </select>
-          </label>
-          <div className="flex flex-wrap items-end gap-4 text-sm">
-            <label className="flex items-center gap-2">
-              <input name="reviewed" type="checkbox" defaultChecked />
-              {t("reviewed")}
-            </label>
-            <label className="flex items-center gap-2">
-              <input name="confirmed" type="checkbox" />
-              {t("confirmed")}
-            </label>
-          </div>
-          <div className="sm:col-span-2">
-            <Button type="submit">{t("submit")}</Button>
-          </div>
-        </form>
-      </section>
+      <ReviewsWorkspace
+        key={session.user.id + brandId.data}
+        brandId={brandId.data}
+        locale={locale}
+        initialBoard={result.board}
+        messages={messages}
+        initialError={isKnownError(errorCode) ? errorCode : null}
+      />
     </div>
   );
 }

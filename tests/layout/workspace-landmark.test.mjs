@@ -305,6 +305,49 @@ test("brand facts workspace keeps header actions, shared cards, wrapping, and re
   assert.match(workspace, /whitespace-normal/);
 });
 
+test("entity accuracy workspaces keep header actions, shared cards, wrapping, and read recovery in the workspace canvas", () => {
+  const reviewsPage = read("../../src/features/entity-accuracy/reviews-page.tsx");
+  const reviewsWorkspace = read("../../src/features/entity-accuracy/reviews-workspace.tsx");
+  assert.doesNotMatch(reviewsPage, /<main\b/);
+  assert.doesNotMatch(reviewsWorkspace, /<main\b/);
+  assert.match(reviewsPage, /<header\b/);
+  assert.match(reviewsPage, /SERVICE_UNAVAILABLE/);
+  assert.match(reviewsPage, /messages\.reload/);
+  assert.match(reviewsPage, /messages\.back/);
+  assert.match(reviewsPage, /relatedEntries/);
+  assert.match(reviewsPage, /whitespace-normal/);
+  assert.match(reviewsPage, /\[overflow-wrap:anywhere\]/);
+  assert.match(reviewsWorkspace, /<Card/);
+  assert.match(reviewsWorkspace, /<CardContent/);
+  assert.match(reviewsWorkspace, /<Badge/);
+  assert.match(reviewsWorkspace, /<Input/);
+  assert.match(reviewsWorkspace, /<Label/);
+  assert.match(reviewsWorkspace, /aria-disabled=\{pending\}/);
+  assert.match(reviewsWorkspace, /\[overflow-wrap:anywhere\]/);
+  assert.match(reviewsWorkspace, /whitespace-normal/);
+
+  const correctionsPage = read("../../src/features/entity-accuracy/corrections-page.tsx");
+  const correctionsWorkspace = read("../../src/features/entity-accuracy/corrections-workspace.tsx");
+  assert.doesNotMatch(correctionsPage, /<main\b/);
+  assert.doesNotMatch(correctionsWorkspace, /<main\b/);
+  assert.match(correctionsPage, /<header\b/);
+  assert.match(correctionsPage, /SERVICE_UNAVAILABLE/);
+  assert.match(correctionsPage, /messages\.reload/);
+  assert.match(correctionsPage, /messages\.back/);
+  assert.match(correctionsPage, /relatedEntries/);
+  assert.match(correctionsPage, /whitespace-normal/);
+  assert.match(correctionsPage, /\[overflow-wrap:anywhere\]/);
+  assert.match(correctionsWorkspace, /<Card/);
+  assert.match(correctionsWorkspace, /<CardContent/);
+  assert.match(correctionsWorkspace, /<Badge/);
+  assert.match(correctionsWorkspace, /<Input/);
+  assert.match(correctionsWorkspace, /<Label/);
+  assert.match(correctionsWorkspace, /aria-disabled=\{pendingDisambiguation\}/);
+  assert.match(correctionsWorkspace, /aria-disabled=\{pendingCorrection\}/);
+  assert.match(correctionsWorkspace, /\[overflow-wrap:anywhere\]/);
+  assert.match(correctionsWorkspace, /whitespace-normal/);
+});
+
 test("prompt sets workspace keeps header actions, shared cards, wrapping, and read recovery in the workspace canvas", () => {
   const page = read("../../src/features/prompts/page.tsx");
   const workspace = read("../../src/features/prompts/workspace.tsx");
@@ -325,4 +368,47 @@ test("prompt sets workspace keeps header actions, shared cards, wrapping, and re
   assert.match(workspace, /aria-disabled=\{pending\}/);
   assert.match(workspace, /\[overflow-wrap:anywhere\]/);
   assert.match(workspace, /whitespace-normal/);
+});
+
+test("entity accuracy workspaces keep header actions, shared cards, wrapping, and read recovery in the workspace canvas", () => {
+  const reviewsPage = read("../../src/features/entity-accuracy/reviews-page.tsx");
+  const reviewsWorkspace = read("../../src/features/entity-accuracy/reviews-workspace.tsx");
+  assert.doesNotMatch(reviewsPage, /<main\b/);
+  assert.doesNotMatch(reviewsWorkspace, /<main\b/);
+  assert.match(reviewsPage, /<header\b/);
+  assert.match(reviewsPage, /SERVICE_UNAVAILABLE/);
+  assert.match(reviewsPage, /messages\.reload/);
+  assert.match(reviewsPage, /messages\.back/);
+  assert.match(reviewsPage, /relatedEntries/);
+  assert.match(reviewsPage, /whitespace-normal/);
+  assert.match(reviewsPage, /\[overflow-wrap:anywhere\]/);
+  assert.match(reviewsWorkspace, /<Card/);
+  assert.match(reviewsWorkspace, /<CardContent/);
+  assert.match(reviewsWorkspace, /<Badge/);
+  assert.match(reviewsWorkspace, /<Input/);
+  assert.match(reviewsWorkspace, /<Label/);
+  assert.match(reviewsWorkspace, /aria-disabled=\{pending\}/);
+  assert.match(reviewsWorkspace, /\[overflow-wrap:anywhere\]/);
+  assert.match(reviewsWorkspace, /whitespace-normal/);
+
+  const correctionsPage = read("../../src/features/entity-accuracy/corrections-page.tsx");
+  const correctionsWorkspace = read("../../src/features/entity-accuracy/corrections-workspace.tsx");
+  assert.doesNotMatch(correctionsPage, /<main\b/);
+  assert.doesNotMatch(correctionsWorkspace, /<main\b/);
+  assert.match(correctionsPage, /<header\b/);
+  assert.match(correctionsPage, /SERVICE_UNAVAILABLE/);
+  assert.match(correctionsPage, /messages\.reload/);
+  assert.match(correctionsPage, /messages\.back/);
+  assert.match(correctionsPage, /relatedEntries/);
+  assert.match(correctionsPage, /whitespace-normal/);
+  assert.match(correctionsPage, /\[overflow-wrap:anywhere\]/);
+  assert.match(correctionsWorkspace, /<Card/);
+  assert.match(correctionsWorkspace, /<CardContent/);
+  assert.match(correctionsWorkspace, /<Badge/);
+  assert.match(correctionsWorkspace, /<Input/);
+  assert.match(correctionsWorkspace, /<Label/);
+  assert.match(correctionsWorkspace, /aria-disabled=\{pendingDisambiguation\}/);
+  assert.match(correctionsWorkspace, /aria-disabled=\{pendingCorrection\}/);
+  assert.match(correctionsWorkspace, /\[overflow-wrap:anywhere\]/);
+  assert.match(correctionsWorkspace, /whitespace-normal/);
 });

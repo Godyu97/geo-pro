@@ -1,8 +1,8 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { DatabaseConnection } from "../../lib/db/connection.ts";
-import { BrandDao } from "../brands/dao.ts";
+import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
+import { BrandDao, type BrandRecord } from "../brands/dao.ts";
 import { entityReviewWriteSchema } from "./contracts.ts";
 import { EntityReviewDao, type EntityReviewRecord } from "./dao.ts";
 import { reviewedErrorDisplay } from "./rules.ts";
@@ -71,11 +71,41 @@ export function presentEntityReviewBoard(rows: readonly EntityReviewRecord[]): E
   };
 }
 
+export type EntityReviewWorkspace = {
+  brandName: string;
+  brandStatus: BrandRecord["status"];
+  board: EntityReviewBoard;
+};
+
+export function entityReviewUnavailable(error: unknown) {
+  const traceId = randomUUID();
+  console.error("entity-reviews-page-unavailable", {
+    traceId,
+    message: error instanceof Error ? error.message : "unknown",
+  });
+  return { error: "SERVICE_UNAVAILABLE" as const, traceId };
+}
+
 export async function listEntityReviews(db: DatabaseConnection, ownerId: string, brandId: string) {
   const owned = await new BrandDao(db).owned(ownerId, brandId);
   if (!owned) return { error: "NOT_FOUND" as const };
   const rows = await new EntityReviewDao(db).reviewsForBrand(ownerId, brandId);
   return { board: presentEntityReviewBoard(rows) };
+}
+
+export async function readEntityReviewWorkspace(
+  db: QueryConnection,
+  ownerId: string,
+  brandId: string,
+): Promise<EntityReviewWorkspace | { error: "NOT_FOUND" }> {
+  const owned = await new BrandDao(db).ownedSummary(ownerId, brandId);
+  if (!owned) return { error: "NOT_FOUND" as const };
+  const rows = await new EntityReviewDao(db).reviewsForBrand(ownerId, brandId);
+  return {
+    brandName: owned.name,
+    brandStatus: owned.status,
+    board: presentEntityReviewBoard(rows),
+  };
 }
 
 export async function recordEntityReviews(

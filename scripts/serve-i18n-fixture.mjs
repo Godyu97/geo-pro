@@ -538,6 +538,71 @@ await writeFile(promptService, promptSource
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 
+const entityCommands = path.join(fixture, "src/features/entity-accuracy/commands.ts");
+const entityCommandsSource = await readFile(entityCommands, "utf8");
+const entityReviewsRead = `export async function readEntityReviewWorkspace(
+  db: QueryConnection,
+  ownerId: string,
+  brandId: string,
+): Promise<EntityReviewWorkspace | { error: "NOT_FOUND" }> {`;
+const entityReviewsWrite = `export async function recordEntityReviews(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: unknown,
+  clock: Clock = systemClock,
+) {`;
+assert.ok(entityCommandsSource.includes(entityReviewsRead) && entityCommandsSource.includes(entityReviewsWrite));
+await writeFile(entityCommands, entityCommandsSource
+  .replace(entityReviewsRead, `${entityReviewsRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-entity-reviews-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private entity reviews fixture failure");
+  }`)
+  .replace(entityReviewsWrite, `${entityReviewsWrite}
+  if ((await (await import("next/headers")).cookies()).get("geo-entity-reviews-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`));
+
+const entityRevisions = path.join(fixture, "src/features/entity-accuracy/revisions.ts");
+const entityRevisionsSource = await readFile(entityRevisions, "utf8");
+const entityCorrectionsRead = `export async function readEntityRevisionWorkspace(
+  db: QueryConnection,
+  ownerId: string,
+  brandId: string,
+): Promise<EntityRevisionWorkspace | { error: "NOT_FOUND" }> {`;
+const entityDisambiguationWrite = `export async function confirmEntityDisambiguation(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: unknown,
+  clock: Clock = systemClock,
+  cache?: CacheStore,
+) {`;
+const entityCorrectionWrite = `export async function recordEntityCorrection(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: unknown,
+  clock: Clock = systemClock,
+) {`;
+assert.ok(
+  entityRevisionsSource.includes(entityCorrectionsRead)
+  && entityRevisionsSource.includes(entityDisambiguationWrite)
+  && entityRevisionsSource.includes(entityCorrectionWrite),
+);
+await writeFile(entityRevisions, entityRevisionsSource
+  .replace(entityCorrectionsRead, `${entityCorrectionsRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-entity-corrections-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private entity corrections fixture failure");
+  }`)
+  .replace(entityDisambiguationWrite, `${entityDisambiguationWrite}
+  if ((await (await import("next/headers")).cookies()).get("geo-entity-corrections-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`)
+  .replace(entityCorrectionWrite, `${entityCorrectionWrite}
+  if ((await (await import("next/headers")).cookies()).get("geo-entity-corrections-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));
