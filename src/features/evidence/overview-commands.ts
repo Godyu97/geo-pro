@@ -31,6 +31,7 @@ import {
   type OverviewPayload,
 } from "./overview-cache.ts";
 import { overviewScopePath, type OverviewScope } from "./overview-contracts.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 
 type Failure = { error: EvidenceError };
 
@@ -50,6 +51,9 @@ export async function readEvidenceOverview(
   cache: CacheStore = openCache(),
   now: () => string = () => new Date().toISOString(),
 ): Promise<OverviewPayload | Failure> {
+  const adopted = await authorizeBrandActor(db, ownerId, scope.brandId, "read", now());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted.ownerId;
   const dao = new EvidenceDao(db);
   const context = await dao.overviewReadContext(ownerId, scope.brandId);
   if (!context) return denied("NOT_FOUND");

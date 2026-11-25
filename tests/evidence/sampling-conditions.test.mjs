@@ -192,8 +192,8 @@ for (const kind of ["sqlite", "postgresql"]) {
     const elapsed = performance.now() - started;
     assert.equal(visible.observation.observedRegion, "unknown");
     assert.equal(hidden, null);
-    assert.equal(watched.queries.length, 5);
-    assert.equal(watched.queries.filter((sql) => sql.includes("target_region")).length, 2);
+    assert.equal(watched.queries.length, 8);
+    assert.equal(watched.queries.filter((sql) => sql.includes("target_region")).length, 1);
     console.log(`${kind} sampling-condition read ${watched.queries.length} sql ${elapsed.toFixed(2)} ms`);
 
     const defaultedId = randomUUID();

@@ -7,7 +7,7 @@ import { formatNumber } from "@/lib/i18n/format";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { brandFixtureOrigin, brandIntakeOrigin } from "../brands/intake";
 import { ApplyMockContentButton, ApplyMockPublicationButton } from "@/features/functional-mock/run-buttons";
-import { BrandDao } from "../brands/dao";
+import { workspaceBrand } from "../team-access/brand-scope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { exportConfirmAction, exportPreflightAction, generateBatchAction, saveBriefAction } from "./actions";
@@ -97,9 +97,9 @@ export default async function ContentListPage({
   const locale = await getLocale();
   const t = await getTranslator("content");
   const connection = getConnection();
-  const brands = new BrandDao(connection);
-  const active = await brands.active(session.user.id);
-  const brandId = typeof params.brandId === "string" ? params.brandId : active?.id;
+  const requested = typeof params.brandId === "string" && params.brandId.trim() ? params.brandId.trim() : undefined;
+  const scope = await workspaceBrand(connection, session.user.id, requested, "read");
+  const brandId = scope?.brandId;
   const brandsAction = (
     <Button asChild className={actionClass}>
       <Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link>
@@ -110,7 +110,7 @@ export default async function ContentListPage({
     return (
       <ContentCanvas
         title={t("title")}
-        summary={<p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>}
+        summary={<p className="max-w-2xl text-sm leading-7 text-muted-foreground">{requested ? t("NOT_FOUND") : t("noBrand")}</p>}
         primary={brandsAction}
       />
     );

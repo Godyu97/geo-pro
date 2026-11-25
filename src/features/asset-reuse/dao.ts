@@ -3,6 +3,7 @@ import "server-only";
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 import {
   SOURCE_REASONS,
   SOURCE_RIGHTS,
@@ -143,14 +144,18 @@ export async function setSourceOriginalRights(
   return row ? sourceRowSchema.parse(row) : null;
 }
 
-export async function sourceOriginalMayDownload(db: QueryConnection, ownerId: string, objectId: string) {
-  const rows = await queryWithParameters(
+export async function sourceOriginalMayDownload(db: QueryConnection, actorId: string, objectId: string) {
+  const [row] = await queryWithParameters(
     db,
-    `SELECT id FROM source_original
-     WHERE owner_id = ? AND stored_object_id = ? AND rights_status = 'active'`,
-    [ownerId, objectId],
+    `SELECT owner_id AS "ownerId", brand_id AS "brandId" FROM source_original
+     WHERE stored_object_id = ? AND rights_status = 'active'`,
+    [objectId],
   );
-  return rows.length === 1;
+  if (!row) return false;
+  const parsed = z.object({ ownerId: z.string().min(1), brandId: brandIdSchema }).parse(row);
+  if (parsed.ownerId === actorId) return true;
+  const scope = await authorizeBrandActor(db, actorId, parsed.brandId, "download");
+  return Boolean(scope && scope.ownerId === parsed.ownerId);
 }
 
 const fragmentRowSchema = z.object({

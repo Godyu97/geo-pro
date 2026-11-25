@@ -10,6 +10,7 @@ import { PromptDao } from "../prompts/dao";
 import { QuotaDao } from "../quotas/dao";
 import { grantState } from "../quotas/ledger";
 import { MonitoringDao } from "./dao";
+import { authorizeBrandActor } from "../team-access/brand-scope";
 import { SamplingProtocolDao } from "./protocol-dao";
 import {
   classifyMonitoringReadiness,
@@ -161,6 +162,11 @@ export async function readOwnedRun(ownerId: string, runId: string) {
   try {
     const connection = getConnection();
     const dao = new MonitoringDao(connection);
+    const identity = await dao.runIdentity(runId);
+    if (!identity) return null;
+    const adopted = await authorizeBrandActor(connection, ownerId, identity.brandId, "read");
+    if (!adopted || adopted.ownerId !== identity.ownerId) return null;
+    ownerId = adopted.ownerId;
     const run = await dao.runForOwner(ownerId, runId);
     if (!run) return null;
     const [slots, attempts, prompt, protocol] = await Promise.all([

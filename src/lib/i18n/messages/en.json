@@ -2874,7 +2874,7 @@
   },
   "teamAccess": {
     "title": "Team and brand access",
-    "description": "An owner can grant another user access to a brand, create a member invitation that hides the brand name, promote an active member to owner, or revoke access. A member can read and export only granted brands.",
+    "description": "An owner can grant another user access to a brand, create a member invitation that hides the brand name, promote an active member to owner, or revoke access. Operators can read and work on granted brands. Read-only members can view them, but cannot write or download internal attachments or delivery packages.",
     "backSettings": "Back to account settings",
     "fixtureNote": "Local checks use synthetic accounts. Invitations hide private brand names and do not send mail. An expired invitation can be resent.",
     "ownerBrands": "Brands you own",
@@ -2883,7 +2883,8 @@
     "memberUser": "Member account",
     "role": "Role",
     "roleOwner": "Owner",
-    "roleMember": "Member",
+    "roleMember": "Operator",
+    "roleReadOnly": "Read-only",
     "expiresAt": "Expiry (optional)",
     "expiresHint": "Leave empty for no expiry. Use UTC, for example 2026-12-31T00:00:00.000Z.",
     "grant": "Grant",

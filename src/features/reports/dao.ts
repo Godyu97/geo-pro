@@ -174,6 +174,14 @@ export class ReportDao {
     return row ? snapshotRow.parse(row) : null;
   }
 
+  async snapshotIdentity(snapshotId: string) {
+    const [row] = await this.query(
+      `SELECT brand_id AS "brandId", owner_id AS "ownerId" FROM report_snapshot WHERE id = ?`,
+      [snapshotId],
+    );
+    return row ? z.object({ brandId: z.string().min(1), ownerId: z.string().min(1) }).parse(row) : null;
+  }
+
   async findSnapshot(ownerId: string, snapshotId: string) {
     const [row] = await this.query(
       `SELECT ${snapshotColumns} FROM report_snapshot WHERE id = ? AND owner_id = ?`,

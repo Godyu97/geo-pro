@@ -15,6 +15,7 @@ import {
   type MonitoringSlotRow,
 } from "./dao.ts";
 import { PromptDao } from "../prompts/dao.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 import { SamplingProtocolDao } from "./protocol-dao.ts";
 import {
   type IsolatedSample,
@@ -216,6 +217,11 @@ export async function executeMonitoringRun(
   now = () => new Date().toISOString(),
   options: { failBeforeCommit?: boolean; crashAfterClaim?: boolean } = {},
 ) {
+  const identity = await new MonitoringDao(connection).runIdentity(runId);
+  if (!identity) return denied("NOT_FOUND");
+  const adopted = await authorizeBrandActor(connection, ownerId, identity.brandId, "write", now());
+  if (!adopted || adopted.ownerId !== identity.ownerId) return denied("NOT_FOUND");
+  ownerId = adopted.ownerId;
   if (transport.label === "official_api") {
     return executeOfficialMonitoringRun(connection, ownerId, runId, transport, now, options);
   }

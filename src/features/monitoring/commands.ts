@@ -5,6 +5,7 @@ import type { DatabaseConnection, QueryConnection } from "../../lib/db/connectio
 import { CapabilityDao } from "../capabilities/dao.ts";
 import { formalRunEligibility } from "../capabilities/rules.ts";
 import { PromptDao } from "../prompts/dao.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 import { QuotaDao } from "../quotas/dao.ts";
 import { grantState } from "../quotas/ledger.ts";
 import {
@@ -233,6 +234,11 @@ export async function acceptMonitoringRun(
 export async function readMonitoringRun(connection: DatabaseConnection, ownerId: string, runId: string) {
   try {
     const dao = new MonitoringDao(connection);
+    const identity = await dao.runIdentity(runId);
+    if (!identity) return denied("NOT_FOUND");
+    const adopted = await authorizeBrandActor(connection, ownerId, identity.brandId, "read");
+    if (!adopted || adopted.ownerId !== identity.ownerId) return denied("NOT_FOUND");
+    ownerId = adopted.ownerId;
     const run = await dao.runForOwner(ownerId, runId);
     if (!run) return denied("NOT_FOUND");
     return withSlots(dao, run);

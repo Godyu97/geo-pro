@@ -6,7 +6,7 @@ import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
-import { BrandDao } from "@/features/brands/dao";
+import { workspaceBrand } from "@/features/team-access/brand-scope";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockRetestButton } from "@/features/functional-mock/run-buttons";
 import { Button } from "@/components/ui/button";
@@ -210,8 +210,9 @@ export default async function ReportsListPage({
     ? params.error
     : null;
   const connection = getConnection();
-  const requestedBrand = typeof params.brandId === "string" ? params.brandId : undefined;
-  const brandId = requestedBrand || (await new BrandDao(connection).active(session.user.id))?.id;
+  const requestedBrand = typeof params.brandId === "string" && params.brandId.trim() ? params.brandId.trim() : undefined;
+  const scope = await workspaceBrand(connection, session.user.id, requestedBrand, "read");
+  const brandId = scope?.brandId;
   const reportsHref = requestedBrand
     ? `/dashboard/reports?brandId=${encodeURIComponent(requestedBrand)}`
     : "/dashboard/reports";
@@ -230,7 +231,7 @@ export default async function ReportsListPage({
     return (
       <ReportCanvas
         title={t("title")}
-        summary={<p className="max-w-2xl break-words text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>}
+        summary={<p className="max-w-2xl break-words text-sm leading-7 text-muted-foreground">{requestedBrand ? t("NOT_FOUND") : t("noBrand")}</p>}
         primary={brandsAction}
         relatedLabel={t("relatedEntries")}
         related={relatedLinks(t)}

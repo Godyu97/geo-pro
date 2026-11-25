@@ -50,6 +50,15 @@ export function approveSeparated(input: {
   return { allowed: true as const, reason: "ok" as const, historicalUntouched: input.historicalSingleApproval };
 }
 
+export const brandAccessActions = ["read", "write", "download"] as const;
+export type BrandAccessAction = (typeof brandAccessActions)[number];
+
+// owner 管理品牌。member 是运营，可读写已授权品牌。read_only 只能查看，不能写，也不能下载内部附件或交付包。
+export function brandDutyAllows(role: "owner" | "member" | "read_only", action: BrandAccessAction) {
+  if (role === "read_only") return action === "read";
+  return role === "owner" || role === "member";
+}
+
 export function batchExport(input: { grantedBrandIds: readonly string[]; requestedBrandIds: readonly string[] }) {
   const allowed = new Set(input.grantedBrandIds);
   const denied = input.requestedBrandIds.filter((brandId) => !allowed.has(brandId));

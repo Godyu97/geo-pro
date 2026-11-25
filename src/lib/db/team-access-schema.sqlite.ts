@@ -16,7 +16,7 @@ export const brandMemberGrant = sqliteTable("brand_member_grant", {
   uniqueIndex("brand_member_grant_pair_uidx").on(table.userId, table.brandId),
   index("brand_member_grant_user_idx").on(table.userId, table.brandId).where(sql`${table.active} = 1`),
   index("brand_member_grant_brand_idx").on(table.brandId, table.userId),
-  check("brand_member_grant_state_check", sql`${table.role} in ('owner', 'member')
+  check("brand_member_grant_state_check", sql`${table.role} in ('owner', 'member', 'read_only')
     and ${table.active} in (0, 1)
     and length(${table.userId}) between 1 and 128
     and length(${table.createdAt}) between 20 and 40

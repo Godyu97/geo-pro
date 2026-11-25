@@ -10,6 +10,8 @@ import {
 import { containsExecutableInstruction } from "../../lib/http/public-page-policy.ts";
 import { delegatedOwnerId, openApprovalScope, rejectIfSeparated } from "../approval-policy/enforce.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
+import type { BrandAccessAction } from "../team-access/rules.ts";
 import { FactDao } from "../brand-facts/dao.ts";
 import { factGaps, factStatus } from "../brand-facts/rules.ts";
 import { withEligibleFacts } from "../brand-facts/service.ts";
@@ -104,6 +106,17 @@ function denied(error: ContentError, gaps?: Array<{ code: string }>, blockers?: 
   return { error, ...(gaps ? { gaps } : {}), ...(blockers ? { blockers } : {}) };
 }
 
+async function adoptOwner(
+  db: QueryConnection,
+  actorId: string,
+  brandId: string,
+  action: BrandAccessAction,
+  now = new Date().toISOString(),
+) {
+  const scope = await authorizeBrandActor(db, actorId, brandId, action, now);
+  return scope?.ownerId ?? null;
+}
+
 function parseFields(version: BriefVersionRow): BriefDraftFields {
   return {
     audience: version.audience,
@@ -152,6 +165,9 @@ export async function saveBriefDraft(
   input: SaveBriefDraftInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "write", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   const brands = new BrandDao(db);
   const brand = await brands.owned(ownerId, input.brandId);
   if (!brand || brand.status !== "active") return denied("NOT_FOUND");
@@ -234,6 +250,9 @@ export async function confirmBrief(
   input: ConfirmBriefInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "write", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   const brands = new BrandDao(db);
   const brand = await brands.owned(ownerId, input.brandId);
   if (!brand || brand.status !== "active") return denied("NOT_FOUND");
@@ -470,6 +489,9 @@ export async function generateBatch(
   input: GenerateBatchInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "write", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   const brands = new BrandDao(db);
   const brand = await brands.owned(ownerId, input.brandId);
   if (!brand || brand.status !== "active") return denied("NOT_FOUND");
@@ -611,6 +633,9 @@ export async function pauseBatch(
   input: BatchControlInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "write", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   const dao = new ContentDao(db);
   const batch = await dao.getBatch(ownerId, input.brandId, input.batchId);
   if (!batch) return denied("NOT_FOUND");
@@ -631,6 +656,9 @@ export async function cancelBatch(
   input: BatchControlInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "write", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   const dao = new ContentDao(db);
   const batch = await dao.getBatch(ownerId, input.brandId, input.batchId);
   if (!batch) return denied("NOT_FOUND");
@@ -675,6 +703,9 @@ export async function resumeBatch(
   input: BatchControlInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "write", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   const brands = new BrandDao(db);
   const brand = await brands.owned(ownerId, input.brandId);
   if (!brand || brand.status !== "active") return denied("NOT_FOUND");
@@ -751,6 +782,9 @@ export async function retryFailed(
   input: BatchControlInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "write", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   const brands = new BrandDao(db);
   const brand = await brands.owned(ownerId, input.brandId);
   if (!brand || brand.status !== "active") return denied("NOT_FOUND");
@@ -834,6 +868,9 @@ export async function readPlan(
   brandId: string,
   planId: string,
 ) {
+  const adopted = await adoptOwner(db, ownerId, brandId, "read");
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   const dao = new ContentDao(db);
   const plan = await dao.getPlan(ownerId, brandId, planId);
   if (!plan) return denied("NOT_FOUND");
@@ -845,7 +882,11 @@ export async function listBriefs(
   ownerId: string,
   brandId: string,
   limit = 20,
+  now = new Date().toISOString(),
 ) {
+  const adopted = await adoptOwner(db, ownerId, brandId, "read", now);
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   const brands = new BrandDao(db);
   const brand = await brands.owned(ownerId, brandId);
   if (!brand) return denied("NOT_FOUND");
@@ -867,6 +908,11 @@ export async function readBatch(
   batchId: string,
 ) {
   const dao = new ContentDao(db);
+  const identity = await dao.batchIdentity(batchId);
+  if (!identity) return denied("NOT_FOUND");
+  const adopted = await adoptOwner(db, ownerId, identity.brandId, "read");
+  if (!adopted || adopted !== identity.ownerId) return denied("NOT_FOUND");
+  ownerId = adopted;
   const batch = await dao.getBatchByIdForOwner(ownerId, batchId);
   if (!batch) return denied("NOT_FOUND");
   const units = await dao.listUnits(batch.id);
@@ -879,15 +925,18 @@ export async function readContentVersion(
   versionId: string,
 ) {
   const dao = new ContentDao(db);
-  const owned = await dao.getContentVersion(actorId, versionId);
-  const version = owned ?? await dao.getContentVersionById(versionId);
-  if (!version) return denied("NOT_FOUND");
+  const identity = await dao.contentVersionIdentity(versionId);
+  if (!identity) return denied("NOT_FOUND");
   let ownerId = actorId;
-  if (!owned) {
-    const delegated = await delegatedOwnerId(db, actorId, version.brandId, "content");
-    if (!delegated || delegated !== version.ownerId) return denied("NOT_FOUND");
-    ownerId = version.ownerId;
+  if (identity.ownerId !== actorId) {
+    const delegated = await delegatedOwnerId(db, actorId, identity.brandId, "content");
+    const adopted = await adoptOwner(db, actorId, identity.brandId, "read");
+    if (delegated && delegated === identity.ownerId) ownerId = identity.ownerId;
+    else if (adopted && adopted === identity.ownerId) ownerId = adopted;
+    else return denied("NOT_FOUND");
   }
+  const version = await dao.getContentVersion(ownerId, versionId);
+  if (!version || version.brandId !== identity.brandId) return denied("NOT_FOUND");
   // Frozen or foreign brands never expose approvals or package metadata.
   const brand = await new BrandDao(db).owned(ownerId, version.brandId);
   if (!brand) return denied("NOT_FOUND");
@@ -920,6 +969,9 @@ export async function listContentVersions(
   limit = 20,
   filter?: ContentVersionFilter,
 ) {
+  const adopted = await adoptOwner(db, ownerId, brandId, "read");
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   const brand = await new BrandDao(db).owned(ownerId, brandId);
   if (!brand) return denied("NOT_FOUND");
   const statuses = filter === "pending_review" ? ["in_review"] : filter === "deliverable" ? ["approved"] : undefined;
@@ -934,6 +986,11 @@ export async function readDeliveryPackage(
   options: ObjectCommandOptions = {},
 ) {
   const dao = new ContentDao(db);
+  const identity = await dao.packageIdentity(packageId);
+  if (!identity) return denied("NOT_FOUND");
+  const adopted = await adoptOwner(db, ownerId, identity.brandId, "download");
+  if (!adopted || adopted !== identity.ownerId) return denied("NOT_FOUND");
+  ownerId = adopted;
   const row = await dao.getPackage(ownerId, packageId);
   if (!row) return denied("NOT_FOUND");
   if (!await new BrandDao(db).owned(ownerId, row.brandId)) return denied("NOT_FOUND");
@@ -953,6 +1010,11 @@ export async function readBriefDetail(
   briefId: string,
 ) {
   const dao = new ContentDao(db);
+  const identity = await dao.briefIdentity(briefId);
+  if (!identity) return denied("NOT_FOUND");
+  const adopted = await adoptOwner(db, ownerId, identity.brandId, "read");
+  if (!adopted || adopted !== identity.ownerId) return denied("NOT_FOUND");
+  ownerId = adopted;
   const brief = await dao.getBriefByIdForOwner(ownerId, briefId);
   if (!brief) return denied("NOT_FOUND");
   const version = await dao.latestBriefVersion(brief.id);
@@ -1054,6 +1116,9 @@ export async function submitReview(
   input: SubmitReviewInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "write", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   return locked(db, ownerId, async (transaction) => {
     if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
     const dao = new ContentDao(transaction);
@@ -1381,6 +1446,9 @@ export async function exportPreflight(
   input: ExportPreflightInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "download", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   if (!await activeBrand(db, ownerId, input.brandId)) return denied("NOT_FOUND");
   const dao = new ContentDao(db);
   const found = await dao.getContentVersionsByIds(ownerId, input.brandId, input.versionIds);
@@ -1671,6 +1739,9 @@ export async function exportConfirm(
   clock: Clock = () => new Date().toISOString(),
   options: ObjectCommandOptions = {},
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "download", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   if (!await activeBrand(db, ownerId, input.brandId)) return denied("NOT_FOUND");
   const dao = new ContentDao(db);
   const job = await dao.getExportJobByOperation(ownerId, input.brandId, input.operationId);
@@ -1768,6 +1839,9 @@ export async function readContentAssetBytes(
   input: { brandId: string; objectId: string },
   options: RegisterAssetOptions = {},
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "download");
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   if (!await activeBrand(db, ownerId, input.brandId)) return denied("NOT_FOUND");
   const [object] = await loadBrandObjectsByIds(db, ownerId, input.brandId, [input.objectId]);
   if (!object || object.status !== "ready" || !object.objectKey || !object.fileName) return denied("NOT_FOUND");
@@ -1802,6 +1876,9 @@ export async function readExportJob(
   brandId: string,
   operationId: string,
 ) {
+  const adopted = await adoptOwner(db, ownerId, brandId, "read");
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   if (!await new BrandDao(db).owned(ownerId, brandId)) return denied("NOT_FOUND");
   const dao = new ContentDao(db);
   const job = await dao.getExportJobByOperation(ownerId, brandId, operationId);

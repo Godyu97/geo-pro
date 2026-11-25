@@ -79,6 +79,36 @@ const invitationColumns = `id, brand_id AS "brandId", invitee_user_id AS "invite
 const grantColumns = `id, user_id AS "userId", brand_id AS "brandId", role, active,
   expires_at AS "expiresAt", revoked_at AS "revokedAt"`;
 
+export function brandActorQuery(actorId: string, brandId: string) {
+  return {
+    sql: `SELECT b.owner_id AS "ownerId", b.status, b.frozen_at AS "frozenAt",
+        g.role AS "role", g.active AS "active", g.expires_at AS "expiresAt",
+        (SELECT 1 FROM brand_member_grant x WHERE x.brand_id = b.id LIMIT 1) AS "hasGrant"
+      FROM brand b
+      LEFT JOIN brand_member_grant g ON g.user_id = ? AND g.brand_id = b.id
+      WHERE b.id = ?`,
+    values: [actorId, brandId] as QueryValue[],
+  };
+}
+
+export function accessibleBrandQuery(actorId: string, now: string) {
+  return {
+    sql: `SELECT b.id AS "brandId", b.owner_id AS "ownerId", 'owner' AS "role"
+      FROM brand b
+      WHERE b.owner_id = ? AND b.status = 'active' AND b.frozen_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM brand_member_grant g WHERE g.brand_id = b.id)
+      UNION ALL
+      SELECT b.id, b.owner_id, g.role
+      FROM brand_member_grant g
+      JOIN brand b ON b.id = g.brand_id
+      WHERE g.user_id = ? AND g.active = 1 AND (g.expires_at IS NULL OR g.expires_at > ?)
+        AND b.status = 'active' AND b.frozen_at IS NULL
+      ORDER BY 1
+      LIMIT ?`,
+    values: [actorId, actorId, now, teamListLimit] as QueryValue[],
+  };
+}
+
 export function validGrantQuery(userId: string, now: string) {
   return {
     sql: `SELECT g.id, g.user_id AS "userId", g.brand_id AS "brandId", g.role, g.active,
@@ -156,6 +186,39 @@ export class TeamAccessDao {
 
   private query(sql: string, values: QueryValue[] = []) {
     return queryWithParameters(this.db, sql, values);
+  }
+
+  async brandActor(actorId: string, brandId: string) {
+    const query = brandActorQuery(actorId, brandId);
+    const [row] = await this.query(query.sql, query.values);
+    if (!row) return null;
+    const flag = (value: unknown) => {
+      if (value == null || value === false || value === 0 || value === "0") return null;
+      return 1;
+    };
+    const activeFlag = (value: unknown) => {
+      if (value == null) return null;
+      return value === 1 || value === "1" || value === true ? 1 : 0;
+    };
+    return z.object({
+      ownerId: z.string().min(1).max(128),
+      status: z.enum(["active", "archived"]),
+      frozenAt: z.string().nullable(),
+      role: z.enum(teamRoles).nullable(),
+      active: z.preprocess(activeFlag, z.union([z.literal(0), z.literal(1), z.null()])),
+      expiresAt: z.string().nullable(),
+      hasGrant: z.preprocess(flag, z.union([z.literal(1), z.null()])),
+    }).parse(row);
+  }
+
+  async accessibleBrands(actorId: string, now: string) {
+    const query = accessibleBrandQuery(actorId, now);
+    const rows = await this.query(query.sql, query.values);
+    return z.array(z.object({
+      brandId: brandIdSchema,
+      ownerId: z.string().min(1).max(128),
+      role: z.enum(teamRoles),
+    })).parse(rows);
   }
 
   async validAccess(userId: string, now: string) {

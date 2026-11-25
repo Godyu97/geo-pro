@@ -223,7 +223,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(smallHit.sampleCount, smallView.sampleCount);
     assert.equal(smallHit.metrics.recommended.equalWeight, smallView.metrics.recommended.equalWeight);
     assert.deepEqual(smallHit.questionClusters, smallView.questionClusters);
-    assert.equal(hitQueries, 1);
+    assert.equal(hitQueries, 2);
 
     const largeCache = memoryCache();
     meter.reset();
@@ -390,7 +390,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       meter.reset();
       const sharedHit = await readEvidenceOverview(meter.connection, ownerSmall, scopeOf(small), second);
       assert.deepEqual(sharedHit.questionClusters, warmed.questionClusters);
-      assert.equal(meter.count(), 1);
+      assert.equal(meter.count(), 2);
       const revisedLarge = await reviseAnalysis(db, ownerLarge, {
         action: "revise-analysis",
         brandId: large,

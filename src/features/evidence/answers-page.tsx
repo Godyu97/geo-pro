@@ -7,7 +7,7 @@ import { formatCount, formatNumber } from "@/lib/i18n/format";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockEvidenceButton } from "@/features/functional-mock/run-buttons";
-import { BrandDao } from "../brands/dao";
+import { workspaceBrand } from "../team-access/brand-scope";
 import { Button } from "@/components/ui/button";
 import {
   answerListFilterActive,
@@ -89,8 +89,8 @@ export default async function EvidenceAnswersPage({
   const t = await getTranslator("evidenceOverview");
   const te = await getTranslator("evidence");
   const connection = getConnection();
-  const brands = new BrandDao(connection);
-  const active = await brands.active(session.user.id);
+  const requested = typeof params.brandId === "string" && params.brandId.trim() ? params.brandId.trim() : undefined;
+  const scope = await workspaceBrand(connection, session.user.id, requested, "read");
   const mockLane = brandIntakeOrigin(await headers())?.mode === "mock";
   const title = t("answersTitle");
   const brandsAction = (
@@ -99,15 +99,13 @@ export default async function EvidenceAnswersPage({
     </Button>
   );
 
-  const brandId = (typeof params.brandId === "string" && params.brandId.trim())
-    ? params.brandId.trim()
-    : active?.id;
+  const brandId = scope?.brandId;
 
   if (!brandId) {
     return (
       <AnswerCanvas
         title={title}
-        summary={<p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("answersNoBrand")}</p>}
+        summary={<p className="max-w-2xl text-sm leading-7 text-muted-foreground">{requested ? te("NOT_FOUND") : t("answersNoBrand")}</p>}
         primary={brandsAction}
         relatedLabel={t("relatedEntries")}
         related={relatedLinks(t, {
@@ -129,9 +127,9 @@ export default async function EvidenceAnswersPage({
       <AnswerCanvas
         title={title}
         summary={<p role="alert" className="max-w-2xl break-words text-sm leading-7">{t("invalidScope")}</p>}
-        primary={active?.id ? (
+        primary={brandId ? (
           <Button asChild variant="outline" className={actionClass}>
-            <Link href={`/dashboard/monitoring/answers?brandId=${active.id}`} prefetch={false}>{t("clearFilters")}</Link>
+            <Link href={`/dashboard/monitoring/answers?brandId=${brandId}`} prefetch={false}>{t("clearFilters")}</Link>
           </Button>
         ) : undefined}
         relatedLabel={t("relatedEntries")}

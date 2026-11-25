@@ -463,6 +463,14 @@ export class ContentDao {
     return row ? briefRow.parse(row) : null;
   }
 
+  async briefIdentity(briefId: string) {
+    const [row] = await this.query(
+      `SELECT brand_id AS "brandId", owner_id AS "ownerId" FROM content_brief WHERE id = ?`,
+      [briefId],
+    );
+    return row ? z.object({ brandId: brandIdSchema, ownerId: z.string().min(1) }).parse(row) : null;
+  }
+
   async getBriefByIdForOwner(ownerId: string, briefId: string) {
     const [row] = await this.query(
       `SELECT ${briefColumns} FROM content_brief WHERE owner_id = ? AND id = ?`,
@@ -549,6 +557,14 @@ export class ContentDao {
     return row ? batchRow.parse(row) : null;
   }
 
+  async batchIdentity(batchId: string) {
+    const [row] = await this.query(
+      `SELECT brand_id AS "brandId", owner_id AS "ownerId" FROM content_batch WHERE id = ?`,
+      [batchId],
+    );
+    return row ? z.object({ brandId: brandIdSchema, ownerId: z.string().min(1) }).parse(row) : null;
+  }
+
   async getBatchByIdForOwner(ownerId: string, batchId: string) {
     const [row] = await this.query(
       `SELECT ${batchColumns} FROM content_batch WHERE owner_id = ? AND id = ?`,
@@ -621,6 +637,14 @@ export class ContentDao {
       [ownerId, versionId],
     );
     return row ? versionRow.parse(row) : null;
+  }
+
+  async contentVersionIdentity(versionId: string) {
+    const [row] = await this.query(
+      `SELECT brand_id AS "brandId", owner_id AS "ownerId" FROM content_version WHERE id = ?`,
+      [versionId],
+    );
+    return row ? z.object({ brandId: brandIdSchema, ownerId: z.string().min(1) }).parse(row) : null;
   }
 
   async getContentVersionById(versionId: string) {
@@ -776,6 +800,14 @@ export class ContentDao {
         row.packageFingerprint, row.createdAt,
       ],
     );
+  }
+
+  async packageIdentity(packageId: string) {
+    const [row] = await this.query(
+      `SELECT brand_id AS "brandId", owner_id AS "ownerId" FROM content_delivery_package WHERE id = ?`,
+      [packageId],
+    );
+    return row ? z.object({ brandId: brandIdSchema, ownerId: z.string().min(1) }).parse(row) : null;
   }
 
   async getPackage(ownerId: string, packageId: string) {

@@ -101,6 +101,20 @@ export async function ownedExportIsCurrent(db: QueryConnection, ownerId: string,
   return rows.length === 1;
 }
 
+export async function loadObjectIdentity(db: QueryConnection, id: string) {
+  const [row] = await queryWithParameters(
+    db,
+    `SELECT owner_id AS "ownerId", brand_id AS "brandId", status FROM stored_object WHERE id = ?`,
+    [id],
+  );
+  if (!row) return null;
+  return z.object({
+    ownerId: z.string().min(1),
+    brandId: z.string().nullable(),
+    status: z.enum(["pending", "ready", "failed", "tombstoned"]),
+  }).parse(row);
+}
+
 export async function loadOwnedObject(db: QueryConnection, ownerId: string, id: string) {
   const [row] = await queryWithParameters(
     db,

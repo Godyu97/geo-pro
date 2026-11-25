@@ -1919,7 +1919,7 @@ CREATE TABLE "brand_member_grant" (
 	"expires_at" text,
 	"created_at" text NOT NULL,
 	"revoked_at" text,
-	CONSTRAINT "brand_member_grant_state_check" CHECK ("brand_member_grant"."role" in ('owner', 'member')
+	CONSTRAINT "brand_member_grant_state_check" CHECK ("brand_member_grant"."role" in ('owner', 'member', 'read_only')
     and "brand_member_grant"."active" in (0, 1)
     and length("brand_member_grant"."user_id") between 1 and 128
     and length("brand_member_grant"."created_at") between 20 and 40

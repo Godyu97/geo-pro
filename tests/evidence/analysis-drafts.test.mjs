@@ -233,7 +233,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       const smallRead = await readObservation(small.connection, owner, observationId);
       const smallElapsed = performance.now() - smallStarted;
       assert.equal(smallRead.drafts.length, 0);
-      assert.equal(small.captured.length, 4);
+      assert.equal(small.captured.length, 6);
       assert.equal(small.captured.filter((item) => item.sql.includes("answer_analysis_draft")).length, 1);
       console.log(`${kind} open draft read ${small.captured.length} sql ${smallElapsed.toFixed(2)} ms before filler rows`);
 
@@ -268,7 +268,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       const largeRead = await readObservation(large.connection, owner, observationId);
       const largeElapsed = performance.now() - largeStarted;
       assert.equal(largeRead.drafts.length, 20);
-      assert.equal(large.captured.length, 4);
+      assert.equal(large.captured.length, 6);
       const listQuery = large.captured.find((item) => item.sql.includes("FROM answer_analysis_draft"));
       assert.ok(listQuery);
       const plan = await db.query(`${db.kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN "}${listQuery.sql}`, listQuery.values);

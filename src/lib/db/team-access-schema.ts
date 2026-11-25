@@ -18,7 +18,7 @@ export const brandMemberGrant = pgTable("brand_member_grant", {
   uniqueIndex("brand_member_grant_pair_uidx").on(table.userId, table.brandId),
   index("brand_member_grant_user_idx").on(table.userId, table.brandId).where(sql`${table.active} = 1`),
   index("brand_member_grant_brand_idx").on(table.brandId, table.userId),
-  check("brand_member_grant_state_check", sql`${table.role} in ('owner', 'member')
+  check("brand_member_grant_state_check", sql`${table.role} in ('owner', 'member', 'read_only')
     and ${table.active} in (0, 1)
     and length(${table.userId}) between 1 and 128
     and length(${table.createdAt}) between 20 and 40
@@ -41,7 +41,7 @@ export const queuedBrandAction = pgTable("queued_brand_action", {
     and length(${table.createdAt}) between 20 and 40`),
 ]);
 
-// One row per owner promotion. The grant role stays owner|member on brand_member_grant.
+// One row per owner promotion. brand_member_grant.role stays owner, member, or read_only.
 export const brandOwnerTransfer = pgTable("brand_owner_transfer", {
   id: text("id").primaryKey(),
   brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),

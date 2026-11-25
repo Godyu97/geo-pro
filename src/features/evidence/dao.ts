@@ -479,6 +479,14 @@ export class EvidenceDao {
     );
   }
 
+  async observationIdentity(observationId: string) {
+    const [row] = await this.query(
+      `SELECT brand_id AS "brandId", owner_id AS "ownerId" FROM answer_observation WHERE id = ?`,
+      [observationId],
+    );
+    return row ? z.object({ brandId: brandIdSchema, ownerId: z.string().min(1) }).parse(row) : null;
+  }
+
   async observationForOwner(ownerId: string, observationId: string) {
     const [row] = await this.query(
       `SELECT ${observationColumns} FROM answer_observation WHERE id = ? AND owner_id = ?`,

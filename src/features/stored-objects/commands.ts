@@ -30,12 +30,14 @@ import {
   type SaveStoredObjectInput,
 } from "./contracts.ts";
 import { sourceOriginalMayDownload } from "../asset-reuse/dao.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 import {
   claimMutableObject,
   insertPendingObject,
   sourceOriginalWithinBrandLimit,
   listFailedObjectKeys,
   listStoredObjectsForOwner,
+  loadObjectIdentity,
   loadOwnedObject,
   markObjectFailed,
   markObjectReady,
@@ -170,10 +172,20 @@ function readyResult(row: { id: string; class: ObjectClass; visibility: "interna
 }
 
 async function openReadyObject(db: QueryConnection, actorId: string, objectId: string): Promise<StoredObjectRow | StoredObjectFailure> {
-  const row = await loadOwnedObject(db, actorId, objectId);
+  const identity = await loadObjectIdentity(db, objectId);
+  if (!identity || identity.status !== "ready") return failure("not-found");
+  let ownerId = actorId;
+  if (identity.ownerId === actorId) {
+    if (identity.brandId && !await brandIsOpen(db, actorId, identity.brandId)) return failure("not-found");
+  } else {
+    if (!identity.brandId) return failure("not-found");
+    const scope = await authorizeBrandActor(db, actorId, identity.brandId, "download");
+    if (!scope || scope.ownerId !== identity.ownerId) return failure("not-found");
+    ownerId = scope.ownerId;
+  }
+  const row = await loadOwnedObject(db, ownerId, objectId);
   if (!row || row.status !== "ready" || !row.objectKey || !row.fileName) return failure("not-found");
   if (row.class === "owned-export" && !await ownedExportIsCurrent(db, actorId, row.id)) return failure("not-found");
-  if (row.brandId !== null && !await brandIsOpen(db, actorId, row.brandId)) return failure("not-found");
   if (row.class === "source-original" && !await sourceOriginalMayDownload(db, actorId, row.id)) return failure("not-found");
   return row;
 }

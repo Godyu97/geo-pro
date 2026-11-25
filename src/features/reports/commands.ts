@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { createObjectStorage } from "../../lib/storage/index.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 import { saveStoredObject, type ObjectStorageClient } from "../stored-objects/commands.ts";
 import { MAX_STORED_OBJECT_BYTES } from "../stored-objects/contracts.ts";
 import { loadBrandObjectsByIds, markObjectFailed } from "../stored-objects/dao.ts";
@@ -473,6 +474,11 @@ export async function readSnapshot(
   snapshotId: string,
   options: SnapshotStorageOptions = {},
 ): Promise<{ error: ReportError } | { snapshot: ReportSnapshotRow; html: string; json: string; source: SnapshotSourceView }> {
+  const identity = await new ReportDao(db).snapshotIdentity(snapshotId);
+  if (!identity) return { error: "NOT_FOUND" };
+  const adopted = await authorizeBrandActor(db, ownerId, identity.brandId, "read");
+  if (!adopted || adopted.ownerId !== identity.ownerId) return { error: "NOT_FOUND" };
+  ownerId = adopted.ownerId;
   const snapshot = await new ReportDao(db).findSnapshot(ownerId, snapshotId);
   if (!snapshot) return { error: "NOT_FOUND" };
   // Download re-checks the current owner and rejects a frozen brand before any object read.
@@ -497,6 +503,9 @@ export async function listReports(
   limit = 20,
   options: SnapshotStorageOptions = {},
 ) {
+  const adopted = await authorizeBrandActor(db, ownerId, brandId, "read");
+  if (!adopted) return { error: "NOT_FOUND" as ReportError };
+  ownerId = adopted.ownerId;
   const brand = await requireOwnedBrand(db, ownerId, brandId);
   if (!brand) return { error: "NOT_FOUND" as ReportError };
   const dao = new ReportDao(db);

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { opaqueIdSchema } from "../maintenance/contracts.ts";
 
-export const teamRoles = ["owner", "member"] as const;
+export const teamRoles = ["owner", "member", "read_only"] as const;
 export const teamActionStatuses = ["queued", "stopped"] as const;
 export const teamInviteStatuses = ["open", "accepted", "expired", "revoked"] as const;
 export const teamInviteLabelKey = "inviteMember" as const;

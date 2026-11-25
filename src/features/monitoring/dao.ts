@@ -111,6 +111,14 @@ export class MonitoringDao {
     return row ? runRow.parse(row) : null;
   }
 
+  async runIdentity(runId: string) {
+    const [row] = await this.query(
+      `SELECT brand_id AS "brandId", owner_id AS "ownerId" FROM monitoring_run WHERE id = ?`,
+      [runId],
+    );
+    return row ? z.object({ brandId: brandIdSchema, ownerId: z.string().min(1) }).parse(row) : null;
+  }
+
   async runForOwner(ownerId: string, runId: string) {
     const [row] = await this.query(`SELECT ${runColumns} FROM monitoring_run WHERE id = ? AND owner_id = ?`, [runId, ownerId]);
     return row ? runRow.parse(row) : null;

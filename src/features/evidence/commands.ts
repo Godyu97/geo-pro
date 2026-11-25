@@ -5,6 +5,7 @@ import type { CacheStore } from "../../lib/cache/store.ts";
 import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection, TransactionConnection } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 import { PromptDao } from "../prompts/dao.ts";
 import {
   type CompleteManualInput,
@@ -484,6 +485,9 @@ export async function readManualEvidenceContext(
   ownerId: string,
   brandId: string,
 ) {
+  const adopted = await authorizeBrandActor(db, ownerId, brandId, "read");
+  if (!adopted) return null;
+  ownerId = adopted.ownerId;
   const brand = await new BrandDao(db).version(ownerId, brandId);
   if (!brand || brand.status !== "active") return null;
   const source = await new PromptDao(db, brandId).latestClusterSource();
@@ -570,6 +574,11 @@ export async function readObservation(
   observationId: string,
 ) {
   const dao = new EvidenceDao(db);
+  const identity = await dao.observationIdentity(observationId);
+  if (!identity) return null;
+  const adopted = await authorizeBrandActor(db, ownerId, identity.brandId, "read");
+  if (!adopted || adopted.ownerId !== identity.ownerId) return null;
+  ownerId = adopted.ownerId;
   const observation = await dao.observationForOwner(ownerId, observationId);
   if (!observation) return null;
   const [citations, analyses, drafts, cost] = await Promise.all([
@@ -596,6 +605,9 @@ export async function readObservationBySlot(
   brandId: string,
   slotId: string,
 ) {
+  const adopted = await authorizeBrandActor(db, ownerId, brandId, "read");
+  if (!adopted) return null;
+  ownerId = adopted.ownerId;
   const dao = new EvidenceDao(db);
   const observation = await dao.observationBySlot(ownerId, brandId, slotId);
   if (!observation) return null;

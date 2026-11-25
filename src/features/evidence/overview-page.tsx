@@ -5,7 +5,7 @@ import { getConnection } from "@/lib/db/connection";
 import { formatDateTime, formatNumber, formatPercent } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
-import { BrandDao } from "../brands/dao";
+import { workspaceBrand } from "../team-access/brand-scope";
 import { Button } from "@/components/ui/button";
 import { TaskSummaryList } from "../optimization/task-summary.tsx";
 import { clusterLabel } from "./answer-list.ts";
@@ -122,12 +122,9 @@ export default async function EvidenceOverviewPage({
   const te = await getTranslator("evidence");
   const labels = getMessages(locale).evidenceOverview;
   const connection = getConnection();
-  const brands = new BrandDao(connection);
-  const active = await brands.active(session.user.id);
-
-  const brandId = (typeof params.brandId === "string" && params.brandId.trim())
-    ? params.brandId.trim()
-    : active?.id;
+  const requested = typeof params.brandId === "string" && params.brandId.trim() ? params.brandId.trim() : undefined;
+  const scope = await workspaceBrand(connection, session.user.id, requested, "read");
+  const brandId = scope?.brandId;
 
   const brandsAction = (
     <Button asChild className={actionClass}>
@@ -139,7 +136,7 @@ export default async function EvidenceOverviewPage({
     return (
       <EvidenceCanvas
         title={t("title")}
-        summary={<p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>}
+        summary={<p className="max-w-2xl text-sm leading-7 text-muted-foreground">{requested ? te("NOT_FOUND") : t("noBrand")}</p>}
         primary={brandsAction}
         relatedLabel={t("relatedEntries")}
         related={relatedLinks(t)}
@@ -154,9 +151,9 @@ export default async function EvidenceOverviewPage({
       <EvidenceCanvas
         title={t("title")}
         summary={<p role="alert" className="max-w-2xl text-sm leading-7">{t("invalidScope")}</p>}
-        primary={active?.id ? (
+        primary={brandId ? (
           <Button asChild variant="outline" className={actionClass}>
-            <Link href={`/dashboard/monitoring/overview?brandId=${active.id}`} prefetch={false}>{t("clearFilters")}</Link>
+            <Link href={`/dashboard/monitoring/overview?brandId=${brandId}`} prefetch={false}>{t("clearFilters")}</Link>
           </Button>
         ) : undefined}
         relatedLabel={t("relatedEntries")}

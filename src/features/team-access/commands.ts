@@ -17,7 +17,7 @@ import {
   type TeamListView,
 } from "./contracts.ts";
 import { TeamAccessDao, type TeamGrantRecord, type TeamInvitationRecord } from "./dao.ts";
-import { batchExport, brandVisible, invitePreview, leaveWorkspace, revokedAction } from "./rules.ts";
+import { batchExport, brandDutyAllows, brandVisible, invitePreview, leaveWorkspace, revokedAction } from "./rules.ts";
 
 function clock() {
   return new Date().toISOString();
@@ -76,7 +76,7 @@ export async function readGrantedBrand(db: QueryConnection, userId: string, bran
 export async function exportGrantedBrands(db: QueryConnection, userId: string, requestedBrandIds: readonly string[], now = clock()) {
   const access = await new TeamAccessDao(db).validAccess(userId, now);
   const decision = batchExport({
-    grantedBrandIds: access.map((row) => row.brandId),
+    grantedBrandIds: access.filter((row) => brandDutyAllows(row.role, "download")).map((row) => row.brandId),
     requestedBrandIds: [...new Set(requestedBrandIds)],
   });
   if (!decision.allowed) return { allowed: false as const, rows: [] as string[] };

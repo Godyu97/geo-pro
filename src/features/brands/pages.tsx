@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { accountAccessPath } from "@/features/account/email/contracts";
 import { requireSession } from "@/lib/auth/session";
+import { getConnection } from "@/lib/db/connection";
+import { authorizeBrandActor } from "@/features/team-access/brand-scope";
 import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { BrandForm, BrandIntakeJump } from "./brand-form";
@@ -452,13 +454,16 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
   const version = brandVersionParam.safeParse(query.version);
   if (!brandIdSchema.safeParse(id).success || (query.version !== undefined && !version.success)) notFound();
   const href = "/dashboard/brands/" + id;
+  const scope = await authorizeBrandActor(getConnection(), user.id, id, "read");
+  if (!scope) notFound();
+  const canManage = scope.role === "owner";
   const result = await readBrandData(async (dao) => {
-    const brand = await dao.version(user.id, id, version.data);
+    const brand = await dao.version(scope.ownerId, id, version.data);
     if (!brand) return null;
-    const editing = query.edit === "1" && query.version === undefined && brand.status === "active";
+    const editing = canManage && query.edit === "1" && query.version === undefined && brand.status === "active";
     return {
-      brand, editing, draft: editing ? await dao.draft(user.id, id) : null,
-      retention: editing ? null : await dao.retentionView(user.id, id),
+      brand, editing, draft: editing ? await dao.draft(scope.ownerId, id) : null,
+      retention: editing ? null : await dao.retentionView(scope.ownerId, id),
     };
   });
 
@@ -501,7 +506,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
     { title: t("fieldCompetitors"), values: competitors },
     { title: t("stepQuestions"), values: questions },
   ];
-  const readiness = await readBrandMonitoringReadiness(user.id, {
+  const readiness = await readBrandMonitoringReadiness(scope.ownerId, {
     id, status: brand.status, website,
   }, snapshot);
   const action = readinessAction(snapshot, readiness);
@@ -571,13 +576,13 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
         </Card>
         <div className="min-w-0 space-y-4 rounded-xl border bg-card p-5 lg:col-start-2">
           <div className="flex min-w-0 flex-wrap gap-2">
-            {!snapshot && brand.status === "active" && <Button asChild className={brandActionClass}><Link href={href + "?edit=1"} prefetch={false}>{t("edit")}</Link></Button>}
+            {canManage && !snapshot && brand.status === "active" && <Button asChild className={brandActionClass}><Link href={href + "?edit=1"} prefetch={false}>{t("edit")}</Link></Button>}
             {brand.version > 1 && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "?version=" + (brand.version - 1)} prefetch={false}>{t("previousVersion")}</Link></Button>}
           </div>
-          {!snapshot && <BrandStatusButton brand={{ id, status: brand.status, revision: brand.revision }} actorId={user.id} messages={messages} />}
-          {!snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/entity-reviews"} prefetch={false}>{getMessages(locale).entityReviews.title}</Link></Button>}
-          {!snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/entity-corrections"} prefetch={false}>{getMessages(locale).entityCorrections.title}</Link></Button>}
-          {!snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/delete"} prefetch={false}>{t("reviewDeletion")}</Link></Button>}
+          {canManage && !snapshot && <BrandStatusButton brand={{ id, status: brand.status, revision: brand.revision }} actorId={user.id} messages={messages} />}
+          {canManage && !snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/entity-reviews"} prefetch={false}>{getMessages(locale).entityReviews.title}</Link></Button>}
+          {canManage && !snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/entity-corrections"} prefetch={false}>{getMessages(locale).entityCorrections.title}</Link></Button>}
+          {canManage && !snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/delete"} prefetch={false}>{t("reviewDeletion")}</Link></Button>}
         </div>
       </div>
       {retention && <RetentionRecord t={t} locale={locale} view={retention} />}

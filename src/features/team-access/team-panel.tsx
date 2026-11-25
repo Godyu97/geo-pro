@@ -185,6 +185,7 @@ export function TeamPanel({ labels, workspace, messages }: {
               <span className="font-medium">{t("role")}</span>
               <select name="role" required className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" defaultValue="member">
                 <option value="member">{t("roleMember")}</option>
+                <option value="read_only">{t("roleReadOnly")}</option>
                 <option value="owner">{t("roleOwner")}</option>
               </select>
             </label>
@@ -277,7 +278,7 @@ export function TeamPanel({ labels, workspace, messages }: {
               return (
                 <li key={member.id} className="flex flex-wrap items-center gap-2">
                   <span>{labelFor(member.brandId)}</span>
-                  <span className="text-muted-foreground">{member.role === "owner" ? t("roleOwner") : t("roleMember")}</span>
+                  <span className="text-muted-foreground">{member.role === "owner" ? t("roleOwner") : member.role === "read_only" ? t("roleReadOnly") : t("roleMember")}</span>
                   <span className="text-muted-foreground">{member.active === 1 ? t("active") : t("inactive")}</span>
                   {member.role === "member" && member.active === 1 && (
                     <Button type="button" variant="outline" disabled={pending !== null}
