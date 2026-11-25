@@ -198,7 +198,12 @@ export async function reviewVersionAction(formData: FormData): Promise<void> {
     if (parsed.success) await submitReview(db, session.user.id, parsed.data);
   } else if (base.action === "approve-content") {
     const parsed = approveContentSchema.safeParse(base);
-    if (parsed.success) await approveContent(db, session.user.id, parsed.data);
+    const result = parsed.success ? await approveContent(db, session.user.id, parsed.data) : { error: "INVALID_INPUT" as const };
+    if ("error" in result && base.versionId) {
+      revalidatePath("/dashboard/content");
+      revalidatePath(versionPath(base.versionId));
+      redirect(`${versionPath(base.versionId)}?reviewError=${result.error}`);
+    }
   } else if (base.action === "reject-content") {
     const parsed = rejectContentSchema.safeParse(base);
     if (parsed.success) await rejectContent(db, session.user.id, parsed.data);

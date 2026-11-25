@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { delegatedOwnerId, openApprovalScope, rejectIfSeparated } from "../approval-policy/enforce.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import type { DatabaseConnection, QueryConnection, TransactionConnection } from "../../lib/db/connection.ts";
@@ -27,9 +28,16 @@ function page<T extends { id: string; createdAt: string }>(items: T[]) {
 }
 
 export async function readFactWorkspace(db: QueryConnection, scope: FactScope, query: WorkspaceQuery, clock = clockNow) {
-  const brand = await new BrandDao(db).ownedSummary(scope.ownerId, scope.brandId);
-  if (!brand) return null;
-  const dao = new FactDao(db, scope);
+  let effective = scope;
+  let brand = await new BrandDao(db).ownedSummary(scope.ownerId, scope.brandId);
+  if (!brand) {
+    const delegated = await delegatedOwnerId(db, scope.ownerId, scope.brandId, "fact");
+    if (!delegated) return null;
+    effective = { ownerId: delegated, brandId: scope.brandId };
+    brand = await new BrandDao(db).ownedSummary(delegated, scope.brandId);
+    if (!brand) return null;
+  }
+  const dao = new FactDao(db, effective);
   const [versions, pastes, fact, paste, impacts, successor] = await Promise.all([
     dao.versions(query.after), dao.pastes(query.pasteAfter),
     query.fact ? dao.version(query.fact) : null,
@@ -105,6 +113,24 @@ function isCandidate(fact: FactVersion) {
   return fact.state === "draft" || fact.state === "pending_confirmation";
 }
 
+async function approveFact(
+  dao: FactDao,
+  current: FactVersion,
+  operation: Extract<FactCommand, { action: "approve" }>,
+  approverId: string,
+  now: string,
+) {
+  if (current.state !== "pending_confirmation") return fail("conflict");
+  const gaps = factGaps(current.fields, now.slice(0, 10));
+  if (gaps.length) return { error: "evidenceRequired" as const, gaps };
+  const prior = await dao.priorApproval(current);
+  const conflict = prior && prior.fields.claim !== current.fields.claim ? prior : null;
+  if ((conflict?.id ?? null) !== operation.conflictId || (operation.revokeConflict && !conflict)) return fail("conflict");
+  await dao.transition(current, "approved", now, approverId);
+  if (conflict && operation.revokeConflict) await dao.transition(conflict, "revoked", now);
+  return done(current.id);
+}
+
 export async function executeFactCommand(db: DatabaseConnection, inputScope: unknown, input: unknown, clock = clockNow) {
   const scope = factScope.parse(inputScope);
   const command = factCommand.safeParse(input);
@@ -112,12 +138,36 @@ export async function executeFactCommand(db: DatabaseConnection, inputScope: unk
   const operation = command.data;
   return db.transaction(async (transaction) => {
     const brands = new BrandDao(transaction);
+    const now = clock().toISOString();
+    if (operation.action === "approve") {
+      const approvalScope = await openApprovalScope(transaction, scope.ownerId, scope.brandId, "fact");
+      if (!("error" in approvalScope) && approvalScope.dual) {
+        if (!await brands.lockOwner(scope.ownerId)) return fail("notFound");
+        if (!await brands.lockOwner(approvalScope.brandOwnerId)) return fail("notFound");
+        const ownedBrand = await brands.owned(approvalScope.brandOwnerId, scope.brandId);
+        if (!ownedBrand) return fail("notFound");
+        if (ownedBrand.status !== "active") return fail("readOnly");
+        const reviewerDao = new FactDao(transaction, { ownerId: approvalScope.brandOwnerId, brandId: scope.brandId });
+        const pending = await reviewerDao.version(operation.id);
+        if (!pending) return fail("notFound");
+        if (pending.revision !== operation.revision) return fail("conflict");
+        const separated = await rejectIfSeparated(transaction, {
+          scope: approvalScope,
+          brandId: scope.brandId,
+          versionId: pending.id,
+          kind: "fact",
+          authorId: approvalScope.brandOwnerId,
+          actorId: scope.ownerId,
+          now,
+        });
+        if (!separated.ok) return fail(separated.error === "SEPARATION" ? "separation" : "duty");
+        return approveFact(reviewerDao, pending, operation, scope.ownerId, now);
+      }
+    }
     if (!await brands.lockOwner(scope.ownerId)) return fail("notFound");
     const brand = await brands.owned(scope.ownerId, scope.brandId);
     if (!brand) return fail("notFound");
     if (brand.status !== "active") return fail("readOnly");
-
-    const now = clock().toISOString();
     const dao = new FactDao(transaction, scope);
     switch (operation.action) {
       case "savePaste": return saveOriginal(dao, operation, now);
@@ -137,17 +187,8 @@ export async function executeFactCommand(db: DatabaseConnection, inputScope: unk
         if (current.state !== "draft") return fail("conflict");
         await dao.transition(current, "pending_confirmation", now);
         break;
-      case "approve": {
-        if (current.state !== "pending_confirmation") return fail("conflict");
-        const gaps = factGaps(current.fields, now.slice(0, 10));
-        if (gaps.length) return { error: "evidenceRequired" as const, gaps };
-        const prior = await dao.priorApproval(current);
-        const conflict = prior && prior.fields.claim !== current.fields.claim ? prior : null;
-        if ((conflict?.id ?? null) !== operation.conflictId || (operation.revokeConflict && !conflict)) return fail("conflict");
-        await dao.transition(current, "approved", now);
-        if (conflict && operation.revokeConflict) await dao.transition(conflict, "revoked", now);
-        break;
-      }
+      case "approve":
+        return approveFact(dao, current, operation, scope.ownerId, now);
       case "revoke":
         if (current.state !== "approved") return fail("conflict");
         await dao.transition(current, "revoked", now);

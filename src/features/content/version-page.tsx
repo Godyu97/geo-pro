@@ -23,10 +23,16 @@ export async function generateMetadata() {
 }
 
 const assetErrorCodes = ["ASSET_TYPE_REJECTED", "ASSET_TOO_LARGE", "ASSET_UNREVIEWED", "INVALID_INPUT", "NOT_FOUND", "SERVICE_UNAVAILABLE"] as const;
+const reviewErrorCodes = ["SEPARATION", "DUTY", "FACT_INVALID", "INVALID_INPUT", "OPERATION_CONFLICT", "NOT_FOUND"] as const;
 
 function assetErrorCode(value: string | string[] | undefined) {
   const code = Array.isArray(value) ? value[0] : value;
   return assetErrorCodes.find((item) => item === code);
+}
+
+function reviewErrorCode(value: string | string[] | undefined) {
+  const code = Array.isArray(value) ? value[0] : value;
+  return reviewErrorCodes.find((item) => item === code);
 }
 
 const actionClass = "h-auto max-w-full whitespace-normal";
@@ -172,6 +178,7 @@ export default async function ContentVersionPage({
   const job = exported && !("error" in exported) ? exported : null;
   const canEdit = !readOnly;
   const assetError = assetErrorCode(query.assetError);
+  const reviewError = reviewErrorCode(query.reviewError);
   const status = version.status;
   const headerPreflight = canEdit && status === "approved" && approvalCurrent;
   const links = [
@@ -189,6 +196,7 @@ export default async function ContentVersionPage({
           <p role="status" className="break-words text-sm leading-7 text-muted-foreground">
             {taskCopy(t, status, approvalCurrent, readOnly)}
           </p>
+          {reviewError ? <p role="alert" className="break-words text-sm leading-7 text-destructive">{t(reviewError)}</p> : null}
           <Badge variant="secondary">{status}</Badge>
           <p className="[overflow-wrap:anywhere] text-xs leading-5 text-muted-foreground">{version.id}</p>
         </div>

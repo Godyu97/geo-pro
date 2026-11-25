@@ -623,6 +623,22 @@ export class ContentDao {
     return row ? versionRow.parse(row) : null;
   }
 
+  async getContentVersionById(versionId: string) {
+    const [row] = await this.query(
+      `SELECT ${versionColumns} FROM content_version WHERE id = ?`,
+      [versionId],
+    );
+    return row ? versionRow.parse(row) : null;
+  }
+
+  async getContentVersionInBrand(brandId: string, versionId: string) {
+    const [row] = await this.query(
+      `SELECT ${versionColumns} FROM content_version WHERE brand_id = ? AND id = ?`,
+      [brandId, versionId],
+    );
+    return row ? versionRow.parse(row) : null;
+  }
+
   async listContentVersionsForBrand(ownerId: string, brandId: string, limit: number, statuses?: string[]) {
     const filter = statuses?.length ? ` AND status IN (${statuses.map(() => "?").join(", ")})` : "";
     const rows = await this.query(
@@ -868,6 +884,14 @@ export class ContentDao {
     const [row] = await this.query(
       `SELECT ${publicationColumns} FROM content_publication WHERE owner_id = ? AND id = ?`,
       [ownerId, publicationId],
+    );
+    return row ? publicationRow.parse(row) : null;
+  }
+
+  async getPublicationById(publicationId: string) {
+    const [row] = await this.query(
+      `SELECT ${publicationColumns} FROM content_publication WHERE id = ?`,
+      [publicationId],
     );
     return row ? publicationRow.parse(row) : null;
   }

@@ -106,7 +106,9 @@ export type FixturePageInput = z.infer<typeof fixturePageSchema>;
 export const contentErrors = {
   SESSION_REQUIRED: 401,
   FORBIDDEN: 403,
+  DUTY: 403,
   NOT_FOUND: 404,
+  SEPARATION: 409,
   INVALID_INPUT: 400,
   EVIDENCE_REQUIRED: 422,
   OPERATION_CONFLICT: 409,

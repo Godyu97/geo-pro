@@ -41,7 +41,15 @@ export async function GET(request: Request, context: Context) {
   }
 }
 
-const errors = { invalidInput: 400, notFound: 404, conflict: 409, evidenceRequired: 422, readOnly: 409 };
+const errors = {
+  invalidInput: 400,
+  notFound: 404,
+  conflict: 409,
+  evidenceRequired: 422,
+  readOnly: 409,
+  separation: 409,
+  duty: 403,
+};
 
 export async function POST(request: Request, context: Context) {
   const scope = await access(request, context);

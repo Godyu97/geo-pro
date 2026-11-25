@@ -8,6 +8,7 @@ import {
   type PublicPageFetcher,
 } from "../../lib/http/public-page-fetch.ts";
 import { containsExecutableInstruction } from "../../lib/http/public-page-policy.ts";
+import { delegatedOwnerId, openApprovalScope, rejectIfSeparated } from "../approval-policy/enforce.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { FactDao } from "../brand-facts/dao.ts";
 import { factGaps, factStatus } from "../brand-facts/rules.ts";
@@ -874,12 +875,19 @@ export async function readBatch(
 
 export async function readContentVersion(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   versionId: string,
 ) {
   const dao = new ContentDao(db);
-  const version = await dao.getContentVersion(ownerId, versionId);
+  const owned = await dao.getContentVersion(actorId, versionId);
+  const version = owned ?? await dao.getContentVersionById(versionId);
   if (!version) return denied("NOT_FOUND");
+  let ownerId = actorId;
+  if (!owned) {
+    const delegated = await delegatedOwnerId(db, actorId, version.brandId, "content");
+    if (!delegated || delegated !== version.ownerId) return denied("NOT_FOUND");
+    ownerId = version.ownerId;
+  }
   // Frozen or foreign brands never expose approvals or package metadata.
   const brand = await new BrandDao(db).owned(ownerId, version.brandId);
   if (!brand) return denied("NOT_FOUND");
@@ -1062,57 +1070,79 @@ export async function submitReview(
 
 export async function approveContent(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: ApproveContentInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
-  if (!await activeBrand(db, ownerId, input.brandId)) return denied("NOT_FOUND");
+  const scope = await openApprovalScope(db, actorId, input.brandId, "content");
+  if ("error" in scope) return denied(scope.error);
   const dao = new ContentDao(db);
-  const version = await ownedVersion(dao, ownerId, input.brandId, input.versionId);
-  if (!version) return denied("NOT_FOUND");
+  const version = scope.dual
+    ? await dao.getContentVersionInBrand(input.brandId, input.versionId)
+    : await ownedVersion(dao, actorId, input.brandId, input.versionId);
+  if (!version || version.brandId !== input.brandId) return denied("NOT_FOUND");
+  if (!scope.dual && version.ownerId !== actorId) return denied("NOT_FOUND");
+  const now = clock();
+  if (scope.dual && !scope.matchingDuty) {
+    const rejected = await rejectIfSeparated(db, {
+      scope, brandId: input.brandId, versionId: version.id, kind: "content",
+      authorId: version.ownerId, actorId, now,
+    });
+    return denied(rejected.ok ? "DUTY" : rejected.error);
+  }
 
   if (version.status === "approved") {
     const fingerprint = versionFingerprint(version);
-    const approval = (await dao.listApprovals(ownerId, version.id))
+    const approval = (await dao.listApprovals(version.ownerId, version.id))
       .find((item) => item.decision === "approved" && item.contentFingerprint === fingerprint);
     if (!approval) return denied("INVALID_INPUT");
     return { versionId: version.id, approvalId: approval.id, status: "approved" as const, replayed: true };
   }
   if (version.status !== "in_review") return denied("INVALID_INPUT");
+  const separated = await rejectIfSeparated(db, {
+    scope, brandId: input.brandId, versionId: version.id, kind: "content",
+    authorId: version.ownerId, actorId, now,
+  });
+  if (!separated.ok) return denied(separated.error);
   const factVersionIds = parseIds(version.factVersionIdsJson);
   if (factVersionIds.length === 0) return denied("FACT_INVALID");
 
   // Facts are rechecked under the owner lock so a concurrent revoke cannot slip through.
   const gate = await withEligibleFacts(
     db,
-    { ownerId, brandId: input.brandId },
+    { ownerId: scope.brandOwnerId, brandId: input.brandId },
     { factVersionIds, contentVersionId: version.id, stage: "review" },
     async (transaction) => {
+      const separatedNow = await rejectIfSeparated(transaction, {
+        scope, brandId: input.brandId, versionId: version.id, kind: "content",
+        authorId: version.ownerId, actorId, now,
+      });
+      if (!separatedNow.ok) return { outcome: "denied" as const, error: separatedNow.error };
       const txDao = new ContentDao(transaction);
-      const current = await ownedVersion(txDao, ownerId, input.brandId, input.versionId);
-      if (!current || current.status !== "in_review") return null;
+      const current = await txDao.getContentVersion(version.ownerId, input.versionId);
+      if (!current || current.brandId !== input.brandId || current.status !== "in_review") return null;
       const fingerprint = versionFingerprint(current);
-      const now = clock();
       const approvalId = randomUUID();
       await txDao.insertApproval({
         id: approvalId,
         brandId: input.brandId,
-        ownerId,
+        ownerId: current.ownerId,
         contentVersionId: current.id,
         contentFingerprint: fingerprint,
         factVersionIdsJson: current.factVersionIdsJson,
         decision: "approved",
-        actorId: ownerId,
+        actorId,
         createdAt: now,
       });
       await txDao.updateContentVersionStatus(current.id, "approved", now);
-      await txDao.markPackagesDoNotReuse(ownerId, current.id, fingerprint);
-      return { approvalId, fingerprint };
+      await txDao.markPackagesDoNotReuse(current.ownerId, current.id, fingerprint);
+      return { outcome: "approved" as const, approvalId, fingerprint };
     },
-    () => new Date(clock()),
+    () => new Date(now),
   );
   if ("error" in gate) return factFailure(gate);
   if (!gate.data) return denied("INVALID_INPUT");
+  if (gate.data.outcome === "denied") return denied(gate.data.error);
   return {
     versionId: version.id,
     approvalId: gate.data.approvalId,
@@ -2059,12 +2089,16 @@ export type ManualEvidenceOptions = ObjectCommandOptions & {
 
 export async function submitManualEvidence(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: SubmitManualEvidenceInput,
   clock: Clock = () => new Date().toISOString(),
   options: ManualEvidenceOptions = {},
 ) {
-  return locked(db, ownerId, async (transaction) => {
+  const scope = await openApprovalScope(db, actorId, input.brandId, "content");
+  if ("error" in scope) return denied(scope.error);
+  const ownerId = scope.brandOwnerId;
+  return db.transaction(async (transaction) => {
+    if (!await new BrandDao(transaction).lockOwner(ownerId)) return denied("NOT_FOUND");
     if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
     const dao = new ContentDao(transaction);
     const publication = await dao.getPublication(ownerId, input.publicationId);
@@ -2078,6 +2112,18 @@ export async function submitManualEvidence(
     if (version.status !== "approved") return denied("APPROVAL_REQUIRED");
     if (versionFingerprint(version) !== publication.contentFingerprint) return denied("APPROVAL_INVALID");
 
+    const now = clock();
+    const separated = await rejectIfSeparated(transaction, {
+      scope,
+      brandId: input.brandId,
+      versionId: publication.id,
+      kind: "content",
+      authorId: publication.publisherId,
+      actorId,
+      now,
+    });
+    if (!separated.ok) return denied(separated.error);
+
     const file = options.file;
     const fileName = file ? sanitizeObjectFileName(file.fileName) : undefined;
     if (file) {
@@ -2087,7 +2133,6 @@ export async function submitManualEvidence(
       if (!evidenceImageTypes.has(file.contentType)) return denied("EVIDENCE_TYPE_REJECTED");
     }
 
-    const now = clock();
     const result = evaluateManualEvidence({
       evidence: {
         screenshotRef: fileName ?? input.screenshotRef,
@@ -2168,7 +2213,7 @@ export async function submitManualEvidence(
         claimedPublishedAt: publication.claimedPublishedAt,
         evidenceGrade: result.evidenceGrade,
       }),
-      actorId: ownerId,
+      actorId,
       checkedAt: now,
       notes: result.reason,
     });
@@ -2310,12 +2355,19 @@ export async function markPublicationRemoved(
 
 export async function readPublication(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   publicationId: string,
 ) {
   const dao = new ContentDao(db);
-  const publication = await dao.getPublication(ownerId, publicationId);
+  const owned = await dao.getPublication(actorId, publicationId);
+  const publication = owned ?? await dao.getPublicationById(publicationId);
   if (!publication) return denied("NOT_FOUND");
+  let ownerId = actorId;
+  if (!owned) {
+    const delegated = await delegatedOwnerId(db, actorId, publication.brandId, "content");
+    if (!delegated || delegated !== publication.ownerId) return denied("NOT_FOUND");
+    ownerId = publication.ownerId;
+  }
   const brand = await new BrandDao(db).owned(ownerId, publication.brandId);
   if (!brand) return denied("NOT_FOUND");
   const [checks, actions, version] = await Promise.all([

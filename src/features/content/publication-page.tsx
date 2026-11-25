@@ -33,6 +33,8 @@ const evidenceErrorCodes = [
   "PUBLICATION_CONFLICT",
   "APPROVAL_REQUIRED",
   "APPROVAL_INVALID",
+  "SEPARATION",
+  "DUTY",
 ] as const;
 
 type Translate = Awaited<ReturnType<typeof getTranslator<"content">>>;

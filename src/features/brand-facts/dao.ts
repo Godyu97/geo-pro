@@ -125,11 +125,11 @@ export class FactDao {
     [JSON.stringify(fields), fields.pasteId, this.scope.brandId, item.id, this.scope.brandId, this.scope.ownerId]);
   }
 
-  async transition(item: FactVersion, state: FactVersion["state"], at: string) {
+  async transition(item: FactVersion, state: FactVersion["state"], at: string, approverId = this.scope.ownerId) {
     await queryWithParameters(this.db, `UPDATE brand_fact_version SET state = ?, revision = revision + 1,
       confirmed_by = ?, confirmed_at = ?, revoked_at = ?
       WHERE brand_id = ? AND id = ? AND EXISTS (SELECT 1 FROM brand WHERE id = ? AND owner_id = ? AND frozen_at IS NULL)`,
-    [state, state === "approved" ? this.scope.ownerId : item.confirmedBy, state === "approved" ? at : item.confirmedAt,
+    [state, state === "approved" ? approverId : item.confirmedBy, state === "approved" ? at : item.confirmedAt,
       state === "revoked" ? at : null, this.scope.brandId, item.id, this.scope.brandId, this.scope.ownerId]);
   }
 
