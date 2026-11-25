@@ -418,6 +418,16 @@ await writeFile(sourceCommands, sourceOriginals.replace(sourceRead, `${sourceRea
     throw new Error("Private source originals fixture failure");
   }`));
 
+const templateCommands = path.join(fixture, "src/features/asset-reuse/template-commands.ts");
+const templateSource = await readFile(templateCommands, "utf8");
+const templateRead = "export async function listContentTemplates(db: QueryConnection, actorId: string, brandId: string): Promise<TemplateList> {";
+assert.ok(templateSource.includes(templateRead));
+await writeFile(templateCommands, templateSource.replace(templateRead, `${templateRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-content-templates-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private content templates fixture failure");
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

@@ -17,7 +17,12 @@ function checked(formData: FormData, name: string) {
   return formData.get(name) === "1";
 }
 
-export async function cloneContentTemplateAction(formData: FormData) {
+export type TemplateCloneFeedback = "cloned" | "INVALID_INPUT" | "NOT_FOUND" | "GATE_REQUIRED" | "cloneUnconfirmed";
+
+export async function cloneContentTemplateAction(
+  _previous: TemplateCloneFeedback | null,
+  formData: FormData,
+): Promise<TemplateCloneFeedback> {
   const session = await requireSession();
   const brandId = String(formData.get("brandId") ?? "");
   const rawName = String(formData.get("name") ?? "").trim();
@@ -31,13 +36,26 @@ export async function cloneContentTemplateAction(formData: FormData) {
     },
     ...(rawName ? { name: rawName } : {}),
   });
-  if (!parsed.success) {
-    redirect(brandIdSchema.safeParse(brandId).success ? templatesPath(brandId, { error: "INVALID_INPUT" }) : "/dashboard/content/templates?error=INVALID_INPUT");
+  if (!parsed.success) return "INVALID_INPUT";
+
+  try {
+    const result = await cloneContentTemplate(getConnection(), session.user.id, parsed.data);
+    if ("error" in result) return result.error;
+    revalidatePath("/dashboard/content/templates");
+    return "cloned";
+  } catch {
+    console.error("content-template-clone-unconfirmed");
+    return "cloneUnconfirmed";
   }
-  const result = await cloneContentTemplate(getConnection(), session.user.id, parsed.data);
-  revalidatePath("/dashboard/content/templates");
-  if ("error" in result) redirect(templatesPath(parsed.data.brandId, { error: result.error }));
-  redirect(templatesPath(parsed.data.brandId, { notice: "cloned" }));
+}
+
+async function checkExport(ownerId: string, input: { brandId: string; id: string }) {
+  try {
+    return await exportContentTemplate(getConnection(), ownerId, input);
+  } catch {
+    console.error("content-template-export-check-unavailable");
+    return { error: "SERVICE_UNAVAILABLE" } as const;
+  }
 }
 
 export async function exportContentTemplateAction(formData: FormData) {
@@ -50,7 +68,7 @@ export async function exportContentTemplateAction(formData: FormData) {
   if (!parsed.success) {
     redirect(brandIdSchema.safeParse(brandId).success ? templatesPath(brandId, { error: "INVALID_INPUT" }) : "/dashboard/content/templates?error=INVALID_INPUT");
   }
-  const result = await exportContentTemplate(getConnection(), session.user.id, parsed.data);
-  if ("error" in result) redirect(templatesPath(parsed.data.brandId, { error: result.error }));
-  redirect(templatesPath(parsed.data.brandId, { notice: result.reason }));
+  const result = await checkExport(session.user.id, parsed.data);
+  const feedback: Record<string, string> = "error" in result ? { error: result.error } : { notice: result.reason };
+  redirect(`${templatesPath(parsed.data.brandId, feedback)}#template-feedback`);
 }

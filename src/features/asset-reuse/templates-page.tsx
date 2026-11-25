@@ -1,20 +1,26 @@
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
+import { brandIdSchema } from "../brands/contracts.ts";
 import { BrandDao } from "../brands/dao.ts";
-import { cloneContentTemplateAction, exportContentTemplateAction } from "./template-actions.ts";
+import { exportContentTemplateAction } from "./template-actions.ts";
+import { TemplateCloneForm } from "./template-clone-form";
 import { listContentTemplates } from "./template-commands.ts";
-import type { TemplateStatus, TemplateView } from "./template-contracts.ts";
+import { templateErrors, type TemplateError, type TemplateStatus, type TemplateView } from "./template-contracts.ts";
 
-const inputClass = "block w-full rounded-md border bg-background px-3 py-2 text-sm";
+const templatesPath = "/dashboard/content/templates";
+const contentPath = "/dashboard/content";
+const actionClass = "min-h-10 whitespace-normal text-center";
+type Translator = Awaited<ReturnType<typeof getTranslator<"contentTemplates">>>;
 
-const errorCodes = ["NOT_FOUND", "INVALID_INPUT", "GATE_REQUIRED", "SYSTEM_READONLY", "FORBIDDEN", "SESSION_REQUIRED", "SERVICE_UNAVAILABLE"] as const;
 const noticeCodes = ["cloned", "fact_gate", "approval_gate"] as const;
 
-function isErrorCode(value: string): value is (typeof errorCodes)[number] {
-  return errorCodes.some((code) => code === value);
+function isErrorCode(value: string): value is TemplateError {
+  return Object.hasOwn(templateErrors, value);
 }
 
 function isNoticeCode(value: string): value is (typeof noticeCodes)[number] {
@@ -27,13 +33,27 @@ function statusKey(status: TemplateStatus) {
   return "statusRetired" as const;
 }
 
-function gateText(on: boolean, onLabel: string, offLabel: string) {
-  return on ? onLabel : offLabel;
-}
-
 export async function generateMetadata() {
   const t = await getTranslator("contentTemplates");
   return { title: t("title"), robots: { index: false, follow: false } };
+}
+
+async function loadTemplates(ownerId: string, requestedBrandId: string | string[] | undefined) {
+  const requested = brandIdSchema.safeParse(requestedBrandId);
+  if (requestedBrandId !== undefined && !requested.success) return { state: "notFound" } as const;
+
+  let brandId = requested.data;
+  try {
+    const connection = getConnection();
+    brandId ??= (await new BrandDao(connection).active(ownerId))?.id;
+    if (!brandId) return { state: "noBrand" } as const;
+    const listed = await listContentTemplates(connection, ownerId, brandId);
+    if ("error" in listed) return { state: "notFound" } as const;
+    return { state: "ready", brandId, templates: listed.templates } as const;
+  } catch {
+    console.error("content-template-page-unavailable");
+    return { state: "unavailable", brandId } as const;
+  }
 }
 
 export default async function ContentTemplatesPage({
@@ -44,106 +64,114 @@ export default async function ContentTemplatesPage({
   const session = await requireSession();
   const params = await searchParams;
   const t = await getTranslator("contentTemplates");
-  const connection = getConnection();
-  const active = await new BrandDao(connection).active(session.user.id);
-  const brandId = typeof params.brandId === "string" ? params.brandId : active?.id;
+  const workspace = await loadTemplates(session.user.id, params.brandId);
   const error = typeof params.error === "string" && isErrorCode(params.error) ? params.error : null;
   const notice = typeof params.notice === "string" && isNoticeCode(params.notice) ? params.notice : null;
 
-  if (!brandId) {
+  if (workspace.state !== "ready") {
+    const noBrand = workspace.state === "noBrand";
+    const unavailable = workspace.state === "unavailable";
+    const retryHref = unavailable && workspace.brandId ? `${templatesPath}?brandId=${workspace.brandId}` : templatesPath;
     return (
-      <div className="space-y-6">
+      <header className="space-y-3">
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>
-        <Button asChild><Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link></Button>
-      </div>
-    );
-  }
-
-  const listed = await listContentTemplates(connection, session.user.id, brandId);
-  if ("error" in listed) {
-    return (
-      <div role="alert" className="space-y-2 text-sm">
-        <p>{t(listed.error)}</p>
-        <Link href="/dashboard/content" prefetch={false} className="underline underline-offset-4">{t("back")}</Link>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-8">
-      <div>
-        <p className="text-sm">
-          <Link href={`/dashboard/content?brandId=${brandId}`} prefetch={false} className="underline underline-offset-4">{t("back")}</Link>
+        <p role={!noBrand || error ? "alert" : undefined} className="max-w-2xl text-sm leading-7 text-muted-foreground">
+          {t(unavailable ? "SERVICE_UNAVAILABLE" : noBrand ? error ?? "noBrand" : "brandUnavailable")}
         </p>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
-      </div>
+        <Button asChild className={actionClass}>
+          {unavailable ? <a href={retryHref}>{t("reload")}</a> : (
+            <Link href={noBrand ? "/dashboard/brands" : contentPath} prefetch={false}>{t(noBrand ? "goBrands" : "back")}</Link>
+          )}
+        </Button>
+      </header>
+    );
+  }
 
-      {error ? <p role="alert" className="text-sm">{t(error)}</p> : null}
-      {notice ? <p role="status" className="text-sm">{t(notice)}</p> : null}
+  const { brandId, templates } = workspace;
+  const feedback = error ?? notice;
+  const success = feedback === "cloned";
+  return (
+    <div className="min-w-0 space-y-6">
+      <header className="space-y-3">
+        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
+        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+        <div className="flex flex-wrap gap-2">
+          {templates.length > 0 && (
+            <Button asChild className={actionClass}><a href="#content-template-list">{t("browse")}</a></Button>
+          )}
+          <Button asChild variant={templates.length > 0 ? "outline" : "default"} className={actionClass}>
+            <Link href={`${contentPath}?brandId=${brandId}`} prefetch={false}>{t("back")}</Link>
+          </Button>
+        </div>
+      </header>
 
-      {listed.templates.length === 0 ? (
-        <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">{t("empty")}</p>
-      ) : (
-        <ul className="space-y-4">
-          {listed.templates.map((template) => (
-            <TemplateCard key={template.id} template={template} brandId={brandId} />
-          ))}
-        </ul>
+      {feedback && (
+        <p id="template-feedback" tabIndex={-1} role={success ? "status" : "alert"}
+          className={`scroll-mt-24 rounded-lg border bg-card p-3 text-sm focus-visible:outline-2 focus-visible:outline-ring ${success ? "" : "border-destructive/30 text-destructive"}`}>
+          {t(feedback)}
+        </p>
       )}
+
+      <section aria-labelledby="content-template-list" className="space-y-3">
+        <h2 id="content-template-list" tabIndex={-1}
+          className="scroll-mt-24 rounded-sm font-semibold focus-visible:outline-2 focus-visible:outline-ring">
+          {t("list")}
+        </h2>
+        {templates.length === 0 ? (
+          <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">{t("empty")}</p>
+        ) : (
+          <ul className="space-y-4">
+            {templates.map((template) => (
+              <TemplateCard key={`${brandId}:${template.id}`} template={template} brandId={brandId} t={t} />
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
 
-async function TemplateCard({ template, brandId }: { template: TemplateView; brandId: string }) {
-  const t = await getTranslator("contentTemplates");
-  const on = t("gateOn");
-  const off = t("gateOff");
+function TemplateCard({ template, brandId, t }: { template: TemplateView; brandId: string; t: Translator }) {
+  const gateState = (on: boolean) => t(on ? "gateOn" : "gateOff");
   return (
-    <li className="rounded-2xl border px-4 py-4 text-sm">
-      <p className="font-medium break-all">{template.name}</p>
-      <p className="mt-2 leading-6 text-muted-foreground">
-        {template.system ? t("system") : t("team")}
-        {template.readOnly ? ` · ${t("readOnly")}` : ""}
-        {` · ${t(statusKey(template.status))}`}
-      </p>
-      <p className="mt-2 leading-6">
-        {t("factGate")} {gateText(template.gates.fact, on, off)}
-        {" · "}
-        {t("licenseGate")} {gateText(template.gates.publicLicense, on, off)}
-        {" · "}
-        {t("reviewGate")} {gateText(template.gates.review, on, off)}
-      </p>
-      {template.asksToInventCaseStudy ? <p className="mt-2 leading-6">{t("inventsCase")}</p> : null}
-      <form action={cloneContentTemplateAction} className="mt-4 space-y-3">
-        <input type="hidden" name="brandId" value={brandId} />
-        <input type="hidden" name="id" value={template.id} />
-        <label className="block">
-          <span className="mb-1 block text-muted-foreground">{t("cloneName")}</span>
-          <input className={inputClass} name="name" maxLength={120} />
-        </label>
-        <div className="flex flex-wrap gap-4">
-          <label className="inline-flex items-center gap-2">
-            <input type="checkbox" name="fact" value="1" defaultChecked />
-            {t("factGate")}
-          </label>
-          <label className="inline-flex items-center gap-2">
-            <input type="checkbox" name="publicLicense" value="1" defaultChecked />
-            {t("licenseGate")}
-          </label>
-          <label className="inline-flex items-center gap-2">
-            <input type="checkbox" name="review" value="1" defaultChecked />
-            {t("reviewGate")}
-          </label>
-        </div>
-        <Button type="submit">{t("clone")}</Button>
-      </form>
-      <form action={exportContentTemplateAction} className="mt-3">
-        <input type="hidden" name="brandId" value={brandId} />
-        <input type="hidden" name="id" value={template.id} />
-        <Button type="submit" variant="outline">{t("exportCheck")}</Button>
-      </form>
+    <li>
+      <Card size="sm">
+        <CardContent className="space-y-4 text-sm">
+          <div className="space-y-2">
+            <h3 className="font-semibold [overflow-wrap:anywhere]">{template.name}</h3>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary">{t(template.system ? "system" : "team")}</Badge>
+              {template.readOnly && <Badge variant="outline">{t("readOnly")}</Badge>}
+              <Badge variant="outline">{t(statusKey(template.status))}</Badge>
+            </div>
+          </div>
+          <dl className="flex flex-wrap gap-x-5 gap-y-2">
+            <div><dt className="text-muted-foreground">{t("factGate")}</dt><dd>{gateState(template.gates.fact)}</dd></div>
+            <div><dt className="text-muted-foreground">{t("licenseGate")}</dt><dd>{gateState(template.gates.publicLicense)}</dd></div>
+            <div><dt className="text-muted-foreground">{t("reviewGate")}</dt><dd>{gateState(template.gates.review)}</dd></div>
+          </dl>
+          {template.asksToInventCaseStudy && (
+            <p className="rounded-lg border border-destructive/30 bg-card p-3 text-destructive">{t("inventsCase")}</p>
+          )}
+          <TemplateCloneForm
+            brandId={brandId}
+            templateId={template.id}
+            labels={{
+              name: t("cloneName"), clone: t("clone"), cloning: t("cloning"),
+              fact: t("factGate"), publicLicense: t("licenseGate"), review: t("reviewGate"),
+            }}
+            feedback={{
+              cloned: t("cloned"), INVALID_INPUT: t("INVALID_INPUT"), NOT_FOUND: t("NOT_FOUND"),
+              GATE_REQUIRED: t("GATE_REQUIRED"), cloneUnconfirmed: t("cloneUnconfirmed"),
+            }}
+          />
+          <form action={exportContentTemplateAction}>
+            <input type="hidden" name="brandId" value={brandId} />
+            <input type="hidden" name="id" value={template.id} />
+            <Button type="submit" variant="outline" className={actionClass}>{t("exportCheck")}</Button>
+          </form>
+        </CardContent>
+      </Card>
     </li>
   );
 }
