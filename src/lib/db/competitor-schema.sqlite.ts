@@ -38,7 +38,7 @@ export const competitorMention = sqliteTable("competitor_mention", {
         (${table.ordered} = 1 and ${table.position} > 0)
         or (${table.ordered} = 0 and ${table.position} is null)
       ))
-      or (${table.mentionState} in ('false', 'unknown') and ${table.ordered} = 0 and ${table.position} is null)
+      or (${table.mentionState} in ('false', 'unknown') and ${table.position} is null)
     )`),
 ]);
 

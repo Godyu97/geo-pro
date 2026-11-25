@@ -5,13 +5,14 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { PurgeDao } from "../../src/features/brands/purge-dao.ts";
-import { competitorShareBreakdown } from "../../src/features/competitor-share/rules.ts";
+import { competitorShareBreakdown, orderedRankBreakdown } from "../../src/features/competitor-share/rules.ts";
 import {
   readCompetitorShare,
   recordCompetitorMentions,
   saveCompetitorSet,
   shareFromMentions,
 } from "../../src/features/competitors/commands.ts";
+import { recordMentionsSchema } from "../../src/features/competitors/contracts.ts";
 import { submitManualEvidence } from "../../src/features/evidence/commands.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
@@ -353,5 +354,208 @@ for (const kind of ["sqlite", "postgresql"]) {
     await new PurgeDao(db).clearContents({ ownerId: owner, brandId: brand }, time);
     const left = await queryWithParameters(db, "SELECT id FROM competitor_set WHERE brand_id = ?", [brand]);
     assert.equal(left.length, 0);
+  });
+}
+
+test("ordered rank breakdown computes appearance, first-place, and conditional mean while excluding unordered and unknown", () => {
+  const result = orderedRankBreakdown(["甲", "乙", "丙"], [
+    { observationId: "o1", brandId: "甲", mentionState: "true", ordered: 1, position: 1 },
+    { observationId: "o1", brandId: "乙", mentionState: "false", ordered: 1, position: null },
+    { observationId: "o1", brandId: "丙", mentionState: "false", ordered: 1, position: null },
+    { observationId: "o2", brandId: "甲", mentionState: "true", ordered: 1, position: 3 },
+    { observationId: "o2", brandId: "乙", mentionState: "false", ordered: 1, position: null },
+    { observationId: "o2", brandId: "丙", mentionState: "false", ordered: 1, position: null },
+    { observationId: "o3", brandId: "甲", mentionState: "false", ordered: 1, position: null },
+    { observationId: "o3", brandId: "乙", mentionState: "false", ordered: 1, position: null },
+    { observationId: "o3", brandId: "丙", mentionState: "false", ordered: 1, position: null },
+    { observationId: "o4", brandId: "甲", mentionState: "false", ordered: 1, position: null },
+    { observationId: "o4", brandId: "乙", mentionState: "false", ordered: 1, position: null },
+    { observationId: "o4", brandId: "丙", mentionState: "unknown", ordered: 1, position: null },
+    { observationId: "u1", questionText: "1. 标题一 2. 标题二", brandId: "甲", mentionState: "true", ordered: 0, position: null },
+    { observationId: "u1", questionText: "1. 标题一 2. 标题二", brandId: "乙", mentionState: "true", ordered: 0, position: null },
+  ]);
+
+  assert.equal(result.ranked, true);
+  assert.equal(result.orderedObservations, 4);
+  assert.equal(result.unorderedObservations, 1);
+  assert.deepEqual(result.excludedAbsent, ["乙", "丙"]);
+  assert.deepEqual(result.observations.map((obs) => obs.observationId), ["o1", "o2", "o3", "o4"]);
+
+  const jia = result.rows.find((row) => row.brandId === "甲");
+  assert.equal(jia?.judgableCount, 4);
+  assert.equal(jia?.appearedCount, 2);
+  assert.equal(jia?.firstPlaceCount, 1);
+  assert.equal(jia?.appearanceRate, 0.5);
+  assert.equal(jia?.firstPlaceRate, 0.25);
+  assert.equal(jia?.conditionalMeanPosition, 2);
+
+  const yi = result.rows.find((row) => row.brandId === "乙");
+  assert.equal(yi?.judgableCount, 4);
+  assert.equal(yi?.appearedCount, 0);
+  assert.equal(yi?.firstPlaceCount, 0);
+  assert.equal(yi?.appearanceRate, 0);
+  assert.equal(yi?.firstPlaceRate, 0);
+  assert.equal(yi?.conditionalMeanPosition, null);
+
+  const bing = result.rows.find((row) => row.brandId === "丙");
+  assert.equal(bing?.judgableCount, 3);
+  assert.equal(bing?.unknownCount, 1);
+  assert.equal(bing?.appearanceRate, 0);
+  assert.equal(bing?.conditionalMeanPosition, null);
+
+  const onlyUnordered = orderedRankBreakdown(["甲", "乙"], [
+    { observationId: "u1", questionText: "1. 第一点\n2. 第二点", brandId: "甲", mentionState: "true", ordered: 0, position: null },
+  ]);
+  assert.equal(onlyUnordered.ranked, false);
+  assert.equal(onlyUnordered.orderedObservations, 0);
+  assert.equal(onlyUnordered.unorderedObservations, 1);
+  assert.equal(onlyUnordered.observations.length, 0);
+
+  const allAbsentOrdered = orderedRankBreakdown(["甲", "乙"], [
+    { observationId: "a1", brandId: "甲", mentionState: "false", ordered: 1, position: null },
+    { observationId: "a1", brandId: "乙", mentionState: "false", ordered: 1, position: null },
+  ]);
+  assert.equal(allAbsentOrdered.ranked, true);
+  assert.equal(allAbsentOrdered.orderedObservations, 1);
+  assert.equal(allAbsentOrdered.rows[0].appearanceRate, 0);
+  assert.equal(allAbsentOrdered.rows[0].judgableCount, 1);
+  assert.equal(allAbsentOrdered.rows[0].conditionalMeanPosition, null);
+});
+
+for (const kind of ["sqlite", "postgresql"]) {
+  test(`${kind}: ordered observations track appearance, first-place, conditional mean, and refuse position on unordered`, async (t) => {
+    if (kind === "postgresql" && !process.env.DATABASE_URL) {
+      t.skip("local PostgreSQL URL is not configured");
+      return;
+    }
+    const fixture = await testDatabase(kind, { migrateNow: false });
+    t.after(() => fixture.cleanup());
+    const db = fixture.connection;
+    await migrateThrough(db, previousTag(kind));
+    execFileSync("pnpm", ["db:migrate"], {
+      env: { ...process.env, ...fixture.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const [owner, outsider] = await Promise.all([account(db), account(db)]);
+    const brand = randomUUID();
+    const brands = new BrandDao(db);
+    await brands.insertBrand(owner, brand, time);
+    await brands.insertVersion(brand, 1, fields, time);
+
+    const set1 = await saveCompetitorSet(db, owner, { brandId: brand, labels: ["甲", "乙"] }, clock);
+    assert.equal(set1.error, undefined);
+
+    const unorderedObs = await observation(db, owner, brand, "1. 先看参数 2. 再看售后，这里只列特点不排名，提到甲和乙。");
+    const badUnordered = recordMentionsSchema.safeParse({
+      brandId: brand,
+      setId: set1.set.id,
+      observationId: unorderedObs,
+      ordered: false,
+      mentions: [{ label: "甲", state: "true", position: 1 }],
+    });
+    assert.equal(badUnordered.success, false);
+
+    const badAbsentPos = recordMentionsSchema.safeParse({
+      brandId: brand,
+      setId: set1.set.id,
+      observationId: unorderedObs,
+      ordered: true,
+      mentions: [{ label: "甲", state: "false", position: 1 }],
+    });
+    assert.equal(badAbsentPos.success, false);
+
+    const savedUnordered = await recordCompetitorMentions(db, owner, {
+      brandId: brand,
+      setId: set1.set.id,
+      observationId: unorderedObs,
+      ordered: false,
+      mentions: [{ label: "甲", state: "true" }, { label: "乙", state: "true" }],
+    }, clock);
+    assert.equal(savedUnordered.error, undefined);
+
+    const rewriteAttempt = await recordCompetitorMentions(db, owner, {
+      brandId: brand,
+      setId: set1.set.id,
+      observationId: unorderedObs,
+      ordered: true,
+      mentions: [{ label: "甲", state: "true", position: 1 }, { label: "乙", state: "true", position: 2 }],
+    }, clock);
+    assert.equal(rewriteAttempt.error, "OPERATION_CONFLICT");
+
+    const unorderedOnly = await readCompetitorShare(db, owner, brand, 1);
+    assert.equal(unorderedOnly.error, undefined);
+    assert.equal(unorderedOnly.rank.ranked, false);
+    assert.equal(unorderedOnly.rank.orderedObservations, 0);
+    assert.equal(unorderedOnly.rank.unorderedObservations, 1);
+
+    const o1 = await observation(db, owner, brand, "有序推荐 1：第一名甲，未提乙");
+    const o2 = await observation(db, owner, brand, "有序推荐 2：第三名甲，未提乙");
+    const o3 = await observation(db, owner, brand, "有序推荐 3：推荐丙，甲乙未上榜");
+    const o4 = await observation(db, owner, brand, "有序推荐 4：推荐丁，甲乙未上榜");
+
+    assert.equal((await recordCompetitorMentions(db, owner, {
+      brandId: brand, setId: set1.set.id, observationId: o1, ordered: true,
+      mentions: [{ label: "甲", state: "true", position: 1 }, { label: "乙", state: "false" }],
+    }, clock)).error, undefined);
+    assert.equal((await recordCompetitorMentions(db, owner, {
+      brandId: brand, setId: set1.set.id, observationId: o2, ordered: true,
+      mentions: [{ label: "甲", state: "true", position: 3 }, { label: "乙", state: "false" }],
+    }, clock)).error, undefined);
+    assert.equal((await recordCompetitorMentions(db, owner, {
+      brandId: brand, setId: set1.set.id, observationId: o3, ordered: true,
+      mentions: [{ label: "甲", state: "false" }, { label: "乙", state: "false" }],
+    }, clock)).error, undefined);
+    assert.equal((await recordCompetitorMentions(db, owner, {
+      brandId: brand, setId: set1.set.id, observationId: o4, ordered: true,
+      mentions: [],
+    }, clock)).error, undefined);
+
+    const share = await readCompetitorShare(db, owner, brand, 1);
+    assert.equal(share.error, undefined);
+    assert.equal(share.rank.ranked, true);
+    assert.equal(share.rank.orderedObservations, 4);
+    assert.equal(share.rank.unorderedObservations, 1);
+    assert.equal(share.rank.unorderedCount, 2);
+    assert.deepEqual(share.rank.excludedAbsent, ["乙"]);
+    assert.deepEqual(
+      share.rank.observations.map((obs) => obs.observationId).sort(),
+      [o1, o2, o3, o4].sort(),
+    );
+
+    const jia = share.rank.rows.find((row) => row.brandId === "甲");
+    assert.equal(jia?.judgableCount, 4);
+    assert.equal(jia?.appearedCount, 2);
+    assert.equal(jia?.firstPlaceCount, 1);
+    assert.equal(jia?.appearanceRate, 0.5);
+    assert.equal(jia?.firstPlaceRate, 0.25);
+    assert.equal(jia?.conditionalMeanPosition, 2);
+
+    const yi = share.rank.rows.find((row) => row.brandId === "乙");
+    assert.equal(yi?.judgableCount, 4);
+    assert.equal(yi?.appearedCount, 0);
+    assert.equal(yi?.firstPlaceCount, 0);
+    assert.equal(yi?.appearanceRate, 0);
+    assert.equal(yi?.firstPlaceRate, 0);
+    assert.equal(yi?.conditionalMeanPosition, null);
+
+    // Version 2 with only ordered samples where all brands are absent
+    const set2 = await saveCompetitorSet(db, owner, { brandId: brand, labels: ["戊"] }, clock);
+    assert.equal(set2.error, undefined);
+    assert.equal((await recordCompetitorMentions(db, owner, {
+      brandId: brand, setId: set2.set.id, observationId: o3, ordered: true,
+      mentions: [{ label: "戊", state: "false" }],
+    }, clock)).error, undefined);
+    const v2 = await readCompetitorShare(db, owner, brand, 2);
+    assert.equal(v2.error, undefined);
+    assert.equal(v2.rank.ranked, true);
+    assert.equal(v2.rank.orderedObservations, 1);
+    assert.equal(v2.rank.rows[0].appearanceRate, 0);
+    assert.equal(v2.rank.rows[0].firstPlaceRate, 0);
+    assert.equal(v2.rank.rows[0].judgableCount, 1);
+    assert.equal(v2.rank.rows[0].conditionalMeanPosition, null);
+    assert.deepEqual(v2.rank.excludedAbsent, ["戊"]);
+
+    assert.equal((await readCompetitorShare(db, outsider, brand)).error, "NOT_FOUND");
   });
 }

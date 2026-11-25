@@ -125,6 +125,16 @@ export class CompetitorDao {
     return row ? mentionRow.parse(row) : null;
   }
 
+  async listObservationMentions(setId: string, observationId: string) {
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT ${mentionColumns} FROM competitor_mention
+       WHERE set_id = ? AND observation_id = ?`,
+      [setId, observationId],
+    );
+    return rows.map((row) => mentionRow.parse(row));
+  }
+
   async insertMention(row: CompetitorMentionRow) {
     await queryWithParameters(
       this.db,

@@ -337,3 +337,190 @@ test("competitor analysis stays readable for long names, citations and a missing
     }
   }
 });
+
+test("ordered recommendations show appearance, first-place, and conditional mean while unordered stays unranked", async ({ page, context, browser }) => {
+  test.setTimeout(240_000);
+  const ownerEmail = `ordered-rank-owner-${randomUUID()}@example.invalid`;
+  const outsiderEmail = `ordered-rank-outsider-${randomUUID()}@example.invalid`;
+  const outsider = await browser.newContext({ baseURL: origin, viewport: { width: 375, height: 800 } });
+  const accounts: Array<{ userId: string; email: string }> = [];
+  try {
+    accounts.push({ userId: await register(context, ownerEmail), email: ownerEmail });
+    accounts.push({ userId: await register(outsider, outsiderEmail), email: outsiderEmail });
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await page.goto("/dashboard/brands/new");
+    await page.getByLabel("品牌名称", { exact: true }).fill("有序排行验收");
+    await page.getByLabel("一句话业务", { exact: true }).fill("合成品牌，仅用于有序推荐指标验收。");
+    await page.getByLabel("官网地址", { exact: true }).fill("https://ordered.example.com");
+    await page.getByRole("button", { name: "下一步", exact: true }).click();
+    await page.getByRole("button", { name: "下一步", exact: true }).click();
+    await page.getByRole("checkbox", { name: `我接受保留策略版本 ${publishedRetentionVersion()}`, exact: true }).check();
+    await page.getByRole("button", { name: "保存品牌", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "有序排行验收", exact: true })).toBeVisible();
+    const brandId = new URL(page.url()).pathname.split("/").at(-1);
+    expect(brandId).toMatch(/^[0-9a-f-]{36}$/);
+
+    const qId = "55555555-5555-4555-8555-555555555555";
+    const seeded = JSON.parse(execFileSync(process.execPath, [
+      "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", "competitor-slots",
+      JSON.stringify({
+        userId: accounts[0].userId,
+        brandId,
+        items: [
+          { questionId: qId, questionText: "带数字标题的无序回答", answerText: "1. 甲仅作示例\n2. 乙同列介绍，无排序语义。" },
+          { questionId: qId, questionText: "有序回答一", answerText: "推荐顺位：1. 甲 2. 丙" },
+          { questionId: qId, questionText: "有序回答二", answerText: "推荐顺位：1. 丙 2. 丁 3. 甲" },
+          { questionId: qId, questionText: "有序回答三", answerText: "推荐顺位：1. 丙" },
+          { questionId: qId, questionText: "有序回答四", answerText: "推荐顺位：1. 丁" },
+        ],
+      }),
+    ], { encoding: "utf8" })) as { created: Array<{ observationId: string; questionId: string }> };
+
+    const [unorderedObs, orderedObs1, orderedObs2, orderedObs3, orderedObs4] = seeded.created.map((item) => item.observationId);
+
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto(`/dashboard/monitoring/competitors?brandId=${brandId}`);
+    const main = page.getByRole("main");
+    await main.getByLabel("竞品名称（每行一个，最多 5 个）", { exact: true }).fill("甲\n乙");
+    await main.getByRole("button", { name: "保存竞品集", exact: true }).click();
+    await expect(main.getByRole("link", { name: "版本 1", exact: true })).toBeVisible();
+
+    // Unchecked ordered refuses position input
+    await main.locator("select[name=observationId]").selectOption(unorderedObs);
+    await main.getByLabel("甲", { exact: true }).selectOption("true");
+    await main.getByLabel("位置 甲", { exact: true }).fill("1");
+    await main.getByRole("button", { name: "保存提及", exact: true }).click();
+    await expect(main.getByText("输入无效。", { exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "有序推荐表现表", exact: true })).toHaveCount(0);
+
+    // Record unordered observation with numbered headings in answer text
+    await main.locator("select[name=observationId]").selectOption(unorderedObs);
+    await main.getByLabel("甲", { exact: true }).selectOption("true");
+    await main.getByLabel("乙", { exact: true }).selectOption("true");
+    await main.getByRole("button", { name: "保存提及", exact: true }).click();
+    await expect(main.getByText("这些提及没有明确顺序，不显示排名。", { exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "有序推荐表现表", exact: true })).toHaveCount(0);
+    await expect(main.getByText(/上榜率/)).toHaveCount(0);
+    await expect(main.getByText(/条件平均位置/)).toHaveCount(0);
+
+    // Saved unordered mention cannot be rewritten to ordered
+    await main.locator("select[name=observationId]").selectOption(unorderedObs);
+    await main.getByLabel("甲", { exact: true }).selectOption("true");
+    await main.getByLabel("位置 甲", { exact: true }).fill("1");
+    await main.getByLabel("乙", { exact: true }).selectOption("false");
+    await main.getByLabel("这条回答是有序推荐", { exact: true }).check();
+    await main.getByRole("button", { name: "保存提及", exact: true }).click();
+    await expect(main.getByText("操作冲突。", { exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "有序推荐表现表", exact: true })).toHaveCount(0);
+
+    // Record 4 ordered observations: 甲 appears in 2 (#1 and #3) and is absent in 2; 乙 is absent in all 4
+    const orderedEntries = [
+      { id: orderedObs1, jiaState: "true", jiaPos: "1" },
+      { id: orderedObs2, jiaState: "true", jiaPos: "3" },
+      { id: orderedObs3, jiaState: "false", jiaPos: "" },
+      { id: orderedObs4, jiaState: "false", jiaPos: "" },
+    ];
+    for (const [index, entry] of orderedEntries.entries()) {
+      await main.locator("select[name=observationId]").selectOption(entry.id);
+      await main.getByLabel("甲", { exact: true }).selectOption(entry.jiaState);
+      await main.getByLabel("位置 甲", { exact: true }).fill(entry.jiaPos);
+      await main.getByLabel("乙", { exact: true }).selectOption("false");
+      await main.getByLabel("位置 乙", { exact: true }).fill("");
+      await main.getByLabel("这条回答是有序推荐", { exact: true }).check();
+      await main.getByRole("button", { name: "保存提及", exact: true }).click();
+      await expect(main.getByText(`有序观察 ${index + 1} 条`, { exact: true })).toBeVisible();
+    }
+
+    for (const copy of [
+      {
+        locale: "zh-CN",
+        region: "有序推荐表现表",
+        appearanceCol: "上榜率",
+        firstCol: "首位率",
+        meanCol: "条件平均位置",
+        absentText: "缺席、不计入平均位置：乙",
+        unorderedNote: "另有 2 条无序提及，不进入名次。",
+      },
+      {
+        locale: "en",
+        region: "Ordered recommendation table",
+        appearanceCol: "Appearance rate",
+        firstCol: "First-place rate",
+        meanCol: "Conditional mean position",
+        absentText: "Absent and excluded from the mean: 乙",
+        unorderedNote: "2 unordered mentions stay out of the rank.",
+      },
+    ]) {
+      await context.addCookies([{ name: "geo-locale", value: copy.locale, url: origin }]);
+      for (const width of [375, 768, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(`/dashboard/monitoring/competitors?brandId=${brandId}&version=1`);
+        const rankTable = main.getByRole("region", { name: copy.region, exact: true });
+        await expect(rankTable.getByRole("columnheader", { name: copy.appearanceCol, exact: true })).toBeVisible();
+        await expect(rankTable.getByRole("columnheader", { name: copy.firstCol, exact: true })).toBeVisible();
+        await expect(rankTable.getByRole("columnheader", { name: copy.meanCol, exact: true })).toBeVisible();
+
+        const jiaRow = rankTable.getByRole("row", { name: "甲" });
+        await expect(jiaRow.getByRole("cell").nth(1)).toHaveText("50.0% (2/4)");
+        await expect(jiaRow.getByRole("cell").nth(2)).toHaveText("25.0% (1/4)");
+        await expect(jiaRow.getByRole("cell").nth(3)).toHaveText("2");
+
+        const yiRow = rankTable.getByRole("row", { name: "乙" });
+        await expect(yiRow.getByRole("cell").nth(1)).toHaveText("0.0% (0/4)");
+        await expect(yiRow.getByRole("cell").nth(2)).toHaveText("0.0% (0/4)");
+        await expect(yiRow.getByRole("cell").nth(3)).toHaveText("N/A");
+
+        await expect(main.getByText(copy.absentText, { exact: true })).toBeVisible();
+        await expect(main.getByText(copy.unorderedNote, { exact: true })).toBeVisible();
+        await expect(main.getByText(new RegExp(orderedObs1))).toBeVisible();
+        await expect(main.getByText("甲: #1", { exact: true })).toBeVisible();
+        await expect(main.getByText("甲: #3", { exact: true })).toBeVisible();
+        await expect(main.getByText(new RegExp(unorderedObs))).toHaveCount(0);
+        await expectNoOverflow(page);
+      }
+    }
+
+    // Version 2: only ordered samples where the brand is completely absent -> 0% with visible denominator and N/A mean
+    await main.getByLabel("Competitor names (one per line, up to 5)", { exact: true }).fill("己");
+    await main.getByRole("button", { name: "Save set", exact: true }).click();
+    await expect(main.getByRole("link", { name: "Version 2", exact: true })).toBeVisible();
+    await main.locator("select[name=observationId]").selectOption(orderedObs3);
+    await main.getByLabel("己", { exact: true }).selectOption("false");
+    await main.getByLabel("This answer is an ordered recommendation", { exact: true }).check();
+    await main.getByRole("button", { name: "Save mentions", exact: true }).click();
+    const v2Rank = main.getByRole("region", { name: "Ordered recommendation table", exact: true });
+    await expect(v2Rank).toBeVisible();
+    const jiRow = v2Rank.getByRole("row", { name: "己" });
+    await expect(jiRow.getByRole("cell").nth(1)).toHaveText("0.0% (0/1)");
+    await expect(jiRow.getByRole("cell").nth(2)).toHaveText("0.0% (0/1)");
+    await expect(jiRow.getByRole("cell").nth(3)).toHaveText("N/A");
+    await expect(main.getByText("Absent and excluded from the mean: 己", { exact: true })).toBeVisible();
+
+    // Outsider gets 404 on API and cannot view this brand's competitor page
+    const denied = await outsider.request.post("/api/monitoring/answers", {
+      headers: { Origin: origin },
+      data: {
+        action: "submit-manual", brandId, operationId: randomUUID(),
+        questionText: "越权检查", answerText: "越权测试",
+        region: "CN", language: "zh-CN", requestedNetworkMode: "unknown", entityVersion: 1,
+        citationSetState: "missing", citations: [], locatorRef: null, collectorId: null,
+        contested: false, brandName: "有序排行验收", aliases: [],
+      },
+    });
+    expect(denied.status()).toBe(404);
+    await outsider.addCookies([{ name: "geo-locale", value: "en", url: origin }]);
+    const outsiderPage = await outsider.newPage();
+    await outsiderPage.goto(`/dashboard/monitoring/competitors?brandId=${brandId}`);
+    const outsiderMain = outsiderPage.getByRole("main");
+    await expect(outsiderMain.getByText("The resource was not found or is not yours.", { exact: true })).toBeVisible();
+    await expect(outsiderMain.getByRole("region", { name: "Ordered recommendation table", exact: true })).toHaveCount(0);
+  } finally {
+    await outsider.close();
+    for (const { userId, email } of accounts) {
+      execFileSync(process.execPath, [
+        "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", "cleanup",
+        JSON.stringify({ userId, email }),
+      ], { stdio: "inherit" });
+    }
+  }
+});

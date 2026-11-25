@@ -2,7 +2,11 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
-import { competitorShareBreakdown, conditionalMeanPosition, type MentionState } from "../competitor-share/rules.ts";
+import {
+  competitorShareBreakdown,
+  orderedRankBreakdown,
+  type MentionState,
+} from "../competitor-share/rules.ts";
 import { inspectCopiedBrief, inspectSource } from "../source-opportunities/rules.ts";
 import type {
   BriefStatusInput,
@@ -29,7 +33,10 @@ export function labelsOf(row: CompetitorSetRow) {
 function emptyShare(labels: readonly string[]) {
   return {
     ...competitorShareBreakdown([], []),
-    rank: { ranked: false as const, mean: null, excludedAbsent: [...labels], unorderedCount: 0 },
+    rank: {
+      ...orderedRankBreakdown(labels, []),
+      unorderedCount: 0,
+    },
   };
 }
 
@@ -52,28 +59,23 @@ export function shareFromMentions(
     })),
   );
   const activeMentions = mentions.filter((mention) => (mention.mentionState ?? "true") === "true");
-  const orderedMentions = activeMentions.filter((mention): mention is typeof mention & { position: number } => (
-    mention.ordered === 1 && mention.position !== null
-  ));
   const unorderedCount = activeMentions.filter((mention) => mention.ordered === 0).length;
-  if (orderedMentions.length === 0) {
-    return {
-      ...breakdown,
-      rank: { ranked: false as const, mean: null, excludedAbsent: [...labels], unorderedCount },
-    };
-  }
-  const present = new Set(orderedMentions.map((mention) => mention.competitorLabel));
-  const stats = conditionalMeanPosition({
-    ordered: true,
-    ranked: orderedMentions.map((mention) => ({ brandId: mention.competitorLabel, position: mention.position })),
-    absentBrandIds: labels.filter((label) => !present.has(label)),
-  });
+  const orderedStats = orderedRankBreakdown(
+    labels,
+    mentions.map((mention) => ({
+      observationId: mention.observationId,
+      questionId: mention.questionId ?? null,
+      questionText: mention.questionText ?? null,
+      brandId: mention.competitorLabel,
+      mentionState: mention.mentionState ?? "true",
+      ordered: mention.ordered,
+      position: mention.position,
+    })),
+  );
   return {
     ...breakdown,
     rank: {
-      ranked: true as const,
-      mean: stats.ranked ? stats.mean : null,
-      excludedAbsent: stats.excludedAbsent,
+      ...orderedStats,
       unorderedCount,
     },
   };
@@ -125,22 +127,30 @@ export async function recordCompetitorMentions(
     const setLabels = labelsOf(set);
     const allowed = new Set(setLabels);
     if (input.mentions.some((mention) => !allowed.has(mention.label))) return denied("INVALID_INPUT");
+    const orderedBit = input.ordered ? (1 as const) : (0 as const);
     const entries = input.mentions.length === 0
       ? setLabels.map((label) => ({
         label,
         mentionState: "false" as const,
-        ordered: 0 as const,
+        ordered: orderedBit,
         position: null,
       }))
       : input.mentions.map((mention) => {
         const mentionState = mention.state ?? "true";
-        const ordered = mentionState === "true" && input.ordered ? (1 as const) : (0 as const);
-        const position = ordered === 1 ? mention.position ?? null : null;
-        return { label: mention.label, mentionState, ordered, position };
+        const position = orderedBit === 1 && mentionState === "true" ? mention.position ?? null : null;
+        return { label: mention.label, mentionState, ordered: orderedBit, position };
       });
+    const existingRows = await dao.listObservationMentions(input.setId, input.observationId);
+    if (existingRows.length > 0) {
+      const obsOrdered = existingRows.some((row) => row.ordered === 1);
+      if (obsOrdered !== input.ordered) {
+        return denied("OPERATION_CONFLICT");
+      }
+    }
+    const existingByLabel = new Map(existingRows.map((row) => [row.competitorLabel, row]));
     const now = clock();
     for (const entry of entries) {
-      const existing = await dao.findMention(input.setId, input.observationId, entry.label);
+      const existing = existingByLabel.get(entry.label);
       if (existing) {
         if (
           existing.mentionState !== entry.mentionState

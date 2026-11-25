@@ -575,6 +575,13 @@
       "when": 1795610564224,
       "tag": "0081_nervous_greymalkin",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1795611083298,
+      "tag": "0082_whole_crusher_hogan",
+      "breakpoints": true
     }
   ]
 }

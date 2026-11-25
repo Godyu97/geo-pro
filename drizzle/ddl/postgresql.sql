@@ -1252,7 +1252,7 @@ CREATE TABLE "competitor_mention" (
         ("competitor_mention"."ordered" = 1 and "competitor_mention"."position" > 0)
         or ("competitor_mention"."ordered" = 0 and "competitor_mention"."position" is null)
       ))
-      or ("competitor_mention"."mention_state" in ('false', 'unknown') and "competitor_mention"."ordered" = 0 and "competitor_mention"."position" is null)
+      or ("competitor_mention"."mention_state" in ('false', 'unknown') and "competitor_mention"."position" is null)
     ))
 );
 

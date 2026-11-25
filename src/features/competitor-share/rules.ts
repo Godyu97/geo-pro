@@ -323,3 +323,206 @@ export function conditionalMeanPosition(input: {
   const mean = input.ranked.reduce((sum, item) => sum + item.position, 0) / input.ranked.length;
   return { ranked: true as const, mean, excludedAbsent: [...input.absentBrandIds] };
 }
+
+export type OrderedMentionInput = {
+  observationId: string;
+  questionId?: string | null;
+  questionText?: string | null;
+  brandId: string;
+  mentionState: MentionState;
+  ordered: 0 | 1;
+  position: number | null;
+};
+
+export type OrderedRankRow = {
+  brandId: string;
+  judgableCount: number;
+  appearedCount: number;
+  firstPlaceCount: number;
+  absentCount: number;
+  unknownCount: number;
+  appearanceRate: number | null;
+  firstPlaceRate: number | null;
+  conditionalMeanPosition: number | null;
+};
+
+export type OrderedObservationEntry = {
+  observationId: string;
+  questionId: string | null;
+  questionText: string | null;
+  brands: Array<{
+    brandId: string;
+    mentionState: MentionState;
+    position: number | null;
+  }>;
+};
+
+export type OrderedRankBreakdown = {
+  ranked: boolean;
+  orderedObservations: number;
+  unorderedObservations: number;
+  mean: number | null;
+  excludedAbsent: string[];
+  rows: OrderedRankRow[];
+  observations: OrderedObservationEntry[];
+};
+
+/**
+ * Computes appearance rate, first-place rate, and conditional mean position
+ * on explicitly ordered observations only. Unordered observations are excluded
+ * regardless of answer text, and absent brands never enter the mean as 0 or tail.
+ */
+export function orderedRankBreakdown(
+  competitors: readonly string[],
+  mentions: readonly OrderedMentionInput[],
+): OrderedRankBreakdown {
+  if (competitors.length === 0) {
+    return {
+      ranked: false,
+      orderedObservations: 0,
+      unorderedObservations: 0,
+      mean: null,
+      excludedAbsent: [],
+      rows: [],
+      observations: [],
+    };
+  }
+
+  const allowed = new Set(competitors);
+  const byObservation = new Map<string, {
+    observationId: string;
+    questionId: string | null;
+    questionText: string | null;
+    anyOrdered: boolean;
+    states: Map<string, { mentionState: MentionState; ordered: 0 | 1; position: number | null }>;
+  }>();
+
+  for (const mention of mentions) {
+    if (!allowed.has(mention.brandId)) continue;
+    let entry = byObservation.get(mention.observationId);
+    if (!entry) {
+      entry = {
+        observationId: mention.observationId,
+        questionId: mention.questionId ?? null,
+        questionText: mention.questionText ?? null,
+        anyOrdered: mention.ordered === 1,
+        states: new Map(),
+      };
+      byObservation.set(mention.observationId, entry);
+    } else {
+      if (entry.questionId === null && mention.questionId !== null && mention.questionId !== undefined) {
+        entry.questionId = mention.questionId;
+      }
+      if (!entry.questionText && mention.questionText) entry.questionText = mention.questionText;
+      if (mention.ordered === 1) entry.anyOrdered = true;
+    }
+
+    const previous = entry.states.get(mention.brandId);
+    if (!previous) {
+      entry.states.set(mention.brandId, {
+        mentionState: mention.mentionState,
+        ordered: mention.ordered,
+        position: mention.position,
+      });
+    } else {
+      const mergedState = mergeMentionState(previous.mentionState, mention.mentionState);
+      const mergedOrdered: 0 | 1 = previous.ordered === 1 || mention.ordered === 1 ? 1 : 0;
+      const mergedPosition = mergedState === "true" && mergedOrdered === 1
+        ? previous.position ?? mention.position
+        : null;
+      entry.states.set(mention.brandId, {
+        mentionState: mergedState,
+        ordered: mergedOrdered,
+        position: mergedPosition,
+      });
+    }
+  }
+
+  const stats = new Map(competitors.map((brandId) => [brandId, {
+    judgableCount: 0,
+    appearedCount: 0,
+    firstPlaceCount: 0,
+    absentCount: 0,
+    unknownCount: 0,
+    positionSum: 0,
+  }]));
+  const observations: OrderedObservationEntry[] = [];
+  const allPositions: number[] = [];
+  let orderedObservations = 0;
+  let unorderedObservations = 0;
+
+  for (const obs of byObservation.values()) {
+    if (!obs.anyOrdered) {
+      unorderedObservations += 1;
+      continue;
+    }
+    orderedObservations += 1;
+    const brands: OrderedObservationEntry["brands"] = [];
+    for (const brandId of competitors) {
+      const bucket = stats.get(brandId)!;
+      const record = obs.states.get(brandId);
+      if (!record) {
+        bucket.judgableCount += 1;
+        bucket.absentCount += 1;
+        brands.push({ brandId, mentionState: "false", position: null });
+        continue;
+      }
+      if (record.mentionState === "unknown") {
+        bucket.unknownCount += 1;
+        brands.push({ brandId, mentionState: "unknown", position: null });
+        continue;
+      }
+      if (record.mentionState === "true" && record.ordered === 1 && record.position !== null && record.position > 0) {
+        bucket.judgableCount += 1;
+        bucket.appearedCount += 1;
+        bucket.positionSum += record.position;
+        allPositions.push(record.position);
+        if (record.position === 1) bucket.firstPlaceCount += 1;
+        brands.push({ brandId, mentionState: "true", position: record.position });
+        continue;
+      }
+      bucket.judgableCount += 1;
+      bucket.absentCount += 1;
+      brands.push({ brandId, mentionState: "false", position: null });
+    }
+    observations.push({
+      observationId: obs.observationId,
+      questionId: obs.questionId,
+      questionText: obs.questionText,
+      brands,
+    });
+  }
+
+  const ranked = orderedObservations > 0;
+  const rows: OrderedRankRow[] = competitors.map((brandId) => {
+    const bucket = stats.get(brandId)!;
+    return {
+      brandId,
+      judgableCount: bucket.judgableCount,
+      appearedCount: bucket.appearedCount,
+      firstPlaceCount: bucket.firstPlaceCount,
+      absentCount: bucket.absentCount,
+      unknownCount: bucket.unknownCount,
+      appearanceRate: bucket.judgableCount === 0 ? null : bucket.appearedCount / bucket.judgableCount,
+      firstPlaceRate: bucket.judgableCount === 0 ? null : bucket.firstPlaceCount / bucket.judgableCount,
+      conditionalMeanPosition: bucket.appearedCount === 0 ? null : bucket.positionSum / bucket.appearedCount,
+    };
+  });
+
+  const excludedAbsent = ranked
+    ? rows.filter((row) => row.appearedCount === 0 && row.absentCount > 0).map((row) => row.brandId)
+    : [...competitors];
+  const mean = allPositions.length === 0
+    ? null
+    : allPositions.reduce((sum, pos) => sum + pos, 0) / allPositions.length;
+
+  return {
+    ranked,
+    orderedObservations,
+    unorderedObservations,
+    mean,
+    excludedAbsent,
+    rows,
+    observations,
+  };
+}

@@ -369,16 +369,97 @@ export default async function CompetitorAnalysisPage({
         {workspace.rank.unorderedCount > 0 && !workspace.rank.ranked ? (
           <p className="text-sm leading-7 text-muted-foreground">{t("unordered")}</p>
         ) : null}
+        {!workspace.rank.ranked && workspace.rank.unorderedCount === 0 && workspace.rank.unorderedObservations > 0 ? (
+          <p className="text-sm leading-7 text-muted-foreground">{t("unordered")}</p>
+        ) : null}
         {workspace.rank.ranked ? (
-          <p className="text-sm leading-7 text-muted-foreground">
-            {t("mean", { mean: workspace.rank.mean === null ? t("shareNa") : workspace.rank.mean })}
-          </p>
-        ) : null}
-        {workspace.rank.ranked && workspace.rank.excludedAbsent.length > 0 ? (
-          <p className="text-sm leading-7 text-muted-foreground [overflow-wrap:anywhere]">{t("absent", { names: workspace.rank.excludedAbsent.join(" · ") })}</p>
-        ) : null}
-        {workspace.rank.ranked && workspace.rank.unorderedCount > 0 ? (
-          <p className="text-sm leading-7 text-muted-foreground">{t("unorderedExcluded", { count: workspace.rank.unorderedCount })}</p>
+          <div className="min-w-0 space-y-3">
+            <h3 className="text-base font-medium">{t("orderedRankHeading")}</h3>
+            <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{t("orderedRankNote")}</p>
+            <p className="text-sm leading-6 text-muted-foreground tabular-nums">
+              {t("orderedSummary", { ordered: formatNumber(locale, workspace.rank.orderedObservations) })}
+            </p>
+            <div
+              role="region"
+              aria-label={t("orderedRankRegion")}
+              tabIndex={0}
+              className="max-w-full overflow-x-auto rounded-2xl border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <table className="min-w-full text-left text-sm">
+                <thead className="text-muted-foreground">
+                  <tr className="border-b">
+                    <th className="min-w-28 max-w-48 px-3 py-3 font-medium" scope="col">{t("brand")}</th>
+                    <th className="px-3 py-3 align-bottom text-xs font-medium leading-4 whitespace-nowrap" scope="col">{t("appearanceRate")}</th>
+                    <th className="px-3 py-3 align-bottom text-xs font-medium leading-4 whitespace-nowrap" scope="col">{t("firstPlaceRate")}</th>
+                    <th className="px-3 py-3 align-bottom text-xs font-medium leading-4 whitespace-nowrap" scope="col">{t("conditionalMeanPosition")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {workspace.rank.rows.map((row) => (
+                    <tr key={row.brandId} className="border-b">
+                      <td className="min-w-28 max-w-48 px-3 py-3 align-top [overflow-wrap:anywhere]">
+                        <p>{row.brandId}</p>
+                        {row.unknownCount > 0 ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {t("orderedUnknownNote", { count: formatNumber(locale, row.unknownCount) })}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums">
+                        {t("rateWithCounts", {
+                          rate: shareText(locale, row.appearanceRate, t("shareNa")),
+                          numerator: formatNumber(locale, row.appearedCount),
+                          denominator: formatNumber(locale, row.judgableCount),
+                        })}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums">
+                        {t("rateWithCounts", {
+                          rate: shareText(locale, row.firstPlaceRate, t("shareNa")),
+                          numerator: formatNumber(locale, row.firstPlaceCount),
+                          denominator: formatNumber(locale, row.judgableCount),
+                        })}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums">
+                        {row.conditionalMeanPosition === null ? t("shareNa") : formatNumber(locale, row.conditionalMeanPosition)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {workspace.rank.excludedAbsent.length > 0 ? (
+              <p className="text-sm leading-7 text-muted-foreground [overflow-wrap:anywhere]">{t("absent", { names: workspace.rank.excludedAbsent.join(" · ") })}</p>
+            ) : null}
+            {workspace.rank.unorderedCount > 0 ? (
+              <p className="text-sm leading-7 text-muted-foreground">{t("unorderedExcluded", { count: workspace.rank.unorderedCount })}</p>
+            ) : null}
+            {workspace.rank.observations.length > 0 ? (
+              <div className={panelClass}>
+                <h4 className="text-sm font-medium">{t("orderedObservationsHeading")}</h4>
+                <ul className="space-y-2 text-sm">
+                  {workspace.rank.observations.map((obs) => (
+                    <li key={obs.observationId} className="rounded-xl border px-3 py-2 [overflow-wrap:anywhere]">
+                      <p className="font-mono text-xs text-muted-foreground">
+                        {obs.questionId ? `${obs.questionId} · ${obs.observationId}` : obs.observationId}
+                      </p>
+                      {obs.questionText ? <p className="mt-1">{obs.questionText}</p> : null}
+                      <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground tabular-nums">
+                        {obs.brands.map((brand) => (
+                          <li key={brand.brandId} className="[overflow-wrap:anywhere]">
+                            {brand.mentionState === "true" && brand.position !== null
+                              ? t("orderedObsPosition", { brand: brand.brandId, position: formatNumber(locale, brand.position) })
+                              : brand.mentionState === "unknown"
+                                ? t("orderedObsUnknown", { brand: brand.brandId })
+                                : t("orderedObsAbsent", { brand: brand.brandId })}
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </section>
 

@@ -48,13 +48,15 @@ export async function recordMentionsAction(formData: FormData): Promise<void> {
     ? setLabels.map((label) => {
       const state = String(formData.get(`state:${label}`) ?? "false");
       const raw = String(formData.get(`position:${label}`) ?? "").trim();
-      return ordered && state === "true"
+      return raw.length > 0
         ? { label, state, position: Number(raw) }
         : { label, state };
     })
     : formData.getAll("label").map(String).map((label) => {
       const raw = String(formData.get(`position:${label}`) ?? "").trim();
-      return ordered ? { label, state: "true" as const, position: Number(raw) } : { label, state: "true" as const };
+      return raw.length > 0
+        ? { label, state: "true" as const, position: Number(raw) }
+        : { label, state: "true" as const };
     });
   const parsed = recordMentionsSchema.safeParse({
     brandId,
