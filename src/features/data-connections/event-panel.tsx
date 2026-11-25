@@ -8,6 +8,7 @@ import { loginPath } from "@/lib/auth/return-to";
 import { useLocale } from "@/lib/i18n/client";
 import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
+import type { DataConnectionView } from "./contracts.ts";
 import {
   connectorEventErrors,
   parseConnectorEventLines,
@@ -36,9 +37,10 @@ function sourceLabel(source: ConnectorEventView["sources"][number]["source"], t:
   return source === "csv" ? t("sourceCsv") : t("sourceConnector");
 }
 
-export function ConnectorEventsPanel({ brands, events, labels, messages, rowsFieldId }: {
+export function ConnectorEventsPanel({ brands, events, connections, labels, messages, rowsFieldId }: {
   brands: { id: string }[];
   events: ConnectorEventView[];
+  connections: DataConnectionView[];
   labels: { brandId: string; name: string }[];
   messages: Copy;
   rowsFieldId: string;
@@ -49,9 +51,28 @@ export function ConnectorEventsPanel({ brands, events, labels, messages, rowsFie
   const labelFor = (brandId: string) => names.get(brandId) ?? brandId;
   const when = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" });
 
+  const syncRows = connections.length > 0 ? connections : [null];
+
   return (
     <>
       {brands.length > 0 ? <ImportForm brands={brands} labelFor={labelFor} rowsFieldId={rowsFieldId} t={t} /> : null}
+      <section aria-labelledby="connector-sync" className="min-w-0 space-y-3">
+        <h2 id="connector-sync" className="text-lg font-semibold">{t("syncHeading")}</h2>
+        {syncRows.map((connection) => (
+          <article key={connection?.id ?? "sync-empty"} className="min-w-0 space-y-2 rounded-xl border bg-card p-4 text-sm leading-6">
+            {connection ? <h3 className="font-medium [overflow-wrap:anywhere]">{connection.displayName}</h3> : null}
+            <p className="[overflow-wrap:anywhere]">{connection?.syncCursor ?? t("syncCursorEmpty")}</p>
+            {connection?.coverageComplete === false ? <p>{t("coverageIncomplete")}</p> : null}
+            {connection?.syncStopped ? <p>{t("syncStoppedNotice")}</p> : null}
+            <p className="font-medium">{t("sourcesHeading")}</p>
+            <p className="[overflow-wrap:anywhere]">
+              {!connection || connection.sources.length === 0
+                ? t("sourcesEmpty")
+                : connection.sources.map((source) => sourceLabel(source.source, t)).join(" · ")}
+            </p>
+          </article>
+        ))}
+      </section>
       <section aria-labelledby="connector-event-records" className="min-w-0 space-y-3">
         <h2 id="connector-event-records" className="text-lg font-semibold">{t("recordsTitle")}</h2>
         {events.length === 0 ? (

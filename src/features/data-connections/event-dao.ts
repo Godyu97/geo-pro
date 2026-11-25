@@ -238,6 +238,36 @@ export class ConnectorEventDao {
     );
   }
 
+  async sourcesByBrand(ownerId: string, brandIds: readonly string[]) {
+    if (brandIds.length === 0) return [];
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT DISTINCT e.brand_id AS "brandId", s.source AS "source"
+       FROM connector_event e
+       INNER JOIN connector_event_source s ON s.event_id = e.id AND s.owner_id = e.owner_id
+       WHERE e.owner_id = ? AND e.brand_id IN (${brandIds.map(() => "?").join(", ")})
+       ORDER BY e.brand_id ASC, s.source ASC
+       LIMIT ?`,
+      [ownerId, ...brandIds, brandIds.length * connectorEventSources.length],
+    );
+    return z.array(z.object({ brandId: brandIdSchema, source: sourceSchema })).parse(rows);
+  }
+
+  async sourcesForEvents(ownerId: string, brandId: string, eventKeys: readonly string[]) {
+    if (eventKeys.length === 0) return [];
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT e.event_key AS "eventId", s.source AS "source"
+       FROM connector_event e
+       INNER JOIN connector_event_source s ON s.event_id = e.id AND s.owner_id = e.owner_id
+       WHERE e.owner_id = ? AND e.brand_id = ? AND e.event_key IN (${eventKeys.map(() => "?").join(", ")})
+       ORDER BY e.event_key ASC, s.source ASC
+       LIMIT ?`,
+      [ownerId, brandId, ...eventKeys, eventKeys.length * connectorEventSources.length],
+    );
+    return z.array(z.object({ eventId: connectorEventKeySchema, source: sourceSchema })).parse(rows);
+  }
+
   async markConflicts(ownerId: string, eventIds: readonly string[], updatedAt: string) {
     if (eventIds.length === 0) return;
     await queryWithParameters(

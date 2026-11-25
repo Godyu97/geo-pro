@@ -9,11 +9,11 @@ import { loginPath } from "@/lib/auth/return-to";
 import { useLocale } from "@/lib/i18n/client";
 import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
-import { dataConnectionErrors, type DataConnectionError, type DataConnectionView } from "./contracts.ts";
+import { dataConnectionErrors, parseSyncEventLines, type DataConnectionError, type DataConnectionView } from "./contracts.ts";
 
 type Copy = Messages["dataConnections"];
 type Translator = (key: keyof Copy) => string;
-type Notice = DataConnectionError | "saved" | "approvalSaved" | "pullSaved";
+type Notice = DataConnectionError | "saved" | "approvalSaved" | "pullSaved" | "syncSaved" | "syncReplayed";
 
 const fieldClass = "w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm";
 const actionClass = "h-auto min-h-10 max-w-full py-2 whitespace-normal aria-disabled:opacity-50";
@@ -219,7 +219,21 @@ function ConnectionCard({ connection, label, locale, t }: {
           <dt className="font-medium">{t("pullAttempt")}</dt>
           <dd className="tabular-nums [overflow-wrap:anywhere]">{attempted}</dd>
         </div>
+        <div className="min-w-0 sm:col-span-2">
+          <dt className="font-medium">{t("syncCursor")}</dt>
+          <dd className="[overflow-wrap:anywhere]">{connection.syncCursor ?? t("syncCursorEmpty")}</dd>
+        </div>
+        <div className="min-w-0 sm:col-span-2">
+          <dt className="font-medium">{t("sourcesHeading")}</dt>
+          <dd className="[overflow-wrap:anywhere]">
+            {connection.sources.length === 0 ? t("sourcesEmpty") : connection.sources.map((source) => (
+              <Badge key={source.source} variant="outline" className="mr-2">{t(source.source === "csv" ? "sourceCsv" : "sourceConnector")}</Badge>
+            ))}
+          </dd>
+        </div>
       </dl>
+      {connection.coverageComplete === false ? <p className="text-sm leading-6">{t("coverageIncomplete")}</p> : null}
+      {connection.syncStopped ? <p className="text-sm leading-6">{t("syncStoppedNotice")}</p> : null}
       <div className="min-w-0">
         <h4 className="text-sm font-medium">{t("fields")}</h4>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm [overflow-wrap:anywhere]">
@@ -241,6 +255,90 @@ function ConnectionCard({ connection, label, locale, t }: {
         </Button>
       </div>
       <OperationNotice notice={notice} t={t} />
+      {!needsApproval && !connection.syncStopped ? (
+        <SyncForm connectionId={connection.id} pending={pending} setPending={setPending} setNotice={setNotice} t={t} />
+      ) : null}
     </article>
+  );
+}
+
+function SyncForm({ connectionId, pending, setPending, setNotice, t }: {
+  connectionId: string;
+  pending: boolean;
+  setPending: (pending: boolean) => void;
+  setNotice: (notice: Notice | null) => void;
+  t: Translator;
+}) {
+  const router = useRouter();
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const parsed = parseSyncEventLines(String(data.get("events") ?? ""));
+    if ("error" in parsed) {
+      setNotice("INVALID_INPUT");
+      return;
+    }
+    setPending(true);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/settings/data-connections/${connectionId}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cursor: String(data.get("cursor") ?? "").trim(),
+          coverageComplete: data.get("coverageComplete") === "on",
+          events: parsed.events,
+        }),
+      });
+      if (!response.ok) {
+        if (response.status === 401) {
+          window.location.replace(loginPath(returnPath, "session-required"));
+          return;
+        }
+        setNotice(errorFrom(await response.json()));
+        return;
+      }
+      const payload: unknown = await response.json();
+      const replayed = Boolean(payload && typeof payload === "object" && "replayed" in payload && payload.replayed);
+      setNotice(replayed ? "syncReplayed" : "syncSaved");
+      router.refresh();
+    } catch {
+      setNotice("SERVICE_UNAVAILABLE");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  function keepComposition(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault();
+  }
+
+  return (
+    <form onSubmit={submit} aria-labelledby={`${connectionId}-sync`} className="min-w-0 space-y-3 border-t pt-4">
+      <h4 id={`${connectionId}-sync`} className="text-sm font-medium">{t("syncTitle")}</h4>
+      <div className="min-w-0 space-y-1 text-sm">
+        <label htmlFor={`${connectionId}-cursor`}>{t("syncCursorField")}</label>
+        <Input id={`${connectionId}-cursor`} name="cursor" className="min-h-10" required maxLength={64} autoComplete="off"
+          aria-describedby={`${connectionId}-cursor-hint`} onKeyDown={keepComposition} />
+        <p id={`${connectionId}-cursor-hint`} className="text-muted-foreground">{t("syncCursorHint")}</p>
+      </div>
+      <label className="flex min-h-10 items-start gap-2 text-sm">
+        <input name="coverageComplete" type="checkbox" defaultChecked className="mt-1" />
+        <span>{t("syncCoverage")}</span>
+      </label>
+      <div className="min-w-0 space-y-1 text-sm">
+        <label htmlFor={`${connectionId}-events`}>{t("syncEvents")}</label>
+        <textarea id={`${connectionId}-events`} name="events" rows={3} autoComplete="off" spellCheck={false}
+          aria-describedby={`${connectionId}-events-hint`} onKeyDown={keepComposition}
+          className={`${fieldClass} block py-2`} />
+        <p id={`${connectionId}-events-hint`} className="text-muted-foreground">{t("syncEventsHint")}</p>
+      </div>
+      <Button type="submit" variant="outline" aria-disabled={pending} className={actionClass}>
+        {pending ? t("syncing") : t("syncAction")}
+      </Button>
+    </form>
   );
 }

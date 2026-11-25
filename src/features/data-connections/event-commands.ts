@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { DatabaseConnection } from "../../lib/db/connection.ts";
+import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
 import type { ConnectorEventList, ConnectorEventView, ImportConnectorEventsInput } from "./event-contracts.ts";
 import { ConnectorEventDao, type ConnectorEventInsert, type ConnectorEventRecord, type ConnectorEventSourceInsert } from "./event-dao.ts";
@@ -50,16 +50,13 @@ export async function readConnectorEvent(db: DatabaseConnection, ownerId: string
   });
 }
 
-export async function importConnectorEvents(
-  db: DatabaseConnection,
+export async function writeConnectorEvents(
+  tx: QueryConnection,
   ownerId: string,
   input: ImportConnectorEventsInput,
   clock: Clock = systemClock,
-): Promise<{ events: ConnectorEventView[] } | { error: "NOT_FOUND" }> {
-  return db.transaction(async (tx) => {
-    const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
-    if (!owned || owned.status !== "active") return { error: "NOT_FOUND" as const };
-    const planned = planConnectorEvents(input.rows);
+): Promise<{ events: ConnectorEventView[] }> {
+  const planned = planConnectorEvents(input.rows);
     const dao = new ConnectorEventDao(tx);
     const existing = await dao.eventsByKeys(ownerId, input.brandId, planned.map((event) => event.eventKey), true);
     const existingByKey = new Map(existing.map((event) => [event.eventKey, event]));
@@ -123,5 +120,17 @@ export async function importConnectorEvents(
     await dao.insertSources(sourceInserts);
     await dao.markConflicts(ownerId, conflicts, now);
     return { events: await viewsFor(dao, ownerId, touched) };
+}
+
+export async function importConnectorEvents(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: ImportConnectorEventsInput,
+  clock: Clock = systemClock,
+): Promise<{ events: ConnectorEventView[] } | { error: "NOT_FOUND" }> {
+  return db.transaction(async (tx) => {
+    const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
+    if (!owned || owned.status !== "active") return { error: "NOT_FOUND" as const };
+    return writeConnectorEvents(tx, ownerId, input, clock);
   });
 }

@@ -3,8 +3,9 @@ import { check, foreignKey, index, integer, pgTable, text, uniqueIndex } from "d
 import { user } from "./auth-schema";
 import { brand } from "./brand-schema";
 
-// Field preview only. No access token, cookie, remote host, or connector event is stored.
+// Field preview and an opaque sync cursor. No access token, cookie, remote host, or event body is stored.
 // pull_attempted_at stays empty until one approved pull is recorded.
+// sync_cursor advances only after an approved pull whose matching source is still authorized.
 export const dataConnection = pgTable("data_connection", {
   id: text("id").primaryKey(),
   brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
@@ -13,6 +14,9 @@ export const dataConnection = pgTable("data_connection", {
   status: text("status").notNull(),
   fieldCount: integer("field_count").notNull(),
   pullAttemptedAt: text("pull_attempted_at"),
+  syncCursor: text("sync_cursor"),
+  coverageComplete: integer("coverage_complete"),
+  syncStopped: integer("sync_stopped").notNull().default(0),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => [
@@ -25,8 +29,16 @@ export const dataConnection = pgTable("data_connection", {
     and length(${table.ownerId}) between 1 and 128
     and length(${table.createdAt}) between 20 and 40
     and length(${table.updatedAt}) between 20 and 40
+    and ${table.syncStopped} in (0, 1)
     and (
-      (${table.status} = 'preview' and ${table.pullAttemptedAt} is null)
+      (${table.syncCursor} is null and ${table.coverageComplete} is null)
+      or (
+        ${table.syncCursor} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$'
+        and ${table.coverageComplete} in (0, 1)
+      )
+    )
+    and (
+      (${table.status} = 'preview' and ${table.pullAttemptedAt} is null and ${table.syncCursor} is null and ${table.syncStopped} = 0)
       or (
         ${table.status} = 'approved'
         and (${table.pullAttemptedAt} is null or length(${table.pullAttemptedAt}) between 20 and 40)

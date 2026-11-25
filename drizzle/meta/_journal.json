@@ -624,6 +624,13 @@
       "when": 1795632625806,
       "tag": "0088_smooth_meteorite",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1795634687507,
+      "tag": "0089_light_vin_gonzales",
+      "breakpoints": true
     }
   ]
 }

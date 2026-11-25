@@ -617,6 +617,13 @@
       "when": 1795632626549,
       "tag": "0087_sloppy_tombstone",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "6",
+      "when": 1795634688268,
+      "tag": "0088_jazzy_quentin_quire",
+      "breakpoints": true
     }
   ]
 }

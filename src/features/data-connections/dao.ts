@@ -7,6 +7,9 @@ import { dataConnectionListLimit } from "./contracts.ts";
 
 const timestampSchema = z.iso.datetime({ precision: 3 });
 
+const flag = z.union([z.literal(0), z.literal(1)]);
+const syncCursorSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/);
+
 const connectionRow = z.object({
   id: brandIdSchema,
   brandId: brandIdSchema,
@@ -15,6 +18,9 @@ const connectionRow = z.object({
   status: z.enum(["preview", "approved"]),
   fieldCount: z.number().int().min(1).max(40),
   pullAttemptedAt: timestampSchema.nullable(),
+  syncCursor: syncCursorSchema.nullable(),
+  coverageComplete: flag.nullable(),
+  syncStopped: flag,
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
 });
@@ -40,6 +46,7 @@ export type DataConnectionFieldInsert = {
 
 const connectionColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", display_name AS "displayName",
   status, field_count AS "fieldCount", pull_attempted_at AS "pullAttemptedAt",
+  sync_cursor AS "syncCursor", coverage_complete AS "coverageComplete", sync_stopped AS "syncStopped",
   created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 function attachFields(
@@ -188,6 +195,50 @@ export class DataConnectionDao {
        WHERE id = ? AND owner_id = ? AND status = 'approved' AND pull_attempted_at IS NULL
        RETURNING id`,
       [attemptedAt, attemptedAt, connectionId, ownerId],
+    );
+    return rows.length === 1;
+  }
+
+  async syncRowsForBrand(ownerId: string, brandId: string) {
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT id, display_name AS "displayName", sync_cursor AS "syncCursor",
+         coverage_complete AS "coverageComplete", sync_stopped AS "syncStopped"
+       FROM data_connection
+       WHERE owner_id = ? AND brand_id = ?
+       ORDER BY created_at DESC, id ASC
+       LIMIT ?`,
+      [ownerId, brandId, dataConnectionListLimit],
+    );
+    return z.array(connectionRow.pick({
+      id: true,
+      displayName: true,
+      syncCursor: true,
+      coverageComplete: true,
+      syncStopped: true,
+    })).parse(rows);
+  }
+
+  async advanceCursor(ownerId: string, connectionId: string, cursor: string, coverageComplete: 0 | 1, updatedAt: string) {
+    const rows = await queryWithParameters(
+      this.db,
+      `UPDATE data_connection
+       SET sync_cursor = ?, coverage_complete = ?, updated_at = ?
+       WHERE id = ? AND owner_id = ? AND status = 'approved' AND sync_stopped = 0
+         AND (sync_cursor IS NULL OR sync_cursor <> ?)
+       RETURNING id`,
+      [cursor, coverageComplete, updatedAt, connectionId, ownerId, cursor],
+    );
+    return rows.length === 1;
+  }
+
+  async markSyncStopped(ownerId: string, connectionId: string, updatedAt: string) {
+    const rows = await queryWithParameters(
+      this.db,
+      `UPDATE data_connection SET sync_stopped = 1, updated_at = ?
+       WHERE id = ? AND owner_id = ? AND status = 'approved'
+       RETURNING id`,
+      [updatedAt, connectionId, ownerId],
     );
     return rows.length === 1;
   }

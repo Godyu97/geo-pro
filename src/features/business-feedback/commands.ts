@@ -1,8 +1,10 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { DatabaseConnection } from "../../lib/db/connection.ts";
+import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { writeConnectorEvents } from "../data-connections/event-commands.ts";
+import { csvEventDigest } from "../data-connections/sync.ts";
 import { prepareLeadRow, type ImportBusinessLeadsInput } from "./contracts.ts";
 import {
   BusinessLeadDao,
@@ -71,16 +73,13 @@ export async function readBusinessLead(db: DatabaseConnection, ownerId: string, 
   return { lead: toView(lead, evidence) };
 }
 
-export async function importBusinessLeads(
-  db: DatabaseConnection,
+export async function writeBusinessLeads(
+  tx: QueryConnection,
   ownerId: string,
   input: ImportBusinessLeadsInput,
   clock: Clock = systemClock,
 ) {
-  return db.transaction(async (tx) => {
-    const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
-    const preview = previewLeadImport(input.rows.map(prepareLeadRow));
+  const preview = previewLeadImport(input.rows.map(prepareLeadRow));
     const ranked = dedupedLead(preview.leads.flatMap((lead) =>
       lead.evidence.map((evidence) => ({ eventId: lead.eventId, evidence })),
     ));
@@ -157,5 +156,27 @@ export async function importBusinessLeads(
     await dao.upgradePrimary(ownerId, upgrades);
     await dao.insertEvidence(evidenceInserts);
     return { leads: await viewsFor(dao, ownerId, touched), rejected: preview.rejected };
+}
+
+export async function importBusinessLeads(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: ImportBusinessLeadsInput,
+  clock: Clock = systemClock,
+) {
+  return db.transaction(async (tx) => {
+    const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
+    if (!owned) return { error: "NOT_FOUND" as const };
+    const result = await writeBusinessLeads(tx, ownerId, input, clock);
+    if ("error" in result || result.leads.length === 0) return result;
+    await writeConnectorEvents(tx, ownerId, {
+      brandId: input.brandId,
+      rows: result.leads.map((lead) => ({
+        eventKey: lead.eventId,
+        source: "csv" as const,
+        payloadDigest: csvEventDigest(lead.eventId),
+      })),
+    }, clock);
+    return result;
   });
 }

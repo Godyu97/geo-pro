@@ -2832,6 +2832,9 @@ CREATE TABLE `data_connection` (
 	`status` text NOT NULL,
 	`field_count` integer NOT NULL,
 	`pull_attempted_at` text,
+	`sync_cursor` text,
+	`coverage_complete` integer,
+	`sync_stopped` integer DEFAULT 0 NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -2844,8 +2847,18 @@ CREATE TABLE `data_connection` (
     and length("data_connection"."owner_id") between 1 and 128
     and length("data_connection"."created_at") between 20 and 40
     and length("data_connection"."updated_at") between 20 and 40
+    and "data_connection"."sync_stopped" in (0, 1)
     and (
-      ("data_connection"."status" = 'preview' and "data_connection"."pull_attempted_at" is null)
+      ("data_connection"."sync_cursor" is null and "data_connection"."coverage_complete" is null)
+      or (
+        length("data_connection"."sync_cursor") between 1 and 64
+        and substr("data_connection"."sync_cursor", 1, 1) glob '[A-Za-z0-9]'
+        and "data_connection"."sync_cursor" not glob '*[^A-Za-z0-9._:-]*'
+        and "data_connection"."coverage_complete" in (0, 1)
+      )
+    )
+    and (
+      ("data_connection"."status" = 'preview' and "data_connection"."pull_attempted_at" is null and "data_connection"."sync_cursor" is null and "data_connection"."sync_stopped" = 0)
       or (
         "data_connection"."status" = 'approved'
         and ("data_connection"."pull_attempted_at" is null or length("data_connection"."pull_attempted_at") between 20 and 40)

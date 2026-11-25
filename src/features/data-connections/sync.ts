@@ -1,4 +1,11 @@
+import { createHash } from "node:crypto";
+
 export type SyncSource = "csv" | "connector";
+
+/** Stable csv fingerprint for an opaque event id. Evidence stays on the lead, not in this digest. */
+export function csvEventDigest(eventId: string) {
+  return createHash("sha256").update(`csv:${eventId}`).digest("hex");
+}
 
 /** The same event key from two sources stays one lead and keeps both source labels. */
 export function syncEvents(rows: readonly { eventId: string; source: SyncSource }[]) {

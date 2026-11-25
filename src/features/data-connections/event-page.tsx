@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { loadOwnedLabels } from "../team-access/commands.ts";
+import { listDataConnections } from "./commands.ts";
 import { listConnectorEvents } from "./event-commands.ts";
 import { ConnectorEventsPanel } from "./event-panel";
 
@@ -16,8 +17,9 @@ async function readWorkspace(ownerId: string) {
   try {
     const connection = getConnection();
     const workspace = await listConnectorEvents(connection, ownerId);
+    const listed = await listDataConnections(connection, ownerId);
     const labels = await loadOwnedLabels(connection, workspace.brands.map((brand) => brand.id));
-    return { ...workspace, labels };
+    return { ...workspace, connections: listed.connections, labels };
   } catch {
     console.error("connector-events-page-unavailable");
     return null;

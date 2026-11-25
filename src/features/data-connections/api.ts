@@ -8,7 +8,7 @@ import { isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts.ts";
-import { approveDataConnection, pullDataConnection, registerDataConnection } from "./commands.ts";
+import { approveDataConnection, pullDataConnection, registerDataConnection, syncDataConnection } from "./commands.ts";
 import {
   dataConnectionErrors,
   registerDataConnectionSchema,
@@ -108,4 +108,22 @@ export function dataConnectionPullResponse(request: Request, connectionId: strin
     (ownerId, id) => pullDataConnection(getConnection(), ownerId, id),
     "data-connection-pull-unavailable",
   );
+}
+
+export async function dataConnectionSyncResponse(request: Request, connectionId: string) {
+  const gate = await requireTrustedOrigin(request);
+  if ("error" in gate) return gate.error;
+  const id = brandIdSchema.safeParse(connectionId);
+  if (!id.success) return failure("INVALID_INPUT");
+  try {
+    if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
+    const body = await readBoundedJson(request, 16384);
+    const result = await syncDataConnection(getConnection(), gate.session.session.user.id, id.data, body);
+    if ("error" in result) return failure(result.error);
+    return json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("data-connection-sync-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
 }

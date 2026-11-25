@@ -286,7 +286,7 @@ test("connection preview, approval and pull have a keyboard path and preserve fi
     await activate(otherPage, otherPage.getByRole("link", { name: copy.en.goBrands, exact: true }));
     await expect(otherPage).toHaveURL(`${origin}/dashboard/brands`);
     expect((await outsider.request.post(api, { headers, data: { brandId, displayName, fieldNames: fields } })).status()).toBe(404);
-    for (const command of [approvePath, pullPath]) {
+    for (const command of [approvePath, pullPath, `${api}/${connectionId}/sync`]) {
       expect((await outsider.request.post(command, { headers, data: {} })).status()).toBe(404);
     }
     expect(await readStored()).toEqual(storedApproved);

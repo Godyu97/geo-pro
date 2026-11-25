@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "../brands/dao";
+import { readBrandSyncSurface } from "../data-connections/commands";
 import { listBusinessLeads } from "./commands";
 import { LeadImportForm } from "./import-form";
 
@@ -24,8 +25,9 @@ async function readWorkspace(ownerId: string) {
     const brand = await new BrandDao(connection).active(ownerId);
     if (!brand) return { kind: "noBrand" } as const;
     const listed = await listBusinessLeads(connection, ownerId, brand.id);
-    if (listed.error) return { kind: "error", code: listed.error } as const;
-    return { kind: "ready", brand, leads: listed.leads } as const;
+    if ("error" in listed) return { kind: "error", code: "NOT_FOUND" } as const;
+    const surface = await readBrandSyncSurface(connection, ownerId, brand.id, listed.leads.map((lead) => lead.eventId));
+    return { kind: "ready", brand, leads: listed.leads, surface } as const;
   } catch {
     console.error("business-leads-page-read-unavailable");
     return { kind: "error", code: "SERVICE_UNAVAILABLE" } as const;
@@ -50,6 +52,7 @@ export default async function BusinessLeadsPage({
   const errorCode = typeof params.error === "string" ? params.error : undefined;
   const workspace = await readWorkspace(session.user.id);
   const ready = workspace.kind === "ready" ? workspace : null;
+  const syncSources = ready ? [...new Set(ready.surface.sources.map((source) => source.source))] : [];
   const reportsHref = ready ? `${reportsPath}?brandId=${encodeURIComponent(ready.brand.id)}` : reportsPath;
   const evidenceLabel = {
     referral: t("evidenceReferral"),
@@ -101,6 +104,19 @@ export default async function BusinessLeadsPage({
             <p role="status" className="rounded-xl border border-dashed bg-card px-4 py-5 text-sm text-muted-foreground">{t("empty")}</p>
           ) : null}
           <LeadImportForm key={ready.brand.id} locale={locale} messages={messages} brandId={ready.brand.id} rowsId={rowsId} />
+          <section aria-labelledby="lead-sync" className="min-w-0 space-y-3">
+            <h2 id="lead-sync" className="text-lg font-semibold">{t("syncHeading")}</h2>
+            {(ready.surface.connections.length > 0 ? ready.surface.connections : [null]).map((connection) => (
+              <article key={connection?.id ?? "sync-empty"} className="min-w-0 space-y-2 rounded-xl border bg-card p-4 text-sm leading-6">
+                {connection ? <h3 className="font-medium [overflow-wrap:anywhere]">{connection.displayName}</h3> : null}
+                <p className="[overflow-wrap:anywhere]">{connection?.syncCursor ?? t("syncCursorEmpty")}</p>
+                {connection?.coverageComplete === false ? <p>{t("coverageIncomplete")}</p> : null}
+                {connection?.syncStopped ? <p>{t("syncStoppedNotice")}</p> : null}
+                <p className="font-medium">{t("sourcesHeading")}</p>
+                <p>{syncSources.length === 0 ? t("sourcesEmpty") : syncSources.map((source) => t(source === "csv" ? "sourceCsv" : "sourceConnector")).join(" · ")}</p>
+              </article>
+            ))}
+          </section>
 
           {ready.leads.length > 0 ? (
             <section aria-labelledby="lead-ledger" className="space-y-4">
@@ -116,6 +132,15 @@ export default async function BusinessLeadsPage({
                       {lead.evidence.map((category) => <li key={category}>{evidenceLabel[category]}</li>)}
                     </ul>
                   </div>
+                  <p className="text-sm font-medium">{t("sourcesHeading")}</p>
+                  <p className="text-sm">
+                    {ready.surface.sources.some((source) => source.eventId === lead.eventId)
+                      ? ready.surface.sources
+                        .filter((source) => source.eventId === lead.eventId)
+                        .map((source) => t(source.source === "csv" ? "sourceCsv" : "sourceConnector"))
+                        .join(" · ")
+                      : t("sourcesEmpty")}
+                  </p>
                 </article>
               ))}
             </section>

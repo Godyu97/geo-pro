@@ -3,12 +3,24 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { prepareLeadRow } from "../business-feedback/contracts.ts";
+import { writeBusinessLeads } from "../business-feedback/commands.ts";
+import { ConnectorEventDao } from "./event-dao.ts";
+import { writeConnectorEvents } from "./event-commands.ts";
+import { SyncAuthorizationDao } from "./revocation-dao.ts";
 import { previewSync } from "./sync.ts";
-import type { DataConnectionList, DataConnectionView, RegisterDataConnectionInput } from "./contracts.ts";
+import {
+  syncDataConnectionSchema,
+  type DataConnectionList,
+  type DataConnectionSourceName,
+  type DataConnectionView,
+  type RegisterDataConnectionInput,
+} from "./contracts.ts";
 import { DataConnectionDao, type DataConnectionRecord } from "./dao.ts";
 
 type Clock = () => string;
 type CommandResult = { connection: DataConnectionView } | { error: "NOT_FOUND" | "PULL_BLOCKED" | "CONFLICT" };
+type SyncError = "NOT_FOUND" | "INVALID_INPUT" | "PULL_BLOCKED" | "SYNC_BLOCKED" | "SYNC_STOPPED" | "CONFLICT";
 type RegisterResult = { connection: DataConnectionView } | { error: "NOT_FOUND" };
 
 const systemClock: Clock = () => new Date().toISOString();
@@ -17,7 +29,7 @@ function sameFields(left: readonly string[], right: readonly string[]) {
   return left.length === right.length && left.every((name, index) => name === right[index]);
 }
 
-function toView(row: DataConnectionRecord): DataConnectionView {
+function toView(row: DataConnectionRecord, sources: readonly { source: DataConnectionSourceName }[] = []): DataConnectionView {
   const preview = previewSync({ approved: row.status === "approved", fieldNames: row.fieldNames });
   return {
     id: row.id,
@@ -27,6 +39,10 @@ function toView(row: DataConnectionRecord): DataConnectionView {
     fieldCount: row.fieldCount,
     fieldNames: preview.fields,
     pullAttemptedAt: row.pullAttemptedAt,
+    syncCursor: row.syncCursor,
+    coverageComplete: row.coverageComplete === null ? null : row.coverageComplete === 1,
+    syncStopped: row.syncStopped === 1,
+    sources: sources.map((source) => ({ source: source.source })),
     preview,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -54,7 +70,14 @@ export async function listDataConnections(db: DatabaseConnection, ownerId: strin
     const dao = new DataConnectionDao(tx);
     const brands = await dao.activeBrandIds(ownerId);
     const connections = await dao.connectionsForOwner(ownerId);
-    return { brands, connections: connections.map(toView) };
+    const sourceRows = await new ConnectorEventDao(tx).sourcesByBrand(ownerId, [...new Set(connections.map((row) => row.brandId))]);
+    const sourcesByBrand = new Map<string, { source: DataConnectionSourceName }[]>();
+    for (const row of sourceRows) {
+      const list = sourcesByBrand.get(row.brandId) ?? [];
+      list.push({ source: row.source });
+      sourcesByBrand.set(row.brandId, list);
+    }
+    return { brands, connections: connections.map((row) => toView(row, sourcesByBrand.get(row.brandId) ?? [])) };
   });
 }
 
@@ -80,6 +103,9 @@ export async function registerDataConnection(
       fieldCount: input.fieldNames.length,
       fieldNames: [...input.fieldNames],
       pullAttemptedAt: null,
+      syncCursor: null,
+      coverageComplete: null,
+      syncStopped: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -136,5 +162,124 @@ export async function pullDataConnection(
     const saved = await dao.recordPull(ownerId, current.id, now);
     if (!saved) return { error: "CONFLICT" as const };
     return { connection: toView({ ...current, pullAttemptedAt: now, updatedAt: now }) };
+  });
+}
+
+async function sourceLabels(tx: ConstructorParameters<typeof ConnectorEventDao>[0], ownerId: string, brandId: string) {
+  const rows = await new ConnectorEventDao(tx).sourcesByBrand(ownerId, [brandId]);
+  return rows.map((row) => ({ source: row.source }));
+}
+
+export async function readBrandSyncSurface(
+  db: DatabaseConnection,
+  ownerId: string,
+  brandId: string,
+  eventIds: readonly string[],
+) {
+  return db.transaction(async (tx) => {
+    const dao = new DataConnectionDao(tx);
+    const rows = await dao.syncRowsForBrand(ownerId, brandId);
+    const sources = await new ConnectorEventDao(tx).sourcesForEvents(ownerId, brandId, eventIds);
+    return {
+      connections: rows.map((row) => ({
+        id: row.id,
+        displayName: row.displayName,
+        syncCursor: row.syncCursor,
+        coverageComplete: row.coverageComplete === null ? null : row.coverageComplete === 1,
+        syncStopped: row.syncStopped === 1,
+      })),
+      sources,
+    };
+  });
+}
+
+export async function syncDataConnection(
+  db: DatabaseConnection,
+  ownerId: string,
+  connectionId: string,
+  body: unknown,
+  clock: Clock = systemClock,
+): Promise<{ connection: DataConnectionView; replayed: boolean } | { error: SyncError }> {
+  return db.transaction(async (tx) => {
+    const dao = new DataConnectionDao(tx);
+    const current = await lockedConnection(dao, new BrandDao(tx), ownerId, connectionId);
+    if (!current) return { error: "NOT_FOUND" as const };
+    const parsed = syncDataConnectionSchema.safeParse(body);
+    if (!parsed.success) return { error: "INVALID_INPUT" as const };
+    const input = parsed.data;
+    const blocked = input.events.some((event) => prepareLeadRow({
+      eventId: event.eventKey,
+      evidence: event.evidence,
+      directIdentifier: false,
+    }).directIdentifier);
+    if (blocked) return { error: "INVALID_INPUT" as const };
+    const preview = previewSync({ approved: current.status === "approved", fieldNames: current.fieldNames });
+    if (!preview.pull || current.status !== "approved" || !sameFields(preview.fields, current.fieldNames)) {
+      return { error: "PULL_BLOCKED" as const };
+    }
+    const authorization = await new SyncAuthorizationDao(tx).authorizationForSource(
+      ownerId,
+      current.brandId,
+      current.displayName,
+      true,
+    );
+    if (!authorization) return { error: "SYNC_BLOCKED" as const };
+    const now = clock();
+    if (authorization.revoked === 1) {
+      await new SyncAuthorizationDao(tx).insertAttempts([{
+        id: randomUUID(),
+        authorizationId: authorization.id,
+        brandId: current.brandId,
+        ownerId,
+        result: "stopped",
+        attemptedAt: now,
+      }]);
+      const stopped = await dao.markSyncStopped(ownerId, current.id, now);
+      if (!stopped) throw new Error("data-connection-sync-stopped");
+      return { error: "SYNC_STOPPED" as const };
+    }
+    const sources = await sourceLabels(tx, ownerId, current.brandId);
+    if (current.syncCursor === input.cursor) return { connection: toView(current, sources), replayed: true };
+    if (input.events.length > 0) {
+      await writeConnectorEvents(tx, ownerId, {
+        brandId: current.brandId,
+        rows: input.events.map((event) => ({
+          eventKey: event.eventKey,
+          source: "connector" as const,
+          payloadDigest: event.payloadDigest,
+        })),
+      }, clock);
+      const leads = await writeBusinessLeads(tx, ownerId, {
+        brandId: current.brandId,
+        rows: input.events.map((event) => ({
+          eventId: event.eventKey,
+          evidence: event.evidence,
+          directIdentifier: false,
+        })),
+      }, clock);
+      if (leads.rejected.length > 0) throw new Error("data-connection-lead-rejected");
+    }
+    const advanced = await dao.advanceCursor(
+      ownerId,
+      current.id,
+      input.cursor,
+      input.coverageComplete ? 1 : 0,
+      now,
+    );
+    if (!advanced) throw new Error("data-connection-cursor");
+    await new SyncAuthorizationDao(tx).insertAttempts([{
+      id: randomUUID(),
+      authorizationId: authorization.id,
+      brandId: current.brandId,
+      ownerId,
+      result: "allowed",
+      attemptedAt: now,
+    }]);
+    const saved = await dao.connectionForOwner(ownerId, current.id, false);
+    if (!saved || saved.syncCursor !== input.cursor) throw new Error("data-connection-cursor");
+    return {
+      connection: toView({ ...current, ...saved, fieldNames: current.fieldNames }, await sourceLabels(tx, ownerId, current.brandId)),
+      replayed: false,
+    };
   });
 }

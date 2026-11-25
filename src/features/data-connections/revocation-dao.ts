@@ -104,6 +104,16 @@ export function syncAttemptsForOwnerQuery(ownerId: string, authorizationIds: rea
   };
 }
 
+export function syncAuthorizationForSourceQuery(ownerId: string, brandId: string, sourceName: string) {
+  return {
+    sql: `SELECT ${authorizationColumns} FROM sync_authorization
+      WHERE owner_id = ? AND brand_id = ? AND source_name = ?
+      ORDER BY revoked ASC, updated_at DESC, id ASC
+      LIMIT 1`,
+    values: [ownerId, brandId, sourceName] as QueryValue[],
+  };
+}
+
 export class SyncAuthorizationDao {
   private readonly db: QueryConnection;
 
@@ -167,6 +177,13 @@ export class SyncAuthorizationDao {
   async attemptsForOwner(ownerId: string, authorizationIds: readonly string[]) {
     const query = syncAttemptsForOwnerQuery(ownerId, authorizationIds);
     return z.array(attemptRow).parse(await queryWithParameters(this.db, query.sql, query.values));
+  }
+
+  async authorizationForSource(ownerId: string, brandId: string, sourceName: string, lock: boolean) {
+    const query = syncAuthorizationForSourceQuery(ownerId, brandId, sourceName);
+    const clause = lock && this.db.kind === "postgresql" ? " FOR UPDATE" : "";
+    const [row] = await queryWithParameters(this.db, query.sql + clause, query.values);
+    return row ? authorizationRow.parse(row) : null;
   }
 
   async markRevoked(ownerId: string, authorizationId: string, retainedRows: number, updatedAt: string) {
