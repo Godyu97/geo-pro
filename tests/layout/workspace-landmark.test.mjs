@@ -221,3 +221,17 @@ test("sampling protocols keep header actions, wrapping, and read recovery in the
   assert.match(panel, /\[overflow-wrap:anywhere\]/);
   assert.match(panel, /aria-disabled=\{pending\}/);
 });
+
+test("settings usage keeps header actions, table container, wrapping, and read recovery in the workspace canvas", () => {
+  const page = read("../../src/features/monitoring/usage-page.tsx");
+  assert.doesNotMatch(page, /<main\b/);
+  assert.match(page, /SERVICE_UNAVAILABLE/);
+  assert.match(page, /retry/);
+  assert.match(page, /backSettings/);
+  assert.match(page, /adjustScope/);
+  assert.match(page, /viewLedger/);
+  assert.match(page, /whitespace-normal/);
+  assert.match(page, /\[overflow-wrap:anywhere\]/);
+  assert.match(page, /<Table/);
+  assert.match(page, /<Badge/);
+});

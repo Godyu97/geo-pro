@@ -465,6 +465,16 @@ await writeFile(protocolCommands, protocolSource
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 
+const usageActivity = path.join(fixture, "src/features/monitoring/activity.ts");
+const usageSource = await readFile(usageActivity, "utf8");
+const usageRead = "export async function readOwnerUsage(connection: DatabaseConnection, ownerId: string, filter: UsageFilter) {\n  try {";
+assert.ok(usageSource.includes(usageRead));
+await writeFile(usageActivity, usageSource.replace(usageRead, `${usageRead}
+    if ((await (await import("next/headers")).cookies()).get("geo-usage-read")?.value === "slow-unavailable") {
+      await new Promise(resolve => setTimeout(resolve, 1800));
+      throw new Error("Private usage fixture failure");
+    }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

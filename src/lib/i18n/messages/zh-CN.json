@@ -362,7 +362,9 @@
     "overLimit": "次数或预算已到硬顶。下一步是调整题数或重复次数。",
     "adjustScope": "调整监测范围",
     "backSettings": "返回账户设置",
-    "attemptState": "费用状态"
+    "attemptState": "费用状态",
+    "viewLedger": "查看额度流水",
+    "ledgerHeading": "额度流水明细"
   },
   "settings": {
     "profile": "个人资料",

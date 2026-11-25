@@ -362,7 +362,9 @@
     "overLimit": "The count or budget ceiling is reached. The next step is to adjust the question count or repeats.",
     "adjustScope": "Adjust monitoring scope",
     "backSettings": "Back to account settings",
-    "attemptState": "Cost state"
+    "attemptState": "Cost state",
+    "viewLedger": "View usage ledger",
+    "ledgerHeading": "Quota movement ledger"
   },
   "settings": {
     "profile": "Personal profile",
