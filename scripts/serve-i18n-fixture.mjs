@@ -316,6 +316,18 @@ await writeFile(externalConnectionsPage, externalConnectionsSource.replace(exter
     if (probe === "unavailable") throw new Error("Private external connections fixture failure");
 ${externalConnectionLabels}`));
 
+const delegationsPage = path.join(fixture, "src/features/commercial/delegations-page.tsx");
+const delegationsSource = await readFile(delegationsPage, "utf8");
+const delegationsRead = "    workspace = await listDelegationWorkspace(getConnection(), user.id, now);";
+assert.ok(delegationsSource.includes(delegationsRead));
+await writeFile(delegationsPage, delegationsSource.replace(delegationsRead, `${delegationsRead}
+    const probe = (await (await import("next/headers")).cookies()).get("geo-delegations-read")?.value;
+    if (probe === "slow") await new Promise(resolve => setTimeout(resolve, 1800));
+    if (probe === "unavailable") {
+      workspace = null;
+      throw new Error("Private brand delegation fixture failure");
+    }`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
