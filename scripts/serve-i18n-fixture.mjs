@@ -307,6 +307,15 @@ await writeFile(notificationsPage, notificationsSource.replace(notificationLabel
     if (probe === "unavailable") throw new Error("Private notification endpoints fixture failure");
 ${notificationLabels}`));
 
+const externalConnectionsPage = path.join(fixture, "src/features/external-connections/connections-page.tsx");
+const externalConnectionsSource = await readFile(externalConnectionsPage, "utf8");
+const externalConnectionLabels = "    const labels = await loadOwnedLabels(connection, workspace.brands.map((brand) => brand.id));";
+assert.ok(externalConnectionsSource.includes(externalConnectionLabels));
+await writeFile(externalConnectionsPage, externalConnectionsSource.replace(externalConnectionLabels, `    const probe = (await (await import("next/headers")).cookies()).get("geo-external-connections-read")?.value;
+    if (probe === "slow") await new Promise(resolve => setTimeout(resolve, 1800));
+    if (probe === "unavailable") throw new Error("Private external connections fixture failure");
+${externalConnectionLabels}`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
