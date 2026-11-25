@@ -184,6 +184,12 @@ export function promptUnavailable() {
   return { error: "unavailable" as const, traceId };
 }
 
+export async function readQuestionEntry(db: QueryConnection, ownerId: string) {
+  const active = await new BrandDao(db).active(ownerId);
+  if (!active) return { kind: "no-brand" as const };
+  return { kind: "active" as const, brandId: active.id };
+}
+
 export type PromptWorkspace = NonNullable<Awaited<ReturnType<typeof readPromptWorkspace>>>;
 export type PromptWarningCode = PromptWarning["code"];
 export type { PromptPreview, BudgetInput };

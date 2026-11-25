@@ -12,6 +12,7 @@ test("workspace location follows the current dashboard section", () => {
   assert.equal(resolveWorkspaceSection("/dashboard/maintenance/support"), "maintenance");
   assert.equal(resolveWorkspaceSection("/dashboard/settings/team"), "settings");
   assert.equal(resolveWorkspaceSection("/dashboard/brands/brand-1/facts"), "brands");
+  assert.equal(resolveWorkspaceSection("/dashboard/brands/questions"), "prompts");
   assert.equal(resolveWorkspaceSection("/dashboard/brands/brand-1/questions"), "prompts");
   assert.equal(resolveWorkspaceSection("/dashboard/monitoring/evidence/obs-1"), "monitoring");
   assert.equal(resolveWorkspaceSection("/dashboard/optimization/task-1"), "optimization");

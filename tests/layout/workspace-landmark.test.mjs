@@ -556,3 +556,30 @@ test("strategy templates keep the next action, observation text, and read recove
   assert.match(loading, /role="status"/);
   assert.match(loading, /t\("loading"\)/);
 });
+
+test("question entry keeps the next action and read recovery before opening a brand", () => {
+  const page = read("../../src/features/prompts/entry-page.tsx");
+  const service = read("../../src/features/prompts/service.ts");
+  const loading = read("../../src/app/(dashboard)/dashboard/brands/questions/loading.tsx");
+  assert.doesNotMatch(page, /<main\b/);
+  assert.match(page, /<header\b/);
+  assert.match(page, /entryNoBrand/);
+  assert.match(page, /entryOpenBrand/);
+  assert.match(page, /allBrands/);
+  assert.match(page, /messages\.closed/);
+  assert.match(page, /devActorDenied/);
+  assert.match(page, /relatedEntries/);
+  assert.match(page, /messages\.unavailable/);
+  assert.match(page, /messages\.reload/);
+  assert.match(page, /const retryHref = "\/dashboard\/brands\/questions"/);
+  assert.match(page, /<a href=\{retryHref\}>/);
+  assert.match(page, /t\("trace"/);
+  assert.match(page, /readQuestionEntry/);
+  assert.match(page, /whitespace-normal/);
+  assert.match(page, /border-dashed/);
+  assert.match(page, /\[overflow-wrap:anywhere\]/);
+  assert.match(page, /redirect\(`\/dashboard\/brands\/\$\{result\.brandId\}\/questions`\)/);
+  assert.match(service, /export async function readQuestionEntry/);
+  assert.match(loading, /role="status"/);
+  assert.match(loading, /t\("loading"\)/);
+});

@@ -1033,6 +1033,9 @@
   "promptSets": {
     "title": "Monitoring questions",
     "description": "Organize buying-question clusters and candidates, separate natural-discovery primary questions from excluded types, and freeze versions for monitoring runs.",
+    "entryNoBrand": "No active brand yet. The next step is to set up a brand before organizing monitoring questions.",
+    "entryOpenBrand": "Open brands",
+    "backOverview": "Back to overview",
     "loading": "Loading monitoring questions…",
     "back": "Back to brand details",
     "activeBrandLabel": "Active brand:",

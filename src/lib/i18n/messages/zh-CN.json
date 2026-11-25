@@ -1033,6 +1033,9 @@
   "promptSets": {
     "title": "监测问题",
     "description": "整理购买问题簇与候选题目，区分自然发现主指标与非自然发现题，并冻结版本以供监测运行引用。",
+    "entryNoBrand": "还没有活跃品牌。下一步是先建立品牌，再整理监测问题。",
+    "entryOpenBrand": "去建档",
+    "backOverview": "返回工作台",
     "loading": "正在加载监测问题…",
     "back": "返回品牌资料",
     "activeBrandLabel": "当前品牌：",

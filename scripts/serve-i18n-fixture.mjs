@@ -547,6 +547,26 @@ await writeFile(promptService, promptSource
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 
+const questionEntryRead = "export async function readQuestionEntry(db: QueryConnection, ownerId: string) {";
+const questionEntrySource = await readFile(promptService, "utf8");
+assert.ok(questionEntrySource.includes(questionEntryRead));
+await writeFile(promptService, questionEntrySource.replace(questionEntryRead, `${questionEntryRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-question-entry-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private question entry fixture failure");
+  }`));
+
+const questionEntryPage = path.join(fixture, "src/features/prompts/entry-page.tsx");
+const questionEntryPageSource = await readFile(questionEntryPage, "utf8");
+const questionEntryAccess = "  const material = brandMaterialAccess(requestHeaders, user.email);";
+assert.ok(questionEntryPageSource.includes(questionEntryAccess));
+await writeFile(questionEntryPage, questionEntryPageSource.replace(questionEntryAccess, `  const entryAccess = (await (await import("next/headers")).cookies()).get("geo-question-entry-access")?.value;
+  const material = entryAccess === "closed"
+    ? { ok: false as const, error: "closed" as const }
+    : entryAccess === "denied"
+      ? { ok: false as const, error: "devActorDenied" as const }
+      : brandMaterialAccess(requestHeaders, user.email);`));
+
 const entityCommands = path.join(fixture, "src/features/entity-accuracy/commands.ts");
 const entityCommandsSource = await readFile(entityCommands, "utf8");
 const entityReviewsRead = `export async function readEntityReviewWorkspace(
