@@ -206,3 +206,18 @@ test("report entry keeps the current snapshot action and recovery in the workspa
   assert.match(reports, /\[overflow-wrap:anywhere\]/);
   assert.match(reports, /whitespace-normal/);
 });
+
+test("sampling protocols keep header actions, wrapping, and read recovery in the workspace canvas", () => {
+  const page = read("../../src/features/monitoring/protocols-page.tsx");
+  const panel = read("../../src/features/monitoring/protocols-panel.tsx");
+  assert.doesNotMatch(page, /<main\b/);
+  assert.doesNotMatch(panel, /<main\b/);
+  assert.match(page, /SERVICE_UNAVAILABLE/);
+  assert.match(page, /reload/);
+  assert.match(page, /goBrands/);
+  assert.match(page, /startDraft/);
+  assert.match(page, /browseProtocols/);
+  assert.match(page, /whitespace-normal/);
+  assert.match(panel, /\[overflow-wrap:anywhere\]/);
+  assert.match(panel, /aria-disabled=\{pending\}/);
+});

@@ -444,6 +444,27 @@ await writeFile(profileCommands, profileSource
   }
 ${profileWrite}`));
 
+const protocolCommands = path.join(fixture, "src/features/monitoring/protocol-commands.ts");
+const protocolSource = await readFile(protocolCommands, "utf8");
+const protocolRead = "export async function listSamplingProtocols(db: DatabaseConnection, ownerId: string): Promise<SamplingProtocolList> {";
+const protocolWrite = `export async function createSamplingProtocol(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: CreateSamplingProtocolInput,
+  clock: Clock = systemClock,
+): Promise<{ protocol: SamplingProtocolView } | { error: SamplingProtocolError }> {`;
+assert.ok(protocolSource.includes(protocolRead) && protocolSource.includes(protocolWrite));
+await writeFile(protocolCommands, protocolSource
+  .replace(protocolRead, `${protocolRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-protocols-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private sampling protocols fixture failure");
+  }`)
+  .replace(protocolWrite, `${protocolWrite}
+  if ((await (await import("next/headers")).cookies()).get("geo-protocols-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));
