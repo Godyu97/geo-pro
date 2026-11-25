@@ -358,6 +358,15 @@ await writeFile(entitlementsPage, entitlementsSource.replace(entitlementsRead, `
     if (probe === "unavailable") throw new Error("Private entitlements fixture failure");
 ${entitlementsRead}`));
 
+const sharesPage = path.join(fixture, "src/features/commercial/shares-page.tsx");
+const sharesSource = await readFile(sharesPage, "utf8");
+const sharesRead = "    workspace = await loadShareWorkspace(getConnection(), user.id);";
+assert.ok(sharesSource.includes(sharesRead));
+await writeFile(sharesPage, sharesSource.replace(sharesRead, `    const probe = (await (await import("next/headers")).cookies()).get("geo-shares-read")?.value;
+    if (probe === "slow") await new Promise(resolve => setTimeout(resolve, 1800));
+    if (probe === "unavailable") throw new Error("Private white-label share fixture failure");
+${sharesRead}`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";

@@ -1,9 +1,12 @@
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { loadShareWorkspace } from "./share-commands.ts";
 import { SharesPanel } from "./shares-panel";
+
+const actionClass = "h-auto min-h-10 max-w-full py-2 whitespace-normal";
 
 export async function generateMetadata() {
   const t = await getTranslator("shares");
@@ -21,24 +24,48 @@ export default async function SharesPage() {
   } catch {
     console.error("shares-page-unavailable");
   }
-  if (!workspace) {
-    return (
-      <div className="space-y-4">
-        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p role="alert" className="text-sm leading-6 text-destructive">{t("SERVICE_UNAVAILABLE")}</p>
-        <Link href="/dashboard/reports" prefetch={false} className="inline-block text-sm underline underline-offset-4">{t("backReports")}</Link>
-      </div>
-    );
-  }
+  const canRegister = Boolean(workspace?.brands.length);
+  const hasShares = Boolean(workspace?.shares.length);
+
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
+    <div className="min-w-0 space-y-6">
+      <header className="space-y-3">
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{t("description")}</p>
-        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{t("fixtureNote")}</p>
-      </div>
-      <SharesPanel workspace={workspace} messages={messages} />
-      <Link href="/dashboard/reports" prefetch={false} className="inline-block text-sm underline underline-offset-4">{t("backReports")}</Link>
+        {workspace ? (
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t("description")}</p>
+        ) : (
+          <p role="alert" className="text-sm leading-6 text-destructive">{t("SERVICE_UNAVAILABLE")}</p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {workspace ? (
+            <>
+              {hasShares && (
+                <Button asChild className={actionClass}>
+                  <a href="#whitelabel-shares-heading">{t("viewHistory")}</a>
+                </Button>
+              )}
+              {canRegister && (
+                <Button asChild variant={hasShares ? "outline" : "default"} className={actionClass}>
+                  <a href="#whitelabel-share-brand">{t("startRegistration")}</a>
+                </Button>
+              )}
+              {!canRegister && !hasShares && (
+                <Button asChild className={actionClass}>
+                  <Link href="/dashboard/brands" prefetch={false}>{t("openBrands")}</Link>
+                </Button>
+              )}
+            </>
+          ) : (
+            <Button asChild className={actionClass}>
+              <a href="/dashboard/reports/shares">{t("reload")}</a>
+            </Button>
+          )}
+          <Button asChild variant="ghost" className={actionClass}>
+            <Link href="/dashboard/reports" prefetch={false}>{t("backReports")}</Link>
+          </Button>
+        </div>
+      </header>
+      {workspace && <SharesPanel workspace={workspace} messages={messages} now={new Date().toISOString()} />}
     </div>
   );
 }
