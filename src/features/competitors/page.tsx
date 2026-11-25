@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { BrandDao } from "../brands/dao";
 import {
   briefStatusAction,
+  createContentBriefFromResearchAction,
+  createOptimizationTaskFromResearchAction,
   inspectCitationAction,
   proposeBriefAction,
   recordMentionsAction,
@@ -592,6 +594,9 @@ export default async function CompetitorAnalysisPage({
                         : t("supportUnknown")}
                   </span>
                 </p>
+                {citation.supportedClaim ? (
+                  <p className="mt-1 [overflow-wrap:anywhere]">{t("supportedClaimLine", { claim: citation.supportedClaim })}</p>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -617,6 +622,22 @@ export default async function CompetitorAnalysisPage({
                 <span>{t(name)}</span>
               </label>
             ))}
+            <label className="block min-w-0 text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("supportedClaim")}</span>
+              <input name="supportedClaim" maxLength={500} className={`${fieldClass} h-10`} />
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground">{t("supportedClaimHint")}</span>
+            </label>
+            <label className="block min-w-0 text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("factVersion")}</span>
+              <span className={selectWrap}>
+                <select name="factVersionId" className="h-10 w-full max-w-full rounded-md border bg-background px-3">
+                  <option value="">{t("factVersionNone")}</option>
+                  {workspace.usableFacts.map((fact) => (
+                    <option key={fact.id} value={fact.id}>{citationOption(fact.claim)}</option>
+                  ))}
+                </select>
+              </span>
+            </label>
             <Button type="submit" className={actionClass}>{t("saveInspection")}</Button>
           </form>
         ) : null}
@@ -643,6 +664,30 @@ export default async function CompetitorAnalysisPage({
                     <Button type="submit" name="status" value="accepted" size="sm" className={actionClass}>{t("accept")}</Button>
                     <Button type="submit" name="status" value="dismissed" size="sm" variant="outline" className={actionClass}>{t("dismiss")}</Button>
                   </form>
+                ) : null}
+                {brief.status === "accepted" ? (
+                  <div className="mt-3 flex min-w-0 flex-wrap gap-2">
+                    <form action={createContentBriefFromResearchAction}>
+                      <input type="hidden" name="brandId" value={brandId} />
+                      <input type="hidden" name="briefId" value={brief.id} />
+                      <Button type="submit" size="sm" className={actionClass}>{t("createContentBrief")}</Button>
+                    </form>
+                    <form action={createOptimizationTaskFromResearchAction}>
+                      <input type="hidden" name="brandId" value={brandId} />
+                      <input type="hidden" name="briefId" value={brief.id} />
+                      <Button type="submit" size="sm" variant="outline" className={actionClass}>{t("createOptimizationTask")}</Button>
+                    </form>
+                    {brief.contentBriefId ? (
+                      <Link href={`/dashboard/content/briefs/${brief.contentBriefId}`} prefetch={false} className={linkClass}>
+                        {t("openContentBrief")}
+                      </Link>
+                    ) : null}
+                    {brief.optimizationTaskId ? (
+                      <Link href={`/dashboard/optimization/${brief.optimizationTaskId}`} prefetch={false} className={linkClass}>
+                        {t("openOptimizationTask")}
+                      </Link>
+                    ) : null}
+                  </div>
                 ) : null}
               </li>
             ))}

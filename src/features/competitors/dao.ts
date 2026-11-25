@@ -47,6 +47,8 @@ const inspectionRow = z.object({
   readable: flag,
   authorKnown: flag,
   supportsBrand: flag,
+  supportedClaim: z.string().nullable(),
+  factVersionId: brandIdSchema.nullable(),
   createdAt: z.iso.datetime({ precision: 3 }),
   updatedAt: z.iso.datetime({ precision: 3 }),
 });
@@ -63,12 +65,37 @@ const citationViewRow = z.object({
   readable: flag.nullable(),
   authorKnown: flag.nullable(),
   supportsBrand: flag.nullable(),
+  supportedClaim: z.string().nullable(),
+  factVersionId: brandIdSchema.nullable(),
 });
 
 export type SourceInspectionRow = z.infer<typeof inspectionRow>;
 export type CitationSourceRow = z.infer<typeof citationViewRow>;
 
 const setColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", version, labels_json AS "labelsJson", created_at AS "createdAt"`;
+const inspectionColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", citation_id AS "citationId",
+  state, support, page_live AS "pageLive", readable, author_known AS "authorKnown",
+  supports_brand AS "supportsBrand", supported_claim AS "supportedClaim", fact_version_id AS "factVersionId",
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
+const briefColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", question_cluster AS "questionCluster",
+  gap, facts_json AS "factsJson", source_ids_json AS "sourceIdsJson", status,
+  content_brief_id AS "contentBriefId", optimization_task_id AS "optimizationTaskId",
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
+const briefRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1),
+  questionCluster: z.string(),
+  gap: z.string(),
+  factsJson: z.string(),
+  sourceIdsJson: z.string(),
+  status: z.enum(["proposed", "accepted", "dismissed"]),
+  contentBriefId: brandIdSchema.nullable(),
+  optimizationTaskId: brandIdSchema.nullable(),
+  createdAt: z.iso.datetime({ precision: 3 }),
+  updatedAt: z.iso.datetime({ precision: 3 }),
+});
+export type ResearchBriefRow = z.infer<typeof briefRow>;
 const mentionColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", set_id AS "setId",
   observation_id AS "observationId", competitor_label AS "competitorLabel", mention_state AS "mentionState", "ordered", position, created_at AS "createdAt"`;
 
@@ -188,10 +215,7 @@ export class CompetitorDao {
   async findInspection(citationId: string) {
     const [row] = await queryWithParameters(
       this.db,
-      `SELECT id, brand_id AS "brandId", owner_id AS "ownerId", citation_id AS "citationId",
-              state, support, page_live AS "pageLive", readable, author_known AS "authorKnown",
-              supports_brand AS "supportsBrand", created_at AS "createdAt", updated_at AS "updatedAt"
-       FROM source_inspection WHERE citation_id = ?`,
+      `SELECT ${inspectionColumns} FROM source_inspection WHERE citation_id = ?`,
       [citationId],
     );
     return row ? inspectionRow.parse(row) : null;
@@ -202,11 +226,12 @@ export class CompetitorDao {
       this.db,
       `INSERT INTO source_inspection (
         id, brand_id, owner_id, citation_id, state, support, page_live, readable,
-        author_known, supports_brand, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        author_known, supports_brand, supported_claim, fact_version_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.id, row.brandId, row.ownerId, row.citationId, row.state, row.support, row.pageLive,
-        row.readable, row.authorKnown, row.supportsBrand, row.createdAt, row.updatedAt,
+        row.readable, row.authorKnown, row.supportsBrand, row.supportedClaim, row.factVersionId,
+        row.createdAt, row.updatedAt,
       ],
     );
   }
@@ -215,13 +240,47 @@ export class CompetitorDao {
     await queryWithParameters(
       this.db,
       `UPDATE source_inspection SET
-        state = ?, support = ?, page_live = ?, readable = ?, author_known = ?, supports_brand = ?, updated_at = ?
+        state = ?, support = ?, page_live = ?, readable = ?, author_known = ?, supports_brand = ?,
+        supported_claim = ?, fact_version_id = ?, updated_at = ?
        WHERE id = ? AND brand_id = ? AND owner_id = ? AND citation_id = ?`,
       [
-        row.state, row.support, row.pageLive, row.readable, row.authorKnown, row.supportsBrand, row.updatedAt,
+        row.state, row.support, row.pageLive, row.readable, row.authorKnown, row.supportsBrand,
+        row.supportedClaim, row.factVersionId, row.updatedAt,
         row.id, row.brandId, row.ownerId, row.citationId,
       ],
     );
+  }
+
+  async approvedFact(ownerId: string, brandId: string, factVersionId: string) {
+    const [row] = await queryWithParameters(
+      this.db,
+      `SELECT f.id, f.content
+       FROM brand_fact_version f
+       JOIN brand b ON b.id = f.brand_id
+       WHERE f.brand_id = ? AND f.id = ? AND b.owner_id = ? AND b.frozen_at IS NULL
+         AND f.state = 'approved' AND f.revoked_at IS NULL`,
+      [brandId, factVersionId, ownerId],
+    );
+    return row ? z.object({ id: brandIdSchema, content: z.string() }).parse(row) : null;
+  }
+
+  async listApprovedFacts(ownerId: string, brandId: string) {
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT f.id, f.content
+       FROM brand_fact_version f
+       JOIN brand b ON b.id = f.brand_id
+       WHERE f.brand_id = ? AND b.owner_id = ? AND b.frozen_at IS NULL
+         AND f.state = 'approved' AND f.revoked_at IS NULL
+         AND f.version = (
+           SELECT MAX(v.version) FROM brand_fact_version v
+           WHERE v.brand_id = f.brand_id AND v.fact_id = f.fact_id
+         )
+       ORDER BY f.created_at DESC, f.id DESC
+       LIMIT 20`,
+      [brandId, ownerId],
+    );
+    return rows.map((row) => z.object({ id: brandIdSchema, content: z.string() }).parse(row));
   }
 
   async listCitationSources(ownerId: string, brandId: string) {
@@ -240,7 +299,8 @@ export class CompetitorDao {
       `SELECT c.id AS "citationId", c.observation_id AS "observationId", c.raw_url AS "rawUrl",
               c.normalized_url AS "normalizedUrl", c.ownership, c.page_status AS "pageStatus",
               i.state, i.support, i.page_live AS "pageLive", i.readable,
-              i.author_known AS "authorKnown", i.supports_brand AS "supportsBrand"
+              i.author_known AS "authorKnown", i.supports_brand AS "supportsBrand",
+              i.supported_claim AS "supportedClaim", i.fact_version_id AS "factVersionId"
        FROM answer_citation c
        JOIN answer_observation o ON o.id = c.observation_id
        LEFT JOIN source_inspection i ON i.citation_id = c.id AND i.brand_id = c.brand_id
@@ -310,27 +370,64 @@ export class CompetitorDao {
   async listBriefs(ownerId: string, brandId: string) {
     const rows = await queryWithParameters(
       this.db,
-      `SELECT id, brand_id AS "brandId", owner_id AS "ownerId", question_cluster AS "questionCluster",
-              gap, facts_json AS "factsJson", source_ids_json AS "sourceIdsJson", status,
-              created_at AS "createdAt", updated_at AS "updatedAt"
+      `SELECT ${briefColumns}
        FROM research_brief
        WHERE owner_id = ? AND brand_id = ?
        ORDER BY created_at DESC, id DESC
        LIMIT 50`,
       [ownerId, brandId],
     );
-    return rows.map((row) => z.object({
-      id: brandIdSchema,
-      brandId: brandIdSchema,
-      ownerId: z.string().min(1),
-      questionCluster: z.string(),
-      gap: z.string(),
-      factsJson: z.string(),
-      sourceIdsJson: z.string(),
-      status: z.enum(["proposed", "accepted", "dismissed"]),
-      createdAt: z.iso.datetime({ precision: 3 }),
-      updatedAt: z.iso.datetime({ precision: 3 }),
-    }).parse(row));
+    return rows.map((row) => briefRow.parse(row));
+  }
+
+  async lockBrief(ownerId: string, brandId: string, briefId: string) {
+    const lock = this.db.kind === "postgresql" ? " FOR UPDATE" : "";
+    const [row] = await queryWithParameters(
+      this.db,
+      `SELECT ${briefColumns} FROM research_brief
+       WHERE id = ? AND brand_id = ? AND owner_id = ?${lock}`,
+      [briefId, brandId, ownerId],
+    );
+    return row ? briefRow.parse(row) : null;
+  }
+
+  async attachHandoff(
+    ownerId: string,
+    brandId: string,
+    briefId: string,
+    column: "content_brief_id" | "optimization_task_id",
+    targetId: string,
+    updatedAt: string,
+  ) {
+    const rows = await queryWithParameters(
+      this.db,
+      `UPDATE research_brief SET ${column} = ?, updated_at = ?
+       WHERE id = ? AND brand_id = ? AND owner_id = ? AND status = 'accepted' AND ${column} IS NULL
+       RETURNING id`,
+      [targetId, updatedAt, briefId, brandId, ownerId],
+    );
+    return rows.length === 1;
+  }
+
+  async citationUrls(ownerId: string, brandId: string, citationIds: readonly string[]) {
+    if (citationIds.length === 0) return [];
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT c.id, c.normalized_url AS "normalizedUrl"
+       FROM answer_citation c
+       JOIN answer_observation o ON o.id = c.observation_id
+       WHERE c.brand_id = ? AND o.brand_id = ? AND o.owner_id = ?
+         AND c.id IN (${citationIds.map(() => "?").join(", ")})`,
+      [brandId, brandId, ownerId, ...citationIds],
+    );
+    const byId = new Map(rows.map((row) => {
+      const parsed = z.object({ id: brandIdSchema, normalizedUrl: z.string() }).parse(row);
+      return [parsed.id, parsed.normalizedUrl] as const;
+    }));
+    return citationIds.flatMap((id) => {
+      const url = byId.get(id);
+      return url ? [url] : [];
+    });
   }
 
   async updateBriefStatus(ownerId: string, brandId: string, briefId: string, status: "accepted" | "dismissed", updatedAt: string) {

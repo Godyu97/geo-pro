@@ -617,6 +617,13 @@
       "when": 1795628547506,
       "tag": "0087_right_swarm",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1795632625806,
+      "tag": "0088_smooth_meteorite",
+      "breakpoints": true
     }
   ]
 }

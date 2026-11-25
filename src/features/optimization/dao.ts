@@ -159,6 +159,24 @@ export class OptimizationDao {
     );
   }
 
+  async deleteTaskGraph(ownerId: string, brandId: string, taskId: string, findingId: string) {
+    await queryWithParameters(
+      this.db,
+      `DELETE FROM optimization_task_evidence WHERE task_id = ? AND brand_id = ?`,
+      [taskId, brandId],
+    );
+    await queryWithParameters(
+      this.db,
+      `DELETE FROM optimization_task WHERE id = ? AND owner_id = ? AND brand_id = ?`,
+      [taskId, ownerId, brandId],
+    );
+    await queryWithParameters(
+      this.db,
+      `DELETE FROM optimization_finding WHERE id = ? AND owner_id = ? AND brand_id = ?`,
+      [findingId, ownerId, brandId],
+    );
+  }
+
   async insertTask(row: TaskRow) {
     await queryWithParameters(
       this.db,

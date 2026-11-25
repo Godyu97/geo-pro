@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { PurgeDao } from "../../src/features/brands/purge-dao.ts";
 import { inspectCitationSource, readCitationSources, readCompetitorWorkspace } from "../../src/features/competitors/commands.ts";
-import { thirdPartySupportSummary } from "../../src/features/source-opportunities/rules.ts";
+import { supportedClaimRecord, thirdPartySupportSummary } from "../../src/features/source-opportunities/rules.ts";
 import { submitManualEvidence } from "../../src/features/evidence/commands.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
@@ -41,6 +41,22 @@ async function account(db) {
   );
   return id;
 }
+
+test("a claim is stored only when the citation supports the brand", () => {
+  assert.equal(supportedClaimRecord({
+    support: "unknown",
+    supportedClaim: "不该保存",
+    factVersionId: "11111111-1111-4111-8111-111111111111",
+  }).supportedClaim, null);
+  assert.equal(supportedClaimRecord({
+    support: "does_not_support",
+    supportedClaim: "明确不支持",
+  }).factVersionId, null);
+  assert.equal(supportedClaimRecord({
+    support: "supports",
+    supportedClaim: "  公开售价 100 元  ",
+  }).supportedClaim, "公开售价 100 元");
+});
 
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: an unreadable citation stays visible with unknown support`, async (t) => {
@@ -108,11 +124,14 @@ for (const kind of ["sqlite", "postgresql"]) {
       readable: false,
       authorKnown: false,
       supportsBrand: true,
+      supportedClaim: "不该保存的主张",
     }, clock);
     assert.equal(limited.error, undefined);
     assert.equal(limited.support, "unknown");
     assert.equal(limited.state, "limited");
     assert.equal(limited.citationKept, true);
+    assert.equal(limited.inspection.supportedClaim, null);
+    assert.equal(limited.inspection.factVersionId, null);
 
     const dead = await inspectCitationSource(db, owner, {
       brandId: brand,
@@ -137,9 +156,15 @@ for (const kind of ["sqlite", "postgresql"]) {
       readable: true,
       authorKnown: true,
       supportsBrand: true,
+      supportedClaim: "公开售价 100 元",
     }, clock);
     assert.equal(positive.support, "supports");
     assert.equal(positive.state, "resolved");
+    assert.equal(positive.inspection.supportedClaim, "公开售价 100 元");
+    assert.equal(positive.inspection.factVersionId, null);
+    const shown = await readCitationSources(db, owner, brand);
+    assert.equal(shown.citations.find((item) => item.citationId === live.id)?.supportedClaim, "公开售价 100 元");
+    assert.equal(shown.citations.find((item) => item.citationId === restricted.id)?.supportedClaim, null);
     const stillThere = await queryWithParameters(db, "SELECT id FROM answer_citation WHERE id = ?", [live.id]);
     assert.equal(stillThere.length, 1);
 
@@ -308,6 +333,76 @@ for (const kind of ["sqlite", "postgresql"]) {
       brandId: brand2, citationId: cNeg.id, pageLive: true, readable: true, authorKnown: true, supportsBrand: false,
     }, clock);
     assert.equal(outsiderDenied.error, "NOT_FOUND");
+  });
+
+  test(`${kind}: old inspections and briefs stay unchanged when claim and handoff columns are added`, async (t) => {
+    const fixture = await testDatabase(kind, { migrateNow: false });
+    t.after(() => fixture.cleanup());
+    const db = fixture.connection;
+    await migrateThrough(db, previousTag(kind));
+    const owner = await account(db);
+    const brand = randomUUID();
+    const brands = new BrandDao(db);
+    await brands.insertBrand(owner, brand, time);
+    await brands.insertVersion(brand, 1, fields, time);
+    const saved = await submitManualEvidence(db, owner, {
+      action: "submit-manual",
+      brandId: brand,
+      operationId: randomUUID(),
+      questionText: "升级前的引用",
+      answerText: "升级前已经保存的引用。",
+      region: "CN",
+      language: "zh-CN",
+      requestedNetworkMode: "unknown",
+      entityVersion: 1,
+      citationSetState: "complete",
+      citations: [{
+        rawUrl: "https://legacy.example.com/kept",
+        citationOrigin: "consumer_visible",
+        ownership: "third_party",
+        pageStatus: "reachable",
+      }],
+      locatorRef: "fixture://sources/upgrade",
+      collectorId: owner,
+      contested: false,
+      brandName: "乙品牌",
+      aliases: ["乙"],
+      officialWebsite: "https://yi.example.com",
+      mentioned: "unknown",
+      recommended: "unknown",
+      officialSiteCited: "unknown",
+    }, clock);
+    assert.equal(saved.error, undefined);
+    const citationId = saved.citations[0].id;
+    const inspectionId = randomUUID();
+    const briefId = randomUUID();
+    await queryWithParameters(db, `INSERT INTO source_inspection (
+      id, brand_id, owner_id, citation_id, state, support, page_live, readable,
+      author_known, supports_brand, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'limited', 'unknown', 1, 0, 0, 0, ?, ?)`,
+    [inspectionId, brand, owner, citationId, time, time]);
+    await queryWithParameters(db, `INSERT INTO research_brief (
+      id, brand_id, owner_id, question_cluster, gap, facts_json, source_ids_json, status, created_at, updated_at
+    ) VALUES (?, ?, ?, '升级前问题簇', '升级前缺口', '[]', ?, 'proposed', ?, ?)`,
+    [briefId, brand, owner, JSON.stringify([citationId]), time, time]);
+
+    execFileSync("pnpm", ["db:migrate"], {
+      env: { ...process.env, ...fixture.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const [inspection] = await queryWithParameters(db, `SELECT state, support, supported_claim AS "supportedClaim",
+      fact_version_id AS "factVersionId" FROM source_inspection WHERE id = ?`, [inspectionId]);
+    assert.equal(inspection.state, "limited");
+    assert.equal(inspection.support, "unknown");
+    assert.equal(inspection.supportedClaim, null);
+    assert.equal(inspection.factVersionId, null);
+    const [brief] = await queryWithParameters(db, `SELECT status, gap, content_brief_id AS "contentBriefId",
+      optimization_task_id AS "optimizationTaskId" FROM research_brief WHERE id = ?`, [briefId]);
+    assert.equal(brief.status, "proposed");
+    assert.equal(brief.gap, "升级前缺口");
+    assert.equal(brief.contentBriefId, null);
+    assert.equal(brief.optimizationTaskId, null);
   });
 }
 

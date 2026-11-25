@@ -111,6 +111,52 @@ export function thirdPartySupportSummary(
   };
 }
 
+/** A supporting page may name the claim. Anything else keeps both fields empty. */
+export function supportedClaimRecord(input: {
+  support: PageSupport;
+  supportedClaim?: string | null;
+  factVersionId?: string | null;
+  factClaim?: string | null;
+}) {
+  if (input.support !== "supports") return { supportedClaim: null, factVersionId: null };
+  const typed = input.supportedClaim?.trim() ?? "";
+  const fromFact = input.factClaim?.trim() ?? "";
+  const supportedClaim = (typed || fromFact).slice(0, 500);
+  if (!supportedClaim) return { supportedClaim: null, factVersionId: null };
+  return { supportedClaim, factVersionId: input.factVersionId ?? null };
+}
+
+/** Join observed citation URLs only. Competitor prose never becomes the source reference. */
+export function citationSourceReference(urls: readonly string[]) {
+  const unique = [...new Set(urls.map((url) => url.trim()).filter((url) => url.length > 0))];
+  let joined = "";
+  for (const url of unique) {
+    const next = joined.length === 0 ? url : `${joined}\n${url}`;
+    if (next.length > 2000) break;
+    joined = next;
+  }
+  return joined.length > 0 ? joined : null;
+}
+
+/** Bind research-brief fact lines only when they match this brand's approved claims. */
+export function matchOwnFactVersions(
+  lines: readonly string[],
+  facts: readonly { id: string; claim: string }[],
+) {
+  const byClaim = new Map<string, string>();
+  for (const fact of facts) {
+    const claim = fact.claim.trim();
+    if (claim.length > 0 && !byClaim.has(claim)) byClaim.set(claim, fact.id);
+  }
+  const ids: string[] = [];
+  for (const line of lines) {
+    const id = byClaim.get(line.trim());
+    if (id && !ids.includes(id)) ids.push(id);
+    if (ids.length === 20) break;
+  }
+  return ids;
+}
+
 /** Reject a brief that only swaps the source brand for our brand, or that has no source or gap. */
 export function inspectCopiedBrief(input: {
   sourceText: string;

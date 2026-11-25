@@ -60,6 +60,8 @@ export const inspectCitationSchema = z.strictObject({
   readable: z.boolean(),
   authorKnown: z.boolean(),
   supportsBrand: z.boolean(),
+  supportedClaim: z.string().trim().max(500).optional(),
+  factVersionId: brandIdSchema.nullable().optional(),
 });
 export type InspectCitationInput = z.infer<typeof inspectCitationSchema>;
 
@@ -84,6 +86,12 @@ export const briefStatusSchema = z.strictObject({
   status: z.enum(["accepted", "dismissed"]),
 });
 export type BriefStatusInput = z.infer<typeof briefStatusSchema>;
+
+export const researchHandoffSchema = z.strictObject({
+  brandId: brandIdSchema,
+  briefId: brandIdSchema,
+});
+export type ResearchHandoffInput = z.infer<typeof researchHandoffSchema>;
 
 export function normalizeCompetitorLabels(labels: readonly string[]) {
   const unique = [...new Set(labels.map((label) => label.trim()).filter((label) => label.length > 0))];

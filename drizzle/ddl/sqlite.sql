@@ -1501,12 +1501,18 @@ CREATE TABLE `research_brief` (
 	`status` text NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
+	`content_brief_id` text,
+	`optimization_task_id` text,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`content_brief_id`) REFERENCES `content_brief`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`optimization_task_id`) REFERENCES `optimization_task`(`id`) ON UPDATE no action ON DELETE set null,
 	CONSTRAINT "research_brief_check" CHECK("research_brief"."status" in ('proposed', 'accepted', 'dismissed')
     and length("research_brief"."question_cluster") between 1 and 200
     and length("research_brief"."gap") between 1 and 2000
     and length("research_brief"."facts_json") between 2 and 8000
-    and length("research_brief"."source_ids_json") between 2 and 4000)
+    and length("research_brief"."source_ids_json") between 2 and 4000
+    and ("research_brief"."content_brief_id" is null or ("research_brief"."status" = 'accepted' and length("research_brief"."content_brief_id") between 1 and 80))
+    and ("research_brief"."optimization_task_id" is null or ("research_brief"."status" = 'accepted' and length("research_brief"."optimization_task_id") between 1 and 80)))
 );
 
 CREATE INDEX `research_brief_brand_idx` ON `research_brief` (`brand_id`,`status`,`created_at`,`id`);
@@ -1524,6 +1530,8 @@ CREATE TABLE `source_inspection` (
 	`supports_brand` integer NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
+	`supported_claim` text,
+	`fact_version_id` text,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`citation_id`) REFERENCES `answer_citation`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "source_inspection_check" CHECK("source_inspection"."state" in ('observed', 'resolved', 'limited', 'unknown')
@@ -1536,6 +1544,15 @@ CREATE TABLE `source_inspection` (
       "source_inspection"."support" = 'unknown'
       or ("source_inspection"."support" = 'supports' and "source_inspection"."page_live" = 1 and "source_inspection"."readable" = 1 and "source_inspection"."author_known" = 1 and "source_inspection"."supports_brand" = 1)
       or ("source_inspection"."support" = 'does_not_support' and "source_inspection"."page_live" = 1 and "source_inspection"."readable" = 1 and "source_inspection"."author_known" = 1 and "source_inspection"."supports_brand" = 0)
+    )
+    and (
+      ("source_inspection"."supported_claim" is null and "source_inspection"."fact_version_id" is null)
+      or (
+        "source_inspection"."support" = 'supports'
+        and "source_inspection"."supported_claim" is not null
+        and length("source_inspection"."supported_claim") between 1 and 500
+        and ("source_inspection"."fact_version_id" is null or length("source_inspection"."fact_version_id") between 1 and 80)
+      )
     ))
 );
 

@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import {
+  createContentBriefFromResearch,
+  createOptimizationTaskFromResearch,
   inspectCitationSource,
   proposeResearchBrief,
   recordCompetitorMentions,
@@ -16,6 +18,7 @@ import {
   inspectCitationSchema,
   proposeBriefSchema,
   recordMentionsSchema,
+  researchHandoffSchema,
   saveCompetitorSetSchema,
 } from "./contracts";
 
@@ -81,6 +84,8 @@ export async function inspectCitationAction(formData: FormData): Promise<void> {
     readable: formData.get("readable") === "on",
     authorKnown: formData.get("authorKnown") === "on",
     supportsBrand: formData.get("supportsBrand") === "on",
+    supportedClaim: String(formData.get("supportedClaim") ?? ""),
+    factVersionId: String(formData.get("factVersionId") ?? "") || null,
   });
   if (!parsed.success) finish(brandId, "INVALID_INPUT");
   const result = await inspectCitationSource(getConnection(), session.user.id, parsed.data);
@@ -118,6 +123,32 @@ export async function briefStatusAction(formData: FormData): Promise<void> {
   });
   if (!parsed.success) finish(brandId, "INVALID_INPUT");
   const result = await setResearchBriefStatus(getConnection(), session.user.id, parsed.data);
+  if ("error" in result) finish(brandId, result.error);
+  finish(brandId);
+}
+
+export async function createContentBriefFromResearchAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const brandId = String(formData.get("brandId") ?? "");
+  const parsed = researchHandoffSchema.safeParse({
+    brandId,
+    briefId: String(formData.get("briefId") ?? ""),
+  });
+  if (!parsed.success) finish(brandId, "INVALID_INPUT");
+  const result = await createContentBriefFromResearch(getConnection(), session.user.id, parsed.data);
+  if ("error" in result) finish(brandId, result.error);
+  finish(brandId);
+}
+
+export async function createOptimizationTaskFromResearchAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const brandId = String(formData.get("brandId") ?? "");
+  const parsed = researchHandoffSchema.safeParse({
+    brandId,
+    briefId: String(formData.get("briefId") ?? ""),
+  });
+  if (!parsed.success) finish(brandId, "INVALID_INPUT");
+  const result = await createOptimizationTaskFromResearch(getConnection(), session.user.id, parsed.data);
   if ("error" in result) finish(brandId, result.error);
   finish(brandId);
 }

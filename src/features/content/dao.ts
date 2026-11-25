@@ -439,6 +439,13 @@ export class ContentDao {
     return rows.map((row) => planRow.parse(row));
   }
 
+  async deleteDraftBrief(ownerId: string, brandId: string, briefId: string) {
+    await this.query(
+      `DELETE FROM content_brief WHERE id = ? AND owner_id = ? AND brand_id = ? AND status = 'draft'`,
+      [briefId, ownerId, brandId],
+    );
+  }
+
   async insertBrief(row: BriefRow) {
     await this.query(
       `INSERT INTO content_brief

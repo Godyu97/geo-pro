@@ -610,6 +610,13 @@
       "when": 1795628548232,
       "tag": "0086_right_white_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1795632626549,
+      "tag": "0087_sloppy_tombstone",
+      "breakpoints": true
     }
   ]
 }

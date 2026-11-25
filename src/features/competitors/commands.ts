@@ -1,23 +1,45 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
+import { z } from "zod";
+import type { CacheStore } from "../../lib/cache/store.ts";
+import { openCache } from "../../lib/cache/store.ts";
+import type { DatabaseConnection, QueryConnection, TransactionConnection } from "../../lib/db/connection.ts";
 import {
   competitorShareBreakdown,
   orderedRankBreakdown,
   type MentionState,
 } from "../competitor-share/rules.ts";
-import { inspectCopiedBrief, inspectSource, thirdPartySupportSummary } from "../source-opportunities/rules.ts";
+import { ContentDao } from "../content/dao.ts";
+import { coverageFromCluster } from "../content/rules.ts";
+import { invalidateEvidenceOverview } from "../evidence/overview-cache.ts";
+import { OptimizationDao } from "../optimization/dao.ts";
+import { assertsNoCausalClaim, normalizeTargetPage, priorityBucketOf } from "../optimization/rules.ts";
+import {
+  citationSourceReference,
+  inspectCopiedBrief,
+  inspectSource,
+  matchOwnFactVersions,
+  supportedClaimRecord,
+  thirdPartySupportSummary,
+} from "../source-opportunities/rules.ts";
 import type {
   BriefStatusInput,
   CompetitorError,
   InspectCitationInput,
   ProposeBriefInput,
   RecordMentionsInput,
+  ResearchHandoffInput,
   SaveCompetitorSetInput,
 } from "./contracts.ts";
 import { normalizeCompetitorLabels } from "./contracts.ts";
-import { CompetitorDao, type CitationSourceRow, type CompetitorMentionDetailRow, type CompetitorSetRow } from "./dao.ts";
+import {
+  CompetitorDao,
+  type CitationSourceRow,
+  type CompetitorMentionDetailRow,
+  type CompetitorSetRow,
+  type ResearchBriefRow,
+} from "./dao.ts";
 
 type Clock = () => string;
 type Failure = { error: CompetitorError };
@@ -230,8 +252,27 @@ export function presentCitation(row: CitationSourceRow) {
     pageStatus: row.pageStatus,
     state: row.state ?? "observed" as const,
     support: row.support ?? "unknown" as const,
+    supportedClaim: row.supportedClaim,
+    factVersionId: row.factVersionId,
     recorded: row.state !== null,
   };
+}
+
+function claimText(content: string) {
+  try {
+    const parsed = z.object({ claim: z.string() }).safeParse(JSON.parse(content));
+    const claim = parsed.success ? parsed.data.claim.trim() : "";
+    return claim.length > 0 ? claim : null;
+  } catch {
+    return null;
+  }
+}
+
+function usableFactsOf(rows: readonly { id: string; content: string }[]) {
+  return rows.flatMap((row) => {
+    const claim = claimText(row.content);
+    return claim ? [{ id: row.id, claim }] : [];
+  });
 }
 
 export function citationHosts(rows: readonly { normalizedUrl: string }[]) {
@@ -261,6 +302,18 @@ export async function inspectCitationSource(
     const dao = new CompetitorDao(tx);
     if (!await dao.ownedBrand(ownerId, input.brandId)) return denied("NOT_FOUND");
     if (!await dao.citationOwned(ownerId, input.brandId, input.citationId)) return denied("NOT_FOUND");
+    let factClaim: string | null = null;
+    if (judged.support === "supports" && input.factVersionId) {
+      const fact = await dao.approvedFact(ownerId, input.brandId, input.factVersionId);
+      factClaim = fact ? claimText(fact.content) : null;
+      if (!factClaim) return denied("INVALID_INPUT");
+    }
+    const recorded = supportedClaimRecord({
+      support: judged.support,
+      supportedClaim: input.supportedClaim,
+      factVersionId: judged.support === "supports" ? input.factVersionId ?? null : null,
+      factClaim,
+    });
     const now = clock();
     const existing = await dao.findInspection(input.citationId);
     const row = {
@@ -274,6 +327,8 @@ export async function inspectCitationSource(
       readable: bit(input.readable),
       authorKnown: bit(input.authorKnown),
       supportsBrand: bit(input.supportsBrand),
+      supportedClaim: recorded.supportedClaim,
+      factVersionId: recorded.factVersionId,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
@@ -393,11 +448,12 @@ export async function readCompetitorWorkspace(
   const sets = await dao.listSets(ownerId, brandId);
   const selected = version === undefined ? sets.at(-1) ?? null : sets.find((item) => item.version === version) ?? null;
   if (version !== undefined && !selected) return denied("NOT_FOUND");
-  const [mentions, observations, sources, briefs] = await Promise.all([
+  const [mentions, observations, sources, briefs, approvedFacts] = await Promise.all([
     selected ? dao.listMentions(ownerId, brandId, selected.id) : Promise.resolve({ truncated: false as const, rows: [] }),
     dao.listRecentObservations(ownerId, brandId),
     dao.listCitationSources(ownerId, brandId),
     dao.listBriefs(ownerId, brandId),
+    dao.listApprovedFacts(ownerId, brandId),
   ]);
   const labels = selected ? labelsOf(selected) : [];
   const share = selected && !mentions.truncated
@@ -422,7 +478,273 @@ export async function readCompetitorWorkspace(
       status: row.status,
       facts: zFacts(row.factsJson),
       sourceIds: zFacts(row.sourceIdsJson),
+      contentBriefId: row.contentBriefId,
+      optimizationTaskId: row.optimizationTaskId,
       copiedReplacement: false as const,
     })),
+    usableFacts: usableFactsOf(approvedFacts),
   };
+}
+
+async function ensureContentPlan(
+  tx: TransactionConnection,
+  ownerId: string,
+  brandId: string,
+  questionCluster: string,
+  now: string,
+) {
+  const content = new ContentDao(tx);
+  const existing = await content.getPlanByCluster(ownerId, brandId, questionCluster);
+  if (existing) return existing.id;
+  const planId = randomUUID();
+  const coverageJson = JSON.stringify(coverageFromCluster({
+    questionCluster,
+    existingPages: [],
+    pendingPages: [],
+    gapPages: ["planned"],
+  }));
+  try {
+    await tx.savepoint(async (nested) => {
+      await new ContentDao(nested).insertPlan({
+        id: planId, brandId, ownerId, questionCluster, coverageJson, createdAt: now, updatedAt: now,
+      });
+    });
+    return planId;
+  } catch {
+    const again = await content.getPlanByCluster(ownerId, brandId, questionCluster);
+    if (!again) throw new Error("content plan was not created");
+    return again.id;
+  }
+}
+
+function parsedFactIds(json: string) {
+  try {
+    return zFacts(json);
+  } catch {
+    return [];
+  }
+}
+
+async function loadAcceptedBrief(tx: TransactionConnection, ownerId: string, input: ResearchHandoffInput) {
+  const dao = new CompetitorDao(tx);
+  if (!await dao.ownedBrand(ownerId, input.brandId)) return denied("NOT_FOUND");
+  const brief = await dao.lockBrief(ownerId, input.brandId, input.briefId);
+  if (!brief) return denied("NOT_FOUND");
+  if (brief.status !== "accepted") return denied("OPERATION_CONFLICT");
+  return { dao, brief };
+}
+
+export async function createContentBriefFromResearch(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: ResearchHandoffInput,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  return db.transaction(async (tx) => {
+    const loaded = await loadAcceptedBrief(tx, ownerId, input);
+    if ("error" in loaded) return loaded;
+    const { dao, brief } = loaded;
+    const content = new ContentDao(tx);
+    if (brief.contentBriefId) {
+      const existing = await content.getBrief(ownerId, input.brandId, brief.contentBriefId);
+      if (existing) return await contentHandoffResult(content, existing.id, existing.status, false, brief);
+    }
+    const facts = usableFactsOf(await dao.listApprovedFacts(ownerId, input.brandId));
+    const factVersionIds = matchOwnFactVersions(zFacts(brief.factsJson), facts);
+    const competitorSource = citationSourceReference(
+      await dao.citationUrls(ownerId, input.brandId, zFacts(brief.sourceIdsJson)),
+    );
+    const now = clock();
+    const planId = await ensureContentPlan(tx, ownerId, input.brandId, brief.questionCluster, now);
+    const briefId = randomUUID();
+    await content.insertBrief({
+      id: briefId,
+      brandId: input.brandId,
+      ownerId,
+      planId,
+      optimizationTaskId: null,
+      status: "draft",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await content.insertBriefVersion({
+      id: randomUUID(),
+      briefId,
+      brandId: input.brandId,
+      revision: 1,
+      audience: "",
+      targetGap: brief.gap,
+      applicableBoundary: "",
+      primaryPage: "",
+      conversionAction: "",
+      templateKind: competitorSource ? "verifiable_comparison" : "fact_faq",
+      titleCandidatesJson: "[]",
+      factVersionIdsJson: JSON.stringify(factVersionIds),
+      competitorSource,
+      confirmedAt: null,
+      createdAt: now,
+    });
+    const attached = await dao.attachHandoff(ownerId, input.brandId, brief.id, "content_brief_id", briefId, now);
+    if (!attached) {
+      await content.deleteDraftBrief(ownerId, input.brandId, briefId);
+      const current = await dao.lockBrief(ownerId, input.brandId, brief.id);
+      if (!current?.contentBriefId) return denied("OPERATION_CONFLICT");
+      const winner = await content.getBrief(ownerId, input.brandId, current.contentBriefId);
+      if (!winner) return denied("OPERATION_CONFLICT");
+      return await contentHandoffResult(content, winner.id, winner.status, false, current);
+    }
+    return {
+      contentBriefId: briefId,
+      created: true as const,
+      status: "draft" as const,
+      questionCluster: brief.questionCluster,
+      targetGap: brief.gap,
+      competitorSource,
+      factVersionIds,
+    };
+  });
+}
+
+async function contentHandoffResult(
+  content: ContentDao,
+  contentBriefId: string,
+  status: "draft" | "confirmed" | "invalidated",
+  created: boolean,
+  brief: ResearchBriefRow,
+) {
+  const version = await content.latestBriefVersion(contentBriefId);
+  return {
+    contentBriefId,
+    created,
+    status,
+    questionCluster: brief.questionCluster,
+    targetGap: version?.targetGap ?? brief.gap,
+    competitorSource: version?.competitorSource ?? null,
+    factVersionIds: version ? parsedFactIds(version.factVersionIdsJson) : [],
+  };
+}
+
+export async function createOptimizationTaskFromResearch(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: ResearchHandoffInput,
+  clock: Clock = () => new Date().toISOString(),
+  cache?: CacheStore,
+) {
+  const created = await db.transaction(async (tx) => {
+    const loaded = await loadAcceptedBrief(tx, ownerId, input);
+    if ("error" in loaded) return loaded;
+    const { dao, brief } = loaded;
+    const tasks = new OptimizationDao(tx);
+    if (brief.optimizationTaskId) {
+      const existing = await tasks.getTask(ownerId, input.brandId, brief.optimizationTaskId);
+      if (existing) {
+        return { taskId: existing.id, created: false as const, merged: false as const, questionCluster: brief.questionCluster };
+      }
+    }
+    const urls = await dao.citationUrls(ownerId, input.brandId, zFacts(brief.sourceIdsJson));
+    const reference = citationSourceReference(urls);
+    const prose = `${brief.gap}\n${reference ?? ""}`;
+    if (!assertsNoCausalClaim(prose)) return denied("INVALID_INPUT");
+    const targetPage = normalizeTargetPage(urls[0]);
+    const now = clock();
+    const open = await tasks.findOpenTask({
+      ownerId,
+      brandId: input.brandId,
+      questionCluster: brief.questionCluster,
+      targetPage,
+      gapType: "citation_gap",
+    });
+    if (open) {
+      const attached = await dao.attachHandoff(ownerId, input.brandId, brief.id, "optimization_task_id", open.id, now);
+      const taskId = attached ? open.id : (await dao.lockBrief(ownerId, input.brandId, brief.id))?.optimizationTaskId;
+      if (!taskId) return denied("OPERATION_CONFLICT");
+      return { taskId, created: false as const, merged: true as const, questionCluster: brief.questionCluster };
+    }
+    const findingId = randomUUID();
+    const taskId = randomUUID();
+    const draft = {
+      gapType: "citation_gap" as const,
+      privacyRisk: 0 as const,
+      assumptionLevel: "pending" as const,
+    };
+    try {
+      await tx.savepoint(async (nested) => {
+        const writer = new OptimizationDao(nested);
+        await writer.insertFinding({
+          id: findingId,
+          brandId: input.brandId,
+          ownerId,
+          gapType: draft.gapType,
+          questionCluster: brief.questionCluster,
+          targetPage,
+          observationId: null,
+          analysisVersionId: null,
+          evidenceSummary: reference ? `研究 Brief 记录的来源引用：${reference}` : "研究 Brief 没有仍可回读的来源 URL。",
+          problemStatement: brief.gap,
+          hypothesis: "这是议题缺口，不把他人页面改写成自家品牌文案。",
+          assumptionLevel: draft.assumptionLevel,
+          stepsJson: JSON.stringify([
+            "核对来源引用仍属于本品牌",
+            "把已批准事实绑定到内容草稿",
+            "确认内容 Brief 后再起草，不直接发布",
+          ]),
+          completionCriteria: "内容 Brief 仍为草稿，并绑定本品牌已批准事实后才可确认。",
+          retestMethod: "确认发布后按同一问题簇复测，不把来源引用当成已发布效果。",
+          businessImportance: 2,
+          estimatedEffort: 2,
+          verifiedEvidence: reference ? 1 : 0,
+          privacyRisk: draft.privacyRisk,
+          createdAt: now,
+        });
+        await writer.insertTask({
+          id: taskId,
+          brandId: input.brandId,
+          ownerId,
+          primaryFindingId: findingId,
+          gapType: draft.gapType,
+          questionCluster: brief.questionCluster,
+          targetPage,
+          title: brief.gap.slice(0, 80),
+          status: "todo",
+          priorityBucket: priorityBucketOf(draft),
+          manualRank: null,
+          reorderReason: null,
+          completionNote: null,
+          dismissReason: null,
+          retestConclusion: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await writer.linkEvidence(taskId, findingId, input.brandId, now);
+      });
+    } catch {
+      const raced = await tasks.findOpenTask({
+        ownerId,
+        brandId: input.brandId,
+        questionCluster: brief.questionCluster,
+        targetPage,
+        gapType: "citation_gap",
+      });
+      if (!raced) throw new Error("optimization task was not created");
+      const attached = await dao.attachHandoff(
+        ownerId, input.brandId, brief.id, "optimization_task_id", raced.id, now,
+      );
+      const taskIdWinner = attached ? raced.id : (await dao.lockBrief(ownerId, input.brandId, brief.id))?.optimizationTaskId;
+      if (!taskIdWinner) return denied("OPERATION_CONFLICT");
+      return { taskId: taskIdWinner, created: false as const, merged: true as const, questionCluster: brief.questionCluster };
+    }
+    const attached = await dao.attachHandoff(ownerId, input.brandId, brief.id, "optimization_task_id", taskId, now);
+    if (!attached) {
+      await tasks.deleteTaskGraph(ownerId, input.brandId, taskId, findingId);
+      const current = await dao.lockBrief(ownerId, input.brandId, brief.id);
+      if (!current?.optimizationTaskId) return denied("OPERATION_CONFLICT");
+      return { taskId: current.optimizationTaskId, created: false as const, merged: true as const, questionCluster: brief.questionCluster };
+    }
+    return { taskId, created: true as const, merged: false as const, questionCluster: brief.questionCluster };
+  });
+  if (!("error" in created)) {
+    await invalidateEvidenceOverview(ownerId, input.brandId, cache ?? openCache());
+  }
+  return created;
 }

@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
+import { check, foreignKey, index, integer, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
 import { brand } from "./brand-schema";
+import { contentBrief } from "./content-schema";
 import { answerCitation, answerObservation } from "./evidence-schema";
+import { optimizationTask } from "./optimization-schema";
 
 export const competitorSet = pgTable("competitor_set", {
   id: text("id").primaryKey(),
@@ -55,6 +57,8 @@ export const sourceInspection = pgTable("source_inspection", {
   supportsBrand: integer("supports_brand").notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  supportedClaim: text("supported_claim"),
+  factVersionId: text("fact_version_id"),
 }, (table) => [
   uniqueIndex("source_inspection_citation_uidx").on(table.citationId),
   index("source_inspection_brand_idx").on(table.brandId, table.citationId),
@@ -68,6 +72,15 @@ export const sourceInspection = pgTable("source_inspection", {
       ${table.support} = 'unknown'
       or (${table.support} = 'supports' and ${table.pageLive} = 1 and ${table.readable} = 1 and ${table.authorKnown} = 1 and ${table.supportsBrand} = 1)
       or (${table.support} = 'does_not_support' and ${table.pageLive} = 1 and ${table.readable} = 1 and ${table.authorKnown} = 1 and ${table.supportsBrand} = 0)
+    )
+    and (
+      (${table.supportedClaim} is null and ${table.factVersionId} is null)
+      or (
+        ${table.support} = 'supports'
+        and ${table.supportedClaim} is not null
+        and length(${table.supportedClaim}) between 1 and 500
+        and (${table.factVersionId} is null or length(${table.factVersionId}) between 1 and 80)
+      )
     )`),
 ]);
 
@@ -82,12 +95,26 @@ export const researchBrief = pgTable("research_brief", {
   status: text("status").notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  contentBriefId: text("content_brief_id"),
+  optimizationTaskId: text("optimization_task_id"),
 }, (table) => [
   index("research_brief_brand_idx").on(table.brandId, table.status, table.createdAt, table.id),
   index("research_brief_owner_idx").on(table.ownerId, table.brandId, table.createdAt, table.id),
+  foreignKey({
+    name: "research_brief_content_brief_fk",
+    columns: [table.contentBriefId],
+    foreignColumns: [contentBrief.id],
+  }).onDelete("set null"),
+  foreignKey({
+    name: "research_brief_task_fk",
+    columns: [table.optimizationTaskId],
+    foreignColumns: [optimizationTask.id],
+  }).onDelete("set null"),
   check("research_brief_check", sql`${table.status} in ('proposed', 'accepted', 'dismissed')
     and length(${table.questionCluster}) between 1 and 200
     and length(${table.gap}) between 1 and 2000
     and length(${table.factsJson}) between 2 and 8000
-    and length(${table.sourceIdsJson}) between 2 and 4000`),
+    and length(${table.sourceIdsJson}) between 2 and 4000
+    and (${table.contentBriefId} is null or (${table.status} = 'accepted' and length(${table.contentBriefId}) between 1 and 80))
+    and (${table.optimizationTaskId} is null or (${table.status} = 'accepted' and length(${table.optimizationTaskId}) between 1 and 80))`),
 ]);
