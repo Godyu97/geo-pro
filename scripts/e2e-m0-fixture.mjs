@@ -167,6 +167,20 @@ try {
       created.push({ observationId, questionId: item.questionId });
     }
     process.stdout.write(JSON.stringify({ created }));
+  } else if (command === "cost-notice") {
+    const [run] = await queryWithParameters(db, `SELECT id FROM monitoring_run WHERE id = ? AND owner_id = ?`, [payload.runId, payload.ownerId]);
+    if (!run) throw new Error("Monitoring run was not found for this owner");
+    const unknown = payload.mode === "unknown";
+    const fromStatus = unknown ? "failed" : "reconciliation_required";
+    const toStatus = unknown ? "reconciliation_required" : "failed";
+    const slots = await queryWithParameters(db, `SELECT id FROM monitoring_slot WHERE run_id = ? AND status = ?`, [payload.runId, fromStatus]);
+    if (slots.length !== 1) throw new Error(`Expected one ${fromStatus} slot, found ${slots.length}`);
+    await queryWithParameters(db, `UPDATE monitoring_attempt
+      SET disposition = ?, actual_minor = ?, cost_state = ?
+      WHERE run_id = ? AND slot_id = ? AND kind = 'sampling'`,
+    [unknown ? "unknown" : "safe_failure", unknown ? null : 0, unknown ? "unknown" : "known", payload.runId, slots[0].id]);
+    await queryWithParameters(db, `UPDATE monitoring_slot SET status = ? WHERE id = ?`, [toStatus, slots[0].id]);
+    process.stdout.write(JSON.stringify({ updated: true }));
   } else if (command === "cleanup") {
     for (const channelId of payload.channelIds ?? []) {
       await queryWithParameters(db, `DELETE FROM sampling_answer_network WHERE channel_id = ?`, [channelId]);

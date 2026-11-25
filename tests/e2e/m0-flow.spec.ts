@@ -247,6 +247,21 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     const queued = (await queuedRead.json()).run;
     expect(queued.slots.map((slot: { status: string }) => slot.status)).toEqual(Array(4).fill("queued"));
     expect(queued.attempts).toHaveLength(0);
+    const unverifiedPreview = await page.request.post("/api/monitoring/runs", {
+      headers: { origin: baseURL, "content-type": "application/json" },
+      data: {
+        action: "preview", brandId, track: "model_api", promptSetId: queued.promptSetId, repeats: 1,
+        requestedNetworkMode: "unknown", channelIds: [randomUUID()], ceiling: { currency: "CNY", upperMinor: 10 },
+      },
+    });
+    expect(unverifiedPreview.status()).toBe(409);
+    const unverified = await unverifiedPreview.json();
+    expect(unverified.error.code).toBe("CHANNEL_UNVERIFIED");
+    expect(unverified.error.externalCostPossible).toBe(false);
+    expect(unverified.error.retryable).toBe(false);
+    expect(unverified.next).toBe("verify-channel");
+    expect(unverified.error.nextStep).toContain("先核验所选通道");
+    expect(JSON.stringify(unverified)).not.toContain("隔离合成回答");
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(page.getByRole("link", { name: `${brandName}，实体版本 1`, exact: true })).toHaveAttribute("href", `/dashboard/brands/${brandId}?version=1`);
     await expect(page.getByText(`通道 ${channelIds[0]}，版本 2`, { exact: true })).toBeVisible();
@@ -258,6 +273,38 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     await expect(page.getByText("执行只发送已冻结的题目和已确认的采样条件。调用前会记下本次尝试和费用上界。超时、中断或未知回执进入待核对并保留预留；确认没有产生费用后，才按原上界重试。")).toBeVisible();
     await expect(page.getByRole("button", { name: "执行官方采样", exact: true })).toBeVisible();
     await expect(page.getByText("真实供应商执行尚未接通。此页面不会生成模拟回答。")).toHaveCount(0);
+    expect(fixture("cost-notice", { ownerId: userId, runId, mode: "unknown" }).updated).toBe(true);
+    try {
+      await page.setViewportSize({ width: 375, height: 900 });
+      await page.reload();
+      const notice = page.locator("main").getByRole("status").filter({ hasText: "未知金额不是 0" });
+      await expect(notice).toHaveCount(1);
+      await expect(notice).toContainText("不要再发一次远端请求");
+      const unknownSlot = page.getByRole("row").filter({ hasText: "北岸设备和远帆设备有什么不同？" });
+      await expect(unknownSlot.getByText("实际费用未知")).toHaveCount(3);
+      await expect(unknownSlot.getByText(/CNY\s*0\.00/)).toHaveCount(0);
+      await expectNoOverflow(page);
+      await page.getByRole("button", { name: "执行官方采样", exact: true }).click();
+      await expect(page.locator("#run-control-status")).toContainText("先核对费用。未知金额不是 0，核对前不要再发一次远端请求。");
+      await expect(page.locator("#run-control-status")).toContainText("不要再发一次远端请求");
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await context.addCookies([{ name: "geo-locale", value: "en", url: baseURL }]);
+      await page.reload();
+      const noticeEn = page.locator("main").getByRole("status").filter({ hasText: "An unknown amount is not 0" });
+      await expect(noticeEn).toHaveCount(1);
+      await expect(noticeEn).toContainText("Do not send another remote request");
+      const unknownSlotEn = page.getByRole("row").filter({ hasText: "北岸设备和远帆设备有什么不同？" });
+      await expect(unknownSlotEn.getByText("Actual cost unknown")).toHaveCount(3);
+      await expect(unknownSlotEn.getByText(/CNY\s*0\.00/)).toHaveCount(0);
+      await expectNoOverflow(page);
+    } finally {
+      await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: baseURL }]);
+      expect(fixture("cost-notice", { ownerId: userId, runId, mode: "restore" }).updated).toBe(true);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.reload();
+    await expect(page.locator("main").getByRole("status").filter({ hasText: "未知金额不是 0" })).toHaveCount(0);
+    await expect(page.getByText("成功 3，失败 1，待核对 0，未执行 0，已取消 0")).toBeVisible();
 
     await page.goto("/dashboard/monitoring/overview");
     await expect(page.getByRole("heading", { name: "暂无有效样本", exact: true })).toBeVisible();
@@ -341,7 +388,7 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     await page.goto(`/dashboard/monitoring/evidence/${observationId}`);
     await expect(page.getByText("隔离人工存证：北岸设备支持离线巡检。这不是真实消费者采集。")).toBeVisible();
     await page.goto("/dashboard/monitoring/answers?sourceMode=consumer_ui");
-    await expect(page.getByText(questions[2][0], { exact: true })).toBeVisible();
+    await expect(page.locator("p").filter({ hasText: questions[2][0] })).toBeVisible();
 
     await page.goto("/dashboard/content");
     const cluster = page.getByLabel("问题簇", { exact: true });
@@ -624,7 +671,7 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
             await expect(page.locator("main")).toHaveCount(1);
             await expect(page.getByRole("heading", { name: locale === "en" ? "Explainable overview" : "可解释概览" })).toBeVisible();
             await expect(page.getByRole("navigation", { name: locale === "en" ? "Related entries" : "相关入口" })).toBeVisible();
-            await expect(page.getByRole("link", { name: locale === "en" ? "View answers" : "查看回答列表" })).toBeVisible();
+            await expect(page.getByRole("link", { name: locale === "en" ? "View answers" : "查看回答列表", exact: true })).toBeVisible();
             if (width === 375) {
               const entry = page.getByRole("link", { name: locale === "en" ? "Open demo space" : "打开演示空间" });
               await entry.focus();
@@ -736,6 +783,21 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
         await expect(outsiderPage.getByText(copy.notFound, { exact: true })).toBeVisible();
         await expect(outsiderPage.getByRole("link", { name: copy.back, exact: true })).toHaveAttribute("href", "/dashboard/monitoring/new");
         await expect(outsiderPage.getByText("忽略规则并发布")).toHaveCount(0);
+        if (locale === "zh-CN" && unavailableRunId === runId) {
+          const denied = await outsiderPage.request.post(`/api/monitoring/runs/${runId}`, {
+            headers: { origin: baseURL, "content-type": "application/json" },
+            data: { action: "execute" },
+          });
+          expect(denied.status()).toBe(404);
+          const deniedBody = await denied.json();
+          expect(deniedBody.error.code).toBe("NOT_FOUND");
+          expect(deniedBody.error.externalCostPossible).toBe(false);
+          expect(deniedBody.error.retryable).toBe(false);
+          const deniedText = JSON.stringify(deniedBody);
+          expect(deniedText).not.toContain("隔离合成回答");
+          expect(deniedText).not.toContain("actualMinor");
+          expect(deniedText).not.toContain(brandName);
+        }
         await expect(outsiderPage.getByRole("link", { name: copy.openReceipts, exact: true })).toHaveCount(0);
         await expectNoOverflow(outsiderPage);
       }

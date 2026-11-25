@@ -17,7 +17,9 @@ import {
   recordLateMonitoringResult,
   redoMonitoringAnalysis,
 } from "../../src/features/monitoring/execution.ts";
+import { monitoringFailureBody, monitoringSuccessCostNotice, samplingCostMessageKey } from "../../src/features/monitoring/failure-contract.ts";
 import { closedOfficialPort } from "../../src/features/monitoring/transport.ts";
+import zhCN from "../../src/lib/i18n/messages/zh-CN.json" with { type: "json" };
 import { PromptDao } from "../../src/features/prompts/dao.ts";
 import { updateQuota } from "../../src/features/quotas/commands.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
@@ -145,6 +147,18 @@ for (const kind of ["sqlite", "postgresql"]) {
     const again = await executeMonitoringRun(db, owner, accepted.id, sampler, clock);
     assert.equal(again.error, undefined);
     assert.equal(sampler.calls.length, 4);
+    const samplingFacts = again.attempts.filter((attempt) => attempt.kind === "sampling").map((attempt) => ({
+      slotId: attempt.slotId, kind: attempt.kind, disposition: attempt.disposition, costState: attempt.costState, ordinal: attempt.ordinal,
+    }));
+    const notice = monitoringSuccessCostNotice(samplingFacts, (key) => zhCN.monitoring[key]);
+    assert.equal(notice?.externalCostPossible, true);
+    assert.equal(notice?.retryable, false);
+    assert.equal(notice?.nextStep, zhCN.monitoring.nextStepReconcileCost);
+    const unknownRow = again.attempts.find((attempt) => attempt.slotId === unknownSlot.id && attempt.kind === "sampling");
+    assert.equal(unknownRow.actualMinor, null);
+    assert.equal(unknownRow.costState, "unknown");
+    assert.equal(samplingCostMessageKey(unknownRow.costState, unknownRow.actualMinor), "actualUnknown");
+    assert.equal(samplingCostMessageKey("unknown", 0), "actualUnknown");
     const [unknownReservation] = await queryWithParameters(db, "SELECT state FROM quota_reservation WHERE id = ?", [unknownSlot.reservationId]);
     assert.equal(unknownReservation.state, "reserved");
     const reread = await readMonitoringRun(db, owner, accepted.id);
@@ -154,6 +168,15 @@ for (const kind of ["sqlite", "postgresql"]) {
     const closed = await executeMonitoringRun(db, owner, accepted.id, closedOfficialPort(), clock);
     assert.equal(closed.error, "REAL_CHANNEL_CLOSED");
     assert.equal(sampler.calls.length, 4);
+    const closedFailure = monitoringFailureBody({
+      code: closed.error, message: zhCN.monitoring[closed.error], next: closed.next, attempts: samplingFacts,
+      translate: (key) => zhCN.monitoring[key],
+    });
+    assert.equal(closedFailure.body.error.externalCostPossible, true);
+    assert.equal(closedFailure.body.error.retryable, false);
+    assert.equal(closedFailure.body.next, "reconcile-cost");
+    assert.equal(closedFailure.body.error.nextStep.includes("0"), true);
+    assert.equal(JSON.stringify(closedFailure.body).includes("isolated "), false);
 
     const [costBefore] = await queryWithParameters(db, "SELECT COALESCE(SUM(actual_minor), 0) AS actual FROM quota_attempt WHERE brand_id = ? AND state = 'known'", [brand]);
     const succeeded = executed.slots.find((slot) => slot.status === "succeeded");

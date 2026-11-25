@@ -8,8 +8,10 @@ import { isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { acceptMonitoringRun, previewMonitoringRun, readMonitoringRun } from "./commands";
-import { acceptRequestSchema, monitoringErrors, previewRequestSchema, runControlSchema, type MonitoringError } from "./contracts";
+import { acceptRequestSchema, previewRequestSchema, runControlSchema, type MonitoringError, type MonitoringNextStep } from "./contracts";
+import { MonitoringDao, type MonitoringAttemptRow } from "./dao";
 import { cancelMonitoringRun, continueMonitoringRun, executeMonitoringRun, pauseMonitoringRun, reconcileMonitoringCost, redoMonitoringAnalysis } from "./execution";
+import { monitoringFailureBody, monitoringSuccessCostNotice, type SamplingAttemptFact } from "./failure-contract";
 import { officialSamplingPortFromEnv } from "./official-port";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { executeFunctionalMockRun } from "@/features/functional-mock/apply-run";
@@ -22,12 +24,40 @@ const privateHeaders = {
   Vary: "Cookie, Accept-Language",
 };
 
-async function failure(code: MonitoringError, traceId?: string, next?: string | null) {
+function samplingFacts(attempts: readonly MonitoringAttemptRow[]): SamplingAttemptFact[] {
+  return attempts.map((attempt) => ({
+    slotId: attempt.slotId,
+    kind: attempt.kind,
+    disposition: attempt.disposition,
+    costState: attempt.costState,
+    ordinal: attempt.ordinal,
+  }));
+}
+
+async function loadSamplingFacts(ownerId: string, runId: string): Promise<SamplingAttemptFact[] | "unreadable"> {
+  try {
+    const dao = new MonitoringDao(getConnection());
+    const run = await dao.runForOwner(ownerId, runId);
+    if (!run) return [];
+    return samplingFacts(await dao.attempts([run.id]));
+  } catch (error) {
+    console.error("monitoring-failure-context-unreadable", { name: error instanceof Error ? error.name : "unknown" });
+    return "unreadable";
+  }
+}
+
+async function failure(code: MonitoringError, traceId?: string, next?: MonitoringNextStep | null, facts?: SamplingAttemptFact[] | "unreadable") {
   const t = await getTranslator("monitoring");
-  return Response.json(
-    { error: { code, message: t(code) }, next: next ?? null, traceId },
-    { status: monitoringErrors[code], headers: privateHeaders },
-  );
+  const built = monitoringFailureBody({
+    code,
+    message: t(code),
+    next: next ?? null,
+    translate: (key) => t(key),
+    attempts: facts === "unreadable" ? [] : facts,
+    costUnreadable: facts === "unreadable",
+    traceId,
+  });
+  return Response.json(built.body, { status: built.status, headers: privateHeaders });
 }
 
 async function requireTrustedOrigin(request: Request) {
@@ -73,9 +103,11 @@ export async function monitoringRunControlResponse(request: Request, runId: stri
   if ("error" in gate) return gate.error;
   try {
     const body = await readBoundedJson(request, 8192);
-    const command = runControlSchema.safeParse(body);
-    if (!command.success || new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
     const ownerId = gate.session.session.user.id;
+    const command = runControlSchema.safeParse(body);
+    if (!command.success || new URL(request.url).searchParams.size) {
+      return failure("INVALID_INPUT", undefined, null, await loadSamplingFacts(ownerId, runId));
+    }
     const connection = getConnection();
     const result = command.data.action === "pause" ? await pauseMonitoringRun(connection, ownerId, runId)
       : command.data.action === "continue" ? await continueMonitoringRun(connection, ownerId, runId)
@@ -90,12 +122,14 @@ export async function monitoringRunControlResponse(request: Request, runId: stri
                 : await executeMonitoringRun(connection, ownerId, runId, officialSamplingPortFromEnv())
             : command.data.action === "redo-analysis" ? await redoMonitoringAnalysis(connection, ownerId, runId, command.data.slotId)
               : await reconcileMonitoringCost(connection, ownerId, runId, command.data.attemptId, command.data.actualMinor);
-    if ("error" in result) return failure(result.error, undefined, result.next);
-    return Response.json(result, { headers: privateHeaders });
+    if ("error" in result) return failure(result.error, undefined, result.next, await loadSamplingFacts(ownerId, runId));
+    const t = await getTranslator("monitoring");
+    const notice = monitoringSuccessCostNotice(samplingFacts(result.attempts), (key) => t(key));
+    return Response.json(notice ? { ...result, ...notice } : result, { headers: privateHeaders });
   } catch {
     const traceId = randomUUID();
     console.error("monitoring-run-control-unavailable", { traceId });
-    return failure("SERVICE_UNAVAILABLE", traceId);
+    return failure("SERVICE_UNAVAILABLE", traceId, null, await loadSamplingFacts(gate.session.session.user.id, runId));
   }
 }
 

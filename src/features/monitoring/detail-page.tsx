@@ -15,6 +15,7 @@ import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockEvidenceButton, ExecuteMockRunButton } from "@/features/functional-mock/run-buttons";
 import { parseOfficialReceipt } from "@/lib/ai/official-sampling";
 import { RunDetailStatus } from "./detail-status";
+import { samplingCostMessageKey } from "./failure-contract";
 import { formatMinorUnits } from "./format";
 import { RunControls } from "./run-controls";
 import { readOwnedRun } from "./service";
@@ -115,6 +116,9 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
         ) : null}
         {result.attempts.some((attempt) => attempt.synthetic === 1) && <p className="text-sm text-muted-foreground">{t("isolatedNote")}</p>}
         {hasPendingCost && <p className="max-w-2xl text-sm text-muted-foreground">{t("recoveryNote")}</p>}
+        {(hasUnknownCost || hasPendingCost) && (
+          <p id="run-cost-notice" role="status" className="max-w-2xl text-sm leading-6">{t("nextStepReconcileCost")}</p>
+        )}
         {mockRun && (
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">{t("executeMockNote")}</p>
@@ -245,15 +249,16 @@ export default async function MonitoringRunPage({ params }: { params: Promise<{ 
                         const triggerLabel = {
                           triggered: "networkTriggerTriggered", not_triggered: "networkTriggerNotTriggered", unknown: "networkTriggerUnknown",
                         } as const;
+                        const costKey = samplingCostMessageKey(attempt.costState, attempt.actualMinor);
                         return (
                           <div key={attempt.id} className="mb-2">
                             <p>{t("attemptLabel", { ordinal: formatNumber(locale, attempt.ordinal) })}</p>
                             {attempt.synthetic === 1 && <p>{t("syntheticResult")}</p>}
                             {attempt.transport === "official_api" && <p>{t("officialAttempt")}</p>}
                             {attempt.late === 1 && <p>{t("lateResult")}</p>}
-                            <p>{attempt.actualMinor !== null && result.currency
+                            <p>{costKey === "costKnown" && result.currency && attempt.actualMinor !== null
                               ? t("costKnown", { amount: formatMinorUnits(locale, attempt.actualMinor, result.currency) })
-                              : t(attempt.costState === "none" ? "costNone" : attempt.costState === "pending" ? "costPending" : "actualUnknown")}</p>
+                              : t(costKey === "costKnown" ? "actualUnknown" : costKey)}</p>
                             {receipt?.responseId && <p className="break-all">{t("responseLocator", { id: receipt.responseId })}</p>}
                             {receipt && <p>{t(triggerLabel[receipt.networkTrigger])}</p>}
                             {receipt && <p>{t("citationState", { state: t(citationLabel[receipt.citationSetState]) })}</p>}

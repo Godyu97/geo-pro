@@ -38,15 +38,18 @@ export function RunControls({
       const response = await fetch(`/api/monitoring/runs/${runId}`, {
         method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
       });
-      const payload = await response.json() as { error?: { message?: string }; replayed?: boolean; pausedForBudget?: boolean };
-      if (!response.ok) {
-        setStatus(payload.error?.message ?? messages.SERVICE_UNAVAILABLE);
-        router.refresh();
-      }
-      else {
-        setStatus(payload.pausedForBudget ? messages.PAUSED_FOR_BUDGET : payload.replayed ? messages.replayedControl : messages.savedControl);
-        router.refresh();
-      }
+      const payload = await response.json() as {
+        error?: { message?: string; nextStep?: string };
+        replayed?: boolean;
+        pausedForBudget?: boolean;
+        nextStep?: string;
+        externalCostPossible?: boolean;
+      };
+      const saved = payload.pausedForBudget ? messages.PAUSED_FOR_BUDGET : payload.replayed ? messages.replayedControl : messages.savedControl;
+      const failure = [payload.error?.message, payload.error?.nextStep].filter(Boolean).join(" ");
+      const notice = payload.externalCostPossible ? payload.nextStep : null;
+      setStatus((response.ok ? [saved, notice].filter(Boolean).join(" ") : failure) || messages.SERVICE_UNAVAILABLE);
+      router.refresh();
     } catch {
       setStatus(messages.SERVICE_UNAVAILABLE);
     } finally {
@@ -77,7 +80,7 @@ export function RunControls({
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "continue" })}>{messages.continue}</Button>
         <Button type="button" variant="outline" disabled={pending} onClick={() => send({ action: "cancel" })}>{messages.cancel}</Button>
       </div>
-      {(status || executing) && <p role="status" className="rounded-md border bg-background p-2 text-sm">{status ?? messages.executeOfficialPending}</p>}
+      {(status || executing) && <p id="run-control-status" role="status" className="rounded-md border bg-background p-2 text-sm">{status ?? messages.executeOfficialPending}</p>}
       {unknownAttempts.map((attempt) => (
         <form key={attempt.id} className="flex flex-wrap items-end gap-2" onSubmit={(event) => {
           event.preventDefault();

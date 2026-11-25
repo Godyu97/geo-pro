@@ -25,16 +25,6 @@ const selectClass = "h-10 w-full min-w-0 rounded-lg border border-input bg-backg
 const inputClass = "h-10 bg-background";
 const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center aria-disabled:opacity-60";
 
-const nextMessage = {
-  "adjust-scope": "QUOTA_INSUFFICIENT",
-  "refresh-preview": "PREVIEW_EXPIRED",
-  "verify-email": "EMAIL_UNVERIFIED",
-  "verify-channel": "CHANNEL_UNVERIFIED",
-  "confirm-ceiling": "NO_TRUSTED_CEILING",
-  "request-quota": "NOT_ENTITLED",
-  "add-primary": "NOT_READY",
-} as const;
-
 export function RegistrationForm({
   locale, messages, brandId, brandName, sets, channels, grant, recent, emailVerified,
 }: {
@@ -88,17 +78,17 @@ export function RegistrationForm({
         body: JSON.stringify(body),
       });
       const payload = await response.json() as {
-        error?: { code?: keyof Copy; message?: string };
-        next?: keyof typeof nextMessage | null;
+        error?: { code?: keyof Copy; message?: string; nextStep?: string; retryable?: boolean; externalCostPossible?: boolean };
+        next?: string | null;
         snapshot?: PreviewSnapshot;
         token?: string;
         id?: string;
         replayed?: boolean;
       };
       if (!response.ok) {
-        const code = payload.next ? nextMessage[payload.next] : payload.error?.code;
         if (payload.next === "refresh-preview") setPreview(null);
-        setStatus(code && code in messages ? t(code) : payload.error?.message ?? t("SERVICE_UNAVAILABLE"));
+        const copy = [payload.error?.message, payload.error?.nextStep].filter(Boolean).join(" ");
+        setStatus(copy || t("SERVICE_UNAVAILABLE"));
         return;
       }
       if (payload.snapshot && payload.token) {
