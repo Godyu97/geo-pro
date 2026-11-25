@@ -264,9 +264,9 @@ export async function listSourceFragmentConflicts(db: QueryConnection, brandId: 
   return z.array(conflictRowSchema).parse(rows);
 }
 
-export async function sourceReadableBy(db: QueryConnection, userId: string, brandId: string, now: string) {
+export async function sourceAccessFor(db: QueryConnection, userId: string, brandId: string, now: string) {
   const owned = await brandOwnedBy(db, userId, brandId);
-  if (owned) return "owner" as const;
+  if (owned) return { viewer: "owner", owned } as const;
   const rows = await queryWithParameters(
     db,
     `SELECT id FROM brand_member_grant
@@ -275,7 +275,7 @@ export async function sourceReadableBy(db: QueryConnection, userId: string, bran
      LIMIT 1`,
     [userId, brandId, now],
   );
-  return rows.length === 1 ? "member" as const : null;
+  return rows.length === 1 ? { viewer: "member", owned: null } as const : null;
 }
 
 export async function brandOwnedBy(db: QueryConnection, ownerId: string, brandId: string) {

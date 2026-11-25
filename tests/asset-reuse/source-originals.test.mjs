@@ -253,6 +253,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const read = await readSourceOriginal(db, owner, { brandId, id: byName.get("kept.txt").id }, { env: storageEnv, storage, now });
     assert.equal(read.error, undefined);
     assert.deepEqual(read.body, body);
+    assert.equal((await listImportedOriginals(db, owner, brandId)).canManage, true);
     const getsAfterOwner = storage.calls.get;
     const hidden = await readSourceOriginal(db, outsider, { brandId, id: byName.get("kept.txt").id }, { env: storageEnv, storage, now });
     assert.equal(hidden.error, "NOT_FOUND");
@@ -280,6 +281,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(frozenSign.error, "NOT_FOUND");
     const history = await listImportedOriginals(db, owner, brandId);
     assert.equal(history.error, undefined);
+    assert.equal(history.canManage, false);
     const names = history.files.map((item) => item.fileName);
     assert.equal(names.includes("kept.txt") && names.includes("huge.txt") && names.includes("scan.md"), true);
     const keptHistory = history.files.find((item) => item.fileName === "kept.txt");
@@ -409,6 +411,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const listedTrace = trace(db);
     const seen = await listImportedOriginals(listedTrace.connection, member, brandId, now);
     assert.equal(seen.viewer, "member");
+    assert.equal(seen.canManage, false);
     assert.equal(seen.files.find((item) => item.fileName === "two.txt").fragments[0].text, text);
     assert.equal(listedTrace.queries.filter((sql) => /FROM source_original_fragment\s/.test(sql)).length, 1);
     assert.equal(listedTrace.queries.filter((sql) => sql.includes("FROM source_original_fragment_conflict")).length, 1);

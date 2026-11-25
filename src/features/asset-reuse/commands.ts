@@ -32,7 +32,7 @@ import {
   listSourceOriginals,
   loadSourceOriginal,
   setSourceOriginalRights as writeRights,
-  sourceReadableBy,
+  sourceAccessFor,
   type SourceFragmentConflictInsert,
   type SourceFragmentInsert,
   type SourceOriginalInsert,
@@ -94,10 +94,8 @@ function presentFragments(
   }));
 }
 
-async function openBrand(db: QueryConnection, ownerId: string, brandId: string) {
-  const brand = await brandOwnedBy(db, ownerId, brandId);
-  if (!brand || brand.status !== "active" || brand.frozenAt !== null) return null;
-  return brand;
+function canManageOriginals(brand: Awaited<ReturnType<typeof brandOwnedBy>>) {
+  return brand?.status === "active" && brand.frozenAt === null;
 }
 
 export async function importSourceOriginals(
@@ -131,7 +129,7 @@ export async function importSourceOriginals(
 
   return db.transaction(async (tx) => {
     if (!await new BrandDao(tx).lockOwner(ownerId)) return denied("NOT_FOUND");
-    if (!await openBrand(tx, ownerId, parsed.data.brandId)) return denied("NOT_FOUND");
+    if (!canManageOriginals(await brandOwnedBy(tx, ownerId, parsed.data.brandId))) return denied("NOT_FOUND");
     const facts = await approvedFactRefs(tx, parsed.data.brandId);
     const rows: SourceOriginalInsert[] = [];
     const fragmentRows: SourceFragmentInsert[] = [];
@@ -268,12 +266,13 @@ async function withFragments(db: QueryConnection, brandId: string, files: readon
 export async function listImportedOriginals(db: DatabaseConnection, userId: string, brandId: string, now = new Date()) {
   const parsed = brandIdSchema.safeParse(brandId);
   if (!parsed.success) return denied("INVALID_INPUT");
-  const viewer = await sourceReadableBy(db, userId, parsed.data, now.toISOString());
-  if (!viewer) return denied("NOT_FOUND");
+  const access = await sourceAccessFor(db, userId, parsed.data, now.toISOString());
+  if (!access) return denied("NOT_FOUND");
+  const { viewer, owned } = access;
   const files = viewer === "owner"
     ? await listSourceOriginals(db, userId, parsed.data, listLimit)
     : await listBrandSourceOriginals(db, parsed.data, listLimit);
-  return { viewer, files: await withFragments(db, parsed.data, files) };
+  return { viewer, canManage: canManageOriginals(owned), files: await withFragments(db, parsed.data, files) };
 }
 
 export async function setSourceOriginalRights(
@@ -285,7 +284,7 @@ export async function setSourceOriginalRights(
   if (!parsed.success) return denied("INVALID_INPUT");
   return db.transaction(async (tx) => {
     if (!await new BrandDao(tx).lockOwner(ownerId)) return denied("NOT_FOUND");
-    if (!await openBrand(tx, ownerId, parsed.data.brandId)) return denied("NOT_FOUND");
+    if (!canManageOriginals(await brandOwnedBy(tx, ownerId, parsed.data.brandId))) return denied("NOT_FOUND");
     const file = await writeRights(tx, ownerId, parsed.data.brandId, parsed.data.id, parsed.data.rights);
     if (!file) return denied("NOT_FOUND");
     return { file };
@@ -293,7 +292,7 @@ export async function setSourceOriginalRights(
 }
 
 async function linkedOriginal(db: DatabaseConnection, ownerId: string, brandId: string, id: string) {
-  if (!await openBrand(db, ownerId, brandId)) return null;
+  if (!canManageOriginals(await brandOwnedBy(db, ownerId, brandId))) return null;
   const row = await loadSourceOriginal(db, ownerId, brandId, id);
   if (!row?.storedObjectId) return null;
   return row;
