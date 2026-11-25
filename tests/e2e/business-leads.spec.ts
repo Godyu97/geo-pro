@@ -12,11 +12,13 @@ const headers = { Origin: origin };
 const shots = ".cache/issue-135/business-leads";
 const brandName = `Synthetic-${"brand".repeat(14)}`;
 const eventId = `lead-${"x".repeat(59)}`;
-const rejectedId = "unapproved-lead";
+const phone = "13800138000";
 const batch = [
+  "event_id,evidence,direct_identifier",
   `${eventId},self_report,false`,
-  `${eventId},referral,false`,
-  `${rejectedId},unknown,true`,
+  `"${eventId}",referral,false`,
+  `${phone},unknown,false`,
+  "",
   ",landing_page,false",
 ].join("\n");
 const copy = {
@@ -121,25 +123,48 @@ test("lead import is reachable by keyboard and keeps the deduplicated evidence o
     await activate(page, main.getByRole("link", { name: copy["zh-CN"].next }));
     const rows = main.getByRole("textbox", { name: "线索行", exact: true });
     await expect(rows).toBeFocused();
-    const submit = main.getByRole("button", { name: "导入", exact: true });
+    const previewButton = main.getByRole("button", { name: "预览", exact: true });
+    const submit = main.getByRole("button", { name: "确认导入", exact: true });
     await rows.fill(`${eventId},referral`);
-    await activate(page, submit);
+    await activate(page, previewButton);
     await expect(main.getByRole("alert")).toContainText("线索行无效");
     await expect(rows).toHaveValue(`${eventId},referral`);
     expect(await list()).toEqual({ leads: [] });
 
-    await rows.fill(batch);
+    await main.locator("input[type=file]").setInputFiles({
+      name: "leads.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(batch),
+    });
+    await expect(rows).toHaveValue(batch);
+    await activate(page, previewButton);
+    await expect(main.getByText("共 4 行", { exact: true })).toBeVisible();
+    await expect(main.getByText("去重后 1 条咨询", { exact: true })).toBeVisible();
+    await expect(main.getByText(`${eventId}：用户自报 升为 可识别引荐`)).toBeVisible();
+    await expect(main.getByText("第 3 行：含直接身份信息，未入库。")).toBeVisible();
+    await expect(main.getByText("第 4 行：缺少事件 ID，未入库。")).toBeVisible();
+    expect(await list()).toEqual({ leads: [] });
     await activate(page, submit);
     await expect(main.getByRole("status").filter({ hasText: "本次结果" })).toBeVisible();
     await expect(main.getByText("第 3 行：含直接身份信息，未入库。")).toBeVisible();
     await expect(main.getByText("第 4 行：缺少事件 ID，未入库。")).toBeVisible();
-    await expect(main).not.toContainText(rejectedId);
+    await expect(main).not.toContainText(phone);
     await expect(main.getByText(copy["zh-CN"].empty, { exact: true })).toHaveCount(0);
     await expect(submit).toBeFocused();
     await page.screenshot({ path: `${shots}/import-zh-CN.png`, fullPage: true });
     const stored = await list();
     expect(stored.leads).toHaveLength(1);
     expect(stored.leads[0]).toMatchObject({ eventId, count: 1, primary: "referral", evidence: ["self_report", "referral"] });
+
+    const enMain = await visit(page, "en", 768);
+    await activate(page, enMain.getByRole("link", { name: copy.en.next, exact: true }));
+    await enMain.getByRole("textbox", { name: "Lead rows", exact: true }).fill(batch);
+    await activate(page, enMain.getByRole("button", { name: "Preview", exact: true }));
+    await expect(enMain.getByText("4 rows", { exact: true })).toBeVisible();
+    await expect(enMain.getByText("Deduplicated inquiries: 1", { exact: true })).toBeVisible();
+    await expect(enMain.getByText(`${eventId}: Self-reported raised to Identified referral`)).toBeVisible();
+    await expect(enMain.getByText("Row 3: Direct identifier, not stored.")).toBeVisible();
+    expect(await list()).toEqual(stored);
 
     for (const locale of ["zh-CN", "en"] as const) {
       for (const width of [375, 768, 1440]) {

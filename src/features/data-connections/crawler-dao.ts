@@ -13,6 +13,17 @@ import {
 const identitySchema = z.enum(crawlerIdentities);
 const timestampSchema = z.iso.datetime({ precision: 3 });
 
+const wholeCount = z.union([z.number(), z.string(), z.bigint()]).transform((value) => {
+  const count = Number(value);
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error("invalid-crawler-count");
+  return count;
+});
+
+const crawlerRollupRow = z.object({
+  visits: wholeCount,
+  citations: wholeCount,
+});
+
 const observationRow = z.object({
   id: brandIdSchema,
   brandId: brandIdSchema,
@@ -36,6 +47,15 @@ export type CrawlerObservationInsert = {
 
 const observationColumns = `id, brand_id AS "brandId", identity, citations,
   called_included AS "calledIncluded", observed_at AS "observedAt"`;
+
+export function crawlerBrandRollupQuery(ownerId: string, brandId: string) {
+  return {
+    sql: `SELECT count(*) AS "visits", COALESCE(SUM(citations), 0) AS "citations"
+      FROM crawler_observation
+      WHERE owner_id = ? AND brand_id = ?`,
+    values: [ownerId, brandId] as QueryValue[],
+  };
+}
 
 export function crawlerObservationsForOwnerQuery(ownerId: string) {
   return {
@@ -64,6 +84,12 @@ export class CrawlerObservationDao {
       [ownerId, 20],
     );
     return z.array(z.object({ id: brandIdSchema })).parse(rows);
+  }
+
+  async brandRollup(ownerId: string, brandId: string) {
+    const query = crawlerBrandRollupQuery(ownerId, brandId);
+    const [row] = await queryWithParameters(this.db, query.sql, query.values);
+    return crawlerRollupRow.parse(row);
   }
 
   async observationsForOwner(ownerId: string) {

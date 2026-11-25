@@ -46,6 +46,19 @@ const observationRow = z.object({
   createdAt: z.iso.datetime({ precision: 3 }),
 });
 
+const wholeCount = z.union([z.number(), z.string(), z.bigint()]).transform((value) => {
+  const count = Number(value);
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error("invalid-lead-count");
+  return count;
+});
+
+const observationRollupRow = z.object({
+  identified: wholeCount,
+  denominator: wholeCount,
+  crawlerVisits: wholeCount,
+  answerCitations: wholeCount,
+});
+
 const qualifiedCountRow = z.object({
   qualified: z.union([z.number(), z.string(), z.bigint()]),
 }).transform((row) => {
@@ -95,6 +108,19 @@ export function leadQualifiedCountQuery(ownerId: string, brandId: string) {
   return {
     sql: `SELECT count(*) AS "qualified" FROM lead_qualification
       WHERE owner_id = ? AND brand_id = ? AND status = 'qualified'`,
+    values: [ownerId, brandId] as QueryValue[],
+  };
+}
+
+export function leadObservationRollupQuery(ownerId: string, brandId: string) {
+  return {
+    sql: `SELECT
+        COALESCE(SUM(CASE WHEN session_denominator > 0 THEN identified_referrals ELSE 0 END), 0) AS "identified",
+        COALESCE(SUM(CASE WHEN session_denominator > 0 THEN session_denominator ELSE 0 END), 0) AS "denominator",
+        COALESCE(SUM(crawler_visits), 0) AS "crawlerVisits",
+        COALESCE(SUM(answer_citations), 0) AS "answerCitations"
+      FROM lead_observation
+      WHERE owner_id = ? AND brand_id = ?`,
     values: [ownerId, brandId] as QueryValue[],
   };
 }
@@ -203,6 +229,12 @@ export class LeadQualityDao {
     const query = leadQualifiedCountQuery(ownerId, brandId);
     const [row] = await queryWithParameters(this.db, query.sql, query.values);
     return qualifiedCountRow.parse(row);
+  }
+
+  async observationRollup(ownerId: string, brandId: string) {
+    const query = leadObservationRollupQuery(ownerId, brandId);
+    const [row] = await queryWithParameters(this.db, query.sql, query.values);
+    return observationRollupRow.parse(row);
   }
 
   async observationsForBrand(ownerId: string, brandId: string) {

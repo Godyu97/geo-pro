@@ -86,3 +86,19 @@ export function aiReferralConversion(input: {
     selfReportedOverVisits: null,
   };
 }
+
+/** Same-event evidence that loses to a higher exclusive primary is an upgrade, not a second inquiry. */
+export function leadPrimaryUpgrades(leads: readonly {
+  eventId: string;
+  evidence: readonly LeadEvidence[];
+  primary: LeadEvidence;
+}[]) {
+  return leads.flatMap((lead) => {
+    let from: LeadEvidence | null = null;
+    for (const item of lead.evidence) {
+      if (rank[item] >= rank[lead.primary]) continue;
+      if (from === null || rank[item] > rank[from]) from = item;
+    }
+    return from === null ? [] : [{ eventId: lead.eventId, from, to: lead.primary }];
+  });
+}

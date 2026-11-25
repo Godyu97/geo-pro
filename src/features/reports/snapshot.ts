@@ -3,6 +3,7 @@ import en from "../../lib/i18n/messages/en.json" with { type: "json" };
 import zhCN from "../../lib/i18n/messages/zh-CN.json" with { type: "json" };
 import { isLocale } from "../../lib/i18n/locale.ts";
 import { createTranslator } from "../../lib/i18n/translate.ts";
+import { businessFeedbackLines, type SnapshotBusinessFeedback } from "./business-feedback.ts";
 import { presentSnapshotCost } from "./cost-copy.ts";
 import type { SnapshotCost, SnapshotLabor } from "./cost.ts";
 import { snapshotMetrics, type SnapshotComparisons, type SnapshotMetric } from "./snapshot-comparisons.ts";
@@ -38,6 +39,7 @@ export type SnapshotPayloadInput = {
   limitations?: string[];
   cost: SnapshotCost;
   labor: SnapshotLabor;
+  businessFeedback?: SnapshotBusinessFeedback;
 };
 
 function metricBlock({ result, excludedSamples, unavailable }: SnapshotComparisons["comparisons"][SnapshotMetric]) {
@@ -115,6 +117,7 @@ export function buildSnapshotDocument(input: SnapshotPayloadInput) {
     publication: input.publication,
     cost: input.cost,
     labor: input.labor,
+    ...(input.businessFeedback ? { business_feedback: input.businessFeedback } : {}),
     limitations,
     next_action: input.loopCompleted ? "按探索结论安排下一轮动作，不把观察写成因果" : "完成发布核验后再申请经营闭环报告",
     source_missing: sourceMissing,
@@ -156,6 +159,12 @@ export function renderSnapshotHtml(document: ReturnType<typeof buildSnapshotDocu
   }).join("\n  ");
   const cost = presentSnapshotCost(locale, document.cost, document.labor);
   const reason = cost.reason ? `<p>${escape(cost.reason)}</p>` : "";
+  const business = document.business_feedback
+    ? `<section id="business-feedback">
+    <h2>${escape(t("businessHeading"))}</h2>
+    ${businessFeedbackLines(locale, document.business_feedback).map((line) => `<p>${escape(line)}</p>`).join("\n    ")}
+  </section>`
+    : "";
   return `<!doctype html>
 <html lang="${locale}">
 <head><meta charset="utf-8"/><title>Report ${escape(document.report_id)}</title></head>
@@ -164,6 +173,7 @@ export function renderSnapshotHtml(document: ReturnType<typeof buildSnapshotDocu
   <p>Brand: ${escape(document.brand.name)} · Entity v${escape(document.brand.entity_version)}</p>
   <p>Grade: ${escape(document.grade)} · Intent: ${escape(document.intent)} · Loop completed: ${document.loop_completed}</p>
   ${comparisons}
+  ${business}
   <section id="snapshot-cost">
     <h2>${escape(cost.heading)}</h2>
     <p>${escape(cost.known)}</p>

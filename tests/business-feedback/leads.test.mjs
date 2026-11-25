@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { importBusinessLeads, listBusinessLeads, readBusinessLead } from "../../src/features/business-feedback/commands.ts";
-import { importBusinessLeadsSchema, parseLeadLines, prepareLeadRow } from "../../src/features/business-feedback/contracts.ts";
+import { importBusinessLeadsSchema, parseLeadLines, prepareLeadRow, previewLeadCsv } from "../../src/features/business-feedback/contracts.ts";
 import { businessLeadErrors } from "../../src/features/business-feedback/contracts.ts";
 import { businessLeadEvidenceQuery, businessLeadListQuery } from "../../src/features/business-feedback/dao.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
@@ -29,6 +29,30 @@ test("lead import rejects identity fields and keeps per-row reasons", () => {
   assert.equal(parsed.rows.length, 4);
   assert.equal(parsed.rows[2].eventId, null);
   assert.equal(parseLeadLines("evt-1,referral").error, "INVALID_INPUT");
+  assert.equal(previewLeadCsv("evt-1,referral").error, "INVALID_INPUT");
+  assert.equal(previewLeadCsv("event_id,evidence\n\"evt-1").error, "INVALID_INPUT");
+
+  const csv = [
+    "event_id,evidence,direct_identifier,note",
+    "evt-1,self_report,false,\"hello, world\"",
+    "\"evt-1\",referral,false,",
+    "",
+    "13800138000,unknown,false,person@example.com",
+    ",landing_page,false,",
+    "evt-2,not_a_source,false,",
+  ].join("\n");
+  const preview = previewLeadCsv(csv);
+  assert.equal(preview.totalRows, 5);
+  assert.equal(preview.mergedCount, 1);
+  assert.deepEqual(preview.upgrades, [{ eventId: "evt-1", from: "self_report", to: "referral" }]);
+  assert.deepEqual(preview.rejected, [
+    { index: 2, reason: "direct_pii" },
+    { index: 3, reason: "missing_id" },
+    { index: 4, reason: "invalid_row" },
+  ]);
+  assert.equal(JSON.stringify(preview.rows).includes("13800138000"), false);
+  assert.equal(JSON.stringify(preview.rows).includes("person@example.com"), false);
+  assert.equal(JSON.stringify(preview).includes("hello, world"), false);
 });
 
 function watch(db) {

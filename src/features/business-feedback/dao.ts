@@ -5,6 +5,12 @@ import { queryWithParameters, type QueryConnection, type QueryValue } from "../.
 import { brandIdSchema } from "../brands/contracts.ts";
 import { leadEvidenceSchema } from "./contracts.ts";
 
+const wholeCount = z.union([z.number(), z.string(), z.bigint()]).transform((value) => {
+  const count = Number(value);
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error("invalid-lead-count");
+  return count;
+});
+
 const leadRow = z.object({
   id: brandIdSchema,
   brandId: brandIdSchema,
@@ -36,6 +42,15 @@ export function businessLeadListQuery(ownerId: string, brandId: string) {
     sql: `SELECT ${leadColumns} FROM business_lead
       WHERE owner_id = ? AND brand_id = ?
       ORDER BY created_at ASC, id ASC`,
+    values: [ownerId, brandId] as QueryValue[],
+  };
+}
+
+export function businessLeadPrimaryCountsQuery(ownerId: string, brandId: string) {
+  return {
+    sql: `SELECT primary_class AS "primary", count(*) AS "count" FROM business_lead
+      WHERE owner_id = ? AND brand_id = ?
+      GROUP BY primary_class`,
     values: [ownerId, brandId] as QueryValue[],
   };
 }
@@ -125,6 +140,22 @@ export class BusinessLeadDao {
       [ownerId, ...leadIds],
     );
     return z.array(leadRow).parse(rows);
+  }
+
+  async primaryCounts(ownerId: string, brandId: string) {
+    const query = businessLeadPrimaryCountsQuery(ownerId, brandId);
+    const rows = z.array(z.object({
+      primary: leadEvidenceSchema,
+      count: wholeCount,
+    })).parse(await queryWithParameters(this.db, query.sql, query.values));
+    const counts: Record<z.infer<typeof leadEvidenceSchema>, number> = {
+      referral: 0,
+      self_report: 0,
+      landing_page: 0,
+      unknown: 0,
+    };
+    for (const row of rows) counts[row.primary] = row.count;
+    return counts;
   }
 
   async evidenceFor(ownerId: string, leadIds: readonly string[]) {

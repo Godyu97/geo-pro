@@ -27,6 +27,10 @@ const copy = {
     missing: "找不到该品牌或报告资源。",
     noCharge: "站内提醒不会自动发起付费调用",
     known: "已知费用 N/A",
+    businessRate: "可识别引荐转化率 N/A。没有可靠会话分母，未把自报咨询除以访问数。",
+    businessCrawler: "爬虫访问观察 1",
+    businessInquiries: "去重咨询 1",
+    businessAbsent: "这份快照没有业务反馈汇总。",
     metrics: ["提及率", "推荐率", "官网引用率"],
     citationCount: "1 道共同题 · N/A",
     legacyMetric: "历史快照指标 推荐率",
@@ -47,6 +51,10 @@ const copy = {
     missing: "Brand or report resource was not found.",
     noCharge: "In-app reminders never auto-charge paid runs",
     known: "Known cost N/A",
+    businessRate: "Identified-referral conversion N/A. There is no reliable session denominator, so self-reported inquiries are not divided by visits.",
+    businessCrawler: "Crawler visit observations 1",
+    businessInquiries: "Deduplicated inquiries 1",
+    businessAbsent: "This snapshot has no business-feedback summary.",
     metrics: ["Mention rate", "Recommendation rate", "Official site citation rate"],
     citationCount: "1 common question · N/A",
     legacyMetric: "Historical snapshot metric: Recommendation rate",
@@ -145,6 +153,20 @@ test("report snapshots keep the current download readable and recoverable", asyn
       effectiveAt: "2026-11-20T02:00:00.000Z", locale: "zh-CN",
     });
     expect(reminder.todo.autoCharge).toBe(0);
+    const lead = await post(context, "/api/reports/leads", {
+      brandId,
+      rows: [
+        { eventId: "evt-self", evidence: "self_report", directIdentifier: false },
+        { eventId: "13800138000", evidence: "unknown", directIdentifier: false },
+      ],
+    });
+    expect(lead.leads).toHaveLength(1);
+    expect(lead.leads[0]).toMatchObject({ eventId: "evt-self", count: 1, primary: "self_report" });
+    expect(lead.rejected).toEqual([{ index: 1, reason: "direct_pii" }]);
+    expect(JSON.stringify(lead).includes("13800138000")).toBe(false);
+    await post(context, "/api/reports/crawler-visits", {
+      brandId, userAgentClaimsAi: true, identityVerified: false, answerCitations: 0,
+    });
     const report = await post(context, "/api/reports", {
       action: "generate-report", brandId, operationId: randomUUID(), retestId: retest.retest.id,
       before, after, locale: "zh-CN", brandName,
@@ -181,6 +203,9 @@ test("report snapshots keep the current download readable and recoverable", asyn
         await expect(main.getByText(current.noCharge, { exact: true })).toBeVisible();
         await expect(main.getByText(current.known, { exact: true })).toBeVisible();
         for (const metric of current.metrics) await expect(main.getByText(metric, { exact: true })).toBeVisible();
+        await expect(main.getByText(current.businessInquiries, { exact: true })).toBeVisible();
+        await expect(main.getByText(current.businessRate, { exact: true })).toBeVisible();
+        await expect(main.getByText(current.businessCrawler, { exact: true })).toBeVisible();
         await expect(main.getByText(current.citationCount, { exact: true })).toBeVisible();
         await expect(main.getByRole("navigation", { name: current.related })).toBeVisible();
         if (width === 375) {
@@ -207,6 +232,19 @@ test("report snapshots keep the current download readable and recoverable", asyn
     expect(firstHtml).toContain(snapshotId);
     expect(firstHtml).toMatch(/<h2>推荐率<\/h2>[\s\S]*?共同题 3\/4[\s\S]*?\+66\.7pp/);
     expect(firstHtml).toMatch(/<h2>官网引用率<\/h2>[\s\S]*?共同题 1\/4[\s\S]*?N\/A/);
+    expect(first.schema_version).toBe("report-v4");
+    expect(first.business_feedback).toMatchObject({
+      deduped_inquiries: 1,
+      self_reported_inquiries: 1,
+      self_reported_over_visits: null,
+      answer_citations: 0,
+      causality: "not_established",
+      ai_referral_conversion: { rate: null, reason: "missing_session_denominator" },
+      crawler_visits: { count: 1, called_included: false },
+    });
+    expect(firstHtml).toContain("called_included: false");
+    expect(firstHtml).not.toContain("已被 AI 收录");
+    expect(firstHtml).not.toContain("13800138000");
 
     await page.setViewportSize({ width: 375, height: 800 });
     await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
@@ -263,6 +301,7 @@ test("report snapshots keep the current download readable and recoverable", asyn
         await expect(main.getByText(brandName, { exact: true })).toHaveCount(0);
         const historyRow = main.getByRole("listitem").filter({ has: page.locator(`a[href="/api/reports/snapshots/${legacy.id}?format=json"]`) });
         await expect(historyRow.getByText(current.legacyMetric, { exact: true })).toBeVisible();
+        await expect(historyRow.getByText(current.businessAbsent, { exact: true })).toBeVisible();
         await expect(historyRow.getByText(current.metrics[2], { exact: true })).toHaveCount(0);
         if (width === 375) {
           await expect(download).toBeInViewport();

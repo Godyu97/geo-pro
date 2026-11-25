@@ -12,6 +12,7 @@ import { ApplyMockRetestButton } from "@/features/functional-mock/run-buttons";
 import { Button } from "@/components/ui/button";
 import { ContentDao } from "@/features/content/dao";
 import { generateSavedSnapshotAction, reviseSavedSnapshotAction } from "./actions";
+import { businessFeedbackLines } from "./business-feedback";
 import { presentSnapshotCost } from "./cost-copy";
 import { listReports, snapshotViews, type SnapshotCostView, type SnapshotExclusion, type SnapshotSourceView, type SnapshotView } from "./commands";
 import { ReportEntryPanel, type ReportPublicationOption } from "./report-entry-panel";
@@ -43,6 +44,31 @@ function relatedLinks(t: Awaited<ReturnType<typeof getTranslator<"reports">>>) {
     { href: "/dashboard/reports/connector-events", label: t("openConnectorEvents") },
     { href: "/dashboard/reports/crawler-visits", label: t("openCrawlerVisits") },
   ] as const;
+}
+
+function SnapshotBusinessLines({
+  view,
+  locale,
+  t,
+}: {
+  view: SnapshotView["business"] | undefined;
+  locale: Locale;
+  t: Awaited<ReturnType<typeof getTranslator<"reports">>>;
+}) {
+  if (!view || view.state === "unavailable") {
+    return <p className="mt-2 break-words text-muted-foreground">{t("businessUnavailable")}</p>;
+  }
+  if (view.state === "absent") {
+    return <p className="mt-2 break-words text-muted-foreground">{t("businessAbsent")}</p>;
+  }
+  return (
+    <div className="mt-3 space-y-1 break-words">
+      <p className="font-medium">{t("businessHeading")}</p>
+      {businessFeedbackLines(locale, view.feedback).map((line) => (
+        <p key={line} className="text-muted-foreground">{line}</p>
+      ))}
+    </div>
+  );
 }
 
 function SnapshotCostLines({
@@ -231,7 +257,7 @@ export default async function ReportsListPage({
     return (
       <ReportCanvas
         title={t("title")}
-        summary={<p className="max-w-2xl break-words text-sm leading-7 text-muted-foreground">{requestedBrand ? t("NOT_FOUND") : t("noBrand")}</p>}
+        summary={<p role={requestedBrand ? "alert" : undefined} className="max-w-2xl break-words text-sm leading-7 text-muted-foreground">{requestedBrand ? t("NOT_FOUND") : t("noBrand")}</p>}
         primary={brandsAction}
         relatedLabel={t("relatedEntries")}
         related={relatedLinks(t)}
@@ -407,6 +433,7 @@ export default async function ReportsListPage({
                 </p>
                 <SnapshotSourceNote source={views.get(item.id)?.source ?? result.sources[item.id]} t={t} />
                 <SnapshotMetrics view={views.get(item.id)} locale={locale} t={t} />
+                <SnapshotBusinessLines view={views.get(item.id)?.business} locale={locale} t={t} />
                 <SnapshotExclusions excluded={views.get(item.id)?.excluded ?? []} t={t} />
                 {item.status === "created" && views.get(item.id)?.comparisons ? (
                   <form action={reviseSavedSnapshotAction} className="mt-3">

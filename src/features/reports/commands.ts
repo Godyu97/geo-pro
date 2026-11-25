@@ -4,7 +4,10 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { createObjectStorage } from "../../lib/storage/index.ts";
+import { BusinessLeadDao } from "../business-feedback/dao.ts";
+import { LeadQualityDao } from "../business-feedback/quality-dao.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { CrawlerObservationDao } from "../data-connections/crawler-dao.ts";
 import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 import { saveStoredObject, type ObjectStorageClient } from "../stored-objects/commands.ts";
 import { MAX_STORED_OBJECT_BYTES } from "../stored-objects/contracts.ts";
@@ -26,6 +29,7 @@ import {
   type SnapshotLabor,
 } from "./cost.ts";
 import { compareWindows, computeD7DueAt, resolveLoopGate } from "./rules.ts";
+import { readSnapshotBusiness, summarizeBusinessFeedback, type SnapshotBusinessView } from "./business-feedback.ts";
 import { buildSnapshotDocument, fingerprintBytes, renderSnapshotHtml } from "./snapshot.ts";
 import { loadSnapshotComparisons } from "./snapshot-comparisons.ts";
 
@@ -113,6 +117,24 @@ function inlineSnapshot(row: ReportSnapshotRow) {
 async function loadWindowCost(db: QueryConnection, brandId: string, windows: CostWindows) {
   const groups = await new ReportDao(db).samplingCostGroups(brandId, windows);
   return { cost: summarizeCostGroups(groups), labor: unrecordedLabor };
+}
+
+async function loadBusinessFeedback(db: QueryConnection, ownerId: string, brandId: string) {
+  const primaryCounts = await new BusinessLeadDao(db).primaryCounts(ownerId, brandId);
+  const quality = new LeadQualityDao(db);
+  const qualified = await quality.qualifiedCount(ownerId, brandId);
+  const rollup = await quality.observationRollup(ownerId, brandId);
+  const crawler = await new CrawlerObservationDao(db).brandRollup(ownerId, brandId);
+  return summarizeBusinessFeedback({
+    primaryCounts,
+    qualified,
+    identifiedReferrals: rollup.identified,
+    sessionDenominator: rollup.denominator > 0 ? rollup.denominator : null,
+    observationCrawlerVisits: rollup.crawlerVisits,
+    observationAnswerCitations: rollup.answerCitations,
+    crawlerVisitCount: crawler.visits,
+    crawlerAnswerCitations: crawler.citations,
+  });
 }
 
 async function readComparisonEvidence(
@@ -336,6 +358,7 @@ export async function generateReport(
       before: { start: input.before.start, endExclusive: input.before.endExclusive },
       after: { start: input.after.start, endExclusive: input.after.endExclusive },
     })),
+    businessFeedback: await loadBusinessFeedback(db, ownerId, input.brandId),
   });
   const jsonText = JSON.stringify(document);
   const htmlText = renderSnapshotHtml(document);
@@ -431,6 +454,7 @@ export async function reviseReport(
       before: { start: input.before.start, endExclusive: input.before.endExclusive },
       after: { start: input.after.start, endExclusive: input.after.endExclusive },
     })),
+    businessFeedback: await loadBusinessFeedback(db, ownerId, input.brandId),
   });
   const jsonText = JSON.stringify(document);
   const htmlText = renderSnapshotHtml(document);
@@ -551,6 +575,7 @@ type SnapshotBodyView = {
   metric?: string;
   comparisons?: z.infer<typeof savedOverview>["comparisons"];
   excluded: SnapshotExclusion[];
+  business: SnapshotBusinessView;
 };
 
 export type SnapshotSourceView = {
@@ -760,9 +785,10 @@ function parseSnapshotView(json: string): SnapshotBodyView {
       metric: summary.data?.metric,
       comparisons: summary.data?.comparisons,
       excluded: excludedQueries(saved),
+      business: readSnapshotBusiness(saved),
     };
   } catch {
-    return { cost: { state: "unavailable" }, excluded: [] };
+    return { cost: { state: "unavailable" }, excluded: [], business: { state: "unavailable" } };
   }
 }
 
@@ -781,7 +807,7 @@ export async function snapshotViews(
     const item = loaded.get(snapshot.id);
     const body = item?.status === "ready"
       ? parseSnapshotView(item.text)
-      : { cost: { state: "unavailable" as const }, excluded: [] };
+      : { cost: { state: "unavailable" as const }, excluded: [], business: { state: "unavailable" as const } };
     views.set(snapshot.id, { ...body, source });
   }
   return views;
