@@ -176,3 +176,99 @@ export class EntityRevisionDao {
     return z.array(correctionRow).parse(await queryWithParameters(this.db, query.sql, query.values));
   }
 }
+
+const promptSetIdRow = z.object({ promptSetId: brandIdSchema });
+const promptContentRow = z.object({ id: brandIdSchema, content: z.string() });
+const brandFactObservationRow = z.object({
+  observationId: brandIdSchema,
+  questionText: z.string(),
+  answerText: z.string(),
+  questionId: brandIdSchema,
+  analysisVersionId: brandIdSchema.nullable(),
+  capturedAt: z.string(),
+});
+
+export type BrandFactObservationRow = z.infer<typeof brandFactObservationRow>;
+
+const savedEvidenceStates = `('complete', 'incomplete', 'contested')`;
+
+export function brandFactPromptSetIdQuery(ownerId: string, brandId: string) {
+  return {
+    sql: `SELECT DISTINCT r.prompt_set_id AS "promptSetId"
+      FROM answer_observation o
+      JOIN monitoring_slot s ON s.id = o.slot_id AND s.brand_id = o.brand_id
+      JOIN monitoring_run r ON r.id = s.run_id AND r.brand_id = o.brand_id AND r.owner_id = o.owner_id
+      WHERE o.owner_id = ? AND o.brand_id = ?
+        AND o.evidence_state IN ${savedEvidenceStates}
+      ORDER BY r.prompt_set_id ASC`,
+    values: [ownerId, brandId] as QueryValue[],
+  };
+}
+
+export function promptSetContentQuery(brandId: string, ids: readonly string[]) {
+  return {
+    sql: `SELECT id, content FROM prompt_set
+      WHERE brand_id = ? AND id IN (${ids.map(() => "?").join(", ")})
+      ORDER BY id ASC`,
+    values: [brandId, ...ids] as QueryValue[],
+  };
+}
+
+export function brandFactObservationQuery(
+  ownerId: string,
+  brandId: string,
+  questionIds: readonly string[],
+  observationId?: string,
+) {
+  const values: QueryValue[] = [ownerId, brandId, ...questionIds];
+  let observationFilter = "";
+  if (observationId) {
+    observationFilter = " AND o.id = ?";
+    values.push(observationId);
+  }
+  return {
+    sql: `SELECT o.id AS "observationId", o.question_text AS "questionText", o.answer_text AS "answerText",
+        s.question_id AS "questionId", a.id AS "analysisVersionId", o.captured_at AS "capturedAt"
+      FROM answer_observation o
+      JOIN monitoring_slot s ON s.id = o.slot_id AND s.brand_id = o.brand_id
+      JOIN monitoring_run r ON r.id = s.run_id AND r.brand_id = o.brand_id AND r.owner_id = o.owner_id
+      LEFT JOIN answer_analysis_version a ON a.observation_id = o.id AND a.brand_id = o.brand_id
+        AND a.version = (
+          SELECT MAX(a2.version) FROM answer_analysis_version a2
+          WHERE a2.observation_id = o.id AND a2.brand_id = o.brand_id
+        )
+      WHERE o.owner_id = ? AND o.brand_id = ?
+        AND o.evidence_state IN ${savedEvidenceStates}
+        AND s.question_id IN (${questionIds.map(() => "?").join(", ")})
+        ${observationFilter}
+      ORDER BY o.captured_at DESC, o.id DESC
+      LIMIT 30`,
+    values,
+  };
+}
+
+export class BrandFactClaimDao {
+  private readonly db: QueryConnection;
+
+  constructor(db: QueryConnection) {
+    this.db = db;
+  }
+
+  async promptSetIds(ownerId: string, brandId: string) {
+    const query = brandFactPromptSetIdQuery(ownerId, brandId);
+    return z.array(promptSetIdRow).parse(await queryWithParameters(this.db, query.sql, query.values))
+      .map((row) => row.promptSetId);
+  }
+
+  async promptContents(brandId: string, ids: readonly string[]) {
+    if (ids.length === 0) return [];
+    const query = promptSetContentQuery(brandId, ids);
+    return z.array(promptContentRow).parse(await queryWithParameters(this.db, query.sql, query.values));
+  }
+
+  async observations(ownerId: string, brandId: string, questionIds: readonly string[], observationId?: string) {
+    if (questionIds.length === 0) return [];
+    const query = brandFactObservationQuery(ownerId, brandId, questionIds, observationId);
+    return z.array(brandFactObservationRow).parse(await queryWithParameters(this.db, query.sql, query.values));
+  }
+}

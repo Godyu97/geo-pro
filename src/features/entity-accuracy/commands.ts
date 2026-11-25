@@ -3,6 +3,8 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { BrandDao, type BrandRecord } from "../brands/dao.ts";
+import { listBrandFactClaims } from "./claim-read.ts";
+import type { BrandFactClaimView } from "./claims.ts";
 import { entityReviewWriteSchema } from "./contracts.ts";
 import { EntityReviewDao, type EntityReviewRecord } from "./dao.ts";
 import { reviewedErrorDisplay } from "./rules.ts";
@@ -75,6 +77,7 @@ export type EntityReviewWorkspace = {
   brandName: string;
   brandStatus: BrandRecord["status"];
   board: EntityReviewBoard;
+  claims: BrandFactClaimView[];
 };
 
 export function entityReviewUnavailable(error: unknown) {
@@ -100,11 +103,16 @@ export async function readEntityReviewWorkspace(
 ): Promise<EntityReviewWorkspace | { error: "NOT_FOUND" }> {
   const owned = await new BrandDao(db).ownedSummary(ownerId, brandId);
   if (!owned) return { error: "NOT_FOUND" as const };
-  const rows = await new EntityReviewDao(db).reviewsForBrand(ownerId, brandId);
+  const reviews = new EntityReviewDao(db);
+  const [rows, claims] = await Promise.all([
+    reviews.reviewsForBrand(ownerId, brandId),
+    listBrandFactClaims(db, ownerId, brandId),
+  ]);
   return {
     brandName: owned.name,
     brandStatus: owned.status,
     board: presentEntityReviewBoard(rows),
+    claims,
   };
 }
 

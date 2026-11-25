@@ -12,7 +12,8 @@ import type { Locale } from "@/lib/i18n/locale";
 import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
 import type { EntityReviewBoard } from "./commands";
-import { entityReviewErrors, type EntityReviewError } from "./contracts";
+import type { BrandFactClaimView, ClaimJudgment } from "./claims";
+import { claimExtractErrors, entityReviewErrors, type ClaimExtractError, type EntityReviewError } from "./contracts";
 
 type Copy = Messages["entityReviews"];
 type FactState = "active" | "expired" | "conflict";
@@ -38,6 +39,24 @@ function isKnownError(code: string): code is EntityReviewError {
   return Object.hasOwn(entityReviewErrors, code);
 }
 
+function isKnownExtractError(code: string): code is ClaimExtractError {
+  return Object.hasOwn(claimExtractErrors, code);
+}
+
+function judgmentLabel(messages: Copy, judgment: ClaimJudgment) {
+  if (judgment === "consistent") return messages.judgmentConsistent;
+  if (judgment === "conflict") return messages.judgmentConflict;
+  if (judgment === "insufficient") return messages.judgmentInsufficient;
+  return messages.judgmentNotApplicable;
+}
+
+function factStatusLabel(messages: Copy, status: BrandFactClaimView["factStatus"]) {
+  if (status === "approved") return messages.factStatusApproved;
+  if (status === "expired") return messages.factStatusExpired;
+  if (status === "revoked") return messages.factStatusRevoked;
+  return null;
+}
+
 function NoticeBanner({ notice }: { notice: Notice | null }) {
   if (!notice) return null;
   return (
@@ -56,18 +75,21 @@ export function ReviewsWorkspace({
   brandId,
   locale,
   initialBoard,
+  initialClaims,
   messages,
   initialError,
 }: {
   brandId: string;
   locale: Locale;
   initialBoard: EntityReviewBoard;
+  initialClaims: BrandFactClaimView[];
   messages: Copy;
   initialError: EntityReviewError | null;
 }) {
   const t = createTranslator(locale, messages);
   const router = useRouter();
   const [board, setBoard] = useState<EntityReviewBoard>(initialBoard);
+  const [claims, setClaims] = useState<BrandFactClaimView[]>(initialClaims);
   const [observationId, setObservationId] = useState("");
   const [analysisVersionId, setAnalysisVersionId] = useState("");
   const [population, setPopulation] = useState("");
@@ -75,11 +97,14 @@ export function ReviewsWorkspace({
   const [fact, setFact] = useState<FactState>("active");
   const [reviewed, setReviewed] = useState(true);
   const [confirmed, setConfirmed] = useState(false);
+  const [confirmLocked, setConfirmLocked] = useState(false);
+  const [extractingId, setExtractingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(
     initialError ? { kind: "alert", text: t(initialError) } : null,
   );
   const [pending, startTransition] = useTransition();
   const inFlightRef = useRef(false);
+  const extractRef = useRef(false);
   const idPrefix = useId();
   const currentPath = `/dashboard/brands/${brandId}/entity-reviews`;
 
@@ -101,7 +126,7 @@ export function ReviewsWorkspace({
               observationId: observationId.trim(),
               analysisVersionId: analysisVersionId.trim(),
               reviewed,
-              confirmed,
+              confirmed: confirmLocked ? false : confirmed,
               fact,
             }],
           }),
@@ -137,9 +162,137 @@ export function ReviewsWorkspace({
     });
   }
 
+  function prefill(claim: BrandFactClaimView) {
+    if (!claim.analysisVersionId) return;
+    setObservationId(claim.observationId);
+    setAnalysisVersionId(claim.analysisVersionId);
+    setFact(claim.reviewFact);
+    setReviewed(true);
+    setConfirmed(false);
+    setConfirmLocked(!claim.confirmable);
+    setNotice({ kind: "status", text: messages.prefilled });
+    document.getElementById("entity-review-form")?.scrollIntoView({ block: "start" });
+  }
+
+  function extractClaim(claim: BrandFactClaimView) {
+    if (extractRef.current) return;
+    extractRef.current = true;
+    setExtractingId(claim.observationId);
+    setNotice(null);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/brands/${brandId}/entity-reviews/claims`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ observationId: claim.observationId }),
+        });
+        const body = await response.json().catch(() => null) as
+          | { claim?: BrandFactClaimView }
+          | { error?: { code?: string } }
+          | null;
+        if (!response.ok) {
+          const code = body && "error" in body ? body.error?.code : undefined;
+          if (response.status === 401 || code === "SESSION_REQUIRED") {
+            router.push(loginPath(currentPath, "session-required"));
+            return;
+          }
+          setNotice({
+            kind: "alert",
+            text: typeof code === "string" && isKnownExtractError(code) ? t(code) : t("SERVICE_UNAVAILABLE"),
+          });
+          return;
+        }
+        if (body && "claim" in body && body.claim) {
+          const next = body.claim;
+          setClaims((current) => current.map((item) => item.observationId === next.observationId ? next : item));
+        }
+        setNotice({ kind: "status", text: messages.extractReady });
+      } catch {
+        setNotice({ kind: "alert", text: t("SERVICE_UNAVAILABLE") });
+      } finally {
+        extractRef.current = false;
+        setExtractingId(null);
+      }
+    })();
+  }
+
   return (
     <div className="min-w-0 space-y-6">
       <NoticeBanner notice={notice} />
+
+      <section
+        id="brand-fact-claims"
+        tabIndex={-1}
+        aria-labelledby="brand-fact-claims-heading"
+        className="scroll-mt-24 space-y-4 focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        <div className="min-w-0 space-y-2">
+          <h2 id="brand-fact-claims-heading" className="text-lg font-semibold tracking-tight">
+            {messages.claimsTitle}
+          </h2>
+          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{messages.claimsDescription}</p>
+        </div>
+        {claims.length === 0 ? (
+          <p className={emptySurfaceClass}>{messages.claimsEmpty}</p>
+        ) : (
+          <ul className="space-y-3">
+            {claims.map((claim) => {
+              const statusLabel = factStatusLabel(messages, claim.factStatus);
+              return (
+                <li key={claim.observationId}>
+                  <Card className="min-w-0">
+                    <CardHeader>
+                      <CardTitle className="text-base [overflow-wrap:anywhere]">
+                        {t("claimQuestion", { text: claim.questionText })}
+                      </CardTitle>
+                      <CardDescription className="[overflow-wrap:anywhere]">
+                        {t("claimAnswer", { text: claim.answerExcerpt })}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <p className="text-sm leading-6 [overflow-wrap:anywhere]">
+                        {t("claimStatement", { text: claim.claim })}
+                      </p>
+                      <div className="flex min-w-0 flex-wrap gap-2">
+                        <Badge variant={claim.judgment === "conflict" ? "destructive" : "secondary"} className={wrapBadgeClass}>
+                          {judgmentLabel(messages, claim.judgment)}
+                        </Badge>
+                        {statusLabel ? <Badge variant="outline" className={wrapBadgeClass}>{statusLabel}</Badge> : null}
+                        {claim.factTitle ? (
+                          <Badge variant="outline" className={wrapBadgeClass}>
+                            {t("claimFact", { title: claim.factTitle })}
+                          </Badge>
+                        ) : null}
+                      </div>
+                      {claim.confirmable ? null : (
+                        <p className="text-sm leading-6 text-muted-foreground">{messages.confirmBlocked}</p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {claim.analysisVersionId ? (
+                          <Button type="button" variant="outline" className={actionClass} onClick={() => prefill(claim)}>
+                            {messages.prefillReview}
+                          </Button>
+                        ) : (
+                          <p className="text-sm leading-6 text-muted-foreground">{messages.prefillNeedsAnalysis}</p>
+                        )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className={actionClass}
+                          aria-disabled={extractingId === claim.observationId}
+                          onClick={() => extractClaim(claim)}
+                        >
+                          {extractingId === claim.observationId ? messages.extractingClaim : messages.extractClaim}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       <section
         id="entity-review-summary"
@@ -230,7 +383,10 @@ export function ReviewsWorkspace({
                   name="observationId"
                   required
                   value={observationId}
-                  onChange={(event) => setObservationId(event.target.value)}
+                  onChange={(event) => {
+                    setObservationId(event.target.value);
+                    setConfirmLocked(false);
+                  }}
                   className={inputClass}
                 />
               </Field>
@@ -240,7 +396,10 @@ export function ReviewsWorkspace({
                   name="analysisVersionId"
                   required
                   value={analysisVersionId}
-                  onChange={(event) => setAnalysisVersionId(event.target.value)}
+                  onChange={(event) => {
+                    setAnalysisVersionId(event.target.value);
+                    setConfirmLocked(false);
+                  }}
                   className={inputClass}
                 />
               </Field>
@@ -298,6 +457,7 @@ export function ReviewsWorkspace({
                     name="confirmed"
                     type="checkbox"
                     checked={confirmed}
+                    disabled={confirmLocked}
                     onChange={(event) => setConfirmed(event.target.checked)}
                     className={checkboxClass}
                   />

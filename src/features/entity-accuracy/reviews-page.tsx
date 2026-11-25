@@ -122,6 +122,7 @@ export default async function EntityReviewsPage({
         brandId={brandId.data}
         locale={locale}
         initialBoard={result.board}
+        initialClaims={result.claims}
         messages={messages}
         initialError={isKnownError(errorCode) ? errorCode : null}
       />

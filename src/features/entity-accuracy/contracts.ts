@@ -61,6 +61,23 @@ export const entityReviewErrors = {
 export type EntityReviewError = keyof typeof entityReviewErrors;
 export type EntityReviewWriteInput = z.infer<typeof entityReviewWriteSchema>;
 
+export const claimExtractBodySchema = z.strictObject({
+  observationId: brandIdSchema,
+});
+
+export const claimExtractErrors = {
+  SESSION_REQUIRED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  INVALID_INPUT: 400,
+  AI_UNAVAILABLE: 503,
+  INVALID_MODEL_OUTPUT: 422,
+  AI_FAILED: 503,
+  SERVICE_UNAVAILABLE: 503,
+} as const;
+
+export type ClaimExtractError = keyof typeof claimExtractErrors;
+
 const revisionFields = {
   observationId: brandIdSchema,
   priorAnalysisId: brandIdSchema,
