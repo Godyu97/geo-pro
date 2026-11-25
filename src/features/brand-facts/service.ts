@@ -11,6 +11,7 @@ import {
   type FactCommand, type FactCursor, type FactFields, type FactScope, type FactVersion,
 } from "./contracts.ts";
 import { FactDao, pageSize } from "./dao.ts";
+import { ContentDao } from "../content/dao.ts";
 import { ContentMaintenanceAbort, openRevokedFactMaintenance } from "../content/maintenance.ts";
 import { dependencyEffect, factGaps, factStatus } from "./rules.ts";
 
@@ -49,6 +50,9 @@ export async function readFactWorkspace(db: QueryConnection, scope: FactScope, q
   if ((query.fact && !fact) || (query.paste && !paste)) return null;
   const [latest, prior] = fact ? await Promise.all([dao.latest(fact.factId), dao.priorApproval(fact)]) : [null, null];
   const conflict = fact && prior && prior.fields.claim !== fact.fields.claim ? prior : null;
+  const dependencies = conflict
+    ? await new ContentDao(db).listFactDependencies(effective.ownerId, effective.brandId, conflict.id)
+    : null;
   const today = clock().toISOString().slice(0, 10);
   return {
     brandName: brand.name,
@@ -58,6 +62,7 @@ export async function readFactWorkspace(db: QueryConnection, scope: FactScope, q
     readOnly: brand.status !== "active",
     pastes: page(pastes), fact, paste, successor, latestId: latest?.id ?? null, today,
     conflict: conflict ? { id: conflict.id, version: conflict.version, claim: conflict.fields.claim } : null,
+    dependencies,
     impacts: impacts.slice(0, pageSize).map((item) => ({
       ...item, effect: dependencyEffect(item.stage, fact !== null && isUsable(fact, today)),
     })),
@@ -120,6 +125,7 @@ async function approveFact(
   operation: Extract<FactCommand, { action: "approve" }>,
   approverId: string,
   now: string,
+  maintenance: { db: TransactionConnection; ownerId: string; brandId: string },
 ) {
   if (current.state !== "pending_confirmation") return fail("conflict");
   const gaps = factGaps(current.fields, now.slice(0, 10));
@@ -128,7 +134,10 @@ async function approveFact(
   const conflict = prior && prior.fields.claim !== current.fields.claim ? prior : null;
   if ((conflict?.id ?? null) !== operation.conflictId || (operation.revokeConflict && !conflict)) return fail("conflict");
   await dao.transition(current, "approved", now, approverId);
-  if (conflict && operation.revokeConflict) await dao.transition(conflict, "revoked", now);
+  if (conflict && operation.revokeConflict) {
+    await dao.transition(conflict, "revoked", now);
+    await openRevokedFactMaintenance(maintenance.db, maintenance.ownerId, maintenance.brandId, conflict.id, now);
+  }
   return done(current.id);
 }
 
@@ -169,7 +178,9 @@ export async function executeFactCommand(db: DatabaseConnection, inputScope: unk
           now,
         });
         if (!separated.ok) return fail(separated.error === "SEPARATION" ? "separation" : "duty");
-        return approveFact(reviewerDao, pending, operation, scope.ownerId, now);
+        return approveFact(reviewerDao, pending, operation, scope.ownerId, now, {
+          db: transaction, ownerId: approvalScope.brandOwnerId, brandId: scope.brandId,
+        });
       }
     }
     if (!await brands.lockOwner(scope.ownerId)) return fail("notFound");
@@ -196,7 +207,9 @@ export async function executeFactCommand(db: DatabaseConnection, inputScope: unk
         await dao.transition(current, "pending_confirmation", now);
         break;
       case "approve":
-        return approveFact(dao, current, operation, scope.ownerId, now);
+        return approveFact(dao, current, operation, scope.ownerId, now, {
+          db: transaction, ownerId: scope.ownerId, brandId: scope.brandId,
+        });
       case "revoke":
         if (current.state !== "approved") return fail("conflict");
         await dao.transition(current, "revoked", now);

@@ -45,6 +45,14 @@ const copy = {
     validity: "有效期",
     saveEdits: "保存候选修改",
     acknowledge: "我已逐条核对主张、来源和公开许可。",
+    claim: "主张",
+    replace: "录入新版本",
+    priceConflict: "与前一个批准版本存在冲突",
+    revokeConflict: "确认新版时同时撤销这个旧版",
+    replacementDependencies: "仍引用这个旧版的内容",
+    dependencyDraftsEmpty: "没有稿件仍引用这个旧版。",
+    dependencyVariantsEmpty: "没有渠道变体仍引用这个旧版。",
+    dependencyPublicationsEmpty: "没有发布仍引用这个旧版。",
     approve: "确认此版本",
     approved: "已批准",
     acknowledgeRevoke: "我确认撤销此版本，并已核对相关影响。",
@@ -83,6 +91,14 @@ const copy = {
     validity: "Validity",
     saveEdits: "Save candidate changes",
     acknowledge: "I reviewed this claim, its evidence, and its publication permission.",
+    claim: "Claim",
+    replace: "Enter a new version",
+    priceConflict: "Conflicts with the previous approval",
+    revokeConflict: "Revoke this previous version when approving the new one",
+    replacementDependencies: "Content that still cites this previous version",
+    dependencyDraftsEmpty: "No drafts still cite this previous version.",
+    dependencyVariantsEmpty: "No channel variants still cite this previous version.",
+    dependencyPublicationsEmpty: "No publications still cite this previous version.",
     approve: "Approve this version",
     approved: "Approved",
     acknowledgeRevoke: "I reviewed the impact and confirm revocation of this version.",
@@ -269,6 +285,46 @@ test("brand facts keeps visual consistency, double-submit guard, isolation, and 
         await expectNoOverflow(page);
       }
     }
+
+    // Conflicting replacement lists an empty dependency set before the revoke choice.
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto(populatedUrl);
+    await activateFromKeyboard(page, page.getByRole("button", { name: zh.replace, exact: true }));
+    const replacementEditor = page.getByRole("region", { name: zh.replace });
+    await replacementEditor.getByRole("textbox", { name: zh.claim, exact: true }).fill("合成设备每分钟改为 90 次校准。");
+    await activateFromKeyboard(page, replacementEditor.getByRole("button", { name: zh.saveDraft, exact: true }));
+    await expect(page.getByRole("heading", { name: zh.priceConflict, exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: zh.replacementDependencies, exact: true })).toBeVisible();
+    await expect(page.getByText(zh.dependencyDraftsEmpty, { exact: true })).toBeVisible();
+    await expect(page.getByText(zh.dependencyVariantsEmpty, { exact: true })).toBeVisible();
+    await expect(page.getByText(zh.dependencyPublicationsEmpty, { exact: true })).toBeVisible();
+    await expect(page.getByLabel(zh.revokeConflict, { exact: true })).not.toBeChecked();
+    const replacementUrl = page.url();
+    await context.addCookies([{ name: "geo-locale", value: "en", url: origin }]);
+    await page.setViewportSize({ width: 1440, height: 800 });
+    await page.goto(replacementUrl);
+    const en = copy.en;
+    await expect(page.getByRole("heading", { name: en.replacementDependencies, exact: true })).toBeVisible();
+    await expect(page.getByText(en.dependencyDraftsEmpty, { exact: true })).toBeVisible();
+    await expect(page.getByText(en.dependencyPublicationsEmpty, { exact: true })).toBeVisible();
+    await expect(page.getByLabel(en.revokeConflict, { exact: true })).not.toBeChecked();
+    await expectNoOverflow(page);
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto(replacementUrl);
+    await expectNoOverflow(page);
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await page.setViewportSize({ width: 768, height: 800 });
+    await page.goto(replacementUrl);
+    await expect(page.getByText(zh.dependencyDraftsEmpty, { exact: true })).toBeVisible();
+    await expectNoOverflow(page);
+    await page.getByLabel(zh.acknowledge, { exact: true }).check();
+    await expect(page.getByLabel(zh.revokeConflict, { exact: true })).not.toBeChecked();
+    await activateFromKeyboard(page, page.getByRole("button", { name: zh.approve, exact: true }));
+    await expect(page.getByText(zh.approved, { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(zh.dependencyDraftsEmpty, { exact: true })).toBeVisible();
+    await page.goto(populatedUrl);
+    await expect(page.getByText(zh.approved, { exact: true }).first()).toBeVisible();
 
     // Revoke works via keyboard
     await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);

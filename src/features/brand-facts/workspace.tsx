@@ -37,6 +37,23 @@ const inputClass = "h-10 bg-background";
 const actionClass = "h-auto min-h-9 max-w-full whitespace-normal text-center aria-disabled:opacity-60";
 const checkboxClass = "mt-0.5 size-4 shrink-0 rounded border border-input accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
+const contentStatusLabel = {
+  draft: "draft",
+  in_review: "contentInReview",
+  approved: "approved",
+  rejected: "contentRejected",
+  invalidated: "contentInvalidated",
+} as const;
+
+function DependencyGroup({ title, empty, rows }: { title: string; empty: string; rows: ReactNode[] | null }) {
+  return (
+    <div className="space-y-1">
+      <h4 className="font-medium">{title}</h4>
+      {rows === null ? <p className="text-muted-foreground">{empty}</p> : <ul className="space-y-1">{rows}</ul>}
+    </div>
+  );
+}
+
 function useDraftId() {
   const previous = useRef<{ content: string; id: string } | null>(null);
   return (content: string) => {
@@ -318,10 +335,47 @@ function FactEditor({ data, submit, pending, pendingAction, t, link, locale, see
                   </ul>
                 </div>
               )}
-              {fact.state === "pending_confirmation" && data.conflict && (
-                <div className="space-y-2 rounded-lg border bg-background p-3 text-sm">
-                  <h3 className="font-medium">{t("priceConflict")}</h3>
-                  <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{data.conflict.claim}</p>
+              {data.conflict && data.dependencies && (
+                <div className="space-y-3 rounded-lg border bg-background p-3 text-sm">
+                  {fact.state === "pending_confirmation" && (
+                    <>
+                      <h3 className="font-medium">{t("priceConflict")}</h3>
+                      <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{data.conflict.claim}</p>
+                    </>
+                  )}
+                  <h3 className="font-medium">{t("replacementDependencies")}</h3>
+                  <DependencyGroup
+                    title={t("dependencyDrafts")}
+                    empty={t("dependencyDraftsEmpty")}
+                    rows={data.dependencies.drafts.length === 0 ? null : data.dependencies.drafts.map((draft) => (
+                      <li key={draft.id} className="flex flex-wrap gap-x-3 gap-y-1 border-b pb-2">
+                        <span className="[overflow-wrap:anywhere]">{draft.title}</span>
+                        <span>{t(contentStatusLabel[draft.status])}</span>
+                        <span className="[overflow-wrap:anywhere] font-mono text-xs">{draft.id}</span>
+                      </li>
+                    ))}
+                  />
+                  <DependencyGroup
+                    title={t("dependencyVariants")}
+                    empty={t("dependencyVariantsEmpty")}
+                    rows={data.dependencies.variants.length === 0 ? null : data.dependencies.variants.map((variant) => (
+                      <li key={variant.id} className="flex flex-wrap gap-x-3 gap-y-1 border-b pb-2">
+                        <span>{variant.channel}</span>
+                        <span className="[overflow-wrap:anywhere] font-mono text-xs">{variant.id}</span>
+                      </li>
+                    ))}
+                  />
+                  <DependencyGroup
+                    title={t("dependencyPublications")}
+                    empty={t("dependencyPublicationsEmpty")}
+                    rows={data.dependencies.publications.length === 0 ? null : data.dependencies.publications.map((publication) => (
+                      <li key={publication.id} className="flex flex-wrap gap-x-3 gap-y-1 border-b pb-2">
+                        <span className="[overflow-wrap:anywhere]">{publication.pageUrl}</span>
+                        <span className="[overflow-wrap:anywhere] font-mono text-xs">{publication.id}</span>
+                      </li>
+                    ))}
+                  />
+                  {data.dependencies.more && <p className="text-muted-foreground">{t("dependencyMore")}</p>}
                   <Link className="underline underline-offset-4" href={link({ fact: data.conflict.id, impactAfter: null })} prefetch={false}>
                     {t("previousApproval")}
                   </Link>

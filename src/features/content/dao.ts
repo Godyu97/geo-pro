@@ -294,6 +294,31 @@ const affectedPublicationRow = z.object({
   targetChannel: z.string().min(1),
 });
 
+const dependencyDraftRow = z.object({
+  id: brandIdSchema,
+  title: z.string().min(1),
+  status: z.enum(["draft", "in_review", "approved", "rejected", "invalidated"]),
+});
+
+const dependencyVariantRow = z.object({
+  id: brandIdSchema,
+  contentVersionId: brandIdSchema,
+  channel: z.string().min(1),
+});
+
+const dependencyPublicationRow = z.object({
+  id: brandIdSchema,
+  contentVersionId: brandIdSchema,
+  pageUrl: z.string().min(1),
+});
+
+export type FactDependencyList = {
+  drafts: z.infer<typeof dependencyDraftRow>[];
+  variants: z.infer<typeof dependencyVariantRow>[];
+  publications: z.infer<typeof dependencyPublicationRow>[];
+  more: boolean;
+};
+
 export type MaintenanceTaskRow = z.infer<typeof maintenanceTaskRow>;
 export type MaintenancePageRow = z.infer<typeof maintenancePageRow>;
 export type AffectedPublicationRow = z.infer<typeof affectedPublicationRow>;
@@ -1100,6 +1125,51 @@ export class ContentDao {
       [ownerId, versionId],
     );
     return rows.map((row) => channelVariantRow.parse(row));
+  }
+
+  async listFactDependencies(ownerId: string, brandId: string, factVersionId: string): Promise<FactDependencyList> {
+    const limit = 21;
+    const [drafts, variants, publications] = await Promise.all([
+      this.query(
+        `SELECT v.id, v.title, v.status
+         FROM brand_fact_use u
+         JOIN content_version v
+           ON v.id = u.content_version_id AND v.brand_id = u.brand_id AND v.owner_id = ?
+         WHERE u.brand_id = ? AND u.fact_version_id = ?
+         ORDER BY v.created_at ASC, v.id ASC
+         LIMIT ?`,
+        [ownerId, brandId, factVersionId, limit],
+      ),
+      this.query(
+        `SELECT cv.id, cv.content_version_id AS "contentVersionId", cv.channel
+         FROM brand_fact_use u
+         JOIN content_channel_variant cv
+           ON cv.content_version_id = u.content_version_id AND cv.brand_id = u.brand_id AND cv.owner_id = ?
+         WHERE u.brand_id = ? AND u.fact_version_id = ?
+         ORDER BY cv.channel ASC, cv.id ASC
+         LIMIT ?`,
+        [ownerId, brandId, factVersionId, limit],
+      ),
+      this.query(
+        `SELECT p.id, p.content_version_id AS "contentVersionId", p.page_url AS "pageUrl"
+         FROM brand_fact_use u
+         JOIN content_publication p
+           ON p.content_version_id = u.content_version_id AND p.brand_id = u.brand_id AND p.owner_id = ?
+         WHERE u.brand_id = ? AND u.fact_version_id = ?
+         ORDER BY p.created_at ASC, p.id ASC
+         LIMIT ?`,
+        [ownerId, brandId, factVersionId, limit],
+      ),
+    ]);
+    const parsedDrafts = z.array(dependencyDraftRow).parse(drafts);
+    const parsedVariants = z.array(dependencyVariantRow).parse(variants);
+    const parsedPublications = z.array(dependencyPublicationRow).parse(publications);
+    return {
+      drafts: parsedDrafts.slice(0, 20),
+      variants: parsedVariants.slice(0, 20),
+      publications: parsedPublications.slice(0, 20),
+      more: parsedDrafts.length > 20 || parsedVariants.length > 20 || parsedPublications.length > 20,
+    };
   }
 
   async listFactPublications(ownerId: string, brandId: string, factVersionId: string) {
