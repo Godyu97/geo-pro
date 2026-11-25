@@ -349,6 +349,15 @@ await writeFile(deliveriesPage, deliveriesSource.replace(deliveriesRead, `    co
     if (probe === "unavailable") throw new Error("Private delivery fixture failure");
 ${deliveriesRead}`));
 
+const entitlementsPage = path.join(fixture, "src/features/commercial/entitlements-page.tsx");
+const entitlementsSource = await readFile(entitlementsPage, "utf8");
+const entitlementsRead = "    workspace = await loadEntitlementWorkspace(getConnection(), user.id);";
+assert.ok(entitlementsSource.includes(entitlementsRead));
+await writeFile(entitlementsPage, entitlementsSource.replace(entitlementsRead, `    const probe = (await (await import("next/headers")).cookies()).get("geo-entitlements-read")?.value;
+    if (probe === "slow") await new Promise(resolve => setTimeout(resolve, 1800));
+    if (probe === "unavailable") throw new Error("Private entitlements fixture failure");
+${entitlementsRead}`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
