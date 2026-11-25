@@ -475,16 +475,25 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
       },
     });
     expect(report.status()).toBe(200);
-    expect((await report.json()).loopCompleted).toBe(true);
+    const reportResult = await report.json();
+    expect(reportResult.loopCompleted).toBe(true);
+    const currentSnapshotId: string = reportResult.snapshot.id;
+    const snapshotRow = (locale: "zh-CN" | "en") => page.getByRole("region", {
+      name: locale === "en" ? "Report snapshots" : "报告快照",
+      exact: true,
+    }).getByRole("listitem").filter({
+      has: page.locator(`a[href="/api/reports/snapshots/${currentSnapshotId}?format=json"]`),
+    });
     const reportsLink = sidebar.getByRole("link", { name: "复测与报告", exact: true });
     await reportsLink.click();
     await expect(page).toHaveURL("/dashboard/reports");
     await expect(reportsLink).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("diagnostic")).toBeVisible();
     await expect(page.getByRole("navigation", { name: "相关入口" })).toBeVisible();
-    await expect(page.getByText("闭环 是")).toBeVisible();
-    const jsonHref = await page.getByRole("link", { name: "下载 JSON", exact: true }).getAttribute("href");
-    const htmlHref = await page.getByRole("link", { name: "下载 HTML", exact: true }).getAttribute("href");
+    const currentSnapshot = snapshotRow("zh-CN");
+    await expect(currentSnapshot.getByText("闭环 是")).toBeVisible();
+    const jsonHref = await currentSnapshot.getByRole("link", { name: "下载 JSON", exact: true }).getAttribute("href");
+    const htmlHref = await currentSnapshot.getByRole("link", { name: "下载 HTML", exact: true }).getAttribute("href");
     const firstJson = await page.request.get(jsonHref!);
     const secondJson = await page.request.get(jsonHref!);
     expect(Buffer.compare(await firstJson.body(), await secondJson.body())).toBe(0);
@@ -492,11 +501,11 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     expect(JSON.stringify(snapshot)).toContain(brandName);
     expect(snapshot.cost).toEqual({ status: "not_applicable", reason: "no_sampling_cost" });
     expect(snapshot.labor).toEqual({ status: "not_applicable", reason: "unrecorded" });
-    await expect(page.getByText("已知费用 N/A").first()).toBeVisible();
-    await expect(page.getByText("待核对费用 N/A").first()).toBeVisible();
-    await expect(page.getByText("窗口内没有可关联的采样费用").first()).toBeVisible();
-    await expect(page.getByText("人工工时 N/A").first()).toBeVisible();
-    await expect(page.getByText("未记录人工工时").first()).toBeVisible();
+    await expect(currentSnapshot.getByText("已知费用 N/A")).toBeVisible();
+    await expect(currentSnapshot.getByText("待核对费用 N/A")).toBeVisible();
+    await expect(currentSnapshot.getByText("窗口内没有可关联的采样费用")).toBeVisible();
+    await expect(currentSnapshot.getByText("人工工时 N/A")).toBeVisible();
+    await expect(currentSnapshot.getByText("未记录人工工时")).toBeVisible();
     await context.addCookies([{ name: "geo-locale", value: "en", url: baseURL }]);
     const englishJson = await page.request.get(jsonHref!);
     expect(Buffer.compare(await firstJson.body(), await englishJson.body())).toBe(0);
@@ -586,11 +595,12 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
           if (path.includes("/dashboard/reports")) {
             await expect(page.locator("main")).toHaveCount(1);
             await expect(page.getByRole("navigation", { name: locale === "en" ? "Related entries" : "相关入口" })).toBeVisible();
-            await expect(page.getByText(locale === "en" ? "loop yes" : "闭环 是")).toBeVisible();
-            await expect(page.getByText(locale === "en" ? "Known cost N/A" : "已知费用 N/A").first()).toBeVisible();
-            await expect(page.getByText(locale === "en" ? "Cost pending reconciliation N/A" : "待核对费用 N/A").first()).toBeVisible();
-            await expect(page.getByText(locale === "en" ? "No sampling cost can be associated in this window" : "窗口内没有可关联的采样费用").first()).toBeVisible();
-            await expect(page.getByText(locale === "en" ? "Labor hours were not recorded" : "未记录人工工时").first()).toBeVisible();
+            const row = snapshotRow(locale);
+            await expect(row.getByText(locale === "en" ? "loop yes" : "闭环 是")).toBeVisible();
+            await expect(row.getByText(locale === "en" ? "Known cost N/A" : "已知费用 N/A")).toBeVisible();
+            await expect(row.getByText(locale === "en" ? "Cost pending reconciliation N/A" : "待核对费用 N/A")).toBeVisible();
+            await expect(row.getByText(locale === "en" ? "No sampling cost can be associated in this window" : "窗口内没有可关联的采样费用")).toBeVisible();
+            await expect(row.getByText(locale === "en" ? "Labor hours were not recorded" : "未记录人工工时")).toBeVisible();
             await expect(page.getByText("0 分")).toHaveCount(0);
             await expect(page.getByText("0 minor")).toHaveCount(0);
             if (width === 375) {

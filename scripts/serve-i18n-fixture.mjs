@@ -759,6 +759,16 @@ await writeFile(brandStoreCommands, brandStoreSource
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 
+const mediaCommands = path.join(fixture, "src/features/local-presence/media-commands.ts");
+const mediaSource = await readFile(mediaCommands, "utf8");
+const mediaRead = "export async function listMediaReviews(db: DatabaseConnection, ownerId: string): Promise<MediaReviewList> {";
+assert.ok(mediaSource.includes(mediaRead));
+await writeFile(mediaCommands, mediaSource.replace(mediaRead, `${mediaRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-media-reviews-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private media review fixture failure");
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));
