@@ -428,6 +428,22 @@ await writeFile(templateCommands, templateSource.replace(templateRead, `${templa
     throw new Error("Private content templates fixture failure");
   }`));
 
+const profileCommands = path.join(fixture, "src/features/channel-variants/commands.ts");
+const profileSource = await readFile(profileCommands, "utf8");
+const profileRead = "export async function listChannelProfiles(db: DatabaseConnection, ownerId: string, brandId: string) {";
+const profileWrite = "  const parsed = publishChannelProfileSchema.safeParse(input);";
+assert.ok(profileSource.includes(profileRead) && profileSource.includes(profileWrite));
+await writeFile(profileCommands, profileSource
+  .replace(profileRead, `${profileRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-channel-profiles-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private channel profiles fixture failure");
+  }`)
+  .replace(profileWrite, `  if ((await (await import("next/headers")).cookies()).get("geo-channel-profiles-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }
+${profileWrite}`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

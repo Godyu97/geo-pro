@@ -1817,7 +1817,15 @@
     "characterLimit": "Up to {count} characters",
     "NOT_FOUND": "This brand's profiles were not found, or you cannot change them.",
     "INVALID_INPUT": "Enter a channel key and a note. The character limit must be a positive integer, or stay empty.",
-    "SESSION_REQUIRED": "Sign in first."
+    "SESSION_REQUIRED": "Sign in first.",
+    "start": "Fill in profile",
+    "browse": "View published versions",
+    "versions": "Published versions",
+    "reload": "Reload",
+    "readUnavailable": "Channel profiles could not be loaded. Reload to try again.",
+    "channelKeyHint": "Start with a lowercase letter or digit. You can also use underscores and hyphens after the first character. Use up to 64 characters.",
+    "publishing": "Publishing profile version…",
+    "publishUnconfirmed": "Publication could not be confirmed. Reload and check the published versions before trying again."
   },
   "contentTemplates": {
     "title": "Content templates",

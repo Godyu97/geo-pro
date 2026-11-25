@@ -4,16 +4,15 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
-import { brandIdSchema } from "../brands/contracts.ts";
 import { publishChannelProfile } from "./commands.ts";
-import { publishChannelProfileSchema } from "./contracts.ts";
+import { publishChannelProfileSchema, type ChannelProfileError } from "./contracts.ts";
 
-function profilesPath(brandId: string, extra?: Record<string, string>) {
-  const params = new URLSearchParams({ brandId, ...extra });
-  return `/dashboard/content/channel-profiles?${params.toString()}`;
-}
+export type ChannelProfilePublishFeedback = ChannelProfileError | "publishUnconfirmed";
 
-export async function publishChannelProfileAction(formData: FormData) {
+export async function publishChannelProfileAction(
+  _previous: ChannelProfilePublishFeedback | null,
+  formData: FormData,
+): Promise<ChannelProfilePublishFeedback> {
   const session = await requireSession();
   const brandId = String(formData.get("brandId") ?? "");
   const maxRaw = String(formData.get("maxCharacters") ?? "").trim();
@@ -23,12 +22,14 @@ export async function publishChannelProfileAction(formData: FormData) {
     maxCharacters: maxRaw === "" ? null : Number(maxRaw),
     note: String(formData.get("note") ?? ""),
   });
-  const safeBrand = brandIdSchema.safeParse(brandId).success;
-  if (!parsed.success) {
-    redirect(safeBrand ? profilesPath(brandId, { error: "INVALID_INPUT" }) : "/dashboard/content/channel-profiles?error=INVALID_INPUT");
+  if (!parsed.success) return "INVALID_INPUT";
+  try {
+    const result = await publishChannelProfile(getConnection(), session.user.id, parsed.data);
+    if ("error" in result) return result.error;
+  } catch {
+    console.error("channel-profile-publish-unconfirmed");
+    return "publishUnconfirmed";
   }
-  const result = await publishChannelProfile(getConnection(), session.user.id, parsed.data);
   revalidatePath("/dashboard/content/channel-profiles");
-  if ("error" in result) redirect(profilesPath(parsed.data.brandId, { error: result.error }));
-  redirect(profilesPath(parsed.data.brandId, { notice: "published" }));
+  redirect(`/dashboard/content/channel-profiles?brandId=${parsed.data.brandId}&notice=published`);
 }

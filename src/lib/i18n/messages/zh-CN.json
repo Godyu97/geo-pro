@@ -1817,7 +1817,15 @@
     "characterLimit": "最多 {count} 字",
     "NOT_FOUND": "未找到这个品牌的画像，或无权修改。",
     "INVALID_INPUT": "请填写渠道键和说明。字数上限需要是正整数，或留空。",
-    "SESSION_REQUIRED": "请先登录。"
+    "SESSION_REQUIRED": "请先登录。",
+    "start": "填写画像",
+    "browse": "查看已发布版本",
+    "versions": "已发布版本",
+    "reload": "重新载入",
+    "readUnavailable": "暂时无法读取渠道画像。请重新载入。",
+    "channelKeyHint": "使用小写英文字母或数字开头，后面可加下划线和连字符，最多 64 个字符。",
+    "publishing": "正在发布画像版本…",
+    "publishUnconfirmed": "暂时无法确认发布结果。请重新载入并查看已发布版本，再决定是否重试。"
   },
   "contentTemplates": {
     "title": "内容模板",
