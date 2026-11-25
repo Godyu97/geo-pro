@@ -46,6 +46,7 @@ import {
   type VerifyPublicationInput,
 } from "./contracts.ts";
 import { ContentDao, type AssetRow, type BriefVersionRow, type ChannelVariantRow, type ContentVersionRow, type PackageRow, type UnitRow } from "./dao.ts";
+import { ContentMaintenanceAbort, openLinkedPublicationMaintenance } from "./maintenance.ts";
 import { ChannelProfileDao } from "../channel-variants/dao.ts";
 import {
   channelVariantFingerprint,
@@ -1110,6 +1111,13 @@ async function locked<T>(
   });
 }
 
+function catchMaintenance<T>(work: Promise<T>): Promise<T | Failure> {
+  return work.catch((error: unknown) => {
+    if (error instanceof ContentMaintenanceAbort) return denied(error.code);
+    throw error;
+  });
+}
+
 export async function submitReview(
   db: DatabaseConnection,
   ownerId: string,
@@ -1940,6 +1948,7 @@ async function observePublicationPage(
 
 async function applyPublicCheck(
   dao: ContentDao,
+  db: TransactionConnection,
   ownerId: string,
   publicationId: string,
   brandId: string,
@@ -2046,6 +2055,9 @@ async function applyPublicCheck(
       updatedAt: checkedAt,
     });
   }
+  if (result.status === "mismatch" || result.status === "removed") {
+    await openLinkedPublicationMaintenance(db, ownerId, brandId, version.id, result.status, checkedAt);
+  }
   return {
     publicationId,
     checkId,
@@ -2063,7 +2075,7 @@ export async function submitPublication(
   input: SubmitPublicationInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
-  return locked(db, ownerId, async (transaction) => {
+  return catchMaintenance(locked(db, ownerId, async (transaction) => {
     if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
     const dao = new ContentDao(transaction);
     const existing = await dao.getPublicationByOperation(ownerId, input.brandId, input.operationId);
@@ -2123,12 +2135,12 @@ export async function submitPublication(
     }
 
     const checked = await applyPublicCheck(
-      dao, ownerId, publicationId, input.brandId, version, input.fixturePage, input.pageUrl, now,
+      dao, transaction, ownerId, publicationId, input.brandId, version, input.fixturePage, input.pageUrl, now,
       fetchPublicPage,
     );
     if (!checked) return denied("NOT_FOUND");
     return { ...checked, replayed: false };
-  });
+  }));
 }
 
 export async function verifyPublication(
@@ -2138,7 +2150,7 @@ export async function verifyPublication(
   clock: Clock = () => new Date().toISOString(),
   fetchPage: PublicPageFetcher = fetchPublicPage,
 ) {
-  return locked(db, ownerId, async (transaction) => {
+  return catchMaintenance(locked(db, ownerId, async (transaction) => {
     if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
     const dao = new ContentDao(transaction);
     const publication = await dao.getPublication(ownerId, input.publicationId);
@@ -2150,12 +2162,12 @@ export async function verifyPublication(
     if (versionFingerprint(version) !== publication.contentFingerprint) return denied("APPROVAL_INVALID");
 
     const checked = await applyPublicCheck(
-      dao, ownerId, publication.id, input.brandId, version, input.fixturePage, publication.pageUrl, clock(),
+      dao, transaction, ownerId, publication.id, input.brandId, version, input.fixturePage, publication.pageUrl, clock(),
       fetchPage,
     );
     if (!checked) return denied("NOT_FOUND");
     return { ...checked, replayed: false };
-  });
+  }));
 }
 
 const evidenceImageTypes = new Set(CONTENT_TYPES["publication-evidence"]);
@@ -2174,7 +2186,7 @@ export async function submitManualEvidence(
   const scope = await openApprovalScope(db, actorId, input.brandId, "content");
   if ("error" in scope) return denied(scope.error);
   const ownerId = scope.brandOwnerId;
-  return db.transaction(async (transaction) => {
+  return catchMaintenance(db.transaction(async (transaction) => {
     if (!await new BrandDao(transaction).lockOwner(ownerId)) return denied("NOT_FOUND");
     if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
     const dao = new ContentDao(transaction);
@@ -2315,6 +2327,9 @@ export async function submitManualEvidence(
         createdAt: now,
         updatedAt: now,
       });
+      await openLinkedPublicationMaintenance(
+        transaction, ownerId, input.brandId, publication.contentVersionId, "mismatch", now,
+      );
     }
     return {
       publicationId: publication.id,
@@ -2327,7 +2342,7 @@ export async function submitManualEvidence(
       replayed: false,
       ...(screenshot ? { screenshot } : {}),
     };
-  });
+  }));
 }
 
 export async function readPublicationEvidence(
@@ -2385,7 +2400,7 @@ export async function markPublicationRemoved(
   input: MarkPublicationRemovedInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
-  return locked(db, ownerId, async (transaction) => {
+  return catchMaintenance(locked(db, ownerId, async (transaction) => {
     if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
     const dao = new ContentDao(transaction);
     const publication = await dao.getPublication(ownerId, input.publicationId);
@@ -2421,13 +2436,16 @@ export async function markPublicationRemoved(
       createdAt: now,
       updatedAt: now,
     });
+    await openLinkedPublicationMaintenance(
+      transaction, ownerId, input.brandId, publication.contentVersionId, "removed", now,
+    );
     return {
       publicationId: publication.id,
       status: "removed" as const,
       effectiveAt: publication.effectiveAt,
       replayed: false,
     };
-  });
+  }));
 }
 
 export async function readPublication(

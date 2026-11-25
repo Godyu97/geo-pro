@@ -11,6 +11,7 @@ import {
   type FactCommand, type FactCursor, type FactFields, type FactScope, type FactVersion,
 } from "./contracts.ts";
 import { FactDao, pageSize } from "./dao.ts";
+import { ContentMaintenanceAbort, openRevokedFactMaintenance } from "../content/maintenance.ts";
 import { dependencyEffect, factGaps, factStatus } from "./rules.ts";
 
 const clockNow = () => new Date();
@@ -131,12 +132,19 @@ async function approveFact(
   return done(current.id);
 }
 
+function maintenanceFailure(code: ContentMaintenanceAbort["code"]) {
+  if (code === "NOT_FOUND") return fail("notFound");
+  if (code === "INVALID_INPUT") return fail("invalidInput");
+  return fail("conflict");
+}
+
 export async function executeFactCommand(db: DatabaseConnection, inputScope: unknown, input: unknown, clock = clockNow) {
   const scope = factScope.parse(inputScope);
   const command = factCommand.safeParse(input);
   if (!command.success) return fail("invalidInput");
   const operation = command.data;
-  return db.transaction(async (transaction) => {
+  try {
+    return await db.transaction(async (transaction) => {
     const brands = new BrandDao(transaction);
     const now = clock().toISOString();
     if (operation.action === "approve") {
@@ -192,10 +200,15 @@ export async function executeFactCommand(db: DatabaseConnection, inputScope: unk
       case "revoke":
         if (current.state !== "approved") return fail("conflict");
         await dao.transition(current, "revoked", now);
+        await openRevokedFactMaintenance(transaction, scope.ownerId, scope.brandId, current.id, now);
         break;
     }
     return done(current.id);
-  });
+    });
+  } catch (error) {
+    if (error instanceof ContentMaintenanceAbort) return maintenanceFailure(error.code);
+    throw error;
+  }
 }
 
 const useInput = z.strictObject({ factVersionIds: factIdsSchema, contentVersionId: brandIdSchema, stage: factStage });

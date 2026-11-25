@@ -603,6 +603,13 @@
       "when": 1795624412790,
       "tag": "0085_quiet_venus",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "6",
+      "when": 1795628548232,
+      "tag": "0086_right_white_tiger",
+      "breakpoints": true
     }
   ]
 }

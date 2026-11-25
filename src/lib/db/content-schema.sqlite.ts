@@ -482,7 +482,7 @@ export const contentMaintenanceTask = sqliteTable("content_maintenance_task", {
     .where(sql`${table.status} = 'open'`),
   index("content_maintenance_task_owner_idx").on(table.ownerId, table.brandId, table.updatedAt, table.id),
   check("content_maintenance_task_state_check", sql`${table.status} in ('open', 'closed')
-    and ${table.reason} in ('expired', 'revoked')
+    and ${table.reason} in ('expired', 'revoked', 'mismatch', 'removed')
     and length(${table.createdAt}) between 20 and 40
     and length(${table.updatedAt}) between 20 and 40`),
 ]);

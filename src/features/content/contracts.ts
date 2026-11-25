@@ -396,7 +396,7 @@ const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
 
 export const maintenanceTaskStatuses = ["open", "closed"] as const;
 export const maintenanceTaskStatusSchema = z.enum(maintenanceTaskStatuses);
-export const maintenanceReasons = ["expired", "revoked"] as const;
+export const maintenanceReasons = ["expired", "revoked", "mismatch", "removed"] as const;
 export const maintenanceReasonSchema = z.enum(maintenanceReasons);
 export const maintenancePageStatuses = ["planned", "verified", "blocked"] as const;
 export const maintenancePageStatusSchema = z.enum(maintenancePageStatuses);
@@ -430,9 +430,16 @@ export const settleMaintenanceSchema = z.strictObject({
 });
 export type SettleMaintenanceInput = z.infer<typeof settleMaintenanceSchema>;
 
+export const scanExpiredMaintenanceSchema = z.strictObject({
+  action: z.literal("scan-expired-maintenance"),
+  brandId: brandIdSchema,
+});
+export type ScanExpiredMaintenanceInput = z.infer<typeof scanExpiredMaintenanceSchema>;
+
 export const maintenanceWriteSchema = z.discriminatedUnion("action", [
   openMaintenanceSchema,
   settleMaintenanceSchema,
+  scanExpiredMaintenanceSchema,
 ]);
 export type MaintenanceWriteInput = z.infer<typeof maintenanceWriteSchema>;
 

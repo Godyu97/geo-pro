@@ -1104,7 +1104,7 @@ export class ContentDao {
          ON v.id = p.content_version_id AND v.owner_id = p.owner_id AND v.brand_id = p.brand_id
        JOIN brand_fact_use u
          ON u.brand_id = p.brand_id AND u.content_version_id = p.content_version_id AND u.fact_version_id = ?
-       WHERE p.owner_id = ? AND p.brand_id = ? AND p.status <> 'removed'
+       WHERE p.owner_id = ? AND p.brand_id = ?
        ORDER BY p.created_at ASC, p.id ASC
        LIMIT 101`,
       [factVersionId, ownerId, brandId],
@@ -1154,7 +1154,11 @@ export class ContentDao {
         id, task_id, brand_id, owner_id, page_id, draft_id, page_url, channel,
         planned_on, verified_on, status, created_at, updated_at
       ) VALUES ${rows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}
-       ON CONFLICT (task_id, page_id) DO NOTHING`,
+       ON CONFLICT (task_id, page_id) DO UPDATE SET
+         planned_on = COALESCE(content_maintenance_page.planned_on, excluded.planned_on),
+         updated_at = CASE
+           WHEN content_maintenance_page.planned_on IS NULL AND excluded.planned_on IS NOT NULL
+           THEN excluded.updated_at ELSE content_maintenance_page.updated_at END`,
       rows.flatMap((row) => [
         row.id, row.taskId, row.brandId, row.ownerId, row.pageId, row.draftId, row.pageUrl, row.channel,
         row.plannedOn, row.verifiedOn, row.status, row.createdAt, row.updatedAt,
@@ -1204,6 +1208,41 @@ export class ContentDao {
        WHERE owner_id = ? AND task_id = ? AND channel = ?`,
       [row.status, row.status, row.verifiedOn, row.updatedAt, row.ownerId, row.taskId, row.channel],
     );
+  }
+
+  async listPublicationFactVersionIds(ownerId: string, brandId: string, limit: number) {
+    const rows = await this.query(
+      `SELECT id FROM (
+         SELECT DISTINCT u.fact_version_id AS id
+         FROM brand_fact_use u
+         JOIN content_publication p
+           ON p.brand_id = u.brand_id
+          AND p.content_version_id = u.content_version_id
+          AND p.owner_id = ?
+         JOIN brand b
+           ON b.id = u.brand_id AND b.owner_id = ? AND b.frozen_at IS NULL
+         WHERE u.brand_id = ?
+       ) linked_facts
+       ORDER BY id ASC
+       LIMIT ?`,
+      [ownerId, ownerId, brandId, limit],
+    );
+    return z.array(z.object({ id: brandIdSchema })).parse(rows).map((row) => row.id);
+  }
+
+  async listVariantLinks(ownerId: string, versionIds: string[]) {
+    if (versionIds.length === 0) return [];
+    const rows = await this.query(
+      `SELECT id, content_version_id AS "contentVersionId", channel
+       FROM content_channel_variant
+       WHERE owner_id = ? AND content_version_id IN (${versionIds.map(() => "?").join(", ")})`,
+      [ownerId, ...versionIds],
+    );
+    return z.array(z.object({
+      id: brandIdSchema,
+      contentVersionId: brandIdSchema,
+      channel: z.string(),
+    })).parse(rows);
   }
 }
 

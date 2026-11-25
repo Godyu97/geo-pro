@@ -9,11 +9,62 @@ import { ApplyMockMaterialsButton } from "@/features/functional-mock/material-bu
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
+import { readContentCalendar } from "../content/maintenance";
 import { cursorValue, workspaceParams } from "./params";
 import { factUnavailable, readFactWorkspace } from "./service";
 import { FactWorkspaceView } from "./workspace";
 
 const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center";
+
+const maintenanceReasons = {
+  expired: "calendarReasonExpired",
+  revoked: "calendarReasonRevoked",
+  mismatch: "calendarReasonMismatch",
+  removed: "calendarReasonRemoved",
+} as const;
+
+async function FactMaintenance({ ownerId, brandId, factId }: { ownerId: string; brandId: string; factId: string }) {
+  const t = await getTranslator("content");
+  const facts = await getTranslator("brandFacts");
+  let failed = false;
+  let tasks: Awaited<ReturnType<typeof readContentCalendar>> | { error: "NOT_FOUND" } = { error: "NOT_FOUND" };
+  try {
+    tasks = await readContentCalendar(getConnection(), ownerId, { brandId, factVersionId: factId });
+    if ("error" in tasks) failed = true;
+  } catch {
+    failed = true;
+  }
+  const href = `/dashboard/content/calendar?brandId=${encodeURIComponent(brandId)}&factVersionId=${encodeURIComponent(factId)}`;
+  const rows = failed || "error" in tasks ? [] : tasks.tasks;
+  return (
+    <section className="min-w-0 space-y-3 rounded-xl border bg-card px-4 py-4">
+      <h2 className="text-lg font-semibold">{facts("maintenanceChain")}</h2>
+      {failed ? <p role="alert" className="text-sm leading-6">{facts("maintenanceChainUnavailable")}</p> : rows.length === 0 ? (
+        <p className="text-sm leading-6 text-muted-foreground">{facts("maintenanceChainEmpty")}</p>
+      ) : rows.map((task) => (
+        <div key={task.id} className="min-w-0 space-y-2 text-sm leading-6">
+          <p className="font-medium">{t(maintenanceReasons[task.reason])}</p>
+          <ul className="space-y-2">
+            {task.pages.map((page) => (
+              <li key={page.id} className="[overflow-wrap:anywhere]">
+                {t("chainFact")}: {task.factVersionId}
+                {" · "}
+                {t("chainDraft")}: {page.draftId}
+                {" · "}
+                {t("chainVariant")}: {page.variantId ?? t("noVariant")}
+                {" · "}
+                {page.channel}
+                {" · "}
+                {page.pageUrl}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      <Link href={href} prefetch={false} className={relatedLinkClass}>{facts("openMaintenanceCalendar")}</Link>
+    </section>
+  );
+}
 const relatedLinkClass = "inline-flex min-h-10 min-w-0 max-w-full items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 whitespace-normal [overflow-wrap:anywhere] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 function materialNotice(material: ReturnType<typeof brandMaterialAccess>, messages: {
@@ -176,6 +227,7 @@ export async function BrandFactsPage({ params, searchParams }: {
           />
         ) : null}
       </aside>
+      {result.fact ? <FactMaintenance ownerId={user.id} brandId={id} factId={result.fact.id} /> : null}
       <FactWorkspaceView key={user.id + id} brandId={id} locale={locale} data={result} messages={messages} />
     </div>
   );

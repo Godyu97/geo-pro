@@ -40,6 +40,8 @@ import {
   exportPreflightSchema,
   generateBatchSchema,
   registerAssetSchema,
+  scanExpiredMaintenanceSchema,
+  settleMaintenanceSchema,
   rejectContentSchema,
   saveBriefDraftSchema,
   saveChannelVariantSchema,
@@ -50,6 +52,7 @@ import {
   updateVariantSchema,
   verifyPublicationSchema,
 } from "./contracts";
+import { scanExpiredContentMaintenance, settleContentMaintenance } from "./maintenance";
 
 export async function saveBriefAction(formData: FormData): Promise<void> {
   const session = await requireSession();
@@ -466,4 +469,66 @@ export async function exportChannelVariantAction(formData: FormData) {
   revalidatePath(variantPath(parsed.data.versionId));
   revalidatePath(versionPath(parsed.data.versionId));
   return { ok: true as const };
+}
+
+const calendarErrors = new Set(["NOT_FOUND", "INVALID_INPUT", "FACT_INVALID", "OPERATION_CONFLICT"]);
+
+function calendarPath(brandId: string, extra: Record<string, string | undefined>) {
+  const search = new URLSearchParams();
+  if (brandId) search.set("brandId", brandId);
+  for (const [key, value] of Object.entries(extra)) {
+    if (value) search.set(key, value);
+  }
+  const query = search.toString();
+  return query ? `/dashboard/content/calendar?${query}` : "/dashboard/content/calendar";
+}
+
+export async function scanExpiredMaintenanceAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const brandId = String(formData.get("brandId") ?? "");
+  const parsed = scanExpiredMaintenanceSchema.safeParse({ action: "scan-expired-maintenance", brandId });
+  if (!parsed.success) redirect(calendarPath(brandId, { calendarError: "INVALID_INPUT" }));
+  const result = await scanExpiredContentMaintenance(getConnection(), session.user.id, parsed.data.brandId);
+  revalidatePath("/dashboard/content/calendar");
+  revalidatePath(`/dashboard/brands/${parsed.data.brandId}/facts`);
+  if ("error" in result) {
+    redirect(calendarPath(parsed.data.brandId, {
+      calendarError: calendarErrors.has(result.error) ? result.error : "INVALID_INPUT",
+    }));
+  }
+  redirect(calendarPath(parsed.data.brandId, { calendarNotice: "scanned", scanned: String(result.scanned) }));
+}
+
+export async function settleMaintenanceAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const brandId = String(formData.get("brandId") ?? "");
+  const taskId = String(formData.get("taskId") ?? "");
+  const channels = formData.getAll("channel").map((value) => String(value));
+  const changes: { channel: string; state: "verified" | "blocked"; verifiedOn?: string }[] = [];
+  for (const channel of channels) {
+    const state = String(formData.get(`state-${channel}`) ?? "");
+    if (state !== "verified" && state !== "blocked") continue;
+    const verifiedOn = String(formData.get(`verified-${channel}`) ?? "");
+    changes.push({
+      channel,
+      state,
+      ...(state === "verified" && verifiedOn ? { verifiedOn } : {}),
+    });
+  }
+  const parsed = settleMaintenanceSchema.safeParse({
+    action: "settle-maintenance",
+    brandId,
+    taskId,
+    channels: changes,
+  });
+  if (!parsed.success) redirect(calendarPath(brandId, { calendarError: "INVALID_INPUT" }));
+  const result = await settleContentMaintenance(getConnection(), session.user.id, parsed.data);
+  revalidatePath("/dashboard/content/calendar");
+  revalidatePath(`/dashboard/brands/${parsed.data.brandId}/facts`);
+  if ("error" in result) {
+    redirect(calendarPath(parsed.data.brandId, {
+      calendarError: calendarErrors.has(result.error) ? result.error : "INVALID_INPUT",
+    }));
+  }
+  redirect(calendarPath(parsed.data.brandId, { calendarNotice: "settled" }));
 }

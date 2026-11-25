@@ -1209,7 +1209,7 @@ CREATE TABLE `content_maintenance_task` (
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`brand_id`,`fact_version_id`) REFERENCES `brand_fact_version`(`brand_id`,`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "content_maintenance_task_state_check" CHECK("content_maintenance_task"."status" in ('open', 'closed')
-    and "content_maintenance_task"."reason" in ('expired', 'revoked')
+    and "content_maintenance_task"."reason" in ('expired', 'revoked', 'mismatch', 'removed')
     and length("content_maintenance_task"."created_at") between 20 and 40
     and length("content_maintenance_task"."updated_at") between 20 and 40)
 );

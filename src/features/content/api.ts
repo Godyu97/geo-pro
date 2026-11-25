@@ -38,7 +38,7 @@ import {
   verifyPublication,
   type ExportBlocker,
 } from "./commands";
-import { openContentMaintenance, readContentCalendar, settleContentMaintenance } from "./maintenance";
+import { openContentMaintenance, readContentCalendar, scanExpiredContentMaintenance, settleContentMaintenance } from "./maintenance";
 import { draftContentFromBrief } from "./fact-drafts";
 import { PACKAGE_FILE_NAMES } from "./package";
 import {
@@ -215,7 +215,9 @@ export async function contentMaintenanceResponse(request: Request) {
   const db = getConnection();
   const result = parsed.data.action === "open-maintenance"
     ? await openContentMaintenance(db, session.user.id, parsed.data)
-    : await settleContentMaintenance(db, session.user.id, parsed.data);
+    : parsed.data.action === "scan-expired-maintenance"
+      ? await scanExpiredContentMaintenance(db, session.user.id, parsed.data.brandId)
+      : await settleContentMaintenance(db, session.user.id, parsed.data);
   if ("error" in result) return errorResponse(result.error);
   return Response.json(result, { headers });
 }

@@ -24,6 +24,16 @@ function denied(error: ContentError): Failure {
   return { error };
 }
 
+export class ContentMaintenanceAbort extends Error {
+  readonly code: ContentError;
+
+  constructor(code: ContentError) {
+    super(code);
+    this.name = "ContentMaintenanceAbort";
+    this.code = code;
+  }
+}
+
 export function presentMaintenancePage(row: MaintenancePageRow) {
   const calendar = calendarRow({
     plannedOn: row.plannedOn,
@@ -56,22 +66,48 @@ function pageChannel(declaration: string, targetChannel: string) {
   return null;
 }
 
+function factAllowsMaintenance(
+  reason: OpenMaintenanceInput["reason"],
+  fact: Parameters<typeof factStatus>[0],
+  today: string,
+) {
+  if (reason === "revoked") return fact.state === "revoked";
+  if (reason === "expired") return factStatus(fact, today) === "expired";
+  return true;
+}
+
+async function presentPages(dao: ContentDao, ownerId: string, rows: MaintenancePageRow[]) {
+  const links = await dao.listVariantLinks(ownerId, [...new Set(rows.map((row) => row.draftId))]);
+  const variants = new Map(links.map((link) => [`${link.contentVersionId}:${link.channel}`, link.id]));
+  return rows.map((row) => ({
+    ...presentMaintenancePage(row),
+    taskId: row.taskId,
+    variantId: variants.get(`${row.draftId}:${row.channel}`) ?? null,
+  }));
+}
+
 export async function openContentMaintenance(
   db: DatabaseConnection,
   ownerId: string,
   input: OpenMaintenanceInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
-  return db.transaction(async (transaction) => {
+  return db.transaction((transaction) => openMaintenanceWithin(transaction, ownerId, input, clock));
+}
+
+async function openMaintenanceWithin(
+  transaction: TransactionConnection,
+  ownerId: string,
+  input: OpenMaintenanceInput,
+  clock: Clock,
+) {
     if (!await new BrandDao(transaction).lockOwner(ownerId)) return denied("NOT_FOUND");
     if (!await ownedBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
     const now = clock();
     const fact = await new FactDao(transaction, { ownerId, brandId: input.brandId }).version(input.factVersionId);
     if (!fact) return denied("NOT_FOUND");
     const today = now.slice(0, 10);
-    if (input.reason === "revoked" ? fact.state !== "revoked" : factStatus(fact, today) !== "expired") {
-      return denied("FACT_INVALID");
-    }
+    if (!factAllowsMaintenance(input.reason, fact, today)) return denied("FACT_INVALID");
 
     const dao = new ContentDao(transaction);
     const publications = await dao.listFactPublications(ownerId, input.brandId, input.factVersionId);
@@ -155,9 +191,8 @@ export async function openContentMaintenance(
       taskCount: surface.taskCount,
       created,
       pageCount: stored.length,
-      pages: stored.map(presentMaintenancePage),
+      pages: await presentPages(dao, ownerId, stored),
     };
-  });
 }
 
 export async function settleContentMaintenance(
@@ -228,7 +263,7 @@ export async function settleContentMaintenance(
       verified: settled.verified,
       blocked: settled.blocked,
       rolledBack: settled.rolledBack,
-      pages: stored.map(presentMaintenancePage),
+      pages: await presentPages(dao, ownerId, stored),
     };
   });
 }
@@ -241,14 +276,93 @@ export async function readContentCalendar(
   if (!await ownedBrand(db, ownerId, query.brandId)) return denied("NOT_FOUND");
   const dao = new ContentDao(db);
   const tasks = await dao.listMaintenanceTasks(ownerId, query.brandId, query.factVersionId, taskCap);
-  const pages = await dao.listMaintenancePages(ownerId, tasks.map((task) => task.id));
+  const pages = await presentPages(dao, ownerId, await dao.listMaintenancePages(ownerId, tasks.map((task) => task.id)));
   return {
     tasks: tasks.map((task) => ({
       id: task.id,
       factVersionId: task.factVersionId,
       status: task.status,
       reason: task.reason,
-      pages: pages.filter((page) => page.taskId === task.id).map(presentMaintenancePage),
+      pages: pages.filter((page) => page.taskId === task.id),
     })),
   };
+}
+
+const scanCap = 50;
+
+export async function scanExpiredContentMaintenance(
+  db: DatabaseConnection,
+  ownerId: string,
+  brandId: string,
+  clock: Clock = () => new Date().toISOString(),
+) {
+  if (!await ownedBrand(db, ownerId, brandId)) return denied("NOT_FOUND");
+  const ids = await new ContentDao(db).listPublicationFactVersionIds(ownerId, brandId, scanCap);
+  const today = clock().slice(0, 10);
+  const expired = ids.length === 0
+    ? []
+    : (await new FactDao(db, { ownerId, brandId }).versionsById(ids)).filter((fact) => factStatus(fact, today) === "expired");
+  const tasks = [];
+  let opened = 0;
+  for (const fact of expired) {
+    const result = await openContentMaintenance(db, ownerId, {
+      action: "open-maintenance",
+      brandId,
+      factVersionId: fact.id,
+      reason: "expired",
+      schedules: [],
+    }, clock);
+    if ("error" in result) {
+      if (result.error === "FACT_INVALID") continue;
+      return result;
+    }
+    if (result.created) opened += 1;
+    if (result.taskId) {
+      tasks.push({
+        taskId: result.taskId,
+        factVersionId: fact.id,
+        created: result.created,
+        pageCount: result.pageCount,
+      });
+    }
+  }
+  return { scanned: expired.length, opened, tasks };
+}
+
+export async function openRevokedFactMaintenance(
+  db: TransactionConnection,
+  ownerId: string,
+  brandId: string,
+  factVersionId: string,
+  at: string,
+) {
+  const opened = await openMaintenanceWithin(db, ownerId, {
+    action: "open-maintenance",
+    brandId,
+    factVersionId,
+    reason: "revoked",
+    schedules: [],
+  }, () => at);
+  if ("error" in opened) throw new ContentMaintenanceAbort(opened.error);
+}
+
+export async function openLinkedPublicationMaintenance(
+  db: TransactionConnection,
+  ownerId: string,
+  brandId: string,
+  contentVersionId: string,
+  reason: "mismatch" | "removed",
+  at: string,
+) {
+  const factIds = [...new Set(await new FactDao(db, { ownerId, brandId }).usedVersionIds(contentVersionId))];
+  for (const factVersionId of factIds) {
+    const opened = await openMaintenanceWithin(db, ownerId, {
+      action: "open-maintenance",
+      brandId,
+      factVersionId,
+      reason,
+      schedules: [],
+    }, () => at);
+    if ("error" in opened) throw new ContentMaintenanceAbort(opened.error);
+  }
 }

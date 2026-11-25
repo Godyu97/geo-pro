@@ -140,6 +140,9 @@ test("content calendar keeps the next maintenance action and recovery in the wor
   assert.match(calendar, /relatedEntries/);
   assert.match(calendar, /calendarOpenPlanned/);
   assert.match(calendar, /calendarOpenBlocked/);
+  assert.match(calendar, /scanExpiredFacts/);
+  assert.match(calendar, /settleChannels/);
+  assert.match(calendar, /calendarChain/);
   assert.match(calendar, /overflow-x-auto/);
   assert.match(calendar, /\[overflow-wrap:anywhere\]/);
   assert.match(calendar, /whitespace-normal/);

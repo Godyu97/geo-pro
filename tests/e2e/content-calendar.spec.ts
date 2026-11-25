@@ -292,6 +292,22 @@ test("content calendar keeps the next maintenance action readable and recoverabl
     await expect(stranger.getByText(zhihuId)).toHaveCount(0);
     await expectNoOverflow(stranger);
     await stranger.screenshot({ path: `${shots}/content-calendar-hidden-en-375.png`, fullPage: false });
+
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await page.setViewportSize({ width: 1440, height: 800 });
+    await page.goto(href);
+    const settle = page.getByRole("main");
+    await activateFromKeyboard(page, settle.getByRole("button", { name: "检查到期事实", exact: true }));
+    await expect(page.getByText("到期检查已完成，本次看到 0 条到期事实。重复检查不会另建任务。", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "事实已撤销", exact: true })).toHaveCount(1);
+    await settle.getByLabel("site 的维护状态").selectOption("verified");
+    await settle.getByLabel("site 的核验日").fill(verifiedOn);
+    await settle.getByLabel("zhihu 的维护状态").selectOption("blocked");
+    await activateFromKeyboard(page, settle.getByRole("button", { name: "保存渠道维护状态", exact: true }));
+    await expect(page.getByText("渠道状态已保存。已核验的渠道不会因为其他渠道受阻而被改回。", { exact: true })).toBeVisible();
+    await expect(page.getByText(copy["zh-CN"].verified, { exact: true })).toBeVisible();
+    await expect(page.getByText(copy["zh-CN"].blocked, { exact: true })).toBeVisible();
+    await expect(page.getByText(verifiedOn, { exact: true })).toBeVisible();
   } finally {
     await outsider.close();
     for (const { userId, email } of accounts) {
