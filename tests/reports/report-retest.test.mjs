@@ -18,6 +18,14 @@ import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
 import { correctRecommendation, saveComparisonFixture, saveLegacySnapshot } from "./saved-observations.mjs";
 import { loadSnapshotComparisons, snapshotObservationsQuery } from "../../src/features/reports/snapshot-comparisons.ts";
+import {
+  generateSavedSnapshot,
+  requestSavedComparison,
+  requestSavedReminder,
+  reviseSavedSnapshot,
+  savedComparisonSchema,
+} from "../../src/features/reports/saved-retest.ts";
+import { windowObservationsQuery } from "../../src/features/reports/window-observations.ts";
 
 const time = "2026-11-20T12:00:00.000Z";
 const clock = () => time;
@@ -123,6 +131,23 @@ async function setup(t, kind) {
   return { db, owner, outsider, brandId, env: fixture.env };
 }
 
+test("saved comparison form rejects caller-supplied samples", () => {
+  const parsed = savedComparisonSchema.safeParse({
+    brandId: randomUUID(),
+    operationId: randomUUID(),
+    intent: "business_loop",
+    track: "model_api",
+    timezone: "Asia/Shanghai",
+    beforeStart: "2026-11-01",
+    beforeEnd: "2026-11-08",
+    afterStart: "2026-11-09",
+    afterEnd: "2026-11-16",
+    locale: "zh-CN",
+    samples: [{ observationId: randomUUID(), numerator: 50, denominator: 100 }],
+  });
+  assert.equal(parsed.success, false);
+});
+
 test("pure rules: AC-M0-12-1 common three exclude modified", () => {
   const before = [
     sample({ queryId: "q1", queryVersion: "q1-v1", numerator: 0 }),
@@ -182,6 +207,78 @@ for (const kind of ["sqlite", "postgresql"]) {
     const planText = plan.map((row) => row.detail ?? row["QUERY PLAN"]).join("\n");
     assert.match(planText, /answer_analysis_version_uidx|answer_analysis_brand_idx/);
     t.diagnostic(`bounded observation query: ${planText.split("\n").filter((line) => /answer_observation|answer_analysis|monitoring_slot|run_protocol_pin/.test(line)).join(" | ")}`);
+
+    const windowQuery = windowObservationsQuery(
+      owner, brandId, "model_api", "2026-10-31T16:00:00.000Z", "2026-11-07T16:00:00.000Z",
+    );
+    const windowPlan = await queryWithParameters(db, `${explain} ${windowQuery.sql}`, windowQuery.values);
+    const windowPlanText = windowPlan.map((row) => row.detail ?? row["QUERY PLAN"]).join("\n");
+    assert.match(windowPlanText, /answer_observation/);
+    t.diagnostic(`window observation query: ${windowPlanText.split("\n").filter((line) => /answer_observation|Index|SCAN|Seq/.test(line)).join(" | ")}`);
+
+    const saved = await requestSavedComparison(db, owner, {
+      brandId,
+      operationId: randomUUID(),
+      intent: "business_loop",
+      track: "model_api",
+      timezone: "Asia/Shanghai",
+      beforeStart: "2026-11-01",
+      beforeEnd: "2026-11-08",
+      afterStart: "2026-11-09",
+      afterEnd: "2026-11-16",
+      locale: "zh-CN",
+    }, clock);
+    assert.equal(saved.error, undefined);
+    assert.equal(saved.downgraded, true);
+    assert.equal(saved.loopCompleted, false);
+    assert.equal(saved.retest.intent, "diagnostic");
+    assert.equal(saved.retest.kind, "diagnostic");
+    assert.equal(saved.comparison.commonQueryCount, 3);
+    assert.equal(saved.comparison.grade, "exploratory");
+    const savedReport = await generateSavedSnapshot(db, owner, {
+      brandId,
+      operationId: randomUUID(),
+      retestId: saved.retest.id,
+      locale: "zh-CN",
+    }, clock, options);
+    assert.equal(savedReport.error, undefined);
+    assert.equal(savedReport.loopCompleted, false);
+    assert.equal(savedReport.snapshot.loopCompleted, 0);
+    assert.equal(savedReport.snapshot.intent, "diagnostic");
+    const savedFiles = await readSnapshot(db, owner, savedReport.snapshot.id, options);
+    const savedDocument = JSON.parse(savedFiles.json);
+    assert.equal(savedDocument.loop_completed, false);
+    assert.equal(savedDocument.comparisons.mention_rate.common_query_count, 3);
+    assert.equal(savedDocument.comparisons.recommendation_rate.common_query_count, 3);
+    assert.equal(savedDocument.comparisons.recommendation_rate.grade, "exploratory");
+    assert.equal(savedDocument.comparisons.official_site_citation_rate.common_query_count, 1);
+    assert.ok(savedDocument.comparisons.recommendation_rate.excluded_queries.some((item) => item.queryId === shared.questionIds[3] && item.reason === "modified"));
+    const savedNumerators = savedDocument.comparisons.recommendation_rate.queries.flatMap((item) => [item.before.numerator, item.after.numerator]);
+    assert.ok(savedNumerators.every((value) => value === 0 || value === 1));
+    assert.equal(savedFiles.json.includes(foreignSample.observationId), false);
+    const duplicateSnapshot = await generateSavedSnapshot(db, owner, {
+      brandId, operationId: randomUUID(), retestId: saved.retest.id, locale: "zh-CN",
+    }, clock, options);
+    assert.equal(duplicateSnapshot.error, "CONFLICT");
+    const emptyWindow = await requestSavedComparison(db, owner, {
+      brandId, operationId: randomUUID(), intent: "diagnostic", track: "model_api", timezone: "Asia/Shanghai",
+      beforeStart: "2020-01-01", beforeEnd: "2020-01-02", afterStart: "2020-01-03", afterEnd: "2020-01-04", locale: "zh-CN",
+    }, clock);
+    assert.equal(emptyWindow.error, "INVALID_INPUT");
+    const missingLoop = await requestSavedReminder(db, owner, {
+      brandId, operationId: randomUUID(), track: "model_api", timezone: "Asia/Shanghai", locale: "zh-CN",
+    }, clock);
+    assert.equal(missingLoop.error, "LOOP_NOT_READY");
+    const unknownPublication = await requestSavedReminder(db, owner, {
+      brandId, operationId: randomUUID(), track: "model_api", timezone: "Asia/Shanghai",
+      publicationId: randomUUID(), locale: "zh-CN",
+    }, clock);
+    assert.equal(unknownPublication.error, "NOT_FOUND");
+    const outsiderSaved = await requestSavedComparison(db, outsider, {
+      brandId, operationId: randomUUID(), intent: "diagnostic", track: "model_api", timezone: "Asia/Shanghai",
+      beforeStart: "2026-11-01", beforeEnd: "2026-11-08", afterStart: "2026-11-09", afterEnd: "2026-11-16", locale: "en",
+    }, clock);
+    assert.equal(outsiderSaved.error, "NOT_FOUND");
 
     // AC-M0-12-2: business_loop without verification becomes diagnostic
     const retest = await requestRetest(db, owner, {
@@ -293,6 +390,28 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(next.evidence[correctedId].analysis_version, 2);
     assert.equal(next.comparisons.recommendation_rate.delta_pp, 100);
     assert.equal(next.comparisons.official_site_citation_rate.delta_pp, null);
+
+    const savedRevised = await reviseSavedSnapshot(db, owner, {
+      brandId,
+      operationId: randomUUID(),
+      snapshotId: savedReport.snapshot.id,
+      locale: "zh-CN",
+    }, clock, options);
+    assert.equal(savedRevised.error, undefined);
+    assert.equal(savedRevised.snapshot.predecessorId, savedReport.snapshot.id);
+    assert.equal(savedRevised.previous.status, "superseded");
+    assert.equal(savedRevised.previous.jsonSha256, savedReport.snapshot.jsonSha256);
+    const savedPrevious = await readSnapshot(db, owner, savedReport.snapshot.id, options);
+    assert.equal(savedPrevious.json, savedFiles.json);
+    assert.equal(savedPrevious.html, savedFiles.html);
+    const savedNext = JSON.parse((await readSnapshot(db, owner, savedRevised.snapshot.id, options)).json);
+    assert.equal(savedNext.predecessor_id, savedReport.snapshot.id);
+    assert.equal(savedNext.comparisons.recommendation_rate.delta_pp, 100);
+    assert.equal(savedNext.evidence[shared.after.samples[1].observationId].analysis_version, 2);
+    const savedAgain = await reviseSavedSnapshot(db, owner, {
+      brandId, operationId: randomUUID(), snapshotId: savedReport.snapshot.id, locale: "zh-CN",
+    }, clock, options);
+    assert.equal(savedAgain.error, "CONFLICT");
 
     const legacy = await saveLegacySnapshot(db, owner, brandId, retest.retest.id);
     const legacySuccessor = await reviseReport(db, owner, {

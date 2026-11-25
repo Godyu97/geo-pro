@@ -217,6 +217,16 @@ export class ReportDao {
     return z.array(costGroupRow).parse(rows);
   }
 
+  async findCreatedSnapshotForRetest(ownerId: string, retestId: string) {
+    const [row] = await this.query(
+      `SELECT ${snapshotColumns} FROM report_snapshot
+       WHERE owner_id = ? AND retest_id = ? AND status = 'created'
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [ownerId, retestId],
+    );
+    return row ? snapshotRow.parse(row) : null;
+  }
+
   async listRetests(ownerId: string, brandId: string, limit = 20) {
     const rows = await this.query(
       `SELECT ${retestColumns} FROM report_retest WHERE owner_id = ? AND brand_id = ?

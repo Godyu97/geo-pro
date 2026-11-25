@@ -320,7 +320,7 @@ test("report snapshots keep the current download readable and recoverable", asyn
     await page.screenshot({ path: `${shots}/report-snapshot-failure-en-375.png`, fullPage: false });
     await context.clearCookies({ name: "geo-reports-unavailable" });
     await activateFromKeyboard(page, reload);
-    await expect(page.getByText(copy.en.currentTask, { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("status")).toHaveText(copy.en.currentTask);
     await expect(page.getByRole("link", { name: copy.en.downloadCurrent, exact: true })).toHaveAttribute("href", `/api/reports/snapshots/${nextId}?format=json`);
 
     const stranger = await outsider.newPage();
@@ -358,6 +358,191 @@ test("report snapshots keep the current download readable and recoverable", asyn
       expect(versions[0]?.count).toBe("0");
       expect(snapshots[0]?.count).toBe("0");
       expect(objects[0]?.count).toBe("0");
+    } finally {
+      await sql.end();
+    }
+  }
+});
+
+const entryCopy = {
+  "zh-CN": {
+    title: "复测与报告",
+    comparison: "同口径对比",
+    submit: "发起同口径对比",
+    downgrade: "没有核验生效点。本次按诊断复跑记录，经营闭环未完成。",
+    reminder: "D+7 站内提醒",
+    remind: "登记 D+7 提醒",
+    loop: "缺少核验生效点，无法创建经营闭环 D+7 待办。",
+    generate: "生成报告快照",
+    revise: "标签纠错后生成后继快照",
+    excluded: "排除题",
+    modified: "题版本已变更",
+    recommendation: "3 道共同题 · +66.7pp",
+    corrected: "3 道共同题 · +100.0pp",
+    citation: "1 道共同题 · N/A",
+    missing: "找不到该品牌或报告资源。",
+  },
+  en: {
+    title: "Retest & reports",
+    comparison: "Same-scope comparison",
+    submit: "Request a same-scope comparison",
+    downgrade: "No verified effective time was found. This run is recorded as diagnostic, and the business loop is not complete.",
+    reminder: "D+7 in-app reminder",
+    remind: "Register the D+7 reminder",
+    loop: "A verified effective time is required before creating a business-loop D+7 todo.",
+    generate: "Generate the report snapshot",
+    revise: "Create a successor after the label correction",
+    excluded: "Excluded questions",
+    modified: "Question version changed",
+    recommendation: "3 common questions · +66.7pp",
+    corrected: "3 common questions · +100.0pp",
+    citation: "1 common question · N/A",
+    missing: "Brand or report resource was not found.",
+  },
+} as const;
+
+test("report page starts a saved-observation comparison without typed samples", async ({ page, context, browser }) => {
+  test.setTimeout(300_000);
+  page.setDefaultTimeout(20_000);
+  const shots = ".cache/issue-152/report-entry";
+  mkdirSync(shots, { recursive: true });
+  const ownerEmail = `report-entry-${randomUUID()}@example.invalid`;
+  const outsiderEmail = `report-entry-other-${randomUUID()}@example.invalid`;
+  const outsider = await browser.newContext({ baseURL: origin, viewport: { width: 375, height: 800 } });
+  const accounts: Array<{ userId: string; email: string }> = [];
+  const entryName = "合成报告入口品牌";
+  try {
+    accounts.push({ userId: await register(context, ownerEmail), email: ownerEmail });
+    accounts.push({ userId: await register(outsider, outsiderEmail), email: outsiderEmail });
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    const savedBrand = await post(context, "/api/brands", {
+      action: "submit", actorId: accounts[0]?.userId, operationId: randomUUID(), target: null, expectedDraft: null,
+      acceptedPolicyVersion: publishedRetentionVersion(),
+      fields: {
+        name: entryName, description: "仅用于报告入口隔离验收的合成品牌。",
+        website: "https://report-entry.example.com", aliases: [],
+        region: "CN", language: "zh-CN", competitors: [], questions: [],
+      },
+    });
+    const brandId = savedBrand.id as string;
+    const { after } = reportFixture("report-observations", { userId: accounts[0]?.userId, brandId });
+    const href = `/dashboard/reports?brandId=${brandId}`;
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto(href);
+    const comparison = page.getByRole("region", { name: entryCopy["zh-CN"].comparison });
+    await comparison.getByLabel("意图").selectOption("business_loop");
+    await comparison.getByLabel("前窗开始").fill("2026-11-01");
+    await comparison.getByLabel("前窗结束（不含当天）").fill("2026-11-08");
+    await comparison.getByLabel("后窗开始").fill("2026-11-09");
+    await comparison.getByLabel("后窗结束（不含当天）").fill("2026-11-16");
+    await activateFromKeyboard(page, comparison.getByRole("button", { name: entryCopy["zh-CN"].submit, exact: true }));
+    await expect(page.getByText(entryCopy["zh-CN"].downgrade, { exact: true })).toBeVisible();
+    await expect(page.getByText("diagnostic · completed · diagnostic", { exact: true })).toBeVisible();
+    await expectNoOverflow(page);
+    await page.screenshot({ path: `${shots}/comparison-zh-CN-375.png`, fullPage: false });
+
+    await page.getByRole("button", { name: entryCopy["zh-CN"].generate, exact: true }).click();
+    await expect(page.getByText(entryCopy["zh-CN"].recommendation, { exact: true })).toBeVisible();
+    await expect(page.getByText(entryCopy["zh-CN"].citation, { exact: true })).toBeVisible();
+    await expect(page.getByText(entryCopy["zh-CN"].excluded, { exact: true })).toBeVisible();
+    await expect(page.getByText(entryCopy["zh-CN"].modified, { exact: false })).toBeVisible();
+    await expect(page.getByText("exploratory · diagnostic · 闭环 否", { exact: true })).toBeVisible();
+    const snapshotHref = await page.getByRole("link", { name: "下载 JSON", exact: true }).getAttribute("href");
+    const snapshotId = snapshotHref?.match(/snapshots\/([0-9a-f-]{36})/)?.[1] ?? "";
+    expect(snapshotId).toMatch(/^[0-9a-f-]{36}$/);
+    const body = await (await context.request.get(`/api/reports/snapshots/${snapshotId}?format=json`)).text();
+    const document = JSON.parse(body);
+    expect(document.comparisons.recommendation_rate.common_query_count).toBe(3);
+    expect(document.comparisons.mention_rate.common_query_count).toBe(3);
+    expect(document.comparisons.official_site_citation_rate.common_query_count).toBe(1);
+    expect(JSON.stringify(document.comparisons.recommendation_rate.queries)).not.toContain("\"numerator\":50");
+
+    await page.getByRole("region", { name: entryCopy["zh-CN"].reminder })
+      .getByRole("button", { name: entryCopy["zh-CN"].remind, exact: true }).click();
+    await expect(page.getByRole("main").locator("p[role=alert]")).toContainText(entryCopy["zh-CN"].loop);
+    await expect(page.getByText("站内提醒不会自动发起付费调用")).toHaveCount(0);
+
+    for (const locale of ["zh-CN", "en"] as const) {
+      const current = entryCopy[locale];
+      await context.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+      for (const width of [375, 768, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(`${href}&error=LOOP_NOT_READY`);
+        await page.evaluate(() => window.scrollTo(0, 0));
+        const main = page.getByRole("main");
+        await expect(main.getByRole("heading", { name: current.title, exact: true })).toBeVisible();
+        await expect(main.getByRole("region", { name: current.comparison })).toBeVisible();
+        await expect(main.getByRole("region", { name: current.reminder })).toBeVisible();
+        await expect(main.locator("p[role=alert]")).toContainText(current.loop);
+        await expect(main.getByText(current.recommendation, { exact: true })).toBeVisible();
+        await expect(main.getByText(current.excluded, { exact: true })).toBeVisible();
+        if (width === 375) await page.screenshot({ path: `${shots}/entry-${locale}-375.png`, fullPage: false });
+        await expectNoOverflow(page);
+      }
+    }
+
+    reportFixture("correct-observation", { observationId: after.samples[1].observationId });
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto(href);
+    await page.getByRole("button", { name: entryCopy["zh-CN"].revise, exact: true }).click();
+    await expect(page.getByText(entryCopy["zh-CN"].corrected, { exact: true })).toBeVisible();
+    await expect(page.getByText(`created · 上一份 ${snapshotId}`, { exact: true })).toBeVisible();
+    await expect(page.getByText("superseded", { exact: true })).toBeVisible();
+    const preserved = await (await context.request.get(`/api/reports/snapshots/${snapshotId}?format=json`)).text();
+    expect(preserved).toBe(body);
+    const successorHref = await page.getByRole("link", { name: "下载当前 JSON", exact: true }).getAttribute("href");
+    const successorId = successorHref?.match(/snapshots\/([0-9a-f-]{36})/)?.[1] ?? "";
+    expect(successorId).not.toBe(snapshotId);
+    const successor = JSON.parse(await (await context.request.get(`/api/reports/snapshots/${successorId}?format=json`)).text());
+    expect(successor.predecessor_id).toBe(snapshotId);
+    expect(successor.comparisons.recommendation_rate.delta_pp).toBe(100);
+    expect(successor.evidence[after.samples[1].observationId].analysis_version).toBe(2);
+
+    for (const locale of ["zh-CN", "en"] as const) {
+      const current = entryCopy[locale];
+      await context.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+      for (const width of [375, 768, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(href);
+        const main = page.getByRole("main");
+        await expect(main.getByText(current.corrected, { exact: true })).toBeVisible();
+        await expect(main.getByRole("button", { name: current.revise, exact: true })).toBeVisible();
+        if (width === 375) await page.screenshot({ path: `${shots}/revised-${locale}-375.png`, fullPage: false });
+        await expectNoOverflow(page);
+      }
+    }
+
+    const stranger = await outsider.newPage();
+    await outsider.addCookies([{ name: "geo-locale", value: "en", url: origin }]);
+    await stranger.setViewportSize({ width: 375, height: 800 });
+    await stranger.goto(href);
+    const hidden = stranger.getByRole("main");
+    await expect(hidden.locator("p[role=alert]")).toContainText(entryCopy.en.missing);
+    await expect(hidden.getByText(snapshotId)).toHaveCount(0);
+    await expect(hidden.getByText(successorId)).toHaveCount(0);
+    await expect(hidden.getByRole("button", { name: entryCopy.en.submit, exact: true })).toHaveCount(0);
+    await expectNoOverflow(stranger);
+    await stranger.screenshot({ path: `${shots}/hidden-en-375.png`, fullPage: false });
+  } finally {
+    await outsider.close();
+    const sql = postgres(localDatabaseURL(), { max: 1 });
+    try {
+      for (const { userId, email } of accounts) {
+        execFileSync(process.execPath, [
+          "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", "cleanup",
+          JSON.stringify({ userId, email }),
+        ], { stdio: "inherit" });
+      }
+      const users = await sql<{ count: string }[]>`
+        select count(*)::text as count from "user" where email like 'report-entry-%@example.invalid'`;
+      const versions = await sql<{ count: string }[]>`
+        select count(*)::text as count from brand_version where name = ${entryName}`;
+      const snapshots = accounts.length === 0 ? [{ count: "0" }] : await sql<{ count: string }[]>`
+        select count(*)::text as count from report_snapshot where owner_id in ${sql(accounts.map((item) => item.userId))}`;
+      expect(users[0]?.count).toBe("0");
+      expect(versions[0]?.count).toBe("0");
+      expect(snapshots[0]?.count).toBe("0");
     } finally {
       await sql.end();
     }

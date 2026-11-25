@@ -120,6 +120,9 @@ try {
   } else if (command === "report-observations") {
     const result = await saveComparisonFixture(db, payload.userId, payload.brandId);
     process.stdout.write(JSON.stringify(result));
+  } else if (command === "correct-observation") {
+    await correctRecommendation(db, payload.observationId);
+    process.stdout.write(JSON.stringify({ corrected: payload.observationId }));
   } else if (command === "report-history") {
     await correctRecommendation(db, payload.observationId);
     const result = await saveLegacySnapshot(db, payload.userId, payload.brandId, payload.retestId);

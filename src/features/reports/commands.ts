@@ -516,11 +516,39 @@ const savedOverview = z.object({
   labor: z.unknown(),
 });
 
+const excludedQuerySchema = z.object({
+  queryId: z.string(),
+  reason: z.enum(["modified", "missing_side", "not_judgable", "brand_question", "scope_mismatch"]),
+});
+
+export type SnapshotExclusion = z.infer<typeof excludedQuerySchema>;
+
 export type SnapshotView = {
   cost: SnapshotCostView;
   metric?: string;
   comparisons?: z.infer<typeof savedOverview>["comparisons"];
+  excluded: SnapshotExclusion[];
 };
+
+function excludedQueries(saved: unknown): SnapshotExclusion[] {
+  if (!saved || typeof saved !== "object" || !("comparisons" in saved)) return [];
+  const comparisons = saved.comparisons;
+  if (!comparisons || typeof comparisons !== "object") return [];
+  const seen = new Set<string>();
+  const items: SnapshotExclusion[] = [];
+  for (const block of Object.values(comparisons)) {
+    if (!block || typeof block !== "object" || !("excluded_queries" in block)) continue;
+    const parsed = z.array(excludedQuerySchema).safeParse(block.excluded_queries);
+    if (!parsed.success) continue;
+    for (const item of parsed.data) {
+      const key = `${item.queryId}:${item.reason}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push(item);
+    }
+  }
+  return items;
+}
 
 function parseSnapshotView(json: string): SnapshotView {
   try {
@@ -532,9 +560,10 @@ function parseSnapshotView(json: string): SnapshotView {
       cost: cost.success && labor.success ? { state: "ready", cost: cost.data, labor: labor.data } : { state: "absent" },
       metric: summary.data?.metric,
       comparisons: summary.data?.comparisons,
+      excluded: excludedQueries(saved),
     };
   } catch {
-    return { cost: { state: "unavailable" } };
+    return { cost: { state: "unavailable" }, excluded: [] };
   }
 }
 
@@ -546,7 +575,7 @@ export async function snapshotViews(
   options: SnapshotStorageOptions = {},
 ): Promise<Map<string, SnapshotView>> {
   const views = new Map<string, SnapshotView>();
-  const unavailable: SnapshotView = { cost: { state: "unavailable" } };
+  const unavailable: SnapshotView = { cost: { state: "unavailable" }, excluded: [] };
   const stored: ReportSnapshotRow[] = [];
   for (const snapshot of snapshots) {
     if (inlineSnapshot(snapshot)) views.set(snapshot.id, parseSnapshotView(snapshot.jsonBytes));

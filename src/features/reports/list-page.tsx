@@ -10,8 +10,12 @@ import { BrandDao } from "@/features/brands/dao";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockRetestButton } from "@/features/functional-mock/run-buttons";
 import { Button } from "@/components/ui/button";
+import { ContentDao } from "@/features/content/dao";
+import { generateSavedSnapshotAction, reviseSavedSnapshotAction } from "./actions";
 import { presentSnapshotCost } from "./cost-copy";
-import { listReports, snapshotViews, type SnapshotCostView, type SnapshotView } from "./commands";
+import { listReports, snapshotViews, type SnapshotCostView, type SnapshotExclusion, type SnapshotView } from "./commands";
+import { ReportEntryPanel, type ReportPublicationOption } from "./report-entry-panel";
+import { readSavedWindows, readTodoProgress } from "./window-observations";
 import { m0StageGate } from "./m0-stage-gate";
 import { snapshotMetricLabels } from "./snapshot";
 import { snapshotMetrics, type SnapshotMetric } from "./snapshot-comparisons";
@@ -66,6 +70,36 @@ function SnapshotCostLines({
       {lines.reason ? <p>{lines.reason}</p> : null}
       <p>{lines.labor}</p>
       <p>{lines.laborReason}</p>
+    </div>
+  );
+}
+
+const exclusionReason = {
+  modified: "comparisonReason_modified",
+  missing_side: "comparisonReason_missing_side",
+  not_judgable: "comparisonReason_not_judgable",
+  brand_question: "comparisonReason_brand_question",
+  scope_mismatch: "comparisonReason_scope_mismatch",
+} as const;
+
+function SnapshotExclusions({
+  excluded,
+  t,
+}: {
+  excluded: readonly SnapshotExclusion[];
+  t: Awaited<ReturnType<typeof getTranslator<"reports">>>;
+}) {
+  if (excluded.length === 0) return null;
+  return (
+    <div className="mt-3 break-words">
+      <p className="font-medium">{t("excludedHeading")}</p>
+      <ul className="mt-1 space-y-1 text-muted-foreground">
+        {excluded.map((item) => (
+          <li key={`${item.queryId}:${item.reason}`} className="[overflow-wrap:anywhere]">
+            {t("excludedLine", { query: item.queryId, reason: t(exclusionReason[item.reason]) })}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -147,12 +181,17 @@ function ReportCanvas({
 export default async function ReportsListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ brandId?: string }>;
+  searchParams: Promise<{ brandId?: string; error?: string; notice?: string }>;
 }) {
   const session = await requireSession();
   const t = await getTranslator("reports");
   const locale = await getLocale();
   const params = await searchParams;
+  const actionError = params.error === "INVALID_INPUT" || params.error === "LOOP_NOT_READY" || params.error === "CONFLICT"
+    || params.error === "NOT_FOUND" || params.error === "SERVICE_UNAVAILABLE" || params.error === "WINDOW_NOT_DUE"
+    || params.error === "FORBIDDEN"
+    ? params.error
+    : null;
   const connection = getConnection();
   const requestedBrand = typeof params.brandId === "string" ? params.brandId : undefined;
   const brandId = requestedBrand || (await new BrandDao(connection).active(session.user.id))?.id;
@@ -223,6 +262,14 @@ export default async function ReportsListPage({
     );
   }
 
+  let publications: ReportPublicationOption[] = [];
+  try {
+    publications = (await new ContentDao(connection).listPublicationsForBrand(session.user.id, brandId, 20))
+      .map((item) => ({ id: item.id, status: item.status, effectiveAt: item.effectiveAt }));
+  } catch {
+    console.error("reports-publication-read-failed", { brandId });
+  }
+  const openRetests = new Set(result.snapshots.filter((item) => item.status === "created").map((item) => item.retestId));
   const next = nextSnapshot(result.snapshots);
   const observationsHref = "/dashboard/reports/observations";
   const taskKey = next.kind === "current"
@@ -253,6 +300,13 @@ export default async function ReportsListPage({
       relatedLabel={t("relatedEntries")}
       related={relatedLinks(t).filter((item) => next.snapshot || item.href !== observationsHref)}
     >
+      <ReportEntryPanel
+        brandId={brandId}
+        publications={publications}
+        error={actionError ? t(actionError) : null}
+        downgraded={params.notice === "diagnostic-downgrade"}
+        t={t}
+      />
       {mockLane && (
         <div className="space-y-2">
           <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("mockRetestNote")}</p>
@@ -276,6 +330,14 @@ export default async function ReportsListPage({
               <li key={item.id} className={itemClass}>
                 <p className="break-words font-medium">{item.kind} · {item.status} · {item.intent}</p>
                 <p className="mt-1 break-all text-muted-foreground">{item.id}</p>
+                {readSavedWindows(item.comparisonJson) && !openRetests.has(item.id)
+                  && (item.status === "completed" || item.status === "inconclusive") ? (
+                  <form action={generateSavedSnapshotAction} className="mt-3">
+                    <input type="hidden" name="brandId" value={brandId} />
+                    <input type="hidden" name="retestId" value={item.id} />
+                    <Button type="submit" variant="outline" className={actionClass}>{t("generateSnapshot")}</Button>
+                  </form>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -288,12 +350,20 @@ export default async function ReportsListPage({
           <p className={emptyClass}>{t("todosEmpty")}</p>
         ) : (
           <ul className="space-y-3">
-            {result.todos.map((item) => (
-              <li key={item.id} className={itemClass}>
-                <p className="break-words font-medium">{t("todoLine", { status: item.status, due: item.dueAt })}</p>
-                <p className="mt-1 text-muted-foreground">{t("noAutoCharge")}</p>
-              </li>
-            ))}
+            {result.todos.map((item) => {
+              const progress = item.status === "scheduled" ? readTodoProgress(item.progressJson) : null;
+              return (
+                <li key={item.id} className={itemClass}>
+                  <p className="break-words font-medium">{t("todoLine", { status: item.status, due: item.dueAt })}</p>
+                  {progress ? (
+                    <p className="mt-1 break-words text-muted-foreground">
+                      {t("reminderProgress", { elapsed: progress.elapsedFullDays, remaining: progress.remainingFullDays })}
+                    </p>
+                  ) : null}
+                  <p className="mt-1 text-muted-foreground">{t("noAutoCharge")}</p>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
@@ -318,6 +388,14 @@ export default async function ReportsListPage({
                   {item.predecessorId ? ` · ${t("snapshotPrevious", { id: item.predecessorId })}` : ""}
                 </p>
                 <SnapshotMetrics view={views.get(item.id)} locale={locale} t={t} />
+                <SnapshotExclusions excluded={views.get(item.id)?.excluded ?? []} t={t} />
+                {item.status === "created" && views.get(item.id)?.comparisons ? (
+                  <form action={reviseSavedSnapshotAction} className="mt-3">
+                    <input type="hidden" name="brandId" value={brandId} />
+                    <input type="hidden" name="snapshotId" value={item.id} />
+                    <Button type="submit" variant="outline" className={actionClass}>{t("reviseSnapshot")}</Button>
+                  </form>
+                ) : null}
                 <SnapshotCostLines
                   view={views.get(item.id)?.cost}
                   locale={locale}
