@@ -124,6 +124,46 @@ try {
     await correctRecommendation(db, payload.observationId);
     const result = await saveLegacySnapshot(db, payload.userId, payload.brandId, payload.retestId);
     process.stdout.write(JSON.stringify(result));
+  } else if (command === "competitor-slots") {
+    const { userId, brandId, items } = payload;
+    const now = new Date().toISOString();
+    const created = [];
+    for (const item of items) {
+      const runId = randomUUID();
+      const slotId = randomUUID();
+      const observationId = randomUUID();
+      const fp = Buffer.from(randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "")).toString("hex").slice(0, 64);
+      await queryWithParameters(
+        db,
+        `INSERT INTO monitoring_run (
+          id, brand_id, owner_id, operation_id, fingerprint, track, prompt_set_id, prompt_set_version,
+          repeat_count, question_count, natural_count, channel_count, slot_count, region, language,
+          requested_network_mode, currency, upper_minor, estimate_high_minor, customer_payable_minor,
+          status, sampling_complete, created_at
+        ) VALUES (?, ?, ?, ?, ?, 'consumer_ui', ?, 1, 1, 1, 1, 1, 1, 'CN', 'zh-CN', 'unknown', NULL, NULL, NULL, 0, 'succeeded', 1, ?)`,
+        [runId, brandId, userId, randomUUID(), fp, randomUUID(), now],
+      );
+      await queryWithParameters(
+        db,
+        `INSERT INTO monitoring_slot (
+          id, run_id, brand_id, question_id, natural_question, channel_id, channel_version,
+          repeat_index, reservation_id, status, created_at, adopted_attempt_id, late
+        ) VALUES (?, ?, ?, ?, 1, 'manual-fixture', 1, 1, NULL, 'queued', ?, NULL, 0)`,
+        [slotId, runId, brandId, item.questionId, now],
+      );
+      await queryWithParameters(
+        db,
+        `INSERT INTO answer_observation (
+          id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method,
+          question_text, answer_text, fingerprint, captured_at, region, language,
+          requested_network_mode, entity_version, citation_set_state, evidence_state,
+          created_at, target_region
+        ) VALUES (?, ?, ?, ?, NULL, 'consumer_ui', 'manual', ?, ?, ?, ?, 'CN', 'zh-CN', 'unknown', 1, 'complete', 'complete', ?, 'CN')`,
+        [observationId, brandId, userId, slotId, item.questionText, item.answerText, fp, now, now],
+      );
+      created.push({ observationId, questionId: item.questionId });
+    }
+    process.stdout.write(JSON.stringify({ created }));
   } else if (command === "cleanup") {
     for (const channelId of payload.channelIds ?? []) {
       await queryWithParameters(db, `DELETE FROM sampling_answer_network WHERE channel_id = ?`, [channelId]);

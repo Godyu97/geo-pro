@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
-import { getTranslator } from "@/lib/i18n/server";
+import { formatNumber, formatPercent } from "@/lib/i18n/format";
+import type { Locale } from "@/lib/i18n/locale";
+import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { Button } from "@/components/ui/button";
 import { BrandDao } from "../brands/dao";
 import {
@@ -28,8 +30,8 @@ const sourceState = {
   unknown: "state_unknown",
 } as const;
 
-function shareText(share: number | null, na: string) {
-  return share === null ? na : String(share);
+function shareText(locale: Locale, share: number | null, na: string) {
+  return share === null ? na : formatPercent(locale, share);
 }
 
 function citationOption(url: string) {
@@ -91,6 +93,7 @@ export default async function CompetitorAnalysisPage({
 }) {
   const session = await requireSession();
   const params = await searchParams;
+  const locale = await getLocale();
   const t = await getTranslator("competitorAnalysis");
   const connection = getConnection();
   const active = await new BrandDao(connection).active(session.user.id);
@@ -204,38 +207,163 @@ export default async function CompetitorAnalysisPage({
       </section>
 
       <section className="min-w-0 space-y-3">
-        <h2 className="text-lg font-semibold">{t("share")}</h2>
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h2 className="text-lg font-semibold">{t("share")}</h2>
+          {workspace.selected ? (
+            <span className="text-sm text-muted-foreground">{t("version", { version: workspace.selected.version })}</span>
+          ) : null}
+        </div>
         {workspace.truncated ? <p className={emptyClass}>{t("truncated")}</p> : null}
         {!workspace.truncated && workspace.rows.length === 0 ? (
           <p className={emptyClass}>{t("setsEmpty")}</p>
         ) : null}
         {workspace.rows.length > 0 ? (
-          <div
-            role="region"
-            aria-label={t("shareRegion")}
-            tabIndex={0}
-            className="max-w-full overflow-x-auto rounded-2xl border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <table className="w-full table-fixed text-left text-sm">
-              <thead className="text-muted-foreground">
-                <tr className="border-b">
-                  <th className="px-3 py-3 font-medium" scope="col">{t("brand")}</th>
-                  <th className="w-16 px-2 py-3 align-bottom text-xs font-medium leading-4 [overflow-wrap:anywhere]" scope="col">{t("count")}</th>
-                  <th className="w-16 px-2 py-3 align-bottom text-xs font-medium leading-4 [overflow-wrap:anywhere]" scope="col">{t("denominator")}</th>
-                  <th className="w-16 px-2 py-3 align-bottom text-xs font-medium leading-4 [overflow-wrap:anywhere]" scope="col">{t("shareValue")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {workspace.rows.map((row) => (
-                  <tr key={row.brandId} className="border-b">
-                    <td className="px-3 py-3 align-top [overflow-wrap:anywhere]">{row.brandId}</td>
-                    <td className="whitespace-nowrap px-2 py-3 align-top tabular-nums">{row.count}</td>
-                    <td className="whitespace-nowrap px-2 py-3 align-top tabular-nums">{row.denominator}</td>
-                    <td className="whitespace-nowrap px-2 py-3 align-top tabular-nums">{shareText(row.share, t("shareNa"))}</td>
+          <>
+            <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{t("shareMethodNote")}</p>
+            <p className="text-sm leading-6 text-muted-foreground tabular-nums">
+              {t("shareSummary", {
+                answers: formatNumber(locale, workspace.summary.commonAnswerCount),
+                covered: formatNumber(locale, workspace.summary.coveredQuestions),
+                equalWeight: formatNumber(locale, workspace.summary.equalWeightQuestions),
+                zero: formatNumber(locale, workspace.summary.zeroMentionQuestions),
+                excluded: formatNumber(locale, workspace.summary.excludedAnswerCount),
+              })}
+            </p>
+            <div
+              role="region"
+              aria-label={t("shareRegion")}
+              tabIndex={0}
+              className="max-w-full overflow-x-auto rounded-2xl border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <table className="min-w-full text-left text-sm">
+                <thead className="text-muted-foreground">
+                  <tr className="border-b">
+                    <th className="min-w-28 max-w-48 px-3 py-3 font-medium" scope="col">{t("brand")}</th>
+                    <th className="px-3 py-3 align-bottom text-xs font-medium leading-4 whitespace-nowrap" scope="col">{t("equalWeightShare")}</th>
+                    <th className="px-3 py-3 align-bottom text-xs font-medium leading-4 whitespace-nowrap" scope="col">{t("pooledShare")}</th>
+                    <th className="px-3 py-3 align-bottom text-xs font-medium leading-4 whitespace-nowrap" scope="col">{t("pooledCount")}</th>
+                    <th className="px-3 py-3 align-bottom text-xs font-medium leading-4 whitespace-nowrap" scope="col">{t("pooledDenominator")}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {workspace.rows.map((row) => (
+                    <tr key={row.brandId} className="border-b">
+                      <td className="min-w-28 max-w-48 px-3 py-3 align-top [overflow-wrap:anywhere]">{row.brandId}</td>
+                      <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums">{shareText(locale, row.equalWeightShare, t("shareNa"))}</td>
+                      <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums">{shareText(locale, row.pooledShare, t("shareNa"))}</td>
+                      <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums">{formatNumber(locale, row.pooledCount)}</td>
+                      <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums">{formatNumber(locale, row.pooledDenominator)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : null}
+        {workspace.questions.length > 0 ? (
+          <div className="min-w-0 space-y-2">
+            <h3 className="text-base font-medium">{t("perQuestionHeading")}</h3>
+            <div
+              role="region"
+              aria-label={t("perQuestionRegion")}
+              tabIndex={0}
+              className="max-w-full overflow-x-auto rounded-2xl border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <table className="min-w-full text-left text-sm">
+                <thead className="text-muted-foreground">
+                  <tr className="border-b">
+                    <th className="px-3 py-3 text-xs font-medium whitespace-nowrap" scope="col">{t("questionIdCol")}</th>
+                    <th className="px-3 py-3 text-xs font-medium whitespace-nowrap" scope="col">{t("questionAnswersCol")}</th>
+                    <th className="px-3 py-3 text-xs font-medium whitespace-nowrap" scope="col">{t("questionDenominatorCol")}</th>
+                    <th className="px-3 py-3 text-xs font-medium whitespace-nowrap" scope="col">{t("questionSharesCol")}</th>
+                    <th className="px-3 py-3 text-xs font-medium whitespace-nowrap" scope="col">{t("questionCoverageCol")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {workspace.questions.map((question) => (
+                    <tr key={question.questionId} className="border-b">
+                      <td className="min-w-32 max-w-56 px-3 py-3 align-top [overflow-wrap:anywhere]">
+                        <p className="font-mono text-xs">{question.questionId}</p>
+                        {question.questionText ? <p className="mt-1 text-xs text-muted-foreground">{question.questionText}</p> : null}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums">{formatNumber(locale, question.answerCount)}</td>
+                      <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums">{formatNumber(locale, question.totalMentions)}</td>
+                      <td className="min-w-44 px-3 py-3 align-top tabular-nums">
+                        {question.status === "ready" ? (
+                          <ul className="space-y-1 text-xs">
+                            {question.brands.map((brand) => (
+                              <li key={brand.brandId} className="[overflow-wrap:anywhere]">
+                                {t("questionBrandShare", {
+                                  brand: brand.brandId,
+                                  count: formatNumber(locale, brand.count),
+                                  denominator: formatNumber(locale, brand.denominator),
+                                  share: shareText(locale, brand.share, t("shareNa")),
+                                })}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <span>{t("shareNa")}</span>
+                        )}
+                      </td>
+                      <td className="min-w-44 px-3 py-3 align-top text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">
+                        {question.status === "ready" ? (
+                          <>
+                            <p>{t("questionCovered")}</p>
+                            {question.excludedAnswerCount > 0 ? (
+                              <p className="mt-1">{t("questionPartialExcluded", { count: formatNumber(locale, question.excludedAnswerCount) })}</p>
+                            ) : null}
+                          </>
+                        ) : question.status === "zero_mentions" ? (
+                          <>
+                            <p>{t("questionZeroMentionCovered")}</p>
+                            {question.excludedAnswerCount > 0 ? (
+                              <p className="mt-1">{t("questionPartialExcluded", { count: formatNumber(locale, question.excludedAnswerCount) })}</p>
+                            ) : null}
+                          </>
+                        ) : (
+                          <p>{t("questionExcludedUnknown", { count: formatNumber(locale, question.excludedAnswerCount) })}</p>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+        {workspace.missingQuestionAnswers.length > 0 ? (
+          <div className={panelClass}>
+            <h3 className="text-base font-medium">{t("missingQuestionHeading")}</h3>
+            <p className="text-sm leading-6 text-muted-foreground">{t("missingQuestionNote")}</p>
+            <ul className="space-y-2 text-sm">
+              {workspace.missingQuestionAnswers.map((item) => (
+                <li key={item.observationId} className="rounded-xl border px-3 py-2 [overflow-wrap:anywhere]">
+                  <p className="font-mono text-xs text-muted-foreground">{item.observationId}</p>
+                  {item.questionText ? <p className="mt-1">{item.questionText}</p> : null}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {item.mentionedBrands.length > 0 ? item.mentionedBrands.join(" · ") : t("noBrandMentioned")}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {workspace.excludedAnswers.length > 0 ? (
+          <div className={panelClass}>
+            <h3 className="text-base font-medium">{t("excludedAnswersHeading")}</h3>
+            <p className="text-sm leading-6 text-muted-foreground">{t("excludedAnswersNote")}</p>
+            <ul className="space-y-2 text-sm">
+              {workspace.excludedAnswers.map((item) => (
+                <li key={item.observationId} className="rounded-xl border px-3 py-2 [overflow-wrap:anywhere]">
+                  <p className="font-mono text-xs text-muted-foreground">{item.questionId ?? t("missingQuestionIdTag")}</p>
+                  {item.questionText ? <p className="mt-1">{item.questionText}</p> : null}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("unknownMembers", { names: item.unknownBrands.join(" · ") })}
+                  </p>
+                </li>
+              ))}
+            </ul>
           </div>
         ) : null}
         {workspace.rank.unorderedCount > 0 && !workspace.rank.ranked ? (
@@ -267,7 +395,9 @@ export default async function CompetitorAnalysisPage({
               <span className={selectWrap}>
                 <select name="observationId" className="h-10 w-full max-w-full rounded-md border bg-background px-3">
                   {workspace.observations.map((item) => (
-                    <option key={item.id} value={item.id}>{item.questionText}</option>
+                    <option key={item.id} value={item.id}>
+                      {item.questionId ? `[${item.questionId}] ${item.questionText}` : `[${t("missingQuestionIdTag")}] ${item.questionText}`}
+                    </option>
                   ))}
                 </select>
               </span>
@@ -276,9 +406,19 @@ export default async function CompetitorAnalysisPage({
               <legend className="text-sm text-muted-foreground">{t("brand")}</legend>
               {workspace.selected.labels.map((label) => (
                 <div key={label} className="flex min-w-0 flex-wrap items-center gap-2">
-                  <label className="flex min-w-0 items-start gap-2 text-sm">
-                    <input type="checkbox" name="label" value={label} className="mt-1" />
-                    <span className="min-w-0 [overflow-wrap:anywhere]">{label}</span>
+                  <input type="hidden" name="setLabel" value={label} />
+                  <label className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                    <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{label}</span>
+                    <select
+                      name={`state:${label}`}
+                      aria-label={label}
+                      defaultValue="false"
+                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                    >
+                      <option value="false">{t("mentionFalse")}</option>
+                      <option value="true">{t("mentionTrue")}</option>
+                      <option value="unknown">{t("mentionUnknown")}</option>
+                    </select>
                   </label>
                   <input
                     name={`position:${label}`}

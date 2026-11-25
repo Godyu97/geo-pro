@@ -575,6 +575,13 @@
       "when": 1795500257080,
       "tag": "0081_easy_harrier",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1795610563489,
+      "tag": "0082_uneven_chimera",
+      "breakpoints": true
     }
   ]
 }

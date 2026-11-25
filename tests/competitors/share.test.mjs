@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { PurgeDao } from "../../src/features/brands/purge-dao.ts";
+import { competitorShareBreakdown } from "../../src/features/competitor-share/rules.ts";
 import {
   readCompetitorShare,
   recordCompetitorMentions,
@@ -73,14 +74,53 @@ async function observation(db, owner, brand, text) {
   return saved.observation.id;
 }
 
+async function slottedObservation(db, owner, brand, questionId, questionText, answerText) {
+  const runId = randomUUID();
+  const slotId = randomUUID();
+  const obsId = randomUUID();
+  const fp = createHash("sha256").update(`${slotId}:${questionText}:${answerText}`, "utf8").digest("hex");
+  await queryWithParameters(
+    db,
+    `INSERT INTO monitoring_run (
+      id, brand_id, owner_id, operation_id, fingerprint, track, prompt_set_id, prompt_set_version,
+      repeat_count, question_count, natural_count, channel_count, slot_count, region, language,
+      requested_network_mode, currency, upper_minor, estimate_high_minor, customer_payable_minor,
+      status, sampling_complete, created_at
+    ) VALUES (?, ?, ?, ?, ?, 'consumer_ui', ?, 1, 1, 1, 1, 1, 1, 'CN', 'zh-CN', 'unknown', NULL, NULL, NULL, 0, 'succeeded', 1, ?)`,
+    [runId, brand, owner, randomUUID(), fp, randomUUID(), time],
+  );
+  await queryWithParameters(
+    db,
+    `INSERT INTO monitoring_slot (
+      id, run_id, brand_id, question_id, natural_question, channel_id, channel_version,
+      repeat_index, reservation_id, status, created_at, adopted_attempt_id, late
+    ) VALUES (?, ?, ?, ?, 1, 'manual-fixture', 1, 1, NULL, 'queued', ?, NULL, 0)`,
+    [slotId, runId, brand, questionId, time],
+  );
+  await queryWithParameters(
+    db,
+    `INSERT INTO answer_observation (
+      id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method,
+      question_text, answer_text, fingerprint, captured_at, region, language,
+      requested_network_mode, entity_version, citation_set_state, evidence_state,
+      created_at, target_region
+    ) VALUES (?, ?, ?, ?, NULL, 'consumer_ui', 'manual', ?, ?, ?, ?, 'CN', 'zh-CN', 'unknown', 1, 'complete', 'complete', ?, 'CN')`,
+    [obsId, brand, owner, slotId, questionText, answerText, fp, time, time],
+  );
+  return obsId;
+}
+
 test("repeated mentions in one answer count once and unordered output has no rank", () => {
   const share = shareFromMentions(["甲", "乙"], [
     { observationId: "a1", competitorLabel: "甲", ordered: 0, position: null },
     { observationId: "a1", competitorLabel: "甲", ordered: 0, position: null },
     { observationId: "a1", competitorLabel: "乙", ordered: 0, position: null },
   ]);
-  assert.equal(share.rows.find((row) => row.brandId === "甲")?.count, 1);
-  assert.equal(share.rows[0].denominator, 1);
+  assert.equal(share.rows.find((row) => row.brandId === "甲")?.pooledCount, 1);
+  assert.equal(share.rows[0].pooledDenominator, 2);
+  assert.equal(share.rows.find((row) => row.brandId === "甲")?.pooledShare, 0.5);
+  assert.equal(share.rows.find((row) => row.brandId === "甲")?.equalWeightShare, null);
+  assert.equal(share.missingQuestionAnswers.length, 1);
   assert.equal(share.rank.ranked, false);
   assert.equal(share.rank.mean, null);
 });
@@ -92,11 +132,55 @@ test("an absent competitor is left out of the conditional mean", () => {
   assert.equal(share.rank.ranked, true);
   assert.equal(share.rank.mean, 1);
   assert.deepEqual(share.rank.excludedAbsent, ["乙"]);
-  assert.equal(share.rows.find((row) => row.brandId === "乙")?.share, 0);
+  assert.equal(share.rows.find((row) => row.brandId === "乙")?.pooledShare, 0);
+});
+
+test("equal-weight share separates from pooled share, keeps zero-mention questions N/A, and excludes unknown answers", () => {
+  const breakdown = competitorShareBreakdown(["甲", "乙"], [
+    // Q1: 1 answer, 甲 mentioned 3 times -> counts as 1; 乙 false
+    { observationId: "a1", questionId: "q1", questionText: "第一题", brandId: "甲", mentionState: "true" },
+    { observationId: "a1", questionId: "q1", questionText: "第一题", brandId: "甲", mentionState: "true" },
+    { observationId: "a1", questionId: "q1", questionText: "第一题", brandId: "甲", mentionState: "true" },
+    { observationId: "a1", questionId: "q1", questionText: "第一题", brandId: "乙", mentionState: "false" },
+    // Q2: 5 answers, 乙 mentioned 1 time each; 甲 false
+    ...["b1", "b2", "b3", "b4", "b5"].flatMap((id) => [
+      { observationId: id, questionId: "q2", questionText: "第二题", brandId: "甲", mentionState: "false" },
+      { observationId: id, questionId: "q2", questionText: "第二题", brandId: "乙", mentionState: "true" },
+    ]),
+    // Q3: zero mentions across fixed set
+    { observationId: "c1", questionId: "q3", questionText: "第三题", brandId: "甲", mentionState: "false" },
+    { observationId: "c1", questionId: "q3", questionText: "第三题", brandId: "乙", mentionState: "false" },
+    // Q4: one unknown member -> excluded from common judgable subset
+    { observationId: "d1", questionId: "q4", questionText: "第四题", brandId: "甲", mentionState: "unknown" },
+    { observationId: "d1", questionId: "q4", questionText: "第四题", brandId: "乙", mentionState: "true" },
+  ]);
+
+  const jia = breakdown.rows.find((row) => row.brandId === "甲");
+  const yi = breakdown.rows.find((row) => row.brandId === "乙");
+  assert.equal(jia?.equalWeightShare, 0.5);
+  assert.equal(yi?.equalWeightShare, 0.5);
+  assert.equal(jia?.equalWeightQuestions, 2);
+  assert.equal(jia?.coveredQuestions, 3);
+  assert.equal(jia?.pooledCount, 1);
+  assert.equal(yi?.pooledCount, 5);
+  assert.equal(jia?.pooledDenominator, 6);
+  assert.ok(Math.abs((jia?.pooledShare ?? 0) - 1 / 6) < 1e-12);
+  assert.ok(Math.abs((yi?.pooledShare ?? 0) - 5 / 6) < 1e-12);
+
+  const q3 = breakdown.questions.find((q) => q.questionId === "q3");
+  assert.equal(q3?.status, "zero_mentions");
+  assert.equal(q3?.brands.every((b) => b.share === null), true);
+
+  const q4 = breakdown.questions.find((q) => q.questionId === "q4");
+  assert.equal(q4?.status, "excluded");
+  assert.equal(breakdown.excludedAnswers.length, 1);
+  assert.deepEqual(breakdown.excludedAnswers[0].unknownBrands, ["甲"]);
+  assert.equal(breakdown.summary.zeroMentionQuestions, 1);
+  assert.equal(breakdown.summary.excludedQuestions, 1);
 });
 
 for (const kind of ["sqlite", "postgresql"]) {
-  test(`${kind}: fixed set counts once per answer and a new set does not pool old mentions`, async (t) => {
+  test(`${kind}: fixed set computes equal-weight and pooled shares, keeps zero-mention N/A, and excludes unknown`, async (t) => {
     if (kind === "postgresql" && !process.env.DATABASE_URL) {
       t.skip("local PostgreSQL URL is not configured");
       return;
@@ -159,12 +243,68 @@ for (const kind of ["sqlite", "postgresql"]) {
       mentions: [{ label: "甲" }],
     }, clock);
 
-    const share = await readCompetitorShare(db, owner, brand);
-    assert.equal(share.error, undefined);
-    assert.equal(share.rows.find((row) => row.brandId === "甲")?.count, 2);
-    assert.equal(share.rows.find((row) => row.brandId === "乙")?.count, 1);
-    assert.equal(share.rows[0].denominator, 2);
-    assert.equal(share.rank.ranked, false);
+    // Unslotted answers enter pooled breakdown and stay in missingQuestionAnswers, not equal-weight mean.
+    const unslottedShare = await readCompetitorShare(db, owner, brand);
+    assert.equal(unslottedShare.error, undefined);
+    assert.equal(unslottedShare.rows.find((row) => row.brandId === "甲")?.pooledCount, 2);
+    assert.equal(unslottedShare.rows.find((row) => row.brandId === "乙")?.pooledCount, 1);
+    assert.equal(unslottedShare.rows[0].pooledDenominator, 3);
+    assert.equal(unslottedShare.rows[0].equalWeightShare, null);
+    assert.equal(unslottedShare.missingQuestionAnswers.length, 2);
+    assert.equal(unslottedShare.rank.ranked, false);
+
+    // Add slotted answers matching Acceptance 1, 2, 3 in a fresh set version 2
+    const v2 = await saveCompetitorSet(db, owner, { brandId: brand, labels: ["甲", "乙", "丁"] }, clock);
+    assert.equal(v2.error, undefined);
+    assert.equal(v2.set.version, 2);
+
+    const q1 = "11111111-1111-4111-8111-111111111111";
+    const q2 = "22222222-2222-4222-8222-222222222222";
+    const q3 = "33333333-3333-4333-8333-333333333333";
+    const q4 = "44444444-4444-4444-8444-444444444444";
+
+    const q1Obs = await slottedObservation(db, owner, brand, q1, "第一题", "甲甲甲");
+    await recordCompetitorMentions(db, owner, {
+      brandId: brand, setId: v2.set.id, observationId: q1Obs, ordered: false,
+      mentions: [{ label: "甲", state: "true" }, { label: "乙", state: "false" }, { label: "丁", state: "false" }],
+    }, clock);
+
+    for (let i = 0; i < 5; i += 1) {
+      const q2Obs = await slottedObservation(db, owner, brand, q2, "第二题", `乙回答 ${i + 1}`);
+      await recordCompetitorMentions(db, owner, {
+        brandId: brand, setId: v2.set.id, observationId: q2Obs, ordered: false,
+        mentions: [{ label: "甲", state: "false" }, { label: "乙", state: "true" }, { label: "丁", state: "false" }],
+      }, clock);
+    }
+
+    const q3Obs = await slottedObservation(db, owner, brand, q3, "第三题", "都不提");
+    await recordCompetitorMentions(db, owner, {
+      brandId: brand, setId: v2.set.id, observationId: q3Obs, ordered: false,
+      mentions: [],
+    }, clock);
+
+    const q4Obs = await slottedObservation(db, owner, brand, q4, "第四题", "可能指乙但甲不明确");
+    await recordCompetitorMentions(db, owner, {
+      brandId: brand, setId: v2.set.id, observationId: q4Obs, ordered: false,
+      mentions: [{ label: "甲", state: "unknown" }, { label: "乙", state: "true" }, { label: "丁", state: "false" }],
+    }, clock);
+
+    const v2Share = await readCompetitorShare(db, owner, brand, 2);
+    assert.equal(v2Share.error, undefined);
+    assert.equal(v2Share.rows.find((row) => row.brandId === "甲")?.equalWeightShare, 0.5);
+    assert.equal(v2Share.rows.find((row) => row.brandId === "乙")?.equalWeightShare, 0.5);
+    assert.equal(v2Share.rows.find((row) => row.brandId === "丁")?.equalWeightShare, 0);
+    assert.equal(v2Share.rows.find((row) => row.brandId === "甲")?.pooledCount, 1);
+    assert.equal(v2Share.rows.find((row) => row.brandId === "乙")?.pooledCount, 5);
+    assert.equal(v2Share.rows[0].pooledDenominator, 6);
+    assert.equal(v2Share.summary.coveredQuestions, 3);
+    assert.equal(v2Share.summary.equalWeightQuestions, 2);
+    assert.equal(v2Share.summary.zeroMentionQuestions, 1);
+    assert.equal(v2Share.summary.excludedQuestions, 1);
+    assert.equal(v2Share.questions.find((q) => q.questionId === q3)?.status, "zero_mentions");
+    assert.equal(v2Share.questions.find((q) => q.questionId === q4)?.status, "excluded");
+    assert.equal(v2Share.excludedAnswers.length, 1);
+    assert.equal(v2Share.rank.unorderedCount, 7);
 
     const outside = await recordCompetitorMentions(db, owner, {
       brandId: brand,
@@ -175,14 +315,33 @@ for (const kind of ["sqlite", "postgresql"]) {
     }, clock);
     assert.equal(outside.error, "INVALID_INPUT");
 
+    // Switching to v3 leaves v1 and v2 untouched
     const next = await saveCompetitorSet(db, owner, { brandId: brand, labels: ["甲", "丙"] }, clock);
     assert.equal(next.created, true);
-    assert.equal(next.set.version, 2);
-    const pooled = await readCompetitorShare(db, owner, brand, 1);
-    assert.equal(pooled.rows.find((row) => row.brandId === "甲")?.count, 2);
-    const fresh = await readCompetitorShare(db, owner, brand, 2);
-    assert.equal(fresh.rows.find((row) => row.brandId === "甲")?.count, 0);
-    assert.equal(fresh.rows.find((row) => row.brandId === "丙")?.share, null);
+    assert.equal(next.set.version, 3);
+    const v1Check = await readCompetitorShare(db, owner, brand, 1);
+    assert.equal(v1Check.rows.find((row) => row.brandId === "甲")?.pooledCount, 2);
+    const v2Check = await readCompetitorShare(db, owner, brand, 2);
+    assert.equal(v2Check.rows.find((row) => row.brandId === "甲")?.equalWeightShare, 0.5);
+    const fresh = await readCompetitorShare(db, owner, brand, 3);
+    assert.equal(fresh.rows.find((row) => row.brandId === "甲")?.pooledCount, 0);
+    assert.equal(fresh.rows.find((row) => row.brandId === "丙")?.equalWeightShare, null);
+    assert.equal(fresh.rows.find((row) => row.brandId === "丙")?.pooledShare, null);
+
+    // Query plan check for listMentions join
+    const explainSql = kind === "sqlite"
+      ? `EXPLAIN QUERY PLAN SELECT m.id, s.question_id FROM competitor_mention m
+         JOIN answer_observation o ON o.id = m.observation_id AND o.brand_id = m.brand_id AND o.owner_id = m.owner_id
+         LEFT JOIN monitoring_slot s ON s.id = o.slot_id
+         WHERE m.owner_id = ? AND m.brand_id = ? AND m.set_id = ?
+         ORDER BY m.created_at ASC, m.id ASC`
+      : `EXPLAIN SELECT m.id, s.question_id FROM competitor_mention m
+         JOIN answer_observation o ON o.id = m.observation_id AND o.brand_id = m.brand_id AND o.owner_id = m.owner_id
+         LEFT JOIN monitoring_slot s ON s.id = o.slot_id
+         WHERE m.owner_id = ? AND m.brand_id = ? AND m.set_id = ?
+         ORDER BY m.created_at ASC, m.id ASC`;
+    const planRows = await queryWithParameters(db, explainSql, [owner, brand, v2.set.id]);
+    assert.ok(planRows.length > 0);
 
     const denied = await readCompetitorShare(db, outsider, brand);
     assert.equal(denied.error, "NOT_FOUND");

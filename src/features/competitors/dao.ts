@@ -20,13 +20,20 @@ const mentionRow = z.object({
   setId: brandIdSchema,
   observationId: brandIdSchema,
   competitorLabel: z.string().min(1),
+  mentionState: z.enum(["true", "false", "unknown"]),
   ordered: z.union([z.literal(0), z.literal(1)]),
   position: z.number().int().positive().nullable(),
   createdAt: z.iso.datetime({ precision: 3 }),
 });
 
+const mentionDetailRow = mentionRow.extend({
+  questionId: z.string().min(1).nullable(),
+  questionText: z.string(),
+});
+
 export type CompetitorSetRow = z.infer<typeof setRow>;
 export type CompetitorMentionRow = z.infer<typeof mentionRow>;
+export type CompetitorMentionDetailRow = z.infer<typeof mentionDetailRow>;
 
 const flag = z.union([z.literal(0), z.literal(1)]);
 const inspectionRow = z.object({
@@ -63,7 +70,7 @@ export type CitationSourceRow = z.infer<typeof citationViewRow>;
 
 const setColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", version, labels_json AS "labelsJson", created_at AS "createdAt"`;
 const mentionColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", set_id AS "setId",
-  observation_id AS "observationId", competitor_label AS "competitorLabel", "ordered", position, created_at AS "createdAt"`;
+  observation_id AS "observationId", competitor_label AS "competitorLabel", mention_state AS "mentionState", "ordered", position, created_at AS "createdAt"`;
 
 export class CompetitorDao {
   private readonly db: QueryConnection;
@@ -122,11 +129,11 @@ export class CompetitorDao {
     await queryWithParameters(
       this.db,
       `INSERT INTO competitor_mention (
-        id, brand_id, owner_id, set_id, observation_id, competitor_label, "ordered", position, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, brand_id, owner_id, set_id, observation_id, competitor_label, mention_state, "ordered", position, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.id, row.brandId, row.ownerId, row.setId, row.observationId, row.competitorLabel,
-        row.ordered, row.position, row.createdAt,
+        row.mentionState, row.ordered, row.position, row.createdAt,
       ],
     );
   }
@@ -139,15 +146,22 @@ export class CompetitorDao {
       [ownerId, brandId, setId],
     );
     const count = z.object({ count: z.coerce.number().int().nonnegative() }).parse(countRows[0]).count;
-    if (count > 5000) return { truncated: true as const, rows: [] as CompetitorMentionRow[] };
+    if (count > 5000) return { truncated: true as const, rows: [] as CompetitorMentionDetailRow[] };
     const rows = await queryWithParameters(
       this.db,
-      `SELECT ${mentionColumns} FROM competitor_mention
-       WHERE owner_id = ? AND brand_id = ? AND set_id = ?
-       ORDER BY created_at ASC, id ASC`,
+      `SELECT m.id, m.brand_id AS "brandId", m.owner_id AS "ownerId", m.set_id AS "setId",
+              m.observation_id AS "observationId", m.competitor_label AS "competitorLabel",
+              m.mention_state AS "mentionState", m."ordered", m.position, m.created_at AS "createdAt",
+              CASE WHEN s.brand_id = o.brand_id THEN s.question_id ELSE NULL END AS "questionId",
+              o.question_text AS "questionText"
+       FROM competitor_mention m
+       JOIN answer_observation o ON o.id = m.observation_id AND o.brand_id = m.brand_id AND o.owner_id = m.owner_id
+       LEFT JOIN monitoring_slot s ON s.id = o.slot_id
+       WHERE m.owner_id = ? AND m.brand_id = ? AND m.set_id = ?
+       ORDER BY m.created_at ASC, m.id ASC`,
       [ownerId, brandId, setId],
     );
-    return { truncated: false as const, rows: rows.map((row) => mentionRow.parse(row)) };
+    return { truncated: false as const, rows: rows.map((row) => mentionDetailRow.parse(row)) };
   }
 
   async citationOwned(ownerId: string, brandId: string, citationId: string) {
@@ -230,16 +244,19 @@ export class CompetitorDao {
   async listRecentObservations(ownerId: string, brandId: string) {
     const rows = await queryWithParameters(
       this.db,
-      `SELECT id, question_text AS "questionText"
-       FROM answer_observation
-       WHERE owner_id = ? AND brand_id = ?
-       ORDER BY created_at DESC, id DESC
+      `SELECT o.id, o.question_text AS "questionText",
+              CASE WHEN s.brand_id = o.brand_id THEN s.question_id ELSE NULL END AS "questionId"
+       FROM answer_observation o
+       LEFT JOIN monitoring_slot s ON s.id = o.slot_id
+       WHERE o.owner_id = ? AND o.brand_id = ?
+       ORDER BY o.created_at DESC, o.id DESC
        LIMIT 20`,
       [ownerId, brandId],
     );
     return rows.map((row) => z.object({
       id: brandIdSchema,
       questionText: z.string(),
+      questionId: z.string().min(1).nullable(),
     }).parse(row));
   }
 

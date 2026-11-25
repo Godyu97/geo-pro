@@ -26,14 +26,19 @@ export const competitorMention = pgTable("competitor_mention", {
   ordered: integer("ordered").notNull(),
   position: integer("position"),
   createdAt: text("created_at").notNull(),
+  mentionState: text("mention_state").notNull().default("true"),
 }, (table) => [
   uniqueIndex("competitor_mention_once_uidx").on(table.setId, table.observationId, table.competitorLabel),
   index("competitor_mention_set_idx").on(table.brandId, table.setId, table.observationId),
   check("competitor_mention_check", sql`${table.ordered} in (0, 1)
+    and ${table.mentionState} in ('true', 'false', 'unknown')
     and length(${table.competitorLabel}) between 1 and 80
     and (
-      (${table.ordered} = 1 and ${table.position} > 0)
-      or (${table.ordered} = 0 and ${table.position} is null)
+      (${table.mentionState} = 'true' and (
+        (${table.ordered} = 1 and ${table.position} > 0)
+        or (${table.ordered} = 0 and ${table.position} is null)
+      ))
+      or (${table.mentionState} in ('false', 'unknown') and ${table.ordered} = 0 and ${table.position} is null)
     )`),
 ]);
 

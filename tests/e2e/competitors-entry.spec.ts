@@ -94,21 +94,24 @@ test("competitor analysis stays readable for long names, citations and a missing
     await expect(main.getByText(longName, { exact: true }).first()).toBeVisible();
     await expectNoOverflow(page);
     const before = main.getByRole("row", { name: shortName });
-    await expect(before.getByRole("cell").nth(1)).toHaveText("0");
-    await expect(before.getByRole("cell").nth(2)).toHaveText("0");
-    await expect(before.getByRole("cell").nth(3)).toHaveText("N/A");
+    await expect(before.getByRole("cell").nth(1)).toHaveText("N/A");
+    await expect(before.getByRole("cell").nth(2)).toHaveText("N/A");
+    await expect(before.getByRole("cell").nth(3)).toHaveText("0");
+    await expect(before.getByRole("cell").nth(4)).toHaveText("0");
 
     const mention = async () => {
-      await main.getByRole("checkbox", { name: shortName, exact: true }).check();
-      await main.getByRole("checkbox", { name: longName, exact: true }).check();
+      await main.getByLabel(shortName, { exact: true }).selectOption("true");
+      await main.getByLabel(longName, { exact: true }).selectOption("true");
       await main.getByRole("button", { name: "保存提及", exact: true }).click();
     };
     await mention();
     await mention();
     const after = main.getByRole("row", { name: shortName });
-    await expect(after.getByRole("cell").nth(1)).toHaveText("1");
-    await expect(after.getByRole("cell").nth(2)).toHaveText("1");
+    await expect(after.getByRole("cell").nth(1)).toHaveText("N/A");
+    await expect(after.getByRole("cell").nth(2)).toHaveText("50.0%");
     await expect(after.getByRole("cell").nth(3)).toHaveText("1");
+    await expect(after.getByRole("cell").nth(4)).toHaveText("2");
+    await expect(main.getByText("缺失题目编号的回答（不进入等权均值）", { exact: true })).toBeVisible();
     await expect(main.getByText("这些提及没有明确顺序，不显示排名。", { exact: true })).toBeVisible();
     await expect(main.getByText(/条件平均位置/)).toHaveCount(0);
     await expect(main.getByText(rawUrl, { exact: true }).first()).toBeVisible();
@@ -165,7 +168,7 @@ test("competitor analysis stays readable for long names, citations and a missing
         await expect(main.getByText("交付周期没有写清", { exact: true })).toBeVisible();
         await expect(main.getByText(copy.proposed, { exact: true })).toBeVisible();
         const table = main.getByRole("region", { name: copy.share, exact: true });
-        await expect(table.getByRole("row", { name: shortName }).getByRole("cell").nth(1)).toHaveText("1");
+        await expect(table.getByRole("row", { name: shortName }).getByRole("cell").nth(3)).toHaveText("1");
         await expectNoOverflow(page);
         if (width === 375) await page.screenshot({ path: testInfo.outputPath(`competitors-${copy.locale}.png`) });
       }
@@ -178,7 +181,7 @@ test("competitor analysis stays readable for long names, citations and a missing
     await page.keyboard.press("Shift+Tab");
     await expect(share).toBeFocused();
     expect(await share.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
-    const countCell = share.getByRole("row", { name: shortName }).getByRole("cell").nth(1);
+    const countCell = share.getByRole("row", { name: shortName }).getByRole("cell").nth(3);
     await countCell.scrollIntoViewIfNeeded();
     expect(await countCell.evaluate((cell) => {
       const rect = cell.getBoundingClientRect();
@@ -197,6 +200,109 @@ test("competitor analysis stays readable for long names, citations and a missing
     await expectNoOverflow(page);
     await activateFromKeyboard(page, main.getByRole("link", { name: "View the current brand", exact: true }));
     await expect(main.getByText(longName, { exact: true }).first()).toBeVisible();
+
+    // Seed slotted observations for Version 2: Q1 (1 answer -> 甲), Q2 (5 answers -> 乙), Q3 (zero mentions), Q4 (unknown)
+    const q1Id = "11111111-1111-4111-8111-111111111111";
+    const q2Id = "22222222-2222-4222-8222-222222222222";
+    const q3Id = "33333333-3333-4333-8333-333333333333";
+    const q4Id = "44444444-4444-4444-8444-444444444444";
+    const seeded = JSON.parse(execFileSync(process.execPath, [
+      "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", "competitor-slots",
+      JSON.stringify({
+        userId: accounts[0].userId,
+        brandId,
+        items: [
+          { questionId: q1Id, questionText: "第一题", answerText: "只提甲" },
+          { questionId: q2Id, questionText: "第二题", answerText: "乙回答1" },
+          { questionId: q2Id, questionText: "第二题", answerText: "乙回答2" },
+          { questionId: q2Id, questionText: "第二题", answerText: "乙回答3" },
+          { questionId: q2Id, questionText: "第二题", answerText: "乙回答4" },
+          { questionId: q2Id, questionText: "第二题", answerText: "乙回答5" },
+          { questionId: q3Id, questionText: "第三题", answerText: "无提及" },
+          { questionId: q4Id, questionText: "第四题", answerText: "甲未知" },
+        ],
+      }),
+    ], { encoding: "utf8" })) as { created: Array<{ observationId: string; questionId: string }> };
+
+    await main.getByLabel("Competitor names (one per line, up to 5)", { exact: true }).fill("甲\n乙");
+    await main.getByRole("button", { name: "Save set", exact: true }).click();
+    await expect(main.getByRole("link", { name: "Version 2", exact: true })).toBeVisible();
+
+    let expectedCommon = 0;
+    let expectedExcluded = 0;
+    for (const entry of seeded.created) {
+      await main.locator("select[name=observationId]").selectOption(entry.observationId);
+      if (entry.questionId === q1Id) {
+        await main.getByLabel("甲", { exact: true }).selectOption("true");
+        await main.getByLabel("乙", { exact: true }).selectOption("false");
+        expectedCommon += 1;
+      } else if (entry.questionId === q2Id) {
+        await main.getByLabel("甲", { exact: true }).selectOption("false");
+        await main.getByLabel("乙", { exact: true }).selectOption("true");
+        expectedCommon += 1;
+      } else if (entry.questionId === q3Id) {
+        await main.getByLabel("甲", { exact: true }).selectOption("false");
+        await main.getByLabel("乙", { exact: true }).selectOption("false");
+        expectedCommon += 1;
+      } else {
+        await main.getByLabel("甲", { exact: true }).selectOption("unknown");
+        await main.getByLabel("乙", { exact: true }).selectOption("true");
+        expectedExcluded += 1;
+      }
+      await main.getByRole("button", { name: "Save mentions", exact: true }).click();
+      await expect(main.getByText(new RegExp(`^${expectedCommon} common answers .* ${expectedExcluded} excluded$`))).toBeVisible();
+    }
+
+    for (const copy of [
+      {
+        locale: "zh-CN",
+        region: "份额表",
+        version: "版本 2",
+        equalHeader: "题等权份额",
+        pooledHeader: "池化份额",
+        zeroNote: /仍在覆盖中/,
+        excludedNote: /整题未进入共同可判断子集（1 条含未知提及）/,
+      },
+      {
+        locale: "en",
+        region: "Share table",
+        version: "Version 2",
+        equalHeader: "Question-equal-weighted share",
+        pooledHeader: "Pooled share",
+        zeroNote: /Still covered/,
+        excludedNote: /Excluded from common judgable subset \(1 answers with unknown mentions\)/,
+      },
+    ]) {
+      await context.addCookies([{ name: "geo-locale", value: copy.locale, url: origin }]);
+      await page.goto(`/dashboard/monitoring/competitors?brandId=${brandId}&version=2`);
+      await expect(main.getByText(copy.version, { exact: true }).first()).toBeVisible();
+      const v2Table = main.getByRole("region", { name: copy.region, exact: true });
+      await expect(v2Table.getByRole("columnheader", { name: copy.equalHeader, exact: true })).toBeVisible();
+      await expect(v2Table.getByRole("columnheader", { name: copy.pooledHeader, exact: true })).toBeVisible();
+      const jiaRow = v2Table.getByRole("row", { name: "甲" });
+      await expect(jiaRow.getByRole("cell").nth(1)).toHaveText("50.0%");
+      await expect(jiaRow.getByRole("cell").nth(2)).toHaveText("16.7%");
+      await expect(jiaRow.getByRole("cell").nth(3)).toHaveText("1");
+      await expect(jiaRow.getByRole("cell").nth(4)).toHaveText("6");
+      const yiRow = v2Table.getByRole("row", { name: "乙" });
+      await expect(yiRow.getByRole("cell").nth(1)).toHaveText("50.0%");
+      await expect(yiRow.getByRole("cell").nth(2)).toHaveText("83.3%");
+      await expect(yiRow.getByRole("cell").nth(3)).toHaveText("5");
+      await expect(yiRow.getByRole("cell").nth(4)).toHaveText("6");
+      await expect(main.getByText(q1Id, { exact: true })).toBeVisible();
+      await expect(main.getByText(q2Id, { exact: true })).toBeVisible();
+      await expect(main.getByText(q3Id, { exact: true })).toBeVisible();
+      await expect(main.getByText(q4Id, { exact: true }).first()).toBeVisible();
+      await expect(main.getByText(copy.zeroNote)).toBeVisible();
+      await expect(main.getByText(copy.excludedNote)).toBeVisible();
+      await expectNoOverflow(page);
+    }
+
+    // Version 1 remains unchanged after Version 2
+    await page.goto(`/dashboard/monitoring/competitors?brandId=${brandId}&version=1`);
+    const v1Table = main.getByRole("region", { name: "Share table", exact: true });
+    await expect(v1Table.getByRole("row", { name: shortName }).getByRole("cell").nth(2)).toHaveText("50.0%");
+    await expect(v1Table.getByRole("row", { name: shortName }).getByRole("cell").nth(3)).toHaveText("1");
 
     const denied = await outsider.request.post("/api/monitoring/answers", {
       headers: { Origin: origin },

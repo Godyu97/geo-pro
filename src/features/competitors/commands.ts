@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
-import { conditionalMeanPosition, mentionShare } from "../competitor-share/rules.ts";
+import { competitorShareBreakdown, conditionalMeanPosition, type MentionState } from "../competitor-share/rules.ts";
 import { inspectCopiedBrief, inspectSource } from "../source-opportunities/rules.ts";
 import type {
   BriefStatusInput,
@@ -13,7 +13,7 @@ import type {
   SaveCompetitorSetInput,
 } from "./contracts.ts";
 import { normalizeCompetitorLabels } from "./contracts.ts";
-import { CompetitorDao, type CitationSourceRow, type CompetitorMentionRow, type CompetitorSetRow } from "./dao.ts";
+import { CompetitorDao, type CitationSourceRow, type CompetitorMentionDetailRow, type CompetitorSetRow } from "./dao.ts";
 
 type Clock = () => string;
 type Failure = { error: CompetitorError };
@@ -26,21 +26,39 @@ export function labelsOf(row: CompetitorSetRow) {
   return normalizeCompetitorLabels(JSON.parse(row.labelsJson) as string[]) ?? [];
 }
 
+function emptyShare(labels: readonly string[]) {
+  return {
+    ...competitorShareBreakdown([], []),
+    rank: { ranked: false as const, mean: null, excludedAbsent: [...labels], unorderedCount: 0 },
+  };
+}
+
 export function shareFromMentions(
   labels: readonly string[],
-  mentions: readonly Pick<CompetitorMentionRow, "observationId" | "competitorLabel" | "ordered" | "position">[],
+  mentions: readonly (Pick<CompetitorMentionDetailRow, "observationId" | "competitorLabel" | "ordered" | "position"> & {
+    mentionState?: MentionState;
+    questionId?: string | null;
+    questionText?: string | null;
+  })[],
 ) {
-  const rows = mentionShare(
-    mentions.map((mention) => ({ answerId: mention.observationId, brandId: mention.competitorLabel })),
+  const breakdown = competitorShareBreakdown(
     labels,
+    mentions.map((mention) => ({
+      observationId: mention.observationId,
+      questionId: mention.questionId ?? null,
+      questionText: mention.questionText ?? null,
+      brandId: mention.competitorLabel,
+      mentionState: mention.mentionState ?? "true",
+    })),
   );
-  const orderedMentions = mentions.filter((mention): mention is typeof mention & { position: number } => (
+  const activeMentions = mentions.filter((mention) => (mention.mentionState ?? "true") === "true");
+  const orderedMentions = activeMentions.filter((mention): mention is typeof mention & { position: number } => (
     mention.ordered === 1 && mention.position !== null
   ));
-  const unorderedCount = mentions.filter((mention) => mention.ordered === 0).length;
+  const unorderedCount = activeMentions.filter((mention) => mention.ordered === 0).length;
   if (orderedMentions.length === 0) {
     return {
-      rows,
+      ...breakdown,
       rank: { ranked: false as const, mean: null, excludedAbsent: [...labels], unorderedCount },
     };
   }
@@ -51,7 +69,7 @@ export function shareFromMentions(
     absentBrandIds: labels.filter((label) => !present.has(label)),
   });
   return {
-    rows,
+    ...breakdown,
     rank: {
       ranked: true as const,
       mean: stats.ranked ? stats.mean : null,
@@ -104,15 +122,33 @@ export async function recordCompetitorMentions(
     const set = sets.find((item) => item.id === input.setId);
     if (!set) return denied("NOT_FOUND");
     if (!await dao.observationOwned(ownerId, input.brandId, input.observationId)) return denied("NOT_FOUND");
-    const allowed = new Set(labelsOf(set));
+    const setLabels = labelsOf(set);
+    const allowed = new Set(setLabels);
     if (input.mentions.some((mention) => !allowed.has(mention.label))) return denied("INVALID_INPUT");
+    const entries = input.mentions.length === 0
+      ? setLabels.map((label) => ({
+        label,
+        mentionState: "false" as const,
+        ordered: 0 as const,
+        position: null,
+      }))
+      : input.mentions.map((mention) => {
+        const mentionState = mention.state ?? "true";
+        const ordered = mentionState === "true" && input.ordered ? (1 as const) : (0 as const);
+        const position = ordered === 1 ? mention.position ?? null : null;
+        return { label: mention.label, mentionState, ordered, position };
+      });
     const now = clock();
-    for (const mention of input.mentions) {
-      const ordered = input.ordered ? 1 : 0;
-      const position = input.ordered ? mention.position ?? null : null;
-      const existing = await dao.findMention(input.setId, input.observationId, mention.label);
+    for (const entry of entries) {
+      const existing = await dao.findMention(input.setId, input.observationId, entry.label);
       if (existing) {
-        if (existing.ordered !== ordered || existing.position !== position) return denied("OPERATION_CONFLICT");
+        if (
+          existing.mentionState !== entry.mentionState
+          || existing.ordered !== entry.ordered
+          || existing.position !== entry.position
+        ) {
+          return denied("OPERATION_CONFLICT");
+        }
         continue;
       }
       await dao.insertMention({
@@ -121,13 +157,14 @@ export async function recordCompetitorMentions(
         ownerId,
         setId: input.setId,
         observationId: input.observationId,
-        competitorLabel: mention.label,
-        ordered,
-        position,
+        competitorLabel: entry.label,
+        mentionState: entry.mentionState,
+        ordered: entry.ordered,
+        position: entry.position,
         createdAt: now,
       });
     }
-    return { recorded: input.mentions.length };
+    return { recorded: entries.length };
   });
 }
 
@@ -146,8 +183,7 @@ export async function readCompetitorShare(
     return {
       sets: [],
       selected: null,
-      rows: [],
-      rank: { ranked: false as const, mean: null, excludedAbsent: [] as string[], unorderedCount: 0 },
+      ...emptyShare([]),
       truncated: false,
     };
   }
@@ -157,8 +193,7 @@ export async function readCompetitorShare(
     return {
       sets: sets.map((item) => ({ id: item.id, version: item.version, labels: labelsOf(item), createdAt: item.createdAt })),
       selected: { id: selected.id, version: selected.version, labels, createdAt: selected.createdAt },
-      rows: [],
-      rank: { ranked: false as const, mean: null, excludedAbsent: [...labels], unorderedCount: 0 },
+      ...emptyShare(labels),
       truncated: true,
     };
   }
@@ -166,8 +201,7 @@ export async function readCompetitorShare(
   return {
     sets: sets.map((item) => ({ id: item.id, version: item.version, labels: labelsOf(item), createdAt: item.createdAt })),
     selected: { id: selected.id, version: selected.version, labels, createdAt: selected.createdAt },
-    rows: share.rows,
-    rank: share.rank,
+    ...share,
     truncated: false,
   };
 }
@@ -357,15 +391,11 @@ export async function readCompetitorWorkspace(
   const labels = selected ? labelsOf(selected) : [];
   const share = selected && !mentions.truncated
     ? shareFromMentions(labels, mentions.rows)
-    : {
-      rows: [] as ReturnType<typeof shareFromMentions>["rows"],
-      rank: { ranked: false as const, mean: null, excludedAbsent: [...labels], unorderedCount: 0 },
-    };
+    : emptyShare(labels);
   return {
     sets: sets.map((item) => ({ id: item.id, version: item.version, labels: labelsOf(item), createdAt: item.createdAt })),
     selected: selected ? { id: selected.id, version: selected.version, labels, createdAt: selected.createdAt } : null,
-    rows: share.rows,
-    rank: share.rank,
+    ...share,
     truncated: mentions.truncated,
     observations,
     citations: sources.rows.map(presentCitation),

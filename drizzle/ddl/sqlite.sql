@@ -1459,14 +1459,19 @@ CREATE TABLE `competitor_mention` (
 	`ordered` integer NOT NULL,
 	`position` integer,
 	`created_at` text NOT NULL,
+	`mention_state` text DEFAULT 'true' NOT NULL,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`set_id`) REFERENCES `competitor_set`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`observation_id`) REFERENCES `answer_observation`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "competitor_mention_check" CHECK("competitor_mention"."ordered" in (0, 1)
+    and "competitor_mention"."mention_state" in ('true', 'false', 'unknown')
     and length("competitor_mention"."competitor_label") between 1 and 80
     and (
-      ("competitor_mention"."ordered" = 1 and "competitor_mention"."position" > 0)
-      or ("competitor_mention"."ordered" = 0 and "competitor_mention"."position" is null)
+      ("competitor_mention"."mention_state" = 'true' and (
+        ("competitor_mention"."ordered" = 1 and "competitor_mention"."position" > 0)
+        or ("competitor_mention"."ordered" = 0 and "competitor_mention"."position" is null)
+      ))
+      or ("competitor_mention"."mention_state" in ('false', 'unknown') and "competitor_mention"."ordered" = 0 and "competitor_mention"."position" is null)
     ))
 );
 

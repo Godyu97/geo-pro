@@ -1,4 +1,275 @@
 export type Mention = { answerId: string; brandId: string };
+export type MentionState = "true" | "false" | "unknown";
+
+export type CompetitorMentionInput = {
+  observationId: string;
+  questionId: string | null;
+  questionText?: string | null;
+  brandId: string;
+  mentionState: MentionState;
+};
+
+export type CompetitorShareRow = {
+  brandId: string;
+  equalWeightShare: number | null;
+  equalWeightQuestions: number;
+  coveredQuestions: number;
+  pooledCount: number;
+  pooledDenominator: number;
+  pooledShare: number | null;
+};
+
+export type QuestionCompetitorShare = {
+  questionId: string;
+  questionText: string | null;
+  status: "ready" | "zero_mentions" | "excluded";
+  answerCount: number;
+  excludedAnswerCount: number;
+  totalMentions: number;
+  brands: Array<{
+    brandId: string;
+    count: number;
+    denominator: number;
+    share: number | null;
+  }>;
+};
+
+export type MissingQuestionAnswer = {
+  observationId: string;
+  questionText: string | null;
+  mentionedBrands: string[];
+};
+
+export type ExcludedCompetitorAnswer = {
+  observationId: string;
+  questionId: string | null;
+  questionText: string | null;
+  unknownBrands: string[];
+};
+
+export type CompetitorShareBreakdown = {
+  rows: CompetitorShareRow[];
+  questions: QuestionCompetitorShare[];
+  missingQuestionAnswers: MissingQuestionAnswer[];
+  excludedAnswers: ExcludedCompetitorAnswer[];
+  summary: {
+    equalWeightQuestions: number;
+    coveredQuestions: number;
+    zeroMentionQuestions: number;
+    excludedQuestions: number;
+    commonAnswerCount: number;
+    excludedAnswerCount: number;
+    missingQuestionAnswerCount: number;
+    pooledDenominator: number;
+  };
+};
+
+function mergeMentionState(existing: MentionState | undefined, incoming: MentionState): MentionState {
+  if (existing === "unknown" || incoming === "unknown") return "unknown";
+  if (existing === "true" || incoming === "true") return "true";
+  return "false";
+}
+
+/**
+ * Computes both question-equal-weighted and pooled shares on the common judgable subset
+ * (answers where no fixed-set member is unknown). Each brand counts at most once per answer.
+ */
+export function competitorShareBreakdown(
+  competitors: readonly string[],
+  mentions: readonly CompetitorMentionInput[],
+): CompetitorShareBreakdown {
+  if (competitors.length === 0) {
+    return {
+      rows: [],
+      questions: [],
+      missingQuestionAnswers: [],
+      excludedAnswers: [],
+      summary: {
+        equalWeightQuestions: 0,
+        coveredQuestions: 0,
+        zeroMentionQuestions: 0,
+        excludedQuestions: 0,
+        commonAnswerCount: 0,
+        excludedAnswerCount: 0,
+        missingQuestionAnswerCount: 0,
+        pooledDenominator: 0,
+      },
+    };
+  }
+
+  const allowed = new Set(competitors);
+  const byObservation = new Map<string, {
+    observationId: string;
+    questionId: string | null;
+    questionText: string | null;
+    states: Map<string, MentionState>;
+  }>();
+
+  for (const mention of mentions) {
+    if (!allowed.has(mention.brandId)) continue;
+    let entry = byObservation.get(mention.observationId);
+    if (!entry) {
+      entry = {
+        observationId: mention.observationId,
+        questionId: mention.questionId ?? null,
+        questionText: mention.questionText ?? null,
+        states: new Map<string, MentionState>(),
+      };
+      byObservation.set(mention.observationId, entry);
+    } else {
+      if (entry.questionId === null && mention.questionId !== null) entry.questionId = mention.questionId;
+      if (!entry.questionText && mention.questionText) entry.questionText = mention.questionText;
+    }
+    entry.states.set(mention.brandId, mergeMentionState(entry.states.get(mention.brandId), mention.mentionState));
+  }
+
+  const pooledCounts = new Map<string, number>();
+  const questionTextById = new Map<string, string | null>();
+  const excludedCountByQuestion = new Map<string, number>();
+  const questionBuckets = new Map<string, { answerCount: number; counts: Map<string, number> }>();
+  const missingQuestionAnswers: MissingQuestionAnswer[] = [];
+  const excludedAnswers: ExcludedCompetitorAnswer[] = [];
+  let commonAnswerCount = 0;
+
+  for (const obs of byObservation.values()) {
+    if (obs.questionId !== null && !questionTextById.has(obs.questionId)) {
+      questionTextById.set(obs.questionId, obs.questionText);
+    }
+    const unknownBrands = competitors.filter((brandId) => obs.states.get(brandId) === "unknown");
+    if (unknownBrands.length > 0) {
+      excludedAnswers.push({
+        observationId: obs.observationId,
+        questionId: obs.questionId,
+        questionText: obs.questionText,
+        unknownBrands,
+      });
+      if (obs.questionId !== null) {
+        excludedCountByQuestion.set(obs.questionId, (excludedCountByQuestion.get(obs.questionId) ?? 0) + 1);
+      }
+      continue;
+    }
+
+    commonAnswerCount += 1;
+    const mentionedBrands = competitors.filter((brandId) => obs.states.get(brandId) === "true");
+    for (const brandId of mentionedBrands) {
+      pooledCounts.set(brandId, (pooledCounts.get(brandId) ?? 0) + 1);
+    }
+
+    if (obs.questionId === null) {
+      missingQuestionAnswers.push({
+        observationId: obs.observationId,
+        questionText: obs.questionText,
+        mentionedBrands,
+      });
+      continue;
+    }
+
+    let bucket = questionBuckets.get(obs.questionId);
+    if (!bucket) {
+      bucket = { answerCount: 0, counts: new Map<string, number>() };
+      questionBuckets.set(obs.questionId, bucket);
+    }
+    bucket.answerCount += 1;
+    for (const brandId of mentionedBrands) {
+      bucket.counts.set(brandId, (bucket.counts.get(brandId) ?? 0) + 1);
+    }
+  }
+
+  const allQuestionIds = [...new Set([...questionBuckets.keys(), ...excludedCountByQuestion.keys()])]
+    .sort((left, right) => left.localeCompare(right));
+
+  const equalWeightSums = new Map<string, number>();
+  const questions: QuestionCompetitorShare[] = [];
+  let equalWeightQuestions = 0;
+  let coveredQuestions = 0;
+  let zeroMentionQuestions = 0;
+  let excludedQuestions = 0;
+
+  for (const questionId of allQuestionIds) {
+    const bucket = questionBuckets.get(questionId);
+    const excludedAnswerCount = excludedCountByQuestion.get(questionId) ?? 0;
+    const questionText = questionTextById.get(questionId) ?? null;
+
+    if (!bucket) {
+      excludedQuestions += 1;
+      questions.push({
+        questionId,
+        questionText,
+        status: "excluded",
+        answerCount: 0,
+        excludedAnswerCount,
+        totalMentions: 0,
+        brands: competitors.map((brandId) => ({ brandId, count: 0, denominator: 0, share: null })),
+      });
+      continue;
+    }
+
+    coveredQuestions += 1;
+    const totalMentions = competitors.reduce((sum, brandId) => sum + (bucket.counts.get(brandId) ?? 0), 0);
+    if (totalMentions === 0) {
+      zeroMentionQuestions += 1;
+      questions.push({
+        questionId,
+        questionText,
+        status: "zero_mentions",
+        answerCount: bucket.answerCount,
+        excludedAnswerCount,
+        totalMentions: 0,
+        brands: competitors.map((brandId) => ({ brandId, count: 0, denominator: 0, share: null })),
+      });
+      continue;
+    }
+
+    equalWeightQuestions += 1;
+    const brands = competitors.map((brandId) => {
+      const count = bucket.counts.get(brandId) ?? 0;
+      const share = count / totalMentions;
+      equalWeightSums.set(brandId, (equalWeightSums.get(brandId) ?? 0) + share);
+      return { brandId, count, denominator: totalMentions, share };
+    });
+
+    questions.push({
+      questionId,
+      questionText,
+      status: "ready",
+      answerCount: bucket.answerCount,
+      excludedAnswerCount,
+      totalMentions,
+      brands,
+    });
+  }
+
+  const pooledDenominator = competitors.reduce((sum, brandId) => sum + (pooledCounts.get(brandId) ?? 0), 0);
+  const rows: CompetitorShareRow[] = competitors.map((brandId) => {
+    const pooledCount = pooledCounts.get(brandId) ?? 0;
+    return {
+      brandId,
+      equalWeightShare: equalWeightQuestions === 0 ? null : (equalWeightSums.get(brandId) ?? 0) / equalWeightQuestions,
+      equalWeightQuestions,
+      coveredQuestions,
+      pooledCount,
+      pooledDenominator,
+      pooledShare: pooledDenominator === 0 ? null : pooledCount / pooledDenominator,
+    };
+  });
+
+  return {
+    rows,
+    questions,
+    missingQuestionAnswers,
+    excludedAnswers,
+    summary: {
+      equalWeightQuestions,
+      coveredQuestions,
+      zeroMentionQuestions,
+      excludedQuestions,
+      commonAnswerCount,
+      excludedAnswerCount: excludedAnswers.length,
+      missingQuestionAnswerCount: missingQuestionAnswers.length,
+      pooledDenominator,
+    },
+  };
+}
 
 /** Each brand counts at most once per answer. Share uses the fixed set and the visible denominator. */
 export function mentionShare(mentions: readonly Mention[], competitors: readonly string[]) {

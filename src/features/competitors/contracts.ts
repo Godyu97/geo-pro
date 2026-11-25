@@ -19,6 +19,10 @@ export const saveCompetitorSetSchema = z.strictObject({
 });
 export type SaveCompetitorSetInput = z.infer<typeof saveCompetitorSetSchema>;
 
+export const mentionStates = ["true", "false", "unknown"] as const;
+export const mentionStateSchema = z.enum(mentionStates);
+export type MentionStateValue = z.infer<typeof mentionStateSchema>;
+
 export const recordMentionsSchema = z.strictObject({
   brandId: brandIdSchema,
   setId: brandIdSchema,
@@ -26,15 +30,20 @@ export const recordMentionsSchema = z.strictObject({
   ordered: z.boolean(),
   mentions: z.array(z.strictObject({
     label: labelSchema,
+    state: mentionStateSchema.optional(),
     position: z.int().positive().optional(),
-  })).min(1).max(5),
+  })).min(0).max(5),
 }).superRefine((input, context) => {
   const labels = input.mentions.map((item) => item.label);
   if (new Set(labels).size !== labels.length) {
     context.addIssue({ code: "custom", path: ["mentions"], message: "duplicate label" });
   }
   for (const [index, mention] of input.mentions.entries()) {
-    if (input.ordered && mention.position === undefined) {
+    const state = mention.state ?? "true";
+    if (state !== "true" && mention.position !== undefined) {
+      context.addIssue({ code: "custom", path: ["mentions", index, "position"], message: "only mentioned brand has position" });
+    }
+    if (input.ordered && state === "true" && mention.position === undefined) {
       context.addIssue({ code: "custom", path: ["mentions", index, "position"], message: "position required" });
     }
     if (!input.ordered && mention.position !== undefined) {
