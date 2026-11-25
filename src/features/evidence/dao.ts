@@ -398,6 +398,34 @@ export class EvidenceDao {
     return row ? attemptCostRow.parse(row) : null;
   }
 
+  async updateDraftObservation(row: ObservationRow) {
+    const rows = await this.query(
+      `UPDATE answer_observation SET
+        question_text = ?, answer_text = ?, fingerprint = ?, region = ?, language = ?,
+        requested_network_mode = ?, entity_version = ?, citation_set_state = ?, evidence_state = ?,
+        locator_ref = ?, collector_id = ?, missing_reason = ?,
+        target_region = ?, observed_region = ?, new_session = ?, product_mode = ?
+       WHERE id = ? AND owner_id = ? AND brand_id = ? AND evidence_state = 'draft_evidence'
+       RETURNING id`,
+      [
+        row.questionText, row.answerText, row.fingerprint, row.region, row.language,
+        row.requestedNetworkMode, row.entityVersion, row.citationSetState, row.evidenceState,
+        row.locatorRef, row.collectorId, row.missingReason,
+        row.targetRegion, row.observedRegion, row.newSession, row.productMode,
+        row.id, row.ownerId, row.brandId,
+      ],
+    );
+    return rows.length === 1;
+  }
+
+  async replaceCitations(observationId: string, brandId: string, rows: CitationRow[]) {
+    await this.query(
+      `DELETE FROM answer_citation WHERE observation_id = ? AND brand_id = ?`,
+      [observationId, brandId],
+    );
+    await this.insertCitations(rows);
+  }
+
   async insertObservation(row: ObservationRow) {
     await this.query(
       `INSERT INTO answer_observation (

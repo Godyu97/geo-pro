@@ -11,6 +11,7 @@ import { executeAnalysisDraft } from "./analysis-drafts";
 import {
   ingestAdoptedObservation,
   readObservation,
+  completeManualEvidence,
   reviseAnalysis,
   submitManualEvidence,
 } from "./commands";
@@ -59,7 +60,9 @@ export async function evidenceWriteResponse(request: Request) {
       ? await ingestAdoptedObservation(connection, ownerId, parsed.data)
       : parsed.data.action === "submit-manual"
         ? await submitManualEvidence(connection, ownerId, parsed.data)
-        : await reviseAnalysis(connection, ownerId, parsed.data);
+        : parsed.data.action === "complete-manual"
+          ? await completeManualEvidence(connection, ownerId, parsed.data)
+          : await reviseAnalysis(connection, ownerId, parsed.data);
     if (result && "error" in result && !("observation" in result)) {
       return failure(result.error, undefined, result.next);
     }

@@ -4,8 +4,10 @@ import { createHash, randomUUID } from "node:crypto";
 import type { CacheStore } from "../../lib/cache/store.ts";
 import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection, TransactionConnection } from "../../lib/db/connection.ts";
+import { BrandDao } from "../brands/dao.ts";
 import { PromptDao } from "../prompts/dao.ts";
 import {
+  type CompleteManualInput,
   type EvidenceError,
   type IngestAdoptedInput,
   type ReviseAnalysisInput,
@@ -72,31 +74,93 @@ async function owned(dao: EvidenceDao, ownerId: string, brandId: string) {
   return brand;
 }
 
+const credentialPattern = /password|passwd|session[_-]?token|cookie|authorization/i;
+
 function buildCitations(
   observationId: string,
   brandId: string,
   createdAt: string,
   citations: Array<{
     rawUrl: string;
-    normalizedUrl?: string;
     citationOrigin: CitationRow["citationOrigin"];
     positionLabel?: string | null;
     ownership?: CitationRow["ownership"];
     pageStatus?: CitationRow["pageStatus"];
   }>,
 ): CitationRow[] {
-  return citations.map((item) => ({
+  const seen = new Set<string>();
+  const rows: CitationRow[] = [];
+  for (const item of citations) {
+    const normalizedUrl = normalizeUrl(item.rawUrl);
+    if (seen.has(normalizedUrl)) continue;
+    seen.add(normalizedUrl);
+    rows.push({
+      id: randomUUID(),
+      observationId,
+      brandId,
+      rawUrl: item.rawUrl,
+      normalizedUrl,
+      citationOrigin: item.citationOrigin,
+      positionLabel: item.positionLabel ?? null,
+      ownership: item.ownership ?? "unknown",
+      pageStatus: item.pageStatus ?? "unknown",
+      createdAt,
+    });
+  }
+  return rows;
+}
+
+function resolveManualWrite(input: SubmitManualInput | CompleteManualInput) {
+  if (credentialPattern.test(`${input.answerText}\n${input.locatorRef ?? ""}`)) return denied("INVALID_INPUT");
+  const missingAnswer = input.answerText.trim().length === 0;
+  const missingCitation = input.citationSetState === "missing";
+  const missingLocator = !input.locatorRef;
+  const missingCollector = !input.collectorId;
+  const incomplete = missingAnswer || missingCitation || missingLocator || missingCollector;
+  const evidenceState = incomplete ? "draft_evidence" as const : input.contested ? "contested" as const : "complete" as const;
+  const conditions = resolveSamplingConditions({
+    region: input.region,
+    targetRegion: input.targetRegion,
+    observedRegion: input.observedRegion,
+    newSession: input.newSession,
+    productMode: input.productMode,
+  });
+  if (!conditions) return denied("INVALID_INPUT");
+  const missingReason = incomplete
+    ? [
+      missingAnswer ? "answer-missing" : null,
+      missingCitation ? "citation-fields-missing" : null,
+      missingLocator ? "locator-missing" : null,
+      missingCollector ? "collector-missing" : null,
+    ].filter(Boolean).join(",")
+    : null;
+  return { evidenceState, conditions, missingReason };
+}
+
+function manualAnalysis(
+  observationId: string,
+  input: SubmitManualInput | CompleteManualInput,
+  evidenceState: "complete" | "contested",
+  labels: ReturnType<typeof classifyLabels>,
+  now: string,
+): AnalysisRow {
+  return {
     id: randomUUID(),
     observationId,
-    brandId,
-    rawUrl: item.rawUrl,
-    normalizedUrl: item.normalizedUrl ?? normalizeUrl(item.rawUrl),
-    citationOrigin: item.citationOrigin,
-    positionLabel: item.positionLabel ?? null,
-    ownership: item.ownership ?? "unknown",
-    pageStatus: item.pageStatus ?? "unknown",
-    createdAt,
-  }));
+    brandId: input.brandId,
+    version: 1,
+    entityVersion: input.entityVersion,
+    ruleVersion: analysisRuleVersion,
+    mentioned: labels.mentioned,
+    recommended: labels.recommended,
+    officialSiteCited: labels.officialSiteCited,
+    evidenceSpan: input.evidenceSpan ?? labels.evidenceSpan,
+    status: evidenceState === "contested" ? "needs_review" : labels.status,
+    revisedFrom: null,
+    reason: null,
+    reviewerId: null,
+    createdAt: now,
+  };
 }
 
 function detailPayload(
@@ -265,34 +329,9 @@ export async function submitManualEvidence(
     const brand = await owned(dao, ownerId, input.brandId);
     if ("error" in brand) return brand;
 
-    const forbidden = /password|passwd|session[_-]?token|cookie|authorization/i.test(
-      `${input.answerText}\n${input.locatorRef ?? ""}`,
-    );
-    if (forbidden) return denied("INVALID_INPUT");
-
-    const missingLocator = !input.locatorRef;
-    const missingCollector = !input.collectorId;
-    const incomplete = input.answerText.trim().length === 0
-      || input.citationSetState === "missing"
-      || missingLocator
-      || missingCollector;
-    const evidenceState = input.contested
-      ? "contested"
-      : incomplete
-        ? "draft_evidence"
-        : "complete";
-    if (evidenceState === "draft_evidence" && input.answerText.trim().length === 0 && !input.locatorRef) {
-      // drafts are allowed; callers may continue later
-    }
-
-    const conditions = resolveSamplingConditions({
-      region: input.region,
-      targetRegion: input.targetRegion,
-      observedRegion: input.observedRegion,
-      newSession: input.newSession,
-      productMode: input.productMode,
-    });
-    if (!conditions) return denied("INVALID_INPUT");
+    const resolved = resolveManualWrite(input);
+    if ("error" in resolved) return resolved;
+    const { evidenceState, conditions, missingReason } = resolved;
 
     const now = clock();
     const observationId = randomUUID();
@@ -335,36 +374,13 @@ export async function submitManualEvidence(
       evidenceState,
       locatorRef: input.locatorRef ?? null,
       collectorId: input.collectorId ?? null,
-      missingReason: incomplete
-        ? [
-            input.answerText.trim() ? null : "answer-missing",
-            input.citationSetState === "missing" ? "citation-fields-missing" : null,
-            missingLocator ? "locator-missing" : null,
-            missingCollector ? "collector-missing" : null,
-          ].filter(Boolean).join(",")
-        : null,
+      missingReason,
       createdAt: now,
     };
 
     const analyses: AnalysisRow[] = [];
     if (evidenceState === "complete" || evidenceState === "contested") {
-      analyses.push({
-        id: randomUUID(),
-        observationId,
-        brandId: input.brandId,
-        version: 1,
-        entityVersion: input.entityVersion,
-        ruleVersion: analysisRuleVersion,
-        mentioned: labels.mentioned,
-        recommended: labels.recommended,
-        officialSiteCited: labels.officialSiteCited,
-        evidenceSpan: input.evidenceSpan ?? labels.evidenceSpan,
-        status: evidenceState === "contested" ? "needs_review" : labels.status,
-        revisedFrom: null,
-        reason: null,
-        reviewerId: null,
-        createdAt: now,
-      });
+      analyses.push(manualAnalysis(observationId, input, evidenceState, labels, now));
     }
 
     await dao.insertObservation(observation);
@@ -382,6 +398,108 @@ export async function submitManualEvidence(
     return payload;
   });
   return releaseOverview(ownerId, input.brandId, result, cache);
+}
+
+export async function completeManualEvidence(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: CompleteManualInput,
+  clock: Clock = () => new Date().toISOString(),
+  cache?: CacheStore,
+) {
+  const result = await db.transaction(async (tx) => {
+    const dao = new EvidenceDao(tx);
+    const existing = await dao.operation(ownerId, input.operationId);
+    if (existing) return JSON.parse(existing) as ReturnType<typeof detailPayload> & { replayed: true };
+
+    const brand = await owned(dao, ownerId, input.brandId);
+    if ("error" in brand) return brand;
+
+    const resolved = resolveManualWrite(input);
+    if ("error" in resolved) return resolved;
+
+    const current = await dao.observationForOwner(ownerId, input.observationId);
+    if (!current || current.brandId !== input.brandId) return denied("NOT_FOUND");
+    if (current.evidenceState !== "draft_evidence" || current.sourceMode !== "consumer_ui" || current.captureMethod !== "manual") {
+      return denied("EVIDENCE_LOCKED");
+    }
+
+    const { evidenceState, conditions, missingReason } = resolved;
+    const now = clock();
+    const citations = evidenceState === "draft_evidence" && input.citationSetState === "missing"
+      ? []
+      : buildCitations(current.id, input.brandId, now, input.citations);
+    const labels = classifyLabels({
+      answerText: input.answerText,
+      brandName: input.brandName,
+      aliases: input.aliases,
+      officialWebsite: input.officialWebsite,
+      citations,
+      mentioned: input.mentioned,
+      recommended: input.recommended,
+      officialSiteCited: input.officialSiteCited,
+    });
+    const observation: ObservationRow = {
+      ...current,
+      questionText: input.questionText,
+      answerText: input.answerText,
+      fingerprint: fingerprintAnswer(input.questionText, input.answerText),
+      region: conditions.region,
+      language: input.language,
+      requestedNetworkMode: input.requestedNetworkMode,
+      entityVersion: input.entityVersion,
+      citationSetState: input.citationSetState,
+      evidenceState,
+      locatorRef: input.locatorRef ?? null,
+      collectorId: input.collectorId ?? null,
+      missingReason,
+      targetRegion: conditions.targetRegion,
+      observedRegion: conditions.observedRegion,
+      newSession: conditions.newSession,
+      productMode: conditions.productMode,
+    };
+    const updated = await dao.updateDraftObservation(observation);
+    if (!updated) return denied("EVIDENCE_LOCKED");
+    await dao.replaceCitations(current.id, input.brandId, citations);
+
+    const analyses: AnalysisRow[] = [];
+    if (evidenceState === "complete" || evidenceState === "contested") {
+      analyses.push(manualAnalysis(current.id, input, evidenceState, labels, now));
+    }
+    for (const analysis of analyses) await dao.insertAnalysis(analysis);
+    const payload = {
+      ...detailPayload(observation, citations, analyses),
+      replayed: false as const,
+      incomplete: evidenceState === "draft_evidence",
+    };
+    await dao.recordOperation(ownerId, input.operationId, operationFingerprint(input), payload, now, input.brandId);
+    if (evidenceState === "draft_evidence") return { ...payload, error: "EVIDENCE_INCOMPLETE" as const };
+    return payload;
+  });
+  return releaseOverview(ownerId, input.brandId, result, cache);
+}
+
+export async function readManualEvidenceContext(
+  db: DatabaseConnection,
+  ownerId: string,
+  brandId: string,
+) {
+  const brand = await new BrandDao(db).version(ownerId, brandId);
+  if (!brand || brand.status !== "active") return null;
+  const source = await new PromptDao(db, brandId).latestClusterSource();
+  return {
+    brandId: brand.id,
+    brandName: brand.fields.name,
+    aliases: brand.fields.aliases,
+    officialWebsite: brand.fields.website || null,
+    entityVersion: brand.entityVersion,
+    region: brand.fields.region,
+    language: brand.fields.language,
+    questions: (source?.questions ?? [])
+      .filter((item) => item.text.trim().length > 0)
+      .slice(0, 30)
+      .map((item) => ({ id: item.id, text: item.text })),
+  };
 }
 
 export async function appendAnalysisRevision(

@@ -73,6 +73,7 @@ export const evidenceErrors = {
   NOT_ENTITLED: 409,
   VERSION_CONFLICT: 409,
   EVIDENCE_INCOMPLETE: 409,
+  EVIDENCE_LOCKED: 409,
   OPERATION_CONFLICT: 409,
   SERVICE_UNAVAILABLE: 503,
   AI_UNAVAILABLE: 503,
@@ -142,6 +143,12 @@ export const submitManualSchema = z.strictObject({
 });
 export type SubmitManualInput = z.infer<typeof submitManualSchema>;
 
+export const completeManualSchema = submitManualSchema.extend({
+  action: z.literal("complete-manual"),
+  observationId: brandIdSchema,
+});
+export type CompleteManualInput = z.infer<typeof completeManualSchema>;
+
 export const reviseAnalysisSchema = z.strictObject({
   action: z.literal("revise-analysis"),
   brandId: brandIdSchema,
@@ -186,6 +193,7 @@ export type AnalysisDraftCommand = z.infer<typeof analysisDraftCommandSchema>;
 export const evidenceWriteSchema = z.discriminatedUnion("action", [
   ingestAdoptedSchema,
   submitManualSchema,
+  completeManualSchema,
   reviseAnalysisSchema,
 ]);
 export type EvidenceWriteInput = z.infer<typeof evidenceWriteSchema>;

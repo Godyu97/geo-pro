@@ -9,7 +9,8 @@ import { listActionDrafts } from "../optimization/action-drafts";
 import { generateOptimizationAction } from "../optimization/actions";
 import { ActionDraftPanel } from "../optimization/draft-panel";
 import { AnalysisDraftPanel } from "./analysis-draft-form";
-import { readObservation } from "./commands";
+import { readManualEvidenceContext, readObservation } from "./commands";
+import { ManualEvidenceForm } from "./manual-evidence-form";
 import { EvidenceDetailStatus } from "./detail-status";
 import { answerListFiltersFromSearch, answerListPath } from "./answer-list";
 import { overviewScopeForReturn, overviewScopePath } from "./overview-contracts";
@@ -68,6 +69,11 @@ export default async function EvidenceDetailPage({
     ? answerListPath("/dashboard/monitoring/answers", preserved, parsedFilters.data)
     : overviewScopePath("/dashboard/monitoring/answers", preserved)}#answer-${observation.id}`;
   const overviewHref = overviewScopePath("/dashboard/monitoring/overview", preserved);
+  const manualContext = observation.evidenceState === "draft_evidence"
+    && observation.sourceMode === "consumer_ui"
+    && observation.captureMethod === "manual"
+    ? await readManualEvidenceContext(getConnection(), session.user.id, observation.brandId)
+    : null;
   const costText = capture.costState === "known" && capture.actualMinor !== null && capture.currency
     ? t("costKnown", { amount: formatMinorUnits(locale, capture.actualMinor, capture.currency) })
     : capture.costState === "none"
@@ -155,7 +161,8 @@ export default async function EvidenceDetailPage({
             {citations.map((item) => (
               <li key={item.id} className="wrap-anywhere rounded-lg border p-3">
                 <p>{item.citationOrigin}</p>
-                <p>{item.normalizedUrl}</p>
+                <p>{t("citationNormalized")}: {item.normalizedUrl}</p>
+                <p>{t("citationRaw")}: {item.rawUrl}</p>
                 <p>{item.ownership} · {item.pageStatus}</p>
               </li>
             ))}
@@ -205,6 +212,28 @@ export default async function EvidenceDetailPage({
           evidenceIds={observation.evidenceState === "draft_evidence" ? undefined : [observation.id]}
           drafts={actionDrafts.drafts}
           messages={getMessages(locale).optimization}
+        />
+      )}
+      {manualContext && (
+        <ManualEvidenceForm
+          mode="complete"
+          context={manualContext}
+          observationId={observation.id}
+          initial={{
+            questionText: observation.questionText,
+            answerText: observation.answerText,
+            targetRegion: observation.targetRegion,
+            observedRegion: observation.observedRegion,
+            newSession: observation.newSession,
+            productMode: observation.productMode,
+            requestedNetworkMode: observation.requestedNetworkMode,
+            citationSetState: observation.citationSetState,
+            citationUrls: citations.map((item) => item.rawUrl).join("\n"),
+            collectorId: observation.collectorId ?? "",
+            locatorRef: observation.locatorRef ?? "",
+            missingReason: observation.missingReason,
+          }}
+          messages={getMessages(locale).evidence}
         />
       )}
       {observation.evidenceState !== "draft_evidence" ? (

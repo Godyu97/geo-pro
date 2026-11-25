@@ -17,6 +17,8 @@ import {
   filterAnswerList,
 } from "./answer-list";
 import { answerListRows, readAnswerListContext } from "./answer-list-context";
+import { ManualEvidenceForm } from "./manual-evidence-form";
+import { readManualEvidenceContext } from "./commands";
 import { readEvidenceOverview } from "./overview-commands";
 import { overviewScopeFromSearch, overviewScopePath } from "./overview-contracts";
 import { OverviewScopeForm } from "./scope-form";
@@ -195,6 +197,7 @@ export default async function EvidenceAnswersPage({
   );
   const overviewHref = overviewScopePath("/dashboard/monitoring/overview", parsed.data);
   const listFiltered = answerListFilterActive(filters.data);
+  const manualContext = await readManualEvidenceContext(connection, session.user.id, parsed.data.brandId);
   const answerCount = formatCount(locale, visible.length, listFiltered
     ? { one: messages.listResultCountOne, other: messages.listResultCountOther }
     : { one: messages.answerCountOne, other: messages.answerCountOther });
@@ -241,6 +244,9 @@ export default async function EvidenceAnswersPage({
           <Link href={scopePath} prefetch={false}>{t("clearListFilters")}</Link>
         </Button>
       ) : null}
+      {manualContext && (
+        <ManualEvidenceForm mode="create" context={manualContext} messages={getMessages(locale).evidence} />
+      )}
       {mockLane && (
         <div className="min-w-0 space-y-2">
           <p className="max-w-2xl break-words text-sm leading-7 text-muted-foreground">{te("mockEvidenceNote")}</p>
