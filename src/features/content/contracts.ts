@@ -136,6 +136,29 @@ export const contentErrors = {
 } as const;
 export type ContentError = keyof typeof contentErrors;
 
+const exportActionErrorCodes = [
+  "INVALID_INPUT",
+  "NOT_FOUND",
+  "SUBSET_INVALID",
+  "PREFLIGHT_REQUIRED",
+  "FACT_INVALID",
+  "APPROVAL_REQUIRED",
+  "LABELING_UNVERIFIED",
+  "OPERATION_CONFLICT",
+  "SERVICE_UNAVAILABLE",
+  "APPROVAL_INVALID",
+  "SESSION_REQUIRED",
+  "FORBIDDEN",
+] as const satisfies readonly ContentError[];
+
+const exportUiErrorCodes = [...exportActionErrorCodes, "NONE_SELECTED"] as const;
+export type ExportUiError = (typeof exportUiErrorCodes)[number];
+
+export function exportUiError(value: string | string[] | undefined): ExportUiError | undefined {
+  const code = Array.isArray(value) ? value[0] : value;
+  return exportUiErrorCodes.find((item) => item === code);
+}
+
 export const briefDraftFieldsSchema = z.strictObject({
   audience: z.string().max(500),
   targetGap: z.string().max(1000),

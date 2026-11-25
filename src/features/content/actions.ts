@@ -150,8 +150,38 @@ function splitIds(value: FormDataEntryValue | null) {
   return String(value ?? "").split(/[\s,]+/).map((item) => item.trim()).filter(Boolean);
 }
 
+function uniqueIds(values: FormDataEntryValue[]) {
+  return [...new Set(values.map((value) => String(value).trim()).filter(Boolean))];
+}
+
 function versionPath(versionId: string) {
   return `/dashboard/content/versions/${versionId}`;
+}
+
+function contentListPath(brandId: string, filter: string) {
+  const search = new URLSearchParams();
+  if (brandId) search.set("brandId", brandId);
+  if (filter === "pending_review" || filter === "deliverable") search.set("filter", filter);
+  const query = search.toString();
+  return query ? `/dashboard/content?${query}` : "/dashboard/content";
+}
+
+function withSearch(path: string, extra: Record<string, string | undefined>) {
+  const [pathname, existing] = path.split("?");
+  const search = new URLSearchParams(existing ?? "");
+  for (const [key, value] of Object.entries(extra)) {
+    if (value) search.set(key, value);
+  }
+  const query = search.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
+function exportTarget(formData: FormData, versionId: string) {
+  const brandId = String(formData.get("brandId") ?? "");
+  if (String(formData.get("source") ?? "") === "list") {
+    return contentListPath(brandId, String(formData.get("filter") ?? ""));
+  }
+  return versionId ? versionPath(versionId) : contentListPath(brandId, "");
 }
 
 export async function reviewVersionAction(formData: FormData): Promise<void> {
@@ -237,34 +267,45 @@ export async function registerAssetAction(formData: FormData): Promise<void> {
 
 export async function exportPreflightAction(formData: FormData): Promise<void> {
   const session = await requireSession();
-  const versionId = String(formData.get("versionId") ?? "");
+  const versionIds = uniqueIds(formData.getAll("versionId"));
+  const target = exportTarget(formData, versionIds[0] ?? "");
+  if (versionIds.length === 0) redirect(withSearch(target, { exportError: "NONE_SELECTED" }));
   const parsed = exportPreflightSchema.safeParse({
     action: "export-preflight",
     brandId: String(formData.get("brandId") ?? ""),
     operationId: randomUUID(),
-    versionIds: [versionId],
+    versionIds,
     mode: String(formData.get("mode") ?? "auto"),
   });
-  if (!parsed.success) return;
+  if (!parsed.success) redirect(withSearch(target, { exportError: "INVALID_INPUT" }));
   const result = await exportPreflight(getConnection(), session.user.id, parsed.data);
-  if ("error" in result) return;
-  redirect(`${versionPath(versionId)}?op=${result.operationId}`);
+  revalidatePath("/dashboard/content");
+  if (String(formData.get("source") ?? "") !== "list" && versionIds[0]) revalidatePath(versionPath(versionIds[0]));
+  if ("error" in result) redirect(withSearch(target, { exportError: result.error }));
+  redirect(withSearch(target, { op: result.operationId }));
 }
 
 export async function exportConfirmAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   const versionId = String(formData.get("versionId") ?? "");
   const operationId = String(formData.get("operationId") ?? "");
+  const target = exportTarget(formData, versionId);
+  const checked = uniqueIds(formData.getAll("chosenVersionId"));
+  const chosenVersionIds = checked.length > 0 ? checked : splitIds(formData.get("chosenVersionIds"));
+  const kept = operationId ? { op: operationId } : {};
+  if (chosenVersionIds.length === 0) redirect(withSearch(target, { ...kept, exportError: "NONE_SELECTED" }));
   const parsed = exportConfirmSchema.safeParse({
     action: "export-confirm",
     brandId: String(formData.get("brandId") ?? ""),
     operationId,
-    chosenVersionIds: splitIds(formData.get("chosenVersionIds")),
+    chosenVersionIds,
   });
-  if (!parsed.success) return;
-  await exportConfirm(getConnection(), session.user.id, parsed.data);
-  revalidatePath(versionPath(versionId));
-  redirect(`${versionPath(versionId)}?op=${operationId}`);
+  if (!parsed.success) redirect(withSearch(target, { ...kept, exportError: "INVALID_INPUT" }));
+  const result = await exportConfirm(getConnection(), session.user.id, parsed.data);
+  revalidatePath("/dashboard/content");
+  if (versionId) revalidatePath(versionPath(versionId));
+  if ("error" in result) redirect(withSearch(target, { ...kept, exportError: result.error }));
+  redirect(withSearch(target, { op: result.operationId }));
 }
 
 function publicationPath(publicationId: string) {

@@ -2,7 +2,7 @@
 
 | 产品叫法 | 路径 | 核心功能与关键弹窗/抽屉 | 对应业务模块/Service |
 | --- | --- | --- | --- |
-| 内容计划与草稿 | `/dashboard/content` · `src/app/(dashboard)/dashboard/content/page.tsx` | 内容总览、Brief 创建与执行；`src/features/functional-mock/run-buttons.tsx` | `src/features/content/`（`list-page.tsx`、`actions.ts`、`commands.ts`、`dao.ts`）· `src/app/api/content/` |
+| 内容计划与草稿 | `/dashboard/content` · `src/app/(dashboard)/dashboard/content/page.tsx` | 内容总览、Brief 创建与执行、稿件批量导出预检及合格子集确认；`src/features/functional-mock/run-buttons.tsx` | `src/features/content/`（`list-page.tsx`、`actions.ts`、`commands.ts`、`dao.ts`）· `src/app/api/content/` |
 | Brief 详情 | `/dashboard/content/briefs/[briefId]` · `src/app/(dashboard)/dashboard/content/briefs/[briefId]/page.tsx` | 基于证据生成事实草稿；`src/features/content/fact-draft-button.tsx` | `src/features/content/`（`brief-page.tsx`、`actions.ts`、`commands.ts`）· `src/app/api/content/briefs/[briefId]/` |
 | 内容版本详情 | `/dashboard/content/versions/[versionId]` · `src/app/(dashboard)/dashboard/content/versions/[versionId]/page.tsx` | 审核定稿、独立复核与交付包打包（Server Component） | `src/features/content/`（`version-page.tsx`、`actions.ts`、`commands.ts`）· `src/app/api/content/versions/[versionId]/` |
 | 渠道变体适配 | `/dashboard/content/versions/[versionId]/variants` · `src/app/(dashboard)/dashboard/content/versions/[versionId]/variants/page.tsx` | 多渠道内容变体生成与编辑；`src/features/content/channel-variant-editor.tsx` | `src/features/content/`（`channel-variants-page.tsx`、`commands.ts`）· `src/features/channel-variants/commands.ts` · `src/app/api/content/versions/[versionId]/variants/` |

@@ -15,7 +15,7 @@ import {
   updateVariantAction,
 } from "./actions";
 import { readContentVersion, readExportJob } from "./commands";
-import type { VersionStatus } from "./contracts";
+import { exportUiError, type VersionStatus } from "./contracts";
 
 export async function generateMetadata() {
   const t = await getTranslator("content");
@@ -165,6 +165,7 @@ export default async function ContentVersionPage({
   const db = getConnection();
   const { version, approvals, packages, assets, publications, approvalCurrent, readOnly } = detail;
   const operationId = typeof query.op === "string" ? query.op : null;
+  const exportError = exportUiError(query.exportError);
   const exported = operationId
     ? await readExportJob(db, session.user.id, version.brandId, operationId)
     : null;
@@ -359,6 +360,7 @@ export default async function ContentVersionPage({
       <section className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">
         <h2 className="text-lg font-semibold">{t("exportTitle")}</h2>
         <p className="break-words text-sm leading-6 text-muted-foreground">{t("exportHint")}</p>
+        {exportError ? <p role="alert" className="break-words text-sm leading-6">{t(exportError)}</p> : null}
         {canEdit && !headerPreflight ? <ExportPreflightForm version={version} t={t} /> : null}
 
         {job ? (
