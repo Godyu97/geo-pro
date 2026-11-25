@@ -67,6 +67,16 @@ await writeFile(maintenancePage, (await readFile(maintenancePage, "utf8")).repla
   '  await requireSession();\n  if ((await (await import("next/headers")).headers()).get("cookie")?.includes("geo-maintenance-slow=1")) await new Promise(resolve => setTimeout(resolve, 1500));',
 ));
 
+const supportDao = path.join(fixture, "src/features/support/dao.ts");
+const supportSource = await readFile(supportDao, "utf8");
+const supportRead = '    const id = opaqueIdSchema.parse(operationId);';
+assert.ok(supportSource.includes(supportRead));
+await writeFile(supportDao, supportSource.replace(supportRead, `    if ((await (await import("next/headers")).cookies()).get("geo-support-read")?.value === "slow-unavailable") {
+      await new Promise(resolve => setTimeout(resolve, 1800));
+      throw new Error("Private support fixture failure");
+    }
+${supportRead}`));
+
 const settingsPage = path.join(fixture, "src/features/account/settings-page.tsx");
 await writeFile(settingsPage, (await readFile(settingsPage, "utf8")).replace(
   '  const { user } = await requireSession();',

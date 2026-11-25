@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { ArrowLeft, LifeBuoy } from "lucide-react";
+import { ArrowLeft, LifeBuoy, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { requireSession } from "@/lib/auth/session";
 import { getTranslator } from "@/lib/i18n/server";
+import { opaqueIdSchema } from "../maintenance/contracts";
 import { currentMaintenanceAccess } from "../maintenance/service";
 import type { SupportMatch } from "./contracts";
 import { lookupSupport } from "./service";
@@ -14,9 +15,8 @@ export async function generateMetadata() {
   return { title: t("title"), robots: { index: false, follow: false } };
 }
 
-function one(value: string | string[] | undefined) {
-  return typeof value === "string" ? value : null;
-}
+const supportPath = "/dashboard/maintenance/support";
+const actionClass = "h-auto min-h-10 whitespace-normal py-2";
 
 export default async function SupportLookupPage({
   searchParams,
@@ -26,12 +26,18 @@ export default async function SupportLookupPage({
   await requireSession();
   const raw = await searchParams;
   const keys = Object.keys(raw);
-  const invalid = keys.some((key) => key !== "operationId") || Array.isArray(raw.operationId);
-  const operationId = one(raw.operationId);
+  const parsed = opaqueIdSchema.safeParse(raw.operationId);
+  const operationId = parsed.success ? parsed.data : null;
+  const invalid = !parsed.success || keys.some((key) => key !== "operationId");
   const access = await currentMaintenanceAccess("support.read");
-  const result = access.status === "allowed" && (operationId || invalid)
+  const result = access.status === "allowed" && keys.length > 0
     ? await lookupSupport(operationId, invalid)
     : null;
+  const unavailable = access.status === "unavailable" ? access : result?.status === "unavailable" ? result : null;
+  const invalidInput = result?.status === "denied" && result.reason === "invalid-input" ? result : null;
+  const denied = access.status === "denied" ? access : result?.status === "denied" && !invalidInput ? result : null;
+  const blocked = unavailable ?? denied;
+  const retryHref = operationId ? `${supportPath}?${new URLSearchParams({ operationId })}` : supportPath;
   const t = await getTranslator("support");
   const failureLabel = (failure: SupportMatch["failure"]) => {
     switch (failure) {
@@ -77,33 +83,60 @@ export default async function SupportLookupPage({
 
   return (
     <div className="space-y-7">
-      <div>
-        <LifeBuoy className="mb-4 size-7 text-primary" aria-hidden="true" />
+      <header className="space-y-3">
+        <LifeBuoy className="size-7 text-primary" aria-hidden="true" />
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
-      </div>
-      {access.status !== "allowed" ? (
-        <section role={access.status === "unavailable" ? "alert" : "status"} className="rounded-xl border bg-card p-5">
-          <p className="font-medium">{t(access.status === "unavailable" ? "unavailable" : "denied")}</p>
-          <p className="mt-2 text-sm leading-7 text-muted-foreground">{t(access.status === "unavailable" ? "retryDescription" : "contactDescription")}</p>
-          <p className="mt-4 break-all text-xs leading-6 text-muted-foreground">{t("trace", { id: access.traceId })}</p>
+        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+        <Button asChild variant="outline" className={actionClass}>
+          <Link href="/dashboard/maintenance"><ArrowLeft aria-hidden="true" />{t("back")}</Link>
+        </Button>
+      </header>
+      {blocked && (
+        <section className="space-y-3 rounded-xl border bg-card p-5">
+          <div role={unavailable ? "alert" : "status"}>
+            <p className="font-medium">{t(unavailable ? "unavailable" : "denied")}</p>
+            <p className="mt-2 text-sm leading-7 text-muted-foreground">{t(unavailable ? "retryDescription" : "contactDescription")}</p>
+          </div>
+          {unavailable && (
+            <Button asChild className={actionClass}>
+              <a href={retryHref}><RefreshCw aria-hidden="true" />{t("retry")}</a>
+            </Button>
+          )}
+          <p className="break-all text-xs leading-6 text-muted-foreground">{t("trace", { id: blocked.traceId })}</p>
         </section>
-      ) : (
-        <form method="get" action="/dashboard/maintenance/support" className="max-w-xl space-y-4 rounded-xl border bg-card p-5">
+      )}
+      {access.status === "allowed" && !denied && (
+        <form method="get" action={supportPath} className="max-w-xl space-y-4 rounded-xl border bg-card p-5">
           <div className="space-y-2">
             <label htmlFor="operationId" className="text-sm font-medium">{t("operationLabel")}</label>
-            <Input id="operationId" name="operationId" required maxLength={128} autoComplete="off" spellCheck={false} defaultValue={operationId ?? ""} pattern="[A-Za-z0-9_-]{1,128}" className="h-10" />
+            <Input
+              id="operationId" name="operationId" required maxLength={128} autoComplete="off" spellCheck={false}
+              defaultValue={operationId ?? ""} pattern={String.raw`[A-Za-z0-9_\-]{1,128}`}
+              aria-invalid={Boolean(invalidInput) || undefined} aria-describedby="support-operation-format" className="h-10"
+            />
+            <p id="support-operation-format" className="text-sm text-muted-foreground">{t("operationFormat")}</p>
           </div>
-          <Button type="submit" className="h-auto min-h-10 whitespace-normal py-2">{t("lookup")}</Button>
+          {invalidInput && (
+            <div role="alert">
+              <p className="text-sm font-medium text-destructive">{t("invalidInput")}</p>
+              <p className="mt-1 break-all text-xs text-muted-foreground">{t("trace", { id: invalidInput.traceId })}</p>
+            </div>
+          )}
+          <Button type="submit" variant={unavailable ? "outline" : "default"} className={actionClass}>{t("lookup")}</Button>
         </form>
       )}
       {result?.status === "allowed" && (
-        <section aria-label={t("resultsTitle")} className="space-y-4">
-          <p className="text-sm text-muted-foreground">{result.data.matches.length ? t("resultsDescription") : t("notFound")}</p>
+        <section aria-labelledby="support-results" className="space-y-4">
+          <h2 id="support-results" className="text-lg font-semibold">{t("resultsTitle")}</h2>
+          {result.data.matches.length ? (
+            <p className="text-sm text-muted-foreground">{t("resultsDescription")}</p>
+          ) : (
+            <p className="rounded-xl border border-dashed bg-card p-5 text-sm text-muted-foreground">{t("notFound")}</p>
+          )}
           <p className="text-sm text-muted-foreground">{result.cache === "hit" ? t("cache.hit") : result.cache === "origin" ? t("cache.origin") : t("cache.blocked")}</p>
           {result.data.matches.map((match) => (
             <article key={`${match.kind}:${match.subjectId}:${match.status}`} className="space-y-3 rounded-xl border bg-card p-5">
-              <h2 className="font-medium">{kindLabel(match.kind)}</h2>
+              <h3 className="font-medium">{kindLabel(match.kind)}</h3>
               <dl className="grid gap-3 text-sm sm:grid-cols-2">
                 <div className="min-w-0"><dt className="text-muted-foreground">{t("subject")}</dt><dd className="break-all">{match.subjectId}</dd></div>
                 <div><dt className="text-muted-foreground">{t("status")}</dt><dd>{statusLabel(match.status)}</dd></div>
@@ -117,17 +150,7 @@ export default async function SupportLookupPage({
           <p className="break-all text-xs leading-6 text-muted-foreground">{t("trace", { id: result.traceId })}</p>
         </section>
       )}
-      {result && result.status !== "allowed" && (
-        <section role={result.status === "unavailable" ? "alert" : "status"} className="rounded-xl border bg-card p-5">
-          <p className="font-medium">{t(result.status === "unavailable" ? "unavailable" : result.reason === "invalid-input" ? "invalidInput" : "denied")}</p>
-          <p className="mt-2 text-sm leading-7 text-muted-foreground">{t(result.status === "unavailable" ? "retryDescription" : "contactDescription")}</p>
-          <p className="mt-4 break-all text-xs leading-6 text-muted-foreground">{t("trace", { id: result.traceId })}</p>
-        </section>
-      )}
       <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("healthBoundary")}</p>
-      <Button asChild variant="outline" className="h-auto min-h-10 whitespace-normal py-2">
-        <Link href="/dashboard/maintenance"><ArrowLeft aria-hidden="true" />{t("back")}</Link>
-      </Button>
     </div>
   );
 }
