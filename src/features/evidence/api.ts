@@ -9,6 +9,7 @@ import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { executeAnalysisDraft } from "./analysis-drafts";
 import {
+  appendReferenceLink,
   ingestAdoptedObservation,
   readObservation,
   completeManualEvidence,
@@ -62,7 +63,9 @@ export async function evidenceWriteResponse(request: Request) {
         ? await submitManualEvidence(connection, ownerId, parsed.data)
         : parsed.data.action === "complete-manual"
           ? await completeManualEvidence(connection, ownerId, parsed.data)
-          : await reviseAnalysis(connection, ownerId, parsed.data);
+          : parsed.data.action === "revise-analysis"
+            ? await reviseAnalysis(connection, ownerId, parsed.data)
+            : await appendReferenceLink(connection, ownerId, parsed.data);
     if (result && "error" in result && !("observation" in result)) {
       return failure(result.error, undefined, result.next);
     }

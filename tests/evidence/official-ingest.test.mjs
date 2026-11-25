@@ -7,6 +7,7 @@ import { serializeOfficialReceipt } from "../../src/lib/ai/official-sampling.ts"
 import { recordCapability } from "../../src/features/capabilities/commands.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import {
+  appendReferenceLink,
   ingestAdoptedObservation,
   readObservation,
   reviseAnalysis,
@@ -71,6 +72,7 @@ function receipt(partial) {
     networkTrigger: partial.networkTrigger,
     citationSetState: partial.citationSetState,
     citations: partial.citations,
+    searchResults: partial.searchResults,
   });
   assert.ok(text);
   return text;
@@ -144,7 +146,9 @@ for (const kind of ["sqlite", "postgresql"]) {
         if (input.questionId === unknownId) return Promise.resolve({ disposition: "unknown", rawText: "费用仍待核对", synthetic: true });
         return Promise.resolve({
           disposition: "adopted",
-          rawText: "甲可考虑；乙不适合本需求。",
+          rawText: input.questionId === byKey.get("empty").id
+            ? "正文里的 https://body.example/only-in-text 不是引用。"
+            : "甲可考虑；乙不适合本需求。",
           actualMinor: 3,
           synthetic: true,
         });
@@ -160,6 +164,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       }),
       empty: receipt({
         responseId: "resp-empty", networkTrigger: "not_triggered", citationSetState: "complete", citations: [],
+        searchResults: [{ url: "https://yi.example.com/guide?utm_source=search", title: "搜索候选", position: 1 }],
       }),
       missing: receipt({
         responseId: "resp-missing", networkTrigger: "unknown", citationSetState: "missing", citations: [],
@@ -201,7 +206,10 @@ for (const kind of ["sqlite", "postgresql"]) {
     const saved = new Map();
     for (const key of ["complete", "empty", "missing", "unsupported", "synthetic"]) {
       const slot = slotByQuestion.get(byKey.get(key).id);
-      const ingested = await ingestAdoptedObservation(db, owner, ingestInput(slot.id), clock, cache);
+      const ingested = await ingestAdoptedObservation(db, owner, {
+        ...ingestInput(slot.id),
+        officialWebsite: key === "empty" ? "https://yi.example.com" : null,
+      }, clock, cache);
       assert.equal(ingested.error, undefined, ingested.error);
       saved.set(key, ingested);
     }
@@ -235,9 +243,42 @@ for (const kind of ["sqlite", "postgresql"]) {
 
     const empty = saved.get("empty");
     assert.equal(empty.observation.networkTrigger, "not_triggered");
+    assert.equal(empty.observation.citationSetState, "complete");
     assert.equal(empty.citationPool.inC, true);
     assert.equal(empty.citationPool.cited, false);
-    assert.equal(empty.citations.length, 0);
+    assert.equal(empty.citations.some((item) => item.citationOrigin === "provider_native" || item.rawUrl.includes("body.example")), false);
+    assert.equal(empty.citations.length, 1);
+    assert.equal(empty.citations[0].citationOrigin, "search_candidate");
+    assert.equal(empty.citations[0].normalizedUrl, "https://yi.example.com/guide");
+    assert.equal(empty.latestAnalysis.officialSiteCited, "false");
+    assert.equal(empty.observation.answerText.includes("https://body.example/only-in-text"), true);
+    const appended = await appendReferenceLink(db, owner, {
+      action: "append-reference",
+      brandId: brand,
+      observationId: empty.observation.id,
+      operationId: randomUUID(),
+      rawUrl: "https://analyst.example/page",
+      citationOrigin: "analyst_found",
+    }, clock, cache);
+    assert.equal(appended.error, undefined, appended.error);
+    assert.equal(appended.observation.answerText, empty.observation.answerText);
+    assert.equal(appended.observation.fingerprint, empty.observation.fingerprint);
+    assert.equal(appended.observation.citationSetState, "complete");
+    assert.equal(appended.latestAnalysis.officialSiteCited, "false");
+    assert.equal(appended.citationPool.cited, false);
+    assert.equal(appended.citations.filter((item) => item.citationOrigin === "provider_native").length, 0);
+    assert.equal(appended.citations.filter((item) => item.citationOrigin === "search_candidate").length, 1);
+    assert.equal(appended.citations.filter((item) => item.citationOrigin === "analyst_found").length, 1);
+    const outsiderAppend = await appendReferenceLink(db, outsider, {
+      action: "append-reference",
+      brandId: brand,
+      observationId: empty.observation.id,
+      operationId: randomUUID(),
+      rawUrl: "https://outsider.example/hidden",
+      citationOrigin: "search_candidate",
+    }, clock, cache);
+    assert.equal(outsiderAppend.error, "NOT_FOUND");
+    assert.equal(await readObservation(db, outsider, empty.observation.id), null);
 
     const missing = saved.get("missing");
     assert.equal(missing.observation.networkTrigger, "unknown");

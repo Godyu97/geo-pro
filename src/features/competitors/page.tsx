@@ -529,6 +529,7 @@ export default async function CompetitorAnalysisPage({
           <div className={panelClass}>
             <h3 className="text-base font-medium">{t("thirdPartySupportHeading")}</h3>
             <p className="text-sm leading-6 text-muted-foreground">{t("thirdPartySupportNote")}</p>
+            <p className="text-sm leading-6 text-muted-foreground">{t("referenceOriginNote")}</p>
             <p className="text-sm font-medium tabular-nums">
               {workspace.supportSummary.supportRate === null
                 ? t("supportRateNaLine", { na: t("shareNa") })
@@ -584,6 +585,7 @@ export default async function CompetitorAnalysisPage({
                   {citation.citationId} · {citation.observationId}
                 </p>
                 <p className="mt-1 [overflow-wrap:anywhere]">{citation.rawUrl}</p>
+                <p className="mt-1">{t(citation.citationOrigin)}</p>
                 <p className="mt-1 flex min-w-0 flex-wrap gap-x-2 text-muted-foreground">
                   <span>{t(sourceState[citation.state])}</span>
                   <span>

@@ -17,6 +17,7 @@ type OfficialSampleBase = {
   modelVersion: string | null;
   networkTrigger: OfficialNetworkTrigger;
   citations: OfficialCitation[];
+  searchResults: OfficialCitation[];
   citationSetState: OfficialCitationState;
 };
 
@@ -103,6 +104,7 @@ const geoSamplingSchema = z.looseObject({
   network_trigger: z.enum(officialNetworkTriggers).optional(),
   citation_support: z.enum(officialCitationStates).optional(),
   citations: z.array(citationItemSchema).max(50).optional(),
+  search_results: z.array(citationItemSchema).max(50).optional(),
 });
 
 const outputPartSchema = z.looseObject({
@@ -115,6 +117,14 @@ const outputItemSchema = z.looseObject({
   type: z.string(),
   status: z.string().optional(),
   content: z.array(outputPartSchema).optional(),
+  action: z.looseObject({
+    type: z.string().optional(),
+    sources: z.array(z.looseObject({
+      type: z.string().optional(),
+      url: z.string().optional(),
+      title: z.string().optional(),
+    })).max(50).optional(),
+  }).optional(),
 });
 
 const officialPayloadSchema = z.looseObject({
@@ -172,6 +182,7 @@ export function unknownOfficialSample(rawText: string | null = null, modelVersio
     modelVersion,
     networkTrigger: "unknown",
     citations: [],
+    searchResults: [],
     citationSetState: "missing",
     actualMinor: null,
     costState: "unknown",
@@ -188,6 +199,7 @@ export function safeFailureOfficialSample(): OfficialSample {
     modelVersion: null,
     networkTrigger: "unknown",
     citations: [],
+    searchResults: [],
     citationSetState: "missing",
     actualMinor: null,
     costState: "known",
@@ -283,6 +295,18 @@ function classifyCitations(payload: OfficialPayload, capability: "complete" | "p
   return classifyList(support, annotations, annotations.sawField, capability);
 }
 
+/** Explicit search lists stay out of the native citation completeness decision. */
+function explicitSearchResults(payload: OfficialPayload): OfficialCitation[] {
+  const geo = payload.geo_sampling;
+  if (geo && Object.hasOwn(geo, "search_results")) return citationsFrom(geo.search_results).citations;
+  const items: Array<{ url?: string; title?: string }> = [];
+  for (const output of payload.output ?? []) {
+    if (output.type !== "web_search_call" || output.action?.type !== "search" || !output.action.sources) continue;
+    for (const source of output.action.sources) items.push({ url: source.url, title: source.title });
+  }
+  return citationsFrom(items).citations;
+}
+
 function responseText(payload: OfficialPayload) {
   const parts: string[] = [];
   for (const item of payload.output ?? []) {
@@ -336,6 +360,7 @@ export function interpretOfficialPayload(input: {
   const currencyMatches = Boolean(input.currency) && input.priceTable.currency === input.currency;
   const withinCeiling = amount !== null && (input.upperMinor === null || amount <= input.upperMinor);
   const citations = classifyCitations(payload, input.citationCapability);
+  const searchResults = explicitSearchResults(payload);
   const trigger = networkTrigger(payload, input.requestedNetworkMode);
   if (successful && (!payload.status || payload.status === "completed")
     && text.length >= 2 && text.length <= MAX_TEXT && !text.includes("\0")
@@ -352,6 +377,7 @@ export function interpretOfficialPayload(input: {
       modelVersion,
       networkTrigger: trigger,
       ...citations,
+      searchResults,
     };
   }
   return {
@@ -359,6 +385,7 @@ export function interpretOfficialPayload(input: {
     responseId,
     networkTrigger: trigger,
     ...citations,
+    searchResults,
   };
 }
 
@@ -372,6 +399,11 @@ export const officialReceiptSchema = z.strictObject({
     title: z.string().min(1).max(200).nullable(),
     position: z.int().positive().max(50),
   })).max(40),
+  searchResults: z.array(z.strictObject({
+    url: z.string().min(1).max(2000),
+    title: z.string().min(1).max(200).nullable(),
+    position: z.int().positive().max(50),
+  })).max(40).optional(),
 });
 
 export function parseOfficialReceipt(value: string | null) {
@@ -384,9 +416,16 @@ export function parseOfficialReceipt(value: string | null) {
   }
 }
 
-export function serializeOfficialReceipt(sample: Pick<OfficialSample, "responseId" | "modelVersion" | "networkTrigger" | "citationSetState" | "citations">) {
+export function serializeOfficialReceipt(sample: Pick<OfficialSample, "responseId" | "modelVersion" | "networkTrigger" | "citationSetState" | "citations"> & { searchResults?: OfficialCitation[] }) {
   const citations: OfficialCitation[] = [];
-  const body = {
+  const body: {
+    responseId: string | null;
+    modelVersion: string | null;
+    networkTrigger: OfficialNetworkTrigger;
+    citationSetState: OfficialCitationState;
+    citations: OfficialCitation[];
+    searchResults?: OfficialCitation[];
+  } = {
     responseId: responseLocator(sample.responseId ?? undefined),
     modelVersion: sample.modelVersion && sample.modelVersion.length <= 80 ? sample.modelVersion : null,
     networkTrigger: sample.networkTrigger,
@@ -407,6 +446,19 @@ export function serializeOfficialReceipt(sample: Pick<OfficialSample, "responseI
   if (citations.length !== sample.citations.length && body.citationSetState === "complete") {
     body.citationSetState = citations.length ? "partial" : "missing";
   }
+  const searchResults: OfficialCitation[] = [];
+  for (const item of sample.searchResults ?? []) {
+    if (searchResults.length === 40) break;
+    const url = citationUrl(item.url);
+    if (!url) continue;
+    searchResults.push({ url, title: item.title?.trim().slice(0, 200) || null, position: searchResults.length + 1 });
+    body.searchResults = searchResults;
+    if (JSON.stringify(body).length > 8000) {
+      searchResults.pop();
+      break;
+    }
+  }
+  if (searchResults.length === 0) delete body.searchResults;
   return JSON.stringify(body);
 }
 

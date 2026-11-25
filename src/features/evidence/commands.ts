@@ -8,11 +8,15 @@ import { BrandDao } from "../brands/dao.ts";
 import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 import { PromptDao } from "../prompts/dao.ts";
 import {
+  type AppendReferenceInput,
   type CompleteManualInput,
   type EvidenceError,
   type IngestAdoptedInput,
   type ReviseAnalysisInput,
   type SubmitManualInput,
+  canAppendReferenceLink,
+  isNativeCitationOrigin,
+  isReferenceLinkOrigin,
   qualifiesForC,
   resolveSamplingConditions,
 } from "./contracts.ts";
@@ -93,8 +97,9 @@ function buildCitations(
   const rows: CitationRow[] = [];
   for (const item of citations) {
     const normalizedUrl = normalizeUrl(item.rawUrl);
-    if (seen.has(normalizedUrl)) continue;
-    seen.add(normalizedUrl);
+    const key = `${item.citationOrigin}\n${normalizedUrl}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     rows.push({
       id: randomUUID(),
       observationId,
@@ -179,7 +184,7 @@ function detailPayload(
     citationPool: {
       inC: pool.inC,
       cited: qualifiesForC(observation.citationSetState) && citations.some(
-        (item) => item.citationOrigin === "provider_native" || item.citationOrigin === "consumer_visible",
+        (item) => isNativeCitationOrigin(item.citationOrigin),
       ),
       reason: pool.reason,
     },
@@ -427,9 +432,16 @@ export async function completeManualEvidence(
 
     const { evidenceState, conditions, missingReason } = resolved;
     const now = clock();
-    const citations = evidenceState === "draft_evidence" && input.citationSetState === "missing"
+    const built = evidenceState === "draft_evidence" && input.citationSetState === "missing"
       ? []
       : buildCitations(current.id, input.brandId, now, input.citations);
+    const existingCitations = await dao.citationsFor(current.id);
+    const citations = [
+      ...built,
+      ...existingCitations.filter((item) => isReferenceLinkOrigin(item.citationOrigin) && !built.some(
+        (next) => next.citationOrigin === item.citationOrigin && next.normalizedUrl === item.normalizedUrl,
+      )),
+    ];
     const labels = classifyLabels({
       answerText: input.answerText,
       brandName: input.brandName,
@@ -477,6 +489,77 @@ export async function completeManualEvidence(
     if (evidenceState === "draft_evidence") return { ...payload, error: "EVIDENCE_INCOMPLETE" as const };
     return payload;
   });
+  return releaseOverview(ownerId, input.brandId, result, cache);
+}
+
+export async function appendReferenceLink(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: AppendReferenceInput,
+  clock: Clock = () => new Date().toISOString(),
+  cache?: CacheStore,
+) {
+  let result: Failure | (ReturnType<typeof detailPayload> & { replayed: boolean; deduped: boolean });
+  try {
+    result = await db.transaction(async (tx) => {
+      const dao = new EvidenceDao(tx);
+      const existing = await dao.operation(ownerId, input.operationId);
+      if (existing) {
+        const stored = JSON.parse(existing) as ReturnType<typeof detailPayload> & { deduped: boolean };
+        return { ...stored, replayed: true as const };
+      }
+
+      const brand = await owned(dao, ownerId, input.brandId);
+      if ("error" in brand) return brand;
+
+      const observation = await dao.lockObservation(ownerId, input.observationId);
+      if (!observation || observation.brandId !== input.brandId) return denied("NOT_FOUND");
+      if (!canAppendReferenceLink(observation.evidenceState)) return denied("INVALID_INPUT");
+
+      let url: URL;
+      try {
+        url = new URL(input.rawUrl);
+      } catch {
+        return denied("INVALID_INPUT");
+      }
+      if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
+        return denied("INVALID_INPUT");
+      }
+
+      const now = clock();
+      const current = await dao.citationsFor(observation.id);
+      const normalizedUrl = normalizeUrl(url.toString());
+      const duplicate = current.some((item) => item.citationOrigin === input.citationOrigin && item.normalizedUrl === normalizedUrl);
+      const row: CitationRow = {
+        id: randomUUID(),
+        observationId: observation.id,
+        brandId: input.brandId,
+        rawUrl: url.toString(),
+        normalizedUrl,
+        citationOrigin: input.citationOrigin,
+        positionLabel: null,
+        ownership: "unknown",
+        pageStatus: "unknown",
+        createdAt: now,
+      };
+      if (!duplicate) await dao.insertCitations([row]);
+      const citations = duplicate ? current : [...current, row];
+      const analyses = await dao.analysesFor(observation.id);
+      const payload = {
+        ...detailPayload(observation, citations, analyses),
+        replayed: false as const,
+        deduped: duplicate,
+      };
+      await dao.recordOperation(ownerId, input.operationId, operationFingerprint(input), payload, now, input.brandId);
+      return payload;
+    });
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    const existing = await new EvidenceDao(db).operation(ownerId, input.operationId);
+    if (!existing) throw error;
+    const stored = JSON.parse(existing) as ReturnType<typeof detailPayload> & { deduped: boolean };
+    result = { ...stored, replayed: true };
+  }
   return releaseOverview(ownerId, input.brandId, result, cache);
 }
 

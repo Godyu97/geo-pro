@@ -23,6 +23,7 @@ import {
   supportedClaimRecord,
   thirdPartySupportSummary,
 } from "../source-opportunities/rules.ts";
+import { isNativeCitationOrigin } from "../evidence/contracts.ts";
 import type {
   BriefStatusInput,
   CompetitorError,
@@ -248,6 +249,7 @@ export function presentCitation(row: CitationSourceRow) {
     observationId: row.observationId,
     rawUrl: row.rawUrl,
     normalizedUrl: row.normalizedUrl,
+    citationOrigin: row.citationOrigin,
     ownership: row.ownership,
     pageStatus: row.pageStatus,
     state: row.state ?? "observed" as const,
@@ -360,7 +362,7 @@ export async function readCitationSources(db: DatabaseConnection, ownerId: strin
   if (!await dao.ownedBrand(ownerId, brandId)) return denied("NOT_FOUND");
   const listed = await dao.listCitationSources(ownerId, brandId);
   const citations = listed.rows.map(presentCitation);
-  const supportSummary = listed.truncated ? thirdPartySupportSummary([]) : thirdPartySupportSummary(citations);
+  const supportSummary = listed.truncated ? thirdPartySupportSummary([]) : thirdPartySupportSummary(citations.filter((item) => isNativeCitationOrigin(item.citationOrigin)));
   return { citations, hosts: citationHosts(citations), supportSummary, truncated: listed.truncated };
 }
 
@@ -460,7 +462,7 @@ export async function readCompetitorWorkspace(
     ? shareFromMentions(labels, mentions.rows)
     : emptyShare(labels);
   const citations = sources.rows.map(presentCitation);
-  const supportSummary = sources.truncated ? thirdPartySupportSummary([]) : thirdPartySupportSummary(citations);
+  const supportSummary = sources.truncated ? thirdPartySupportSummary([]) : thirdPartySupportSummary(citations.filter((item) => isNativeCitationOrigin(item.citationOrigin)));
   return {
     sets: sets.map((item) => ({ id: item.id, version: item.version, labels: labelsOf(item), createdAt: item.createdAt })),
     selected: selected ? { id: selected.id, version: selected.version, labels, createdAt: selected.createdAt } : null,

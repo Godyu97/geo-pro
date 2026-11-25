@@ -6,6 +6,7 @@ import { brandIdSchema } from "../brands/contracts.ts";
 import { networkModes } from "../capabilities/contracts.ts";
 import {
   analysisDraftStatuses, analysisStatuses, captureMethods, citationOrigins, citationSetStates, evidenceStates,
+  nativeCitationOrigins,
   networkTriggers, ownershipStates, pageStatuses, sourceModes, triStateSchema,
 } from "./contracts.ts";
 
@@ -300,10 +301,12 @@ export function overviewPlanLinkQuery(ownerId: string, brandId: string) {
 }
 
 export function citationOwnershipQuery(brandId: string, observationIds: readonly string[]) {
+  const origins = nativeCitationOrigins.map((origin) => `'${origin}'`).join(", ");
   return {
     sql: `SELECT observation_id AS "observationId", ownership
           FROM answer_citation
           WHERE brand_id = ? AND observation_id IN (${observationIds.map(() => "?").join(", ")})
+            AND citation_origin IN (${origins})
           ORDER BY observation_id ASC, id ASC`,
     values: [brandId, ...observationIds] as QueryValue[],
   };
@@ -490,6 +493,15 @@ export class EvidenceDao {
   async observationForOwner(ownerId: string, observationId: string) {
     const [row] = await this.query(
       `SELECT ${observationColumns} FROM answer_observation WHERE id = ? AND owner_id = ?`,
+      [observationId, ownerId],
+    );
+    return row ? observationRow.parse(row) : null;
+  }
+
+  async lockObservation(ownerId: string, observationId: string) {
+    const lock = this.connection.kind === "postgresql" ? " FOR UPDATE" : "";
+    const [row] = await this.query(
+      `SELECT ${observationColumns} FROM answer_observation WHERE id = ? AND owner_id = ?${lock}`,
       [observationId, ownerId],
     );
     return row ? observationRow.parse(row) : null;

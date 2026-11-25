@@ -10,6 +10,8 @@ import { generateOptimizationAction } from "../optimization/actions";
 import { ActionDraftPanel } from "../optimization/draft-panel";
 import { AnalysisDraftPanel } from "./analysis-draft-form";
 import { readManualEvidenceContext, readObservation } from "./commands";
+import { canAppendReferenceLink, isNativeCitationOrigin, isReferenceLinkOrigin } from "./contracts";
+import { ReferenceLinkForm } from "./reference-link-form";
 import { ManualEvidenceForm } from "./manual-evidence-form";
 import { EvidenceDetailStatus } from "./detail-status";
 import { answerListFiltersFromSearch, answerListPath } from "./answer-list";
@@ -156,11 +158,41 @@ export default async function EvidenceDetailPage({
               : t("notCited")
             : t("notInC", { reason: citationPool.reason ?? observation.citationSetState })}
         </p>
-        {citations.length > 0 && (
+        <h3 className="text-sm font-medium">{t("nativeCitations")}</h3>
+        {citations.some((item) => isNativeCitationOrigin(item.citationOrigin)) ? (
           <ul className="space-y-2 text-sm">
-            {citations.map((item) => (
+            {citations.filter((item) => isNativeCitationOrigin(item.citationOrigin)).map((item) => (
               <li key={item.id} className="wrap-anywhere rounded-lg border p-3">
-                <p>{item.citationOrigin}</p>
+                <p>{t(item.citationOrigin)}</p>
+                <p>{t("citationNormalized")}: {item.normalizedUrl}</p>
+                <p>{t("citationRaw")}: {item.rawUrl}</p>
+                <p>{item.ownership} · {item.pageStatus}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm">{t("nativeCitationsEmpty")}</p>
+        )}
+        {citations.some((item) => isReferenceLinkOrigin(item.citationOrigin)) && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">{t("referenceLinks")}</h3>
+            <ul className="space-y-2 text-sm">
+              {citations.filter((item) => isReferenceLinkOrigin(item.citationOrigin)).map((item) => (
+                <li key={item.id} className="wrap-anywhere rounded-lg border p-3">
+                  <p>{t(item.citationOrigin)}</p>
+                  <p>{t("citationNormalized")}: {item.normalizedUrl}</p>
+                  <p>{t("citationRaw")}: {item.rawUrl}</p>
+                  <p>{item.ownership} · {item.pageStatus}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {citations.some((item) => !isNativeCitationOrigin(item.citationOrigin) && !isReferenceLinkOrigin(item.citationOrigin)) && (
+          <ul className="space-y-2 text-sm">
+            {citations.filter((item) => !isNativeCitationOrigin(item.citationOrigin) && !isReferenceLinkOrigin(item.citationOrigin)).map((item) => (
+              <li key={item.id} className="wrap-anywhere rounded-lg border p-3">
+                <p>{t(item.citationOrigin)}</p>
                 <p>{t("citationNormalized")}: {item.normalizedUrl}</p>
                 <p>{t("citationRaw")}: {item.rawUrl}</p>
                 <p>{item.ownership} · {item.pageStatus}</p>
@@ -169,6 +201,13 @@ export default async function EvidenceDetailPage({
           </ul>
         )}
       </section>
+      {canAppendReferenceLink(observation.evidenceState) && (
+        <ReferenceLinkForm
+          brandId={observation.brandId}
+          observationId={observation.id}
+          messages={getMessages(locale).evidence}
+        />
+      )}
       <AnalysisDraftPanel
         locale={locale}
         observationId={observation.id}

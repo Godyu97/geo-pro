@@ -57,6 +57,20 @@ export const citationSetStates = ["complete", "partial", "unsupported", "missing
 export const citationOrigins = [
   "provider_native", "consumer_visible", "search_candidate", "analyst_found", "custom_pipeline",
 ] as const;
+export const nativeCitationOrigins = ["provider_native", "consumer_visible"] as const;
+export const referenceLinkOrigins = ["search_candidate", "analyst_found"] as const;
+
+export function isNativeCitationOrigin(origin: string) {
+  return origin === "provider_native" || origin === "consumer_visible";
+}
+
+export function isReferenceLinkOrigin(origin: string) {
+  return origin === "search_candidate" || origin === "analyst_found";
+}
+
+export function canAppendReferenceLink(evidenceState: string) {
+  return evidenceState === "draft_evidence" || evidenceState === "complete" || evidenceState === "contested";
+}
 export const ownershipStates = ["owned_domain", "owned_account", "competitor", "third_party", "unknown"] as const;
 export const pageStatuses = ["unknown", "reachable", "restricted", "not_applicable"] as const;
 export const analysisStatuses = ["pending", "classified", "needs_review", "revised"] as const;
@@ -149,6 +163,16 @@ export const completeManualSchema = submitManualSchema.extend({
 });
 export type CompleteManualInput = z.infer<typeof completeManualSchema>;
 
+export const appendReferenceSchema = z.strictObject({
+  action: z.literal("append-reference"),
+  brandId: brandIdSchema,
+  observationId: brandIdSchema,
+  operationId: brandIdSchema,
+  rawUrl: z.string().url().max(2000),
+  citationOrigin: z.enum(referenceLinkOrigins),
+});
+export type AppendReferenceInput = z.infer<typeof appendReferenceSchema>;
+
 export const reviseAnalysisSchema = z.strictObject({
   action: z.literal("revise-analysis"),
   brandId: brandIdSchema,
@@ -195,6 +219,7 @@ export const evidenceWriteSchema = z.discriminatedUnion("action", [
   submitManualSchema,
   completeManualSchema,
   reviseAnalysisSchema,
+  appendReferenceSchema,
 ]);
 export type EvidenceWriteInput = z.infer<typeof evidenceWriteSchema>;
 
@@ -203,5 +228,5 @@ export function qualifiesForC(citationSetState: (typeof citationSetStates)[numbe
 }
 
 export function nativeCited(citations: Array<{ citationOrigin: string }>) {
-  return citations.some((item) => item.citationOrigin === "provider_native" || item.citationOrigin === "consumer_visible");
+  return citations.some((item) => isNativeCitationOrigin(item.citationOrigin));
 }

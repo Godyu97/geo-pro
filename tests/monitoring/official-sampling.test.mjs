@@ -13,7 +13,8 @@ import { createSamplingProtocol, freezeSamplingProtocol, pinSamplingProtocol } f
 import { createOfficialSamplingPort, officialSamplingPortFromEnv } from "../../src/features/monitoring/official-port.ts";
 import { PromptDao } from "../../src/features/prompts/dao.ts";
 import { updateQuota } from "../../src/features/quotas/commands.ts";
-import { parseOfficialReceipt, safeFailureOfficialSample, serializeOfficialReceipt } from "../../src/lib/ai/official-sampling.ts";
+import { interpretOfficialPayload, parseOfficialReceipt, safeFailureOfficialSample, serializeOfficialReceipt } from "../../src/lib/ai/official-sampling.ts";
+import { classifyLabels, officialAttemptCapture } from "../../src/features/evidence/rules.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
 
@@ -267,6 +268,82 @@ test("official receipts retain intact URLs and downgrade incomplete citation set
   assert.equal(receipt.citationSetState, "partial");
   assert.ok(receipt.citations.length > 0 && receipt.citations.length < citations.length);
   assert.deepEqual(receipt.citations, citations.slice(0, receipt.citations.length));
+  assert.equal(receipt.searchResults, undefined);
+});
+
+test("an explicit search list does not complete or fill native citations", () => {
+  const base = {
+    httpStatus: 200,
+    requestedModel: "fixture-model",
+    requestedNetworkMode: "on",
+    citationCapability: "complete",
+    priceTable,
+    currency: "CNY",
+    upperMinor: 100,
+  };
+  const bodyOnly = interpretOfficialPayload({
+    ...base,
+    payload: {
+      id: "resp-body", status: "completed", model: "fixture-model",
+      output_text: "见 https://body.example/guess",
+      output: [{ type: "message", content: [{ type: "output_text", text: "见 https://body.example/guess" }] }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      geo_sampling: { network_trigger: "triggered", citations: [] },
+    },
+  });
+  assert.equal(bodyOnly.citationSetState, "complete");
+  assert.equal(bodyOnly.citations.length, 0);
+  assert.equal(bodyOnly.searchResults.length, 0);
+
+  const listed = interpretOfficialPayload({
+    ...base,
+    payload: {
+      id: "resp-search", status: "completed", model: "fixture-model",
+      output_text: "没有把搜索结果写成引用。",
+      output: [
+        { type: "web_search_call", status: "completed", action: { type: "search", sources: [{ type: "url", url: "https://search.example/a?utm_source=1" }, { url: "not a url" }] } },
+        { type: "message", content: [{ type: "output_text", text: "没有把搜索结果写成引用。", annotations: [{ type: "url_citation", url: "https://native.example/cited" }] }] },
+      ],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      geo_sampling: {
+        network_trigger: "triggered",
+        citation_support: "complete",
+        citations: [],
+        search_results: [{ url: "https://search.example/explicit?fbclid=2", title: "候选" }, { url: "notaurl" }],
+      },
+    },
+  });
+  assert.equal(listed.citationSetState, "complete");
+  assert.equal(listed.citations.length, 0);
+  assert.equal(listed.searchResults.length, 1);
+  assert.equal(listed.searchResults[0].url, "https://search.example/explicit?fbclid=2");
+  const fromTool = interpretOfficialPayload({
+    ...base,
+    payload: {
+      id: "resp-tool", status: "completed", model: "fixture-model",
+      output_text: "引用与搜索分开。",
+      output: [
+        { type: "web_search_call", status: "completed", action: { type: "search", sources: [{ url: "https://search.example/tool" }] } },
+        { type: "message", content: [{ type: "output_text", text: "引用与搜索分开。", annotations: [{ type: "url_citation", url: "https://native.example/cited" }] }] },
+      ],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      geo_sampling: { network_trigger: "triggered" },
+    },
+  });
+  assert.equal(fromTool.citationSetState, "complete");
+  assert.deepEqual(fromTool.citations.map((item) => item.url), ["https://native.example/cited"]);
+  assert.deepEqual(fromTool.searchResults.map((item) => item.url), ["https://search.example/tool"]);
+  const captured = officialAttemptCapture(serializeOfficialReceipt(listed));
+  assert.equal(captured.citationSetState, "complete");
+  assert.equal(captured.citations.length, 1);
+  assert.equal(captured.citations[0].citationOrigin, "search_candidate");
+  const labels = classifyLabels({
+    answerText: "没有把搜索结果写成引用。",
+    brandName: "乙品牌",
+    officialWebsite: "https://search.example",
+    citations: captured.citations,
+  });
+  assert.equal(labels.officialSiteCited, "false");
 });
 
 for (const kind of ["sqlite", "postgresql"]) {

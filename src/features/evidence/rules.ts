@@ -1,28 +1,24 @@
 import { createHash } from "node:crypto";
 import { parseOfficialReceipt } from "../../lib/ai/official-sampling.ts";
-import { citationSetStates, nativeCited, networkTriggers, type TriState } from "./contracts.ts";
+import { citationSetStates, isNativeCitationOrigin, nativeCited, networkTriggers, type TriState } from "./contracts.ts";
 
 type CitationSetState = (typeof citationSetStates)[number];
 type NetworkTrigger = (typeof networkTriggers)[number];
 
 export type AdoptedCitationInput = {
   rawUrl: string;
-  citationOrigin: "provider_native";
+  citationOrigin: "provider_native" | "search_candidate";
   positionLabel: string;
   ownership: "unknown";
   pageStatus: "unknown";
 };
 
-/** Vendor receipt is the only citation and trigger source for an official attempt. */
-export function officialAttemptCapture(receiptText: string | null): {
-  citationSetState: CitationSetState;
-  networkTrigger: NetworkTrigger;
-  citations: AdoptedCitationInput[];
-} {
-  const receipt = parseOfficialReceipt(receiptText);
-  if (!receipt) return { citationSetState: "missing", networkTrigger: "unknown", citations: [] };
+function adoptedLinks(
+  items: ReadonlyArray<{ url: string; position: number }>,
+  citationOrigin: AdoptedCitationInput["citationOrigin"],
+) {
   const citations: AdoptedCitationInput[] = [];
-  for (const item of receipt.citations) {
+  for (const item of items) {
     let url: URL;
     try {
       url = new URL(item.url);
@@ -32,16 +28,30 @@ export function officialAttemptCapture(receiptText: string | null): {
     if (url.protocol !== "http:" && url.protocol !== "https:") continue;
     citations.push({
       rawUrl: url.toString(),
-      citationOrigin: "provider_native",
+      citationOrigin,
       positionLabel: String(item.position),
       ownership: "unknown",
       pageStatus: "unknown",
     });
   }
+  return citations;
+}
+
+/** Vendor receipt is the only citation and trigger source for an official attempt. */
+export function officialAttemptCapture(receiptText: string | null): {
+  citationSetState: CitationSetState;
+  networkTrigger: NetworkTrigger;
+  citations: AdoptedCitationInput[];
+} {
+  const receipt = parseOfficialReceipt(receiptText);
+  if (!receipt) return { citationSetState: "missing", networkTrigger: "unknown", citations: [] };
   return {
     citationSetState: receipt.citationSetState,
     networkTrigger: receipt.networkTrigger,
-    citations,
+    citations: [
+      ...adoptedLinks(receipt.citations, "provider_native"),
+      ...adoptedLinks(receipt.searchResults ?? [], "search_candidate"),
+    ],
   };
 }
 
@@ -118,7 +128,7 @@ export function classifyLabels(input: {
 
   const officialHost = input.officialWebsite ? hostOf(input.officialWebsite) : "";
   const citations = input.citations ?? [];
-  const native = citations.filter((item) => item.citationOrigin === "provider_native" || item.citationOrigin === "consumer_visible");
+  const native = citations.filter((item) => isNativeCitationOrigin(item.citationOrigin));
   let officialSiteCited: TriState = "unknown";
   if (!officialHost) officialSiteCited = "false";
   else if (native.length === 0 && !nativeCited(citations)) officialSiteCited = "false";

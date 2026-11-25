@@ -3,6 +3,7 @@ import "server-only";
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection } from "../../lib/db/connection.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
+import { citationOrigins } from "../evidence/contracts.ts";
 
 const setRow = z.object({
   id: brandIdSchema,
@@ -57,6 +58,7 @@ const citationViewRow = z.object({
   observationId: brandIdSchema,
   rawUrl: z.string(),
   normalizedUrl: z.string(),
+  citationOrigin: z.enum(citationOrigins),
   ownership: z.string(),
   pageStatus: z.string(),
   state: z.enum(["observed", "resolved", "limited", "unknown"]).nullable(),
@@ -297,7 +299,7 @@ export class CompetitorDao {
     const rows = await queryWithParameters(
       this.db,
       `SELECT c.id AS "citationId", c.observation_id AS "observationId", c.raw_url AS "rawUrl",
-              c.normalized_url AS "normalizedUrl", c.ownership, c.page_status AS "pageStatus",
+              c.normalized_url AS "normalizedUrl", c.citation_origin AS "citationOrigin", c.ownership, c.page_status AS "pageStatus",
               i.state, i.support, i.page_live AS "pageLive", i.readable,
               i.author_known AS "authorKnown", i.supports_brand AS "supportsBrand",
               i.supported_claim AS "supportedClaim", i.fact_version_id AS "factVersionId"
