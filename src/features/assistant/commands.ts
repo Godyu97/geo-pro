@@ -10,6 +10,7 @@ import {
   confirmAssistantPlanSchema,
   createAssistantPlanSchema,
   type AssistantError,
+  type AssistantPlanView,
   type ConfirmAssistantPlanInput,
   type CreateAssistantPlanInput,
 } from "./contracts.ts";
@@ -32,27 +33,6 @@ type PlanOptions = {
   clock?: () => string;
   env?: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
-};
-
-export type AssistantItemView = {
-  id: string;
-  position: number;
-  action: string;
-  factVersionId: string;
-  factCurrent: boolean;
-  status: AssistantPlanItemRecord["status"];
-  blockReason: AssistantPlanItemRecord["blockReason"];
-};
-
-export type AssistantPlanView = {
-  id: string;
-  brandId: string;
-  status: AssistantPlanRecord["status"];
-  ignored: boolean;
-  budgetMinor: number;
-  controlsUnchanged: true;
-  strategy: { label: "observation"; guaranteed: false; successes: number };
-  items: AssistantItemView[];
 };
 
 class PlanAbort extends Error {
@@ -130,6 +110,28 @@ export async function listAssistantPlans(db: DatabaseConnection, ownerId: string
   const plans = await dao.plansForBrand(ownerId, brand.id);
   const items = await dao.itemsForPlans(ownerId, plans.map((plan) => plan.id));
   return { plans: plans.map((plan) => toView(plan, items)) };
+}
+
+export function assistantWorkspaceUnavailable(error: unknown) {
+  const traceId = randomUUID();
+  console.error("assistant-plans-page-unavailable", {
+    traceId,
+    message: error instanceof Error ? error.message : "unknown",
+  });
+  return { error: "SERVICE_UNAVAILABLE" as const, traceId };
+}
+
+export async function readAssistantWorkspace(db: DatabaseConnection, ownerId: string) {
+  const active = await new BrandDao(db).active(ownerId);
+  if (!active) return { kind: "no-brand" as const };
+  const listed = await listAssistantPlans(db, ownerId, active.id);
+  if ("error" in listed) throw new Error("assistant-plans-unavailable");
+  return {
+    kind: "ready" as const,
+    brandId: active.id,
+    brandName: active.name,
+    plans: listed.plans,
+  };
 }
 
 export async function readAssistantPlan(db: DatabaseConnection, ownerId: string, planId: string) {

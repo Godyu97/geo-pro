@@ -50,3 +50,24 @@ export type AssistantError = keyof typeof assistantErrors;
 export type CreateAssistantPlanInput = z.infer<typeof createAssistantPlanSchema>;
 export type ConfirmAssistantPlanInput = z.infer<typeof confirmAssistantPlanSchema>;
 export type PlanItemInput = z.infer<typeof planItemInputSchema>;
+
+export type AssistantPlanItemView = {
+  id: string;
+  position: number;
+  action: string;
+  factVersionId: string;
+  factCurrent: boolean;
+  status: (typeof itemStatuses)[number];
+  blockReason: (typeof blockReasons)[number] | null;
+};
+
+export type AssistantPlanView = {
+  id: string;
+  brandId: string;
+  status: (typeof planStatuses)[number];
+  ignored: boolean;
+  budgetMinor: number;
+  controlsUnchanged: true;
+  strategy: { label: "observation"; guaranteed: false; successes: number };
+  items: AssistantPlanItemView[];
+};

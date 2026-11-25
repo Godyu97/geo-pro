@@ -650,6 +650,29 @@ await writeFile(deletionCommands, deletionCommandSource.replace(deletionCommand,
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 
+const assistantCommands = path.join(fixture, "src/features/assistant/commands.ts");
+const assistantSource = await readFile(assistantCommands, "utf8");
+const assistantRead = `export async function readAssistantWorkspace(db: DatabaseConnection, ownerId: string) {`;
+const assistantConfirm = `export async function confirmPlanItems(
+  db: DatabaseConnection,
+  ownerId: string,
+  planId: string,
+  input: ConfirmAssistantPlanInput,
+  options: PlanOptions = {},
+) {`;
+assert.ok(assistantSource.includes(assistantRead));
+assert.ok(assistantSource.includes(assistantConfirm));
+await writeFile(assistantCommands, assistantSource
+  .replace(assistantRead, `${assistantRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-assistant-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private assistant fixture failure");
+  }`)
+  .replace(assistantConfirm, `${assistantConfirm}
+  if ((await (await import("next/headers")).cookies()).get("geo-assistant-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));
