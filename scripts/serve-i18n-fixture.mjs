@@ -147,14 +147,14 @@ await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(b
 
 const versionRead = `export async function readContentVersion(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   versionId: string,
 ) {
   const dao = new ContentDao(db);`;
 assert.ok((await readFile(briefCommands, "utf8")).includes(versionRead));
 await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(versionRead, `export async function readContentVersion(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   versionId: string,
 ) {
   if ((await (await import("next/headers")).cookies()).get("geo-content-version-unavailable")?.value === "1") {
@@ -182,14 +182,14 @@ await writeFile(calendarService, (await readFile(calendarService, "utf8")).repla
 
 const publicationRead = `export async function readPublication(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   publicationId: string,
 ) {
   const dao = new ContentDao(db);`;
 assert.ok((await readFile(briefCommands, "utf8")).includes(publicationRead));
 await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(publicationRead, `export async function readPublication(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   publicationId: string,
 ) {
   if ((await (await import("next/headers")).cookies()).get("geo-content-publication-unavailable")?.value === "1") {
@@ -222,7 +222,7 @@ const reportList = `export async function listReports(
   limit = 20,
   options: SnapshotStorageOptions = {},
 ) {
-  const brand = await requireOwnedBrand(db, ownerId, brandId);`;
+  const adopted = await authorizeBrandActor(db, ownerId, brandId, "read");`;
 assert.ok((await readFile(reportCommands, "utf8")).includes(reportList));
 await writeFile(reportCommands, (await readFile(reportCommands, "utf8")).replace(reportList, `export async function listReports(
   db: QueryConnection,
@@ -234,7 +234,7 @@ await writeFile(reportCommands, (await readFile(reportCommands, "utf8")).replace
   if ((await (await import("next/headers")).cookies()).get("geo-reports-unavailable")?.value === "1") {
     throw new Error("Private report fixture failure");
   }
-  const brand = await requireOwnedBrand(db, ownerId, brandId);`));
+  const adopted = await authorizeBrandActor(db, ownerId, brandId, "read");`));
 
 const observationCommands = path.join(fixture, "src/features/formal-retest/commands.ts");
 const observationList = `export async function listFormalObservations(db: DatabaseConnection, ownerId: string, brandId: string) {
