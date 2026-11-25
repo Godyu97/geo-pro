@@ -17,3 +17,11 @@ export async function readBrandData<T>(read: (dao: BrandDao) => Promise<T>) {
     return brandUnavailable();
   }
 }
+
+export async function readDeletionPreview(ownerId: string, brandId: string) {
+  return readBrandData((dao) => dao.deletionImpact(ownerId, brandId));
+}
+
+export async function readDeletionRecovery(ownerId: string, brandId: string) {
+  return readBrandData((dao) => dao.deletionState(ownerId, brandId));
+}

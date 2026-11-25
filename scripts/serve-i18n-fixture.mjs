@@ -603,6 +603,43 @@ await writeFile(entityRevisions, entityRevisionsSource
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 
+const deletionService = path.join(fixture, "src/features/brands/service.ts");
+const deletionServiceSource = await readFile(deletionService, "utf8");
+const deletionPreview = `export async function readDeletionPreview(ownerId: string, brandId: string) {
+  return readBrandData((dao) => dao.deletionImpact(ownerId, brandId));
+}`;
+const deletionRecovery = `export async function readDeletionRecovery(ownerId: string, brandId: string) {
+  return readBrandData((dao) => dao.deletionState(ownerId, brandId));
+}`;
+assert.ok(deletionServiceSource.includes(deletionPreview) && deletionServiceSource.includes(deletionRecovery));
+await writeFile(deletionService, deletionServiceSource
+  .replace(deletionPreview, `export async function readDeletionPreview(ownerId: string, brandId: string) {
+  if ((await (await import("next/headers")).cookies()).get("geo-brand-deletion-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private brand deletion fixture failure");
+  }
+  return readBrandData((dao) => dao.deletionImpact(ownerId, brandId));
+}`)
+  .replace(deletionRecovery, `export async function readDeletionRecovery(ownerId: string, brandId: string) {
+  if ((await (await import("next/headers")).cookies()).get("geo-brand-recovery-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private brand recovery fixture failure");
+  }
+  return readBrandData((dao) => dao.deletionState(ownerId, brandId));
+}`));
+
+const deletionCommands = path.join(fixture, "src/features/brands/commands.ts");
+const deletionCommandSource = await readFile(deletionCommands, "utf8");
+const deletionCommand = `export async function executeBrandCommand(
+  connection: DatabaseConnection, ownerId: string, command: BrandCommand,
+  session?: BrandRecoverySession, clock = () => new Date(), cache?: CacheStore,
+): Promise<CommandResult> {`;
+assert.ok(deletionCommandSource.includes(deletionCommand));
+await writeFile(deletionCommands, deletionCommandSource.replace(deletionCommand, `${deletionCommand}
+  if ((await (await import("next/headers")).cookies()).get("geo-brand-deletion-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

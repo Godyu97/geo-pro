@@ -28,7 +28,7 @@ import {
 } from "@/features/monitoring/brand-readiness";
 import { readBrandMonitoringReadiness } from "@/features/monitoring/service";
 import { readPilotAdmission, type PilotAdmissionItem } from "./pilot-admission";
-import { readBrandData } from "./service";
+import { brandUnavailable, readBrandData, readDeletionPreview, readDeletionRecovery } from "./service";
 import type { RetentionView } from "./dao";
 
 type Query = Record<string, string | string[] | undefined>;
@@ -538,6 +538,28 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
   );
 }
 
+function BrandScopeFailure({ title, message, trace, reloadLabel, reloadHref, backLabel, backHref }: {
+  title: string; message: string; trace: string; reloadLabel: string; reloadHref: string; backLabel: string; backHref: string;
+}) {
+  return (
+    <div className="min-w-0 space-y-6">
+      <header className="min-w-0 space-y-3">
+        <h1 className="break-words text-2xl font-semibold tracking-tight">{title}</h1>
+        <p role="alert" className="max-w-2xl break-words text-sm leading-7 text-destructive">{message}</p>
+        <div className="flex min-w-0 flex-wrap gap-2">
+          <Button asChild className={brandActionClass}>
+            <a href={reloadHref}>{reloadLabel}</a>
+          </Button>
+          <Button asChild variant="outline" className={brandActionClass}>
+            <Link href={backHref} prefetch={false}>{backLabel}</Link>
+          </Button>
+        </div>
+        <p className="break-all text-xs text-muted-foreground">{trace}</p>
+      </header>
+    </div>
+  );
+}
+
 export async function BrandDeletionPage({ params }: { params: Promise<{ id: string }> }) {
   const { user } = await requireSession();
   const locale = await getLocale();
@@ -549,41 +571,71 @@ export async function BrandDeletionPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   if (!brandIdSchema.safeParse(id).success) notFound();
   const href = "/dashboard/brands/" + id;
-  const result = await readBrandData((dao) => dao.deletionImpact(user.id, id));
+  const currentHref = href + "/delete";
+  const result = await readDeletionPreview(user.id, id).catch(() => brandUnavailable());
   if ("unavailable" in result) return (
-    <BrandFrame title={t("deletionImpact")} back={href} backLabel={t("viewBrand")}>
-      <BrandLoadFailure t={t} href={href + "/delete"} />
-    </BrandFrame>
+    <BrandScopeFailure
+      title={t("deletionImpact")}
+      message={t("unavailable")}
+      trace={t("trace", { id: result.traceId })}
+      reloadLabel={t("reload")}
+      reloadHref={currentHref}
+      backLabel={t("viewBrand")}
+      backHref={href}
+    />
   );
   if (!result.data) notFound();
 
   const impact = result.data;
+  const messages = getMessages(locale);
   const rows = [
     [t("fieldName"), impact.name],
     [t("deletionBrandData"), t("deletionBrandCounts", { versions: formatNumber(locale, impact.versions), drafts: formatNumber(locale, impact.drafts) })],
-    [getMessages(locale).brandFacts.title, t("deletionFactCounts", { facts: formatNumber(locale, impact.facts), materials: formatNumber(locale, impact.materials) })],
-    [getMessages(locale).promptSets.title, t("deletionPromptCounts", { sets: formatNumber(locale, impact.promptSets) })],
+    [messages.brandFacts.title, t("deletionFactCounts", { facts: formatNumber(locale, impact.facts), materials: formatNumber(locale, impact.materials) })],
+    [messages.promptSets.title, t("deletionPromptCounts", { sets: formatNumber(locale, impact.promptSets) })],
     [t("deletionAttachments"), t("deletionUnavailableScope")],
     [t("deletionReports"), t("deletionUnavailableScope")],
     [t("deletionInFlight"), t("deletionInFlightCounts", { reservations: formatNumber(locale, impact.reservations), attempts: formatNumber(locale, impact.unresolvedAttempts) })],
     [t("deletionRetained"), t("deletionRetainedDetails")],
   ];
+  const related = [
+    { href, label: t("viewBrand") },
+    { href: "/dashboard/brands", label: t("allBrands") },
+    { href: href + "/facts", label: messages.brandFacts.title },
+    { href: href + "/questions", label: messages.promptSets.title },
+  ];
   return (
-    <BrandFrame title={t("deletionImpact")} back={href} backLabel={t("viewBrand")}>
-      <IntakeNotice t={t} mode={intake.mode} />
-      <section aria-label={t("deletionImpact")} className="max-w-3xl space-y-5 rounded-xl border bg-card p-5">
-        <p className="text-sm leading-6">{t("deletionConsequences")}</p>
-        <dl className="grid gap-3 text-sm sm:grid-cols-2">
-          {rows.map(([label, value]) => (
-            <div key={label} className="min-w-0 space-y-1 border-t pt-3">
-              <dt className="font-medium">{label}</dt>
-              <dd className="wrap-anywhere text-muted-foreground">{value}</dd>
-            </div>
+    <div className="min-w-0 space-y-6">
+      <header className="min-w-0 space-y-3">
+        <h1 className="break-words text-2xl font-semibold tracking-tight">{t("deletionImpact")}</h1>
+        <p className="max-w-3xl break-words text-sm leading-6 text-muted-foreground">{t("deletionTask")}</p>
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+          <span className="font-medium">{t("fieldName")}</span>
+          <span className="[overflow-wrap:anywhere]">{impact.name}</span>
+          <Badge variant="secondary">{t("active")}</Badge>
+        </div>
+        <BrandDeletionButtons action="freeze" id={id} revision={impact.revision} actorId={user.id} messages={messages.brands} />
+        <nav aria-label={t("relatedEntries")} className="flex min-w-0 flex-wrap gap-2">
+          {related.map((item) => (
+            <Link key={item.href + item.label} href={item.href} prefetch={false} className={brandRelatedClass}>{item.label}</Link>
           ))}
-        </dl>
-        <BrandDeletionButtons action="freeze" id={id} revision={impact.revision} actorId={user.id} messages={getMessages(locale).brands} />
-      </section>
-    </BrandFrame>
+        </nav>
+      </header>
+      <IntakeNotice t={t} mode={intake.mode} />
+      <Card className="min-w-0 py-0 shadow-none">
+        <CardContent className="space-y-5 p-5 sm:p-6">
+          <p className="break-words text-sm leading-6">{t("deletionConsequences")}</p>
+          <dl className="grid gap-3 text-sm sm:grid-cols-2">
+            {rows.map(([label, value]) => (
+              <div key={label} className="min-w-0 space-y-1 border-t pt-3">
+                <dt className="font-medium">{label}</dt>
+                <dd className="text-muted-foreground [overflow-wrap:anywhere]">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -598,42 +650,69 @@ export async function BrandRecoveryPage({ params }: { params: Promise<{ id: stri
   const intake = decision.intake;
   const { id } = await params;
   if (!brandIdSchema.safeParse(id).success) notFound();
-  const href = "/dashboard/brands/" + id + "/recovery";
-  const result = await readBrandData((dao) => dao.deletionState(user.id, id));
+  const brandHref = "/dashboard/brands/" + id;
+  const href = brandHref + "/recovery";
+  const result = await readDeletionRecovery(user.id, id).catch(() => brandUnavailable());
   if ("unavailable" in result) return (
-    <BrandFrame title={t("recoveryTitle")} back="/dashboard/brands" backLabel={t("allBrands")}>
-      <BrandLoadFailure t={t} href={href} />
-    </BrandFrame>
+    <BrandScopeFailure
+      title={t("recoveryTitle")}
+      message={t("unavailable")}
+      trace={t("trace", { id: result.traceId })}
+      reloadLabel={t("reload")}
+      reloadHref={href}
+      backLabel={t("allBrands")}
+      backHref="/dashboard/brands"
+    />
   );
   if (!result.data?.frozenAt || !result.data.restoreUntil) notFound();
   const { frozenAt, restoreUntil, revision } = result.data;
   const error = brandRecoveryError({ frozenAt, restoreUntil },
     { emailVerified: user.emailVerified, createdAt: session.createdAt }, new Date());
+  const task = error ? t(brandErrorMessage[error]) : t("recoveryTaskRestore");
+  const primary = error === "IDENTITY_UNVERIFIED" ? (
+    <Button asChild className={brandActionClass}>
+      <Link href={accountAccessPath("verify", href)} prefetch={false}>{email("verifyTitle")}</Link>
+    </Button>
+  ) : error === "REAUTH_REQUIRED" ? (
+    <SignOutButton returnTo={href} label={t("reauthenticate")} />
+  ) : error === "RECOVERY_EXPIRED" ? (
+    <Button asChild variant="outline" className={brandActionClass}>
+      <Link href="/dashboard/brands" prefetch={false}>{t("allBrands")}</Link>
+    </Button>
+  ) : (
+    <BrandDeletionButtons action="recover" id={id} revision={revision} actorId={user.id} messages={getMessages(locale).brands} />
+  );
   return (
-    <BrandFrame title={t("recoveryTitle")} back="/dashboard/brands" backLabel={t("allBrands")}>
+    <div className="min-w-0 space-y-6">
+      <header className="min-w-0 space-y-3">
+        <h1 className="break-words text-2xl font-semibold tracking-tight">{t("recoveryTitle")}</h1>
+        <p className="max-w-3xl break-words text-sm leading-6 text-muted-foreground">{task}</p>
+        <Badge variant="outline">{t("frozenAccess")}</Badge>
+        {primary}
+        <nav aria-label={t("relatedEntries")} className="flex min-w-0 flex-wrap gap-2">
+          <Link href="/dashboard/brands" prefetch={false} className={brandRelatedClass}>{t("allBrands")}</Link>
+        </nav>
+      </header>
       <IntakeNotice t={t} mode={intake.mode} />
-      <section aria-label={t("recoveryTitle")} className="max-w-3xl space-y-4 rounded-xl border bg-card p-5">
-        <p className="text-sm leading-6">{t("frozenDescription")}</p>
-        <dl className="space-y-3 text-sm">
-          <div><dt className="font-medium">{t("brandReference")}</dt><dd className="break-all">{id}</dd></div>
-          <div><dt className="font-medium">{t("recoveryDeadline")}</dt>
-            <dd><time dateTime={restoreUntil}>{formatDateTime(locale, new Date(restoreUntil))}</time></dd>
-          </div>
-        </dl>
-        {error ? (
-          <div className="space-y-3">
-            <p role="status" className="text-sm leading-6">{t(brandErrorMessage[error])}</p>
-            {error === "IDENTITY_UNVERIFIED" && (
-              <Link href={accountAccessPath("verify", href)} prefetch={false}
-                className="inline-block text-sm underline underline-offset-4">
-                {email("verifyTitle")}
-              </Link>
-            )}
-            {error === "REAUTH_REQUIRED" && <SignOutButton returnTo={href} label={t("reauthenticate")} />}
-          </div>
-        ) : <BrandDeletionButtons action="recover" id={id} revision={revision} actorId={user.id} messages={getMessages(locale).brands} />}
-      </section>
-    </BrandFrame>
+      <Card className="min-w-0 py-0 shadow-none">
+        <CardContent className="p-5 sm:p-6">
+          <section aria-label={t("recoveryTitle")} className="min-w-0 space-y-4">
+            <p className="break-words text-sm leading-6">{t("frozenDescription")}</p>
+            <dl className="space-y-3 text-sm">
+              <div className="min-w-0 space-y-1">
+                <dt className="font-medium">{t("brandReference")}</dt>
+                <dd className="text-muted-foreground [overflow-wrap:anywhere]">{id}</dd>
+              </div>
+              <div className="min-w-0 space-y-1">
+                <dt className="font-medium">{t("recoveryDeadline")}</dt>
+                <dd className="[overflow-wrap:anywhere]"><time dateTime={restoreUntil}>{formatDateTime(locale, new Date(restoreUntil))}</time></dd>
+              </div>
+            </dl>
+            {error ? <p role="status" className="break-words text-sm leading-6">{t(brandErrorMessage[error])}</p> : null}
+          </section>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

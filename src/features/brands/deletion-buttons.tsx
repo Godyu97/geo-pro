@@ -24,14 +24,24 @@ export function BrandDeletionButtons({ action, id, revision, actorId, messages }
     if (result?.kind === "deletion") window.location.replace(action === "freeze" ? recoveryHref : brandHref);
   }
 
+  const actionClass = "h-auto max-w-full whitespace-normal text-left";
+
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-3">
-        <Button type="button" variant={action === "freeze" ? "destructive" : "default"} disabled={pending} onClick={() => void submit()}>
+      <div className="flex min-w-0 flex-wrap gap-3">
+        <Button
+          type="button"
+          variant={action === "freeze" ? "destructive" : "default"}
+          className={actionClass}
+          aria-disabled={pending}
+          onClick={() => { if (!pending) void submit(); }}
+        >
           {t(pending ? "saving" : action === "freeze" ? "confirmDeletion" : "recoverDeletedBrand")}
         </Button>
         {action === "freeze" && (
-          <Button asChild variant="outline"><Link href={brandHref} prefetch={false}>{t("cancelDeletion")}</Link></Button>
+          <Button asChild variant="outline" className={actionClass}>
+            <Link href={brandHref} prefetch={false}>{t("cancelDeletion")}</Link>
+          </Button>
         )}
       </div>
       {error && (
