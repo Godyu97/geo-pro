@@ -15,4 +15,4 @@
 
 隔离库覆盖 SQLite 与 PostgreSQL。稿件作者自批返回 `SEPARATION` 且不产生新批准；事实提交人自批返回 `separation` 且事实正文和历史批准不变；发布人提交 `verified_manual` 被拒绝且发布状态保持 `access_limited`。对应职责的成员可以批准或核验，记录中的操作者是该成员。关闭双人审核后，负责人可以再次单人批准。
 
-`pnpm test:content` 仍有 2 项既有失败：`tests/content/channel-profiles.test.mjs` 把基线定在倒数第二个迁移，并期望此时还不存在 `channel_profile`。该表由更早的迁移创建，断言发生在审批代码之前。本轮没有改这条迁移测试。
+2026-11-26：渠道画像升级测试不再使用倒数第二个迁移。基线固定在 `channel_profile` 创建之前，SQLite 为 `0072_broad_snowbird`，PostgreSQL 为 `0073_swift_cardiac`。升级后旧变体的画像钉保持空，且不生成画像行。`pnpm test:content` 54 项通过，含双方言的稿件批准、人工核验和这条升级。

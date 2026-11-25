@@ -65,9 +65,17 @@ const usableFact = {
   validThrough: "2026-12-31",
 };
 
-function previousTag(kind) {
-  const journal = JSON.parse(readFileSync(kind === "sqlite" ? "drizzle/sqlite/meta/_journal.json" : "drizzle/meta/_journal.json", "utf8"));
-  return journal.entries.at(-2).tag;
+function profileBaselineTag(kind) {
+  const folder = kind === "sqlite" ? "drizzle/sqlite" : "drizzle";
+  const journal = JSON.parse(readFileSync(`${folder}/meta/_journal.json`, "utf8"));
+  const baseline = kind === "sqlite" ? "0072_broad_snowbird" : "0073_swift_cardiac";
+  const index = journal.entries.findIndex(({ tag }) => tag === baseline);
+  assert.notEqual(index, -1, `Unknown migration ${baseline}`);
+  const next = journal.entries[index + 1];
+  assert.ok(next, `Missing migration after ${baseline}`);
+  const sql = readFileSync(`${folder}/${next.tag}.sql`, "utf8");
+  assert.match(sql, /CREATE TABLE [`"]channel_profile[`"]/);
+  return baseline;
 }
 
 function memoryStorage() {
@@ -175,7 +183,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const fixture = await testDatabase(kind, { migrateNow: false });
     t.after(() => fixture.cleanup());
     const db = fixture.connection;
-    await migrateThrough(db, previousTag(kind));
+    await migrateThrough(db, profileBaselineTag(kind));
     await assert.rejects(() => queryWithParameters(db, "SELECT id FROM channel_profile", []));
     const owner = await account(db);
     const brand = randomUUID();
