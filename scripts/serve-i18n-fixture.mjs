@@ -340,6 +340,15 @@ await writeFile(ordersPage, ordersSource.replace(ordersRead, `${ordersRead}
       throw new Error("Private quote orders fixture failure");
     }`));
 
+const deliveriesPage = path.join(fixture, "src/features/commercial/deliveries-page.tsx");
+const deliveriesSource = await readFile(deliveriesPage, "utf8");
+const deliveriesRead = "    workspace = await loadDeliveryWorkspace(getConnection(), user.id);";
+assert.ok(deliveriesSource.includes(deliveriesRead));
+await writeFile(deliveriesPage, deliveriesSource.replace(deliveriesRead, `    const probe = (await (await import("next/headers")).cookies()).get("geo-deliveries-read")?.value;
+    if (probe === "slow") await new Promise(resolve => setTimeout(resolve, 1800));
+    if (probe === "unavailable") throw new Error("Private delivery fixture failure");
+${deliveriesRead}`));
+
 const monitoringService = path.join(fixture, "src/features/monitoring/service.ts");
 const monitoringSource = await readFile(monitoringService, "utf8");
 const runRead = "export async function readOwnedRun(ownerId: string, runId: string) {\n  try {";
