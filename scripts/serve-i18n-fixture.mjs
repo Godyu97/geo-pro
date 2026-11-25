@@ -737,6 +737,28 @@ await writeFile(localObservationCommands, localObservationSource
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 
+const brandStoreCommands = path.join(fixture, "src/features/local-presence/store-commands.ts");
+const brandStoreSource = await readFile(brandStoreCommands, "utf8");
+const brandStoreRead = "export async function listBrandStores(db: DatabaseConnection, ownerId: string): Promise<BrandStoreList> {";
+const brandStoreWrite = `export async function registerBrandStore(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: RegisterBrandStoreInput,
+  clock: Clock = systemClock,
+): Promise<{ store: BrandStoreView } | { error: "NOT_FOUND" }> {`;
+assert.ok(brandStoreSource.includes(brandStoreRead));
+assert.ok(brandStoreSource.includes(brandStoreWrite));
+await writeFile(brandStoreCommands, brandStoreSource
+  .replace(brandStoreRead, `${brandStoreRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-brand-stores-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private brand stores fixture failure");
+  }`)
+  .replace(brandStoreWrite, `${brandStoreWrite}
+  if ((await (await import("next/headers")).cookies()).get("geo-brand-stores-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

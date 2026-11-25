@@ -1,10 +1,14 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, useTransition, type ComponentProps, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { loginPath } from "@/lib/auth/return-to";
-import { useLocale } from "@/lib/i18n/client";
+import type { Locale } from "@/lib/i18n/locale";
 import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
 import {
@@ -18,12 +22,44 @@ import {
 
 type Copy = Messages["brandStores"];
 type Translator = (key: keyof Copy, params?: Record<string, string | number>) => string;
+type Notice = { kind: "status" | "alert"; text: string };
 
-const fieldClass = "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm";
+const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center aria-disabled:opacity-60";
+const wrapBadgeClass = "h-auto max-w-full whitespace-normal rounded-xl px-3 py-1 text-left leading-5 [overflow-wrap:anywhere]";
+const selectClass = "box-border block h-10 w-full min-w-0 max-w-full truncate rounded-lg border border-input bg-background px-3 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const emptySurfaceClass = "rounded-xl border border-dashed bg-card px-4 py-5 text-sm leading-6 text-muted-foreground [overflow-wrap:anywhere]";
 const returnPath = "/dashboard/brands/stores";
 
 function isBrandStoreError(code: string): code is BrandStoreError {
   return Object.hasOwn(brandStoreErrors, code);
+}
+
+export function BrandStoreJump({ href, children, onClick, ...props }: ComponentProps<"a"> & { href: string; children: ReactNode }) {
+  return (
+    <a {...props} href={href} onClick={(event) => {
+      onClick?.(event);
+      const root = document.getElementById("main-content") ?? document;
+      const target = root.querySelector<HTMLElement>(href);
+      if (!target) return;
+      event.preventDefault();
+      target.focus();
+      target.scrollIntoView({ block: "nearest" });
+    }}>{children}</a>
+  );
+}
+
+function NoticeBanner({ notice }: { notice: Notice | null }) {
+  if (!notice) return null;
+  return (
+    <p
+      role={notice.kind}
+      className={notice.kind === "alert"
+        ? "rounded-xl border border-destructive/30 bg-card px-4 py-3 text-sm leading-6 text-destructive"
+        : "rounded-xl border bg-card px-4 py-3 text-sm leading-6 text-foreground"}
+    >
+      {notice.text}
+    </p>
+  );
 }
 
 function noticeFrom(payload: unknown, t: Translator) {
@@ -33,179 +69,249 @@ function noticeFrom(payload: unknown, t: Translator) {
   return isBrandStoreError(error.code) ? t(error.code) : t("SERVICE_UNAVAILABLE");
 }
 
-export function BrandStoresPanel({ brands, stores, uses, labels, messages }: {
+export function BrandStoresPanel({ brands, stores, uses, labels, locale, messages }: {
   brands: { id: string }[];
   stores: BrandStoreView[];
   uses: StoreFactUseView[];
   labels: { brandId: string; name: string }[];
+  locale: Locale;
   messages: Copy;
 }) {
-  const { locale } = useLocale();
   const t = createTranslator(locale, messages);
+  const router = useRouter();
   const labelFor = (brandId: string) => labels.find((label) => label.brandId === brandId)?.name ?? brandId;
   const when = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" });
   const usesFor = (storeId: string) => uses.filter((item) => item.storeId === storeId);
+  const [brandId, setBrandId] = useState(brands[0]?.id ?? "");
+  const [name, setName] = useState("");
+  const [serviceArea, setServiceArea] = useState("");
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [pending, setPending] = useState(false);
+  const [, startTransition] = useTransition();
+  const inFlightRef = useRef(false);
+
+  function begin() {
+    if (inFlightRef.current) return false;
+    inFlightRef.current = true;
+    setPending(true);
+    setNotice(null);
+    return true;
+  }
+
+  function finish() {
+    inFlightRef.current = false;
+    setPending(false);
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (inFlightRef.current) return;
+    const parsed = registerBrandStoreSchema.safeParse({ brandId, name, serviceArea });
+    if (!parsed.success) {
+      setNotice({ kind: "alert", text: t("INVALID_INPUT") });
+      return;
+    }
+    if (!begin()) return;
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/brands/stores", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsed.data),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          if (response.status === 401) {
+            window.location.replace(loginPath(returnPath, "session-required"));
+            return;
+          }
+          setNotice({ kind: "alert", text: noticeFrom(payload, t) });
+          return;
+        }
+        setName("");
+        setServiceArea("");
+        setNotice({ kind: "status", text: t("saved") });
+        router.refresh();
+      } catch {
+        setNotice({ kind: "alert", text: t("SERVICE_UNAVAILABLE") });
+      } finally {
+        finish();
+      }
+    });
+  }
 
   return (
-    <div className="space-y-6">
-      {brands.length === 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("noBrands")}</p> : (
-        <RegisterForm brands={brands} labelFor={labelFor} t={t} />
-      )}
-      {stores.length === 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("empty")}</p> : (
-        <ul className="space-y-3">
+    <div className="min-w-0 space-y-6">
+      {brands.length > 0 ? (
+        <Card id="brand-store-form" className="min-w-0 scroll-mt-24">
+          <CardHeader>
+            <CardTitle>
+              <h2 className="[overflow-wrap:anywhere]">{t("registerTitle")}</h2>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="grid min-w-0 gap-4">
+              <NoticeBanner notice={notice} />
+              {brands.length > 1 ? (
+                <div className="flex min-w-0 flex-col gap-2">
+                  <Label htmlFor="brand-store-brand">{t("brand")}</Label>
+                  <select
+                    id="brand-store-brand"
+                    value={brandId}
+                    onChange={(event) => setBrandId(event.target.value)}
+                    className={selectClass}
+                  >
+                    {brands.map((brand) => (
+                      <option key={brand.id} value={brand.id}>{labelFor(brand.id)}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label htmlFor="brand-store-name">{t("storeName")}</Label>
+                <Input
+                  id="brand-store-name"
+                  value={name}
+                  maxLength={80}
+                  autoComplete="off"
+                  onChange={(event) => setName(event.target.value)}
+                  className="h-10 bg-background"
+                />
+                <p className="text-sm leading-6 text-muted-foreground">{t("storeNameHint")}</p>
+              </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label htmlFor="brand-store-area">{t("serviceArea")}</Label>
+                <Input
+                  id="brand-store-area"
+                  value={serviceArea}
+                  maxLength={160}
+                  autoComplete="off"
+                  onChange={(event) => setServiceArea(event.target.value)}
+                  className="h-10 bg-background"
+                />
+                <p className="text-sm leading-6 text-muted-foreground">{t("serviceAreaHint")}</p>
+              </div>
+              <div>
+                <Button type="submit" aria-disabled={pending} className={actionClass}>
+                  {pending ? t("registering") : t("registerAction")}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
+      {stores.length === 0 ? <p className={emptySurfaceClass}>{t("empty")}</p> : (
+        <div id="brand-store-list" tabIndex={-1} className="min-w-0 scroll-mt-24 space-y-4 outline-none focus-visible:outline-2 focus-visible:outline-ring">
+          <h2 className="text-lg font-semibold [overflow-wrap:anywhere]">{t("listTitle")}</h2>
           {stores.map((store) => (
-            <li key={store.id} className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
-              <p className="break-words font-medium">{store.name}</p>
-              <p className="break-words text-sm leading-6 text-muted-foreground">{labelFor(store.brandId)}</p>
-              <p className="break-words text-sm leading-6">{t("serviceAreaLine", { area: store.serviceArea })}</p>
-              <p className="text-sm leading-6 text-muted-foreground">{t("createdAt", { time: when.format(new Date(store.createdAt)) })}</p>
-              <UseForm store={store} t={t} />
-              {usesFor(store.id).length === 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("useEmpty")}</p> : (
-                <ul className="space-y-2">
-                  {usesFor(store.id).map((item) => (
-                    <li key={item.id} className="min-w-0 space-y-1 rounded-lg border p-3">
-                      <p className="break-words text-sm leading-6">{t("useLine", { area: item.serviceArea })}</p>
-                      <p className="text-sm leading-6 text-muted-foreground">{t("ownStoreOnly")}</p>
-                      <p className="text-sm leading-6 text-muted-foreground">{t("recordedAt", { time: when.format(new Date(item.recordedAt)) })}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
+            <Card key={store.id} className="min-w-0">
+              <CardHeader>
+                <CardTitle>
+                  <h3 className="[overflow-wrap:anywhere]">{store.name}</h3>
+                </CardTitle>
+                <p className="text-sm leading-6 text-muted-foreground [overflow-wrap:anywhere]">{labelFor(store.brandId)}</p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm leading-6 [overflow-wrap:anywhere]">{t("serviceAreaLine", { area: store.serviceArea })}</p>
+                <p className="text-sm leading-6 text-muted-foreground">{t("createdAt", { time: when.format(new Date(store.createdAt)) })}</p>
+                <UseForm store={store} t={t} />
+                {usesFor(store.id).length === 0 ? <p className="text-sm leading-6 text-muted-foreground">{t("useEmpty")}</p> : (
+                  <ul className="space-y-2">
+                    {usesFor(store.id).map((item) => (
+                      <li key={item.id} className="min-w-0 space-y-1 rounded-lg border p-3">
+                        <p className="text-sm leading-6 [overflow-wrap:anywhere]">{t("useLine", { area: item.serviceArea })}</p>
+                        <Badge variant="outline" className={wrapBadgeClass}>{t("ownStoreOnly")}</Badge>
+                        <p className="text-sm leading-6 text-muted-foreground">{t("recordedAt", { time: when.format(new Date(item.recordedAt)) })}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
 }
 
-function RegisterForm({ brands, labelFor, t }: {
-  brands: { id: string }[];
-  labelFor: (brandId: string) => string;
-  t: Translator;
-}) {
-  const router = useRouter();
-  const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (pending) return;
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const parsed = registerBrandStoreSchema.safeParse({
-      brandId: String(data.get("brandId") ?? ""),
-      name: String(data.get("name") ?? ""),
-      serviceArea: String(data.get("serviceArea") ?? ""),
-    });
-    if (!parsed.success) {
-      setNotice(t("INVALID_INPUT"));
-      return;
-    }
-    setPending(true);
-    setNotice(null);
-    try {
-      const response = await fetch("/api/brands/stores", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsed.data),
-      });
-      if (!response.ok) {
-        if (response.status === 401) {
-          window.location.replace(loginPath(returnPath, "session-required"));
-          return;
-        }
-        setNotice(noticeFrom(await response.json(), t));
-        return;
-      }
-      setNotice(t("saved"));
-      form.reset();
-      router.refresh();
-    } catch {
-      setNotice(t("SERVICE_UNAVAILABLE"));
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="min-w-0 space-y-4 rounded-xl border bg-card p-5">
-      <h2 className="font-medium">{t("registerTitle")}</h2>
-      {notice && <p role="status" className="text-sm leading-6">{notice}</p>}
-      <label className="block min-w-0 space-y-1 text-sm">
-        <span>{t("brand")}</span>
-        <select name="brandId" required className={fieldClass} defaultValue={brands[0]?.id}>
-          {brands.map((brand) => <option key={brand.id} value={brand.id}>{labelFor(brand.id)}</option>)}
-        </select>
-      </label>
-      <label className="block min-w-0 space-y-1 text-sm">
-        <span>{t("storeName")}</span>
-        <input name="name" type="text" required maxLength={80} autoComplete="off" className={fieldClass} />
-        <span className="block text-muted-foreground">{t("storeNameHint")}</span>
-      </label>
-      <label className="block min-w-0 space-y-1 text-sm">
-        <span>{t("serviceArea")}</span>
-        <input name="serviceArea" type="text" required maxLength={160} autoComplete="off" className={fieldClass} />
-        <span className="block text-muted-foreground">{t("serviceAreaHint")}</span>
-      </label>
-      <Button type="submit" disabled={pending}>{pending ? t("registering") : t("registerAction")}</Button>
-    </form>
-  );
-}
-
 function UseForm({ store, t }: { store: BrandStoreView; t: Translator }) {
   const router = useRouter();
+  const [serviceArea, setServiceArea] = useState(store.serviceArea);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
+  const inFlightRef = useRef(false);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (pending) return;
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const parsed = recordStoreFactUseSchema.safeParse({
-      serviceArea: String(data.get("serviceArea") ?? ""),
-    });
-    if (!parsed.success) {
-      setNotice(t("INVALID_INPUT"));
-      return;
-    }
+  function begin() {
+    if (inFlightRef.current) return false;
+    inFlightRef.current = true;
     setPending(true);
     setNotice(null);
-    try {
-      const response = await fetch(`/api/brands/stores/${store.id}/uses`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsed.data),
-      });
-      if (!response.ok) {
-        if (response.status === 401) {
-          window.location.replace(loginPath(returnPath, "session-required"));
+    return true;
+  }
+
+  function finish() {
+    inFlightRef.current = false;
+    setPending(false);
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (inFlightRef.current) return;
+    const parsed = recordStoreFactUseSchema.safeParse({ serviceArea });
+    if (!parsed.success) {
+      setNotice({ kind: "alert", text: t("INVALID_INPUT") });
+      return;
+    }
+    if (!begin()) return;
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/brands/stores/${store.id}/uses`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsed.data),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          if (response.status === 401) {
+            window.location.replace(loginPath(returnPath, "session-required"));
+            return;
+          }
+          setNotice({ kind: "alert", text: noticeFrom(payload, t) });
           return;
         }
-        setNotice(noticeFrom(await response.json(), t));
-        return;
+        setNotice({ kind: "status", text: t("useSaved") });
+        router.refresh();
+      } catch {
+        setNotice({ kind: "alert", text: t("SERVICE_UNAVAILABLE") });
+      } finally {
+        finish();
       }
-      setNotice(t("useSaved"));
-      form.reset();
-      router.refresh();
-    } catch {
-      setNotice(t("SERVICE_UNAVAILABLE"));
-    } finally {
-      setPending(false);
-    }
+    });
   }
 
   return (
-    <form onSubmit={submit} className="min-w-0 space-y-3 rounded-lg border p-3">
-      <h3 className="text-sm font-medium">{t("useTitle")}</h3>
-      {notice && <p role="status" className="text-sm leading-6">{notice}</p>}
-      <label className="block min-w-0 space-y-1 text-sm">
-        <span>{t("serviceArea")}</span>
-        <input name="serviceArea" type="text" required maxLength={160} autoComplete="off" defaultValue={store.serviceArea} className={fieldClass} />
-        <span className="block text-muted-foreground">{t("useHint")}</span>
-      </label>
-      <Button type="submit" disabled={pending}>{pending ? t("using") : t("useAction")}</Button>
+    <form id={`brand-store-check-${store.id}`} onSubmit={handleSubmit} className="grid min-w-0 gap-3 rounded-lg border p-3">
+      <h4 className="text-sm font-medium [overflow-wrap:anywhere]">{t("useTitle")}</h4>
+      <NoticeBanner notice={notice} />
+      <div className="flex min-w-0 flex-col gap-2">
+        <Label htmlFor={`brand-store-check-area-${store.id}`}>{t("serviceArea")}</Label>
+        <Input
+          id={`brand-store-check-area-${store.id}`}
+          value={serviceArea}
+          maxLength={160}
+          autoComplete="off"
+          onChange={(event) => setServiceArea(event.target.value)}
+          className="h-10 bg-background"
+        />
+        <p className="text-sm leading-6 text-muted-foreground">{t("useHint")}</p>
+      </div>
+      <div>
+        <Button type="submit" aria-disabled={pending} className={actionClass}>
+          {pending ? t("using") : t("useAction")}
+        </Button>
+      </div>
     </form>
   );
 }

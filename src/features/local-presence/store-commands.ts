@@ -30,6 +30,15 @@ function toUseView(row: StoreFactUseRecord): StoreFactUseView {
   };
 }
 
+export function brandStoresUnavailable(error: unknown) {
+  const traceId = randomUUID();
+  console.error("brand-stores-page-unavailable", {
+    traceId,
+    message: error instanceof Error ? error.message : "unknown",
+  });
+  return { error: "SERVICE_UNAVAILABLE" as const, traceId };
+}
+
 export async function listBrandStores(db: DatabaseConnection, ownerId: string): Promise<BrandStoreList> {
   return db.transaction(async (tx) => {
     const dao = new BrandStoreDao(tx);
