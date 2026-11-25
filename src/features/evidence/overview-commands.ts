@@ -6,9 +6,9 @@ import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { listPrioritizedTasks } from "../optimization/commands.ts";
 import { functionalMockMarker } from "../functional-mock/mode.ts";
-import { PromptDao } from "../prompts/dao.ts";
-import { questionType } from "../prompts/contracts.ts";
 import { SamplingPlanDao } from "../sampling-plans/dao.ts";
+import { clusterForAnswer, type AnswerCluster } from "./answer-list.ts";
+import { readAnswerClusterSources } from "./answer-list-context.ts";
 import type { EvidenceError } from "./contracts.ts";
 import { EvidenceDao } from "./dao.ts";
 import {
@@ -17,6 +17,7 @@ import {
   latestCompleteCapture,
   ownedPageJudgement,
   summarizeCoverage,
+  summarizeQuestionClusters,
   type CoverageAnswer,
   type CoveragePlanSlot,
   type OverviewSample,
@@ -40,11 +41,6 @@ function denied(error: EvidenceError): Failure {
 function questionKeyOf(questionId: string | null, questionText: string) {
   if (questionId) return questionId;
   return createHash("sha256").update(questionText.trim(), "utf8").digest("hex").slice(0, 32);
-}
-
-function parseQuestionType(value: unknown): QuestionType {
-  const parsed = questionType.safeParse(value);
-  return parsed.success ? parsed.data : "unknown";
 }
 
 export async function readEvidenceOverview(
@@ -116,10 +112,10 @@ export async function readEvidenceOverview(
     list.push(link);
     linksBySlot.set(link.planSlotId, list);
   }
-  const promptIds = [...new Set([...refs.values()].map((item) => item.promptSetId))];
-  const promptTypes = promptIds.length
-    ? await new PromptDao(db, scope.brandId).questionTypes(promptIds)
-    : new Map<string, Map<string, QuestionType>>();
+  const sources = await readAnswerClusterSources(db, scope.brandId, [
+    ...rows.map((row) => row.promptSetId),
+    ...Array.from(refs.values(), (ref) => ref.promptSetId),
+  ]);
   const typeByQuestionId = new Map<string, QuestionType>();
   const samples: OverviewSample[] = [];
   const coverageAnswers: CoverageAnswer[] = [];
@@ -135,9 +131,11 @@ export async function readEvidenceOverview(
         type = cachedType;
       } else {
         const ref = refs.get(row.observation.slotId);
-        const found = ref ? promptTypes.get(ref.promptSetId)?.get(row.questionId) : undefined;
+        const found = ref
+          ? sources.linked.get(ref.promptSetId)?.questions.find((item) => item.id === row.questionId)?.type
+          : undefined;
         if (found) {
-          type = parseQuestionType(found);
+          type = found;
           typeByQuestionId.set(row.questionId, type);
         }
       }
@@ -221,6 +219,16 @@ export async function readEvidenceOverview(
     ),
   };
   const metrics = aggregateOverviewMetrics(samples);
+  const primaryIds = new Set(metrics.sampleIds);
+  const clusters = new Map<string, AnswerCluster | null>();
+  for (const row of rows) {
+    if (!primaryIds.has(row.observation.id)) continue;
+    clusters.set(row.observation.id, clusterForAnswer({
+      questionText: row.observation.questionText,
+      questionId: row.promptSetId ? row.questionId : null,
+      promptSetId: row.promptSetId,
+    }, sources.linked, sources.latest));
+  }
   const answers = samples
     .filter((item) => item.evidenceState === "complete" || item.evidenceState === "contested")
     .map((item) => ({
@@ -273,6 +281,7 @@ export async function readEvidenceOverview(
       hasOfficialWebsite,
     },
     ...metrics,
+    questionClusters: summarizeQuestionClusters(metrics.metrics, clusters),
     coverage,
     collection,
     answers,

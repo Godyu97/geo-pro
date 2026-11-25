@@ -237,12 +237,14 @@ for (const kind of ["sqlite", "postgresql"]) {
     const maintain = randomUUID();
     const budget = randomUUID();
     const parts = randomUUID();
+    const unassigned = randomUUID();
     const foreign = randomUUID();
     const rows = [
       { id: install, questionText: "如何安装这个设备", answerText: "按说明书固定", mentioned: "true", recommended: "true", officialSiteCited: "false" },
       { id: maintain, questionText: "日常维护怎么做", answerText: "定期清洁", mentioned: "true", recommended: "false", officialSiteCited: "true" },
       { id: budget, questionText: "预算大概多少", answerText: "暂无明确报价", mentioned: "true", recommended: "unknown", officialSiteCited: "false" },
       { id: parts, questionText: "配件是否通用", answerText: "需要核对密封圈型号", mentioned: "unknown", recommended: "true", officialSiteCited: "unknown" },
+      { id: unassigned, questionText: "是否支持户外使用", answerText: "可选户外型号", mentioned: "false", recommended: "false", officialSiteCited: "true" },
     ];
     for (const row of rows) {
       await insertObservation(db, {
@@ -255,18 +257,28 @@ for (const kind of ["sqlite", "postgresql"]) {
       fingerprint: sha(foreign),
     });
 
-    const overview = await readEvidenceOverview(db, owner, { brandId: brand, sourceMode: "model_api" }, memoryCache());
+    const scope = { brandId: brand, sourceMode: "model_api" };
+    const cache = memoryCache();
+    const overview = await readEvidenceOverview(db, owner, scope, cache);
     assert.equal("error" in overview, false);
-    assert.equal(overview.sampleCount, 4);
-    assert.deepEqual(overview.answers.map((answer) => answer.observationId).sort(), [install, maintain, budget, parts].sort());
+    assert.equal(overview.sampleCount, 5);
+    assert.deepEqual(overview.answers.map((answer) => answer.observationId).sort(), [install, maintain, budget, parts, unassigned].sort());
+    assert.equal(overview.metrics.recommended.equalWeight, 0.5);
+    assert.equal(overview.metrics.recommended.fixedQuestions, 5);
+    const clusters = new Map(overview.questionClusters.map((row) => [row.cluster?.id ?? null, row]));
+    const rates = (id) => Object.values(clusters.get(id).metrics).map((metric) => [metric.equalWeight, metric.coveredQuestions]);
+    assert.deepEqual(rates(installCluster), [[1, 2], [0.5, 2], [0.5, 2]]);
+    assert.deepEqual(rates(budgetCluster), [[1, 1], [1, 1], [0, 1]]);
+    assert.deepEqual(rates(null), [[0, 1], [0, 1], [1, 1]]);
+    const clusterQuestions = [...clusters.values()].flatMap((row) => row.questionKeys);
+    assert.equal(clusterQuestions.length, overview.metrics.recommended.fixedQuestions);
+    assert.equal(new Set(clusterQuestions).size, clusterQuestions.length);
 
     const context = await readAnswerListContext(db, owner, brand, [...overview.answers.map((answer) => answer.observationId), foreign]);
     assert.equal(context.rows.has(foreign), false);
     const detailed = overview.answers.map((answer) => {
       const row = context.rows.get(answer.observationId);
-      const found = answer.questionText === "如何安装这个设备" || answer.questionText === "日常维护怎么做"
-        ? installCluster
-        : budgetCluster;
+      const found = content.questions.find((question) => question.text === answer.questionText)?.clusterId;
       assert.equal(row?.promptSetId ?? null, null);
       const clusterId = context.latest?.questions.find((question) => question.text === answer.questionText)?.clusterId;
       assert.equal(clusterId, found);
@@ -284,8 +296,8 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.deepEqual(filterAnswerList(detailed, { recommended: "unknown" }).map((row) => row.observationId), [budget]);
     assert.equal(filterAnswerList(detailed, { recommended: "false" }).some((row) => row.observationId === budget), false);
     assert.deepEqual(filterAnswerList(detailed, { q: "密封圈" }).map((row) => row.observationId), [parts]);
-    assert.equal(overview.sampleCount, 4);
-    assert.equal(overview.answers.length, 4);
+    assert.equal(overview.sampleCount, 5);
+    assert.equal(overview.answers.length, 5);
 
     const built = answerListContextQuery(owner, brand, [install]);
     assert.match(built.sql, /o\.owner_id = \?/);
@@ -295,5 +307,22 @@ for (const kind of ["sqlite", "postgresql"]) {
     console.log(`${kind} answer-list context ${built.values.length} params`);
     console.log(plan.map((row) => JSON.stringify(row)).join("\n"));
     assert.ok(JSON.stringify(plan).length > 20);
+
+    const cacheHit = await readEvidenceOverview(db, owner, scope, cache);
+    assert.deepEqual(cacheHit.questionClusters, overview.questionClusters);
+    const nextCluster = randomUUID();
+    const moved = content.questions[0];
+    await prompts.insertSet({
+      id: randomUUID(), setId: randomUUID(), version: 1, entityVersion: 1, region: "CN", language: "zh-CN",
+      content: {
+        clusters: [cluster(nextCluster, "新题集", "新问题簇")],
+        questions: [{ ...moved, clusterId: nextCluster }],
+      },
+      createdAt: "2026-11-21T08:00:00.000Z",
+    });
+    const nextView = await readEvidenceOverview(db, owner, scope, cache);
+    assert.deepEqual(nextView.metrics, overview.metrics);
+    assert.deepEqual(nextView.questionClusters.find((row) => row.cluster?.id === nextCluster)?.questionKeys, [sha(moved.text).slice(0, 32)]);
+    assert.equal(nextView.questionClusters.find((row) => !row.cluster).questionKeys.length, 4);
   });
 }

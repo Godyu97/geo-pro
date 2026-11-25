@@ -85,10 +85,12 @@ async function seedTracked(db, ownerId, brandId, total) {
   }));
   const runs = [];
   let discoveryObservationId = null;
+  let firstClusterId = null;
   for (let offset = 0; offset < questions.length; offset += 30) {
     const slice = questions.slice(offset, offset + 30);
     const setId = randomUUID();
     const clusterId = randomUUID();
+    firstClusterId ??= clusterId;
     const content = JSON.stringify({
       clusters: [{
         id: clusterId, audience: "买家", intent: "选型", primaryPage: "https://yi.example.com/guide", conversionAction: "了解",
@@ -166,7 +168,7 @@ async function seedTracked(db, ownerId, brandId, total) {
     if (!discoveryObservationId && discovery) discoveryObservationId = discovery.observationId;
     runs.push({ runId, slotId: slots[0].slotId });
   }
-  return { slotId: runs[0].slotId, discoveryObservationId };
+  return { slotId: runs[0].slotId, discoveryObservationId, firstClusterId };
 }
 
 function scopeOf(brandId) {
@@ -194,6 +196,12 @@ for (const kind of ["sqlite", "postgresql"]) {
     await brands.insertVersion(manual, 1, fields, time);
     const smallSeed = await seedTracked(db, ownerSmall, small, 30);
     const largeSeed = await seedTracked(db, ownerLarge, large, 120);
+    const latestSetId = randomUUID();
+    await queryWithParameters(db, `INSERT INTO prompt_set
+      (brand_id, id, set_id, version, entity_version, region, language, content, created_at)
+      VALUES (?, ?, ?, 1, 1, 'CN', 'zh-CN', ?, ?)`, [
+      small, latestSetId, latestSetId, JSON.stringify({ clusters: [], questions: [] }), at(500),
+    ]);
     const comparisons = (total) => Math.ceil(total / 10);
     const cache = memoryCache();
 
@@ -206,12 +214,15 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(smallView.answers.length, 30);
     assert.equal(smallView.demo, false);
     assert.equal(smallView.scope.hasOfficialWebsite, true);
+    assert.deepEqual(smallView.questionClusters.map((row) => row.cluster?.id), [smallSeed.firstClusterId]);
+    assert.equal(smallView.questionClusters[0].questionKeys.length, 27);
 
     meter.reset();
     const smallHit = await readEvidenceOverview(meter.connection, ownerSmall, scopeOf(small), cache);
     const hitQueries = meter.count();
     assert.equal(smallHit.sampleCount, smallView.sampleCount);
     assert.equal(smallHit.metrics.recommended.equalWeight, smallView.metrics.recommended.equalWeight);
+    assert.deepEqual(smallHit.questionClusters, smallView.questionClusters);
     assert.equal(hitQueries, 1);
 
     const largeCache = memoryCache();
@@ -375,6 +386,11 @@ for (const kind of ["sqlite", "postgresql"]) {
       const first = openCache({ GEO_CACHE_DRIVER: "redis", REDIS_URL: probeUrl });
       const second = openCache({ GEO_CACHE_DRIVER: "redis", REDIS_URL: probeUrl });
       const before = await readEvidenceOverview(db, ownerLarge, scopeOf(large), first);
+      const warmed = await readEvidenceOverview(db, ownerSmall, scopeOf(small), first);
+      meter.reset();
+      const sharedHit = await readEvidenceOverview(meter.connection, ownerSmall, scopeOf(small), second);
+      assert.deepEqual(sharedHit.questionClusters, warmed.questionClusters);
+      assert.equal(meter.count(), 1);
       const revisedLarge = await reviseAnalysis(db, ownerLarge, {
         action: "revise-analysis",
         brandId: large,

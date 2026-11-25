@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { primaryTypes, questionType } from "../prompts/contracts.ts";
+import type { AnswerCluster } from "./answer-list.ts";
 import type { TriState } from "./contracts.ts";
 
 export type MetricKind = "mentioned" | "recommended" | "officialSiteCited" | "ownedPageCited";
@@ -59,6 +60,16 @@ export type OverviewMetrics = {
 };
 
 export const overviewMetricKinds = ["mentioned", "recommended", "officialSiteCited", "ownedPageCited"] as const;
+export const clusterMetricKinds = ["mentioned", "recommended", "officialSiteCited"] as const;
+
+type ClusterRate = Pick<RateBreakdown, "equalWeight" | "coveredQuestions">;
+type ClusterMetricKind = (typeof clusterMetricKinds)[number];
+
+export type QuestionClusterSummary = {
+  cluster: AnswerCluster | null;
+  questionKeys: string[];
+  metrics: Record<ClusterMetricKind, ClusterRate>;
+};
 
 export type QuestionMetricCell = {
   numerator: number;
@@ -255,6 +266,52 @@ export function aggregateOverviewMetrics(samples: OverviewSample[]): OverviewMet
     metrics,
     sampleIds,
   };
+}
+
+export function summarizeQuestionClusters(
+  metrics: OverviewMetrics["metrics"],
+  clustersByObservation: ReadonlyMap<string, AnswerCluster | null>,
+): QuestionClusterSummary[] {
+  const groups = new Map<string | null, { cluster: AnswerCluster | null; questions: QuestionMetricRow[] }>();
+  const questionClusters = new Map<string, AnswerCluster | null>();
+  for (const question of metrics.mentioned.perQuestion) {
+    const cluster = clustersByObservation.get(question.sampleIds[0]) ?? null;
+    // A single fixed question can span versions. Conflicting assignments leave it unassigned.
+    const agrees = cluster && question.sampleIds.every((id) => clustersByObservation.get(id)?.id === cluster.id);
+    questionClusters.set(question.questionKey, agrees ? cluster : null);
+  }
+  for (const question of questionMetricRows(metrics)) {
+    const cluster = questionClusters.get(question.questionKey) ?? null;
+    const key = cluster?.id ?? null;
+    const group = groups.get(key);
+    if (group) group.questions.push(question);
+    else groups.set(key, { cluster, questions: [question] });
+  }
+
+  function summarize(questions: QuestionMetricRow[], kind: ClusterMetricKind): ClusterRate {
+    let sum = 0;
+    let coveredQuestions = 0;
+    for (const question of questions) {
+      const value = question.cells[kind].rate;
+      if (value === null) continue;
+      sum += value;
+      coveredQuestions += 1;
+    }
+    return { equalWeight: rate(sum, coveredQuestions), coveredQuestions };
+  }
+
+  return [...groups.values()]
+    .sort((left, right) => Number(!left.cluster) - Number(!right.cluster)
+      || (left.cluster?.id ?? "").localeCompare(right.cluster?.id ?? ""))
+    .map(({ cluster, questions }) => ({
+      cluster,
+      questionKeys: questions.map((question) => question.questionKey),
+      metrics: {
+        mentioned: summarize(questions, "mentioned"),
+        recommended: summarize(questions, "recommended"),
+        officialSiteCited: summarize(questions, "officialSiteCited"),
+      },
+    }));
 }
 
 const emptyQuestionCell = (): QuestionMetricCell => ({

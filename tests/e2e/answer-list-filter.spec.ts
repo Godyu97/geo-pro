@@ -42,7 +42,7 @@ async function insertListFixture(input: {
   brandId: string;
   installCluster: string;
   budgetCluster: string;
-  ids: { install: string; maintain: string; budget: string; parts: string };
+  ids: { install: string; maintain: string; budget: string; parts: string; unassigned: string };
 }) {
   const sql = postgres(localDatabaseURL(), { max: 1 });
   try {
@@ -72,6 +72,7 @@ async function insertListFixture(input: {
       { id: input.ids.maintain, questionText: "日常维护怎么做", answerText: "定期清洁", mentioned: "true", recommended: "false", officialSiteCited: "true" },
       { id: input.ids.budget, questionText: "预算大概多少", answerText: "暂无明确报价", mentioned: "true", recommended: "unknown", officialSiteCited: "false" },
       { id: input.ids.parts, questionText: "配件是否通用", answerText: "需要核对密封圈型号", mentioned: "unknown", recommended: "true", officialSiteCited: "unknown" },
+      { id: input.ids.unassigned, questionText: "是否支持户外使用", answerText: "可选户外型号", mentioned: "unknown", recommended: "false", officialSiteCited: "true" },
     ];
     for (const row of rows) {
       await sql`
@@ -128,6 +129,7 @@ test("answer list filters and evidence detail recovery work in both locales", as
     maintain: randomUUID(),
     budget: randomUUID(),
     parts: randomUUID(),
+    unassigned: randomUUID(),
   };
   try {
     const policyVersion = publishedRetentionVersion();
@@ -166,7 +168,7 @@ test("answer list filters and evidence detail recovery work in both locales", as
     });
     await page.goto(`/dashboard/monitoring/answers?${scope.toString()}`);
     await expect(page.getByRole("heading", { name: "AI 回答列表", exact: true })).toBeVisible();
-    await expect(page.getByText("当前范围 4 条回答", { exact: true })).toBeVisible();
+    await expect(page.getByText("当前范围 5 条回答", { exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "题目或原文", exact: true })).toBeVisible();
     await expect(page.getByRole("combobox", { name: "问题簇", exact: true })).toBeVisible();
 
@@ -178,7 +180,7 @@ test("answer list filters and evidence detail recovery work in both locales", as
     await expect(page).toHaveURL(/from=/);
     await expect(page.getByText("当前结果 1 条回答", { exact: true })).toBeVisible();
     await expect(page.getByText("如何安装这个设备", { exact: true })).toBeVisible();
-    for (const hidden of ["日常维护怎么做", "预算大概多少", "配件是否通用"]) {
+    for (const hidden of ["日常维护怎么做", "预算大概多少", "配件是否通用", "是否支持户外使用"]) {
       await expect(page.getByText(hidden, { exact: true })).toHaveCount(0);
     }
     const overviewHref = await page.getByRole("link", { name: "返回概览", exact: true }).getAttribute("href");
@@ -188,6 +190,77 @@ test("answer list filters and evidence detail recovery work in both locales", as
     await expect(page.getByText("如何安装这个设备", { exact: true })).toBeVisible();
     await expect(page.getByText("日常维护怎么做", { exact: true })).toBeVisible();
     await expect(page.getByText("预算大概多少", { exact: true })).toBeVisible();
+
+    const overviewURL = `${baseURL}/dashboard/monitoring/overview?${scope}`;
+    for (const view of [
+      { locale: "zh-CN", title: "按问题簇", missing: "缺少问题簇", open: "查看「安装用户 · 完成安装」的回答",
+        covered: "已覆盖 1/2 题", recommendation: "推荐率", clear: "清除列表筛选", back: "返回概览", count: "当前结果 2 条回答" },
+      { locale: "en", title: "By question cluster", missing: "Missing cluster", open: "View answers for 安装用户 · 完成安装",
+        covered: "Questions covered 1/2", recommendation: "Recommendation rate", clear: "Clear list filters", back: "Back to overview", count: "2 matching answers" },
+    ]) {
+      if (view.locale === "en") await page.getByLabel("界面语言", { exact: true }).selectOption("en");
+      await expect(page.locator("html")).toHaveAttribute("lang", view.locale);
+      await expect(page).toHaveURL(overviewURL);
+      const table = page.getByRole("table", { name: view.title, exact: true });
+      await expect(table.getByRole("row")).toHaveCount(4);
+      const openCluster = table.getByRole("link", { name: view.open, exact: true });
+      const installRow = table.getByRole("row").filter({ has: page.getByRole("link", { name: view.open, exact: true }) });
+      for (const [index, rate] of ["100.0%", "50.0%", "50.0%"].entries()) {
+        await expect(installRow.getByRole("cell").nth(index)).toContainText(rate);
+      }
+      const budgetRow = table.getByRole("row").filter({ hasText: "预算用户 · 比较价格" });
+      for (const [index, rate] of ["100.0%", "100.0%", "0.0%"].entries()) {
+        await expect(budgetRow.getByRole("cell").nth(index)).toContainText(rate);
+        await expect(budgetRow.getByRole("cell").nth(index)).toContainText(view.covered);
+      }
+      const missingRow = table.getByRole("row").filter({ hasText: view.missing });
+      for (const [index, rate] of ["N/A", "0.0%", "100.0%"].entries()) {
+        await expect(missingRow.getByRole("cell").nth(index)).toContainText(rate);
+      }
+      await expect(page.locator("section").filter({
+        has: page.getByRole("heading", { name: view.recommendation, exact: true }),
+      })).toContainText("50.0%");
+      const budgetQuestion = page.locator("#overview-question-table tr").filter({ hasText: "预算大概多少" });
+      await expect(budgetQuestion.getByRole("cell").nth(1)).toContainText("N/A");
+      await expect(budgetQuestion.getByRole("cell").last()).toContainText("预算用户 · 比较价格");
+
+      for (const width of [1440, 768, 375]) {
+        await page.setViewportSize({ width, height: 900 });
+        await openCluster.scrollIntoViewIfNeeded();
+        await expectNoOverflow(page);
+        if (width === 375) {
+          const region = table.locator("..");
+          expect(await region.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+          await captureState(page, testInfo, `cluster-overview-${view.locale}-375`);
+        }
+      }
+      await openCluster.focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(openCluster).toBeFocused();
+      expect(await openCluster.evaluate((link) => link.matches(":focus-visible"))).toBe(true);
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL(`${baseURL}/dashboard/monitoring/answers?${scope}&cluster=${installCluster}`);
+      await expect(page.getByText(view.count, { exact: true })).toBeVisible();
+      for (const hidden of ["预算大概多少", "配件是否通用", "是否支持户外使用"]) {
+        await expect(page.getByText(hidden, { exact: true })).toHaveCount(0);
+      }
+      await page.getByRole("link", { name: view.clear, exact: true }).click();
+      await expect(page).toHaveURL(`${baseURL}/dashboard/monitoring/answers?${scope}`);
+      await expect(page.getByText("是否支持户外使用", { exact: true })).toBeVisible();
+      await page.getByRole("link", { name: view.back, exact: true }).click();
+      await expect(table).toBeVisible();
+    }
+    console.log(JSON.stringify({
+      event: "question-cluster-browser-evidence",
+      clusters: [installCluster, budgetCluster, null],
+      observations: ids,
+      questionKeys: ["如何安装这个设备", "日常维护怎么做", "预算大概多少", "配件是否通用", "是否支持户外使用"]
+        .map((text) => sha(text).slice(0, 32)),
+    }));
+    await page.getByLabel("Interface language", { exact: true }).selectOption("zh-CN");
+    await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     await page.goto(`/dashboard/monitoring/answers?${scope.toString()}&q=${encodeURIComponent("安装")}`);
     await expect(page.getByRole("link", { name: "查看证据", exact: true })).toHaveAttribute("href", new RegExp(ids.install));
@@ -329,7 +402,7 @@ test("answer list filters and evidence detail recovery work in both locales", as
     await expect(page.getByText("如何安装这个设备", { exact: true })).toBeVisible();
 
     await page.getByRole("link", { name: "清除列表筛选", exact: true }).click();
-    await expect(page.getByText("当前范围 4 条回答", { exact: true })).toBeVisible();
+    await expect(page.getByText("当前范围 5 条回答", { exact: true })).toBeVisible();
     await expect(page).not.toHaveURL(/q=/);
     await expect(page).toHaveURL(/region=CN/);
     await page.getByRole("combobox", { name: "问题簇", exact: true }).selectOption(installCluster);

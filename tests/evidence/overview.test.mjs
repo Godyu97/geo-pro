@@ -19,6 +19,7 @@ import {
   ownedPageJudgement,
   questionMetricRows,
   summarizeCoverage,
+  summarizeQuestionClusters,
 } from "../../src/features/evidence/metrics.ts";
 import { readEvidenceOverview } from "../../src/features/evidence/overview-commands.ts";
 import {
@@ -96,6 +97,29 @@ function planSlot(partial) {
     ...partial,
   };
 }
+
+test("cluster rates average fixed questions and leave unknown or conflicting questions visible", () => {
+  const first = { id: "a", audience: "Buyers", intent: "Compare" };
+  const second = { id: "b", audience: "Operators", intent: "Maintain" };
+  const affixed = [
+    [sample({ questionKey: "q1", recommended: "true" }), first],
+    [sample({ questionKey: "q1", recommended: "false" }), first],
+    [sample({ questionKey: "q2", recommended: "true" }), first],
+    [sample({ questionKey: "q2", recommended: "true" }), first],
+    [sample({ questionKey: "q2", recommended: "true" }), first],
+    [sample({ questionKey: "q3", recommended: "unknown", citationSetState: "partial" }), first],
+    [sample({ questionKey: "q4", recommended: "false" }), first],
+    [sample({ questionKey: "q4", recommended: "false" }), second],
+    [sample({ questionKey: "q5", recommended: "false" }), second],
+  ];
+  const { metrics } = aggregateOverviewMetrics(affixed.map(([item]) => item));
+  const groups = summarizeQuestionClusters(metrics, new Map(affixed.map(([item, cluster]) => [item.observationId, cluster])));
+  assert.equal(metrics.recommended.equalWeight, 0.375);
+  assert.deepEqual(groups.map(({ questionKeys }) => questionKeys), [["q1", "q2", "q3"], ["q5"], ["q4"]]);
+  assert.deepEqual(groups[0].metrics.recommended, { equalWeight: 0.75, coveredQuestions: 2 });
+  assert.equal(groups[0].metrics.officialSiteCited.coveredQuestions, 2);
+  assert.equal(questionMetricRows(metrics).find((row) => row.questionKey === "q3").cells.recommended.rate, null);
+});
 
 test("AC-M0-07-1 empty scope shows N/A without fabricated rates", () => {
   const metrics = aggregateOverviewMetrics([]);

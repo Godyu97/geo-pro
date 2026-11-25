@@ -8,6 +8,8 @@ import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "../brands/dao";
 import { Button } from "@/components/ui/button";
 import { TaskSummaryList } from "../optimization/task-summary.tsx";
+import { clusterLabel } from "./answer-list.ts";
+import { ClusterMetricsTable } from "./cluster-metrics-table";
 import { CollectionLine, CoverageCard, MetricCard } from "./metric-card.tsx";
 import { questionMetricRows, type QuestionMetricCell, type RateBreakdown } from "./metrics.ts";
 import { readEvidenceOverview } from "./overview-commands";
@@ -178,6 +180,14 @@ export default async function EvidenceOverviewPage({
 
   const answersHref = overviewScopePath("/dashboard/monitoring/answers", parsed.data);
   const hasSamples = overview.viewStatus !== "empty";
+  const clusterByQuestion = new Map<string, string>();
+  const clusterRows = overview.questionClusters.map((row, index) => {
+    const label = row.cluster
+      ? clusterLabel(row.cluster, t("clusterUnnamed", { index: formatNumber(locale, index + 1) }))
+      : t("clusterMissing");
+    for (const questionKey of row.questionKeys) clusterByQuestion.set(questionKey, label);
+    return { ...row, label };
+  });
 
   return (
     <EvidenceCanvas
@@ -295,6 +305,14 @@ export default async function EvidenceOverviewPage({
             })}
           </div>
 
+          <ClusterMetricsTable
+            rows={clusterRows}
+            scope={parsed.data}
+            hasOfficialWebsite={overview.scope.hasOfficialWebsite}
+            locale={locale}
+            t={t}
+          />
+
           <section className="min-w-0 space-y-3" aria-labelledby="overview-per-question">
             <h2 id="overview-per-question" className="break-words text-lg font-semibold">{t("perQuestion")}</h2>
             <p className="max-w-3xl break-words text-sm leading-6 text-muted-foreground">{t("perQuestionNote")}</p>
@@ -306,6 +324,7 @@ export default async function EvidenceOverviewPage({
                     {(["mentionRate", "recommendRate", "officialCiteRate", "ownedCiteRate"] as const).map((label) => (
                       <th key={label} scope="col" className="px-4 py-3 font-medium whitespace-nowrap">{t(label)}</th>
                     ))}
+                    <th scope="col" className="px-4 py-3 font-medium whitespace-nowrap">{t("cluster")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -328,6 +347,7 @@ export default async function EvidenceOverviewPage({
                           </td>
                         );
                       })}
+                      <td className="min-w-32 px-4 py-3 wrap-anywhere">{clusterByQuestion.get(row.questionKey)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -9,7 +9,7 @@ import { sourceModes, triStateSchema } from "./contracts.ts";
 import { analysisRuleVersion } from "./rules.ts";
 import type { OverviewScope } from "./overview-contracts.ts";
 
-export const overviewRuleVersion = "s-m0-07-v2";
+export const overviewRuleVersion = "s-m0-07-v3";
 export const overviewCacheTtlSeconds = 60;
 const chunkChars = 3500;
 const indexLimit = 30;
@@ -40,6 +40,7 @@ const rateSchema = z.object({
     sampleIds: z.array(z.string()),
   })),
 });
+const clusterRateSchema = rateSchema.pick({ equalWeight: true, coveredQuestions: true });
 
 export const overviewPayloadSchema = z.object({
   scope: z.object({
@@ -62,6 +63,15 @@ export const overviewPayloadSchema = z.object({
     officialSiteCited: rateSchema,
     ownedPageCited: rateSchema,
   }),
+  questionClusters: z.array(z.object({
+    cluster: z.object({ id: z.string(), audience: z.string(), intent: z.string() }).nullable(),
+    questionKeys: z.array(z.string()),
+    metrics: z.object({
+      mentioned: clusterRateSchema,
+      recommended: clusterRateSchema,
+      officialSiteCited: clusterRateSchema,
+    }),
+  })),
   coverage: z.object({
     status: z.enum(["ready", "na"]),
     reason: z.enum(["no-frozen-plan-slots", "no-due-slots"]).nullable(),

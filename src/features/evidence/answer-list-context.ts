@@ -10,6 +10,25 @@ export type AnswerListRow = {
   cluster: AnswerCluster | null;
 };
 
+export async function readAnswerClusterSources(
+  db: DatabaseConnection,
+  brandId: string,
+  promptSetIds: Iterable<string | null>,
+) {
+  const promptIds: string[] = [];
+  let needsLatest = false;
+  for (const id of promptSetIds) {
+    if (id) promptIds.push(id);
+    else needsLatest = true;
+  }
+  const prompts = new PromptDao(db, brandId);
+  const [linked, latest] = await Promise.all([
+    prompts.clusterSources(promptIds),
+    needsLatest ? prompts.latestClusterSource() : null,
+  ]);
+  return { linked, latest };
+}
+
 export async function readAnswerListContext(
   db: DatabaseConnection,
   ownerId: string,
@@ -17,14 +36,8 @@ export async function readAnswerListContext(
   observationIds: readonly string[],
 ) {
   const rows = await new EvidenceDao(db).listAnswerContexts(ownerId, brandId, observationIds);
-  const promptIds = [...rows.values()].flatMap((row) => row.promptSetId ? [row.promptSetId] : []);
-  const needsLatest = [...rows.values()].some((row) => !row.promptSetId);
-  const prompts = new PromptDao(db, brandId);
-  const [linked, latest] = await Promise.all([
-    promptIds.length ? prompts.clusterSources(promptIds) : Promise.resolve(new Map()),
-    needsLatest ? prompts.latestClusterSource() : Promise.resolve(null),
-  ]);
-  return { rows, linked, latest };
+  const sources = await readAnswerClusterSources(db, brandId, Array.from(rows.values(), (row) => row.promptSetId));
+  return { rows, ...sources };
 }
 
 export function answerListRows(

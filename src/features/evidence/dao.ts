@@ -133,6 +133,7 @@ const overviewContextSchema = z.object({
   citations: sqlCount,
   citationAt: sqlText,
   capabilityAt: sqlText,
+  latestPromptSetId: sqlText,
 });
 
 const nullableMinor = z.preprocess(
@@ -229,6 +230,7 @@ export function scopedObservationQuery(input: ScopedObservationInput) {
   return {
     sql: `SELECT ${scopedColumns}
          , s.question_id AS "questionId"
+         , r.prompt_set_id AS "promptSetId"
          , s.natural_question AS "naturalQuestion"
          , a.mentioned AS "mentioned"
          , a.recommended AS "recommended"
@@ -236,6 +238,8 @@ export function scopedObservationQuery(input: ScopedObservationInput) {
          , a.version AS "analysisVersion"
        FROM answer_observation o
        LEFT JOIN monitoring_slot s ON s.id = o.slot_id
+       LEFT JOIN monitoring_run r ON r.id = s.run_id
+         AND s.brand_id = o.brand_id AND r.brand_id = o.brand_id AND r.owner_id = o.owner_id
        LEFT JOIN answer_analysis_version a ON a.observation_id = o.id
          AND a.version = (
            SELECT MAX(a2.version) FROM answer_analysis_version a2 WHERE a2.observation_id = o.id
@@ -557,7 +561,9 @@ export class EvidenceDao {
                  FROM sampling_slot s WHERE s.brand_id = b.id AND s.owner_id = b.owner_id) AS "slotStamp",
               (SELECT COUNT(*) FROM answer_citation c WHERE c.brand_id = b.id) AS "citations",
               (SELECT COALESCE(MAX(c.created_at), '') FROM answer_citation c WHERE c.brand_id = b.id) AS "citationAt",
-              (SELECT COALESCE(MAX(v.changed_at), '') FROM capability_version v) AS "capabilityAt"
+              (SELECT COALESCE(MAX(v.changed_at), '') FROM capability_version v) AS "capabilityAt",
+              (SELECT p.id FROM prompt_set p WHERE p.brand_id = b.id
+                 ORDER BY p.created_at DESC, p.id DESC LIMIT 1) AS "latestPromptSetId"
        FROM brand b
        LEFT JOIN brand_version v ON v.brand_id = b.id AND v.version = b.entity_version
        WHERE b.owner_id = ? AND b.id = ? AND b.frozen_at IS NULL`,
@@ -590,6 +596,7 @@ export class EvidenceDao {
       parsed.citations,
       parsed.citationAt,
       parsed.capabilityAt,
+      parsed.latestPromptSetId,
     ].join("|");
     return {
       name: parsed.name ?? brandId,
@@ -678,6 +685,7 @@ export class EvidenceDao {
     return rows.map((row) => ({
       observation: observationRow.parse(row),
       questionId: row.questionId == null ? null : brandIdSchema.parse(row.questionId),
+      promptSetId: row.promptSetId == null ? null : brandIdSchema.parse(row.promptSetId),
       naturalQuestion: row.naturalQuestion == null ? null : z.coerce.number().int().min(0).max(1).parse(row.naturalQuestion),
       mentioned: row.mentioned == null ? null : triStateSchema.parse(row.mentioned),
       recommended: row.recommended == null ? null : triStateSchema.parse(row.recommended),
