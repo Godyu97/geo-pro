@@ -6,6 +6,7 @@ import { updateQuota } from "../src/features/quotas/commands.ts";
 import { saveSamplingPlan } from "../src/features/sampling-plans/commands.ts";
 import { driveDueSamplingWindow } from "../src/features/sampling-plans/due-commands.ts";
 import { getConnection, queryWithParameters } from "../src/lib/db/connection.ts";
+import { correctRecommendation, saveComparisonFixture, saveLegacySnapshot } from "../tests/reports/saved-observations.mjs";
 
 const [command, payloadText] = process.argv.slice(2);
 const payload = JSON.parse(payloadText ?? "{}");
@@ -116,6 +117,13 @@ try {
     }, async () => ({ runId, chargedMinor: 3 }));
     if (due.error || due.runs[0]?.monitoringRunId !== runId) throw new Error("Could not link the fixture run");
     process.stdout.write(JSON.stringify({ linked: true }));
+  } else if (command === "report-observations") {
+    const result = await saveComparisonFixture(db, payload.userId, payload.brandId);
+    process.stdout.write(JSON.stringify(result));
+  } else if (command === "report-history") {
+    await correctRecommendation(db, payload.observationId);
+    const result = await saveLegacySnapshot(db, payload.userId, payload.brandId, payload.retestId);
+    process.stdout.write(JSON.stringify(result));
   } else if (command === "cleanup") {
     for (const channelId of payload.channelIds ?? []) {
       await queryWithParameters(db, `DELETE FROM sampling_answer_network WHERE channel_id = ?`, [channelId]);

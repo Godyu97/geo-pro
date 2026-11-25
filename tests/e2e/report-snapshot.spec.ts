@@ -27,6 +27,9 @@ const copy = {
     missing: "找不到该品牌或报告资源。",
     noCharge: "站内提醒不会自动发起付费调用",
     known: "已知费用 N/A",
+    metrics: ["提及率", "推荐率", "官网引用率"],
+    citationCount: "1 道共同题 · N/A",
+    legacyMetric: "历史快照指标 推荐率",
   },
   en: {
     title: "Retest & reports",
@@ -44,6 +47,9 @@ const copy = {
     missing: "Brand or report resource was not found.",
     noCharge: "In-app reminders never auto-charge paid runs",
     known: "Known cost N/A",
+    metrics: ["Mention rate", "Recommendation rate", "Official site citation rate"],
+    citationCount: "1 common question · N/A",
+    legacyMetric: "Historical snapshot metric: Recommendation rate",
   },
 } as const;
 
@@ -55,12 +61,10 @@ function localDatabaseURL() {
   return databaseURL;
 }
 
-function windowSample(queryId: string, numerator: number, queryVersion = `${queryId}-v1`) {
-  return {
-    observationId: randomUUID(), queryId, queryVersion, track: "model_api", channelVersion: "1",
-    protocolVersion: "m0-fixture", analysisRuleVersion: "m0-fixture", region: "CN", entityVersion: 1,
-    judgable: true, numerator, denominator: 1, brandQuestion: queryId === "q4",
-  };
+function reportFixture(command: string, payload: object) {
+  return JSON.parse(execFileSync(process.execPath, [
+    "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", command, JSON.stringify(payload),
+  ], { encoding: "utf8" }));
 }
 
 async function register(context: BrowserContext, email: string) {
@@ -118,16 +122,7 @@ test("report snapshots keep the current download readable and recoverable", asyn
       },
     });
     const brandId = savedBrand.id as string;
-    const before = {
-      start: "2026-11-01", endExclusive: "2026-11-08",
-      samples: ["q1", "q2", "q3", "q4"].map((id) => windowSample(id, 0)),
-    };
-    const after = {
-      start: "2026-11-08", endExclusive: "2026-11-15",
-      samples: [
-        windowSample("q1", 1), windowSample("q2", 0), windowSample("q3", 1), windowSample("q4", 1, "q4-v2"),
-      ],
-    };
+    const { before, after } = reportFixture("report-observations", { userId: accounts[0]?.userId, brandId });
     const retest = await post(context, "/api/reports", {
       action: "request-retest", brandId, operationId: randomUUID(), kind: "exploratory", intent: "business_loop",
       track: "model_api", timezone: "Asia/Shanghai", entityVersion: 1, before, after, locale: "zh-CN",
@@ -175,10 +170,14 @@ test("report snapshots keep the current download readable and recoverable", asyn
         await expect(main.getByText("superseded")).toHaveCount(0);
         await expect(main.getByText(current.noCharge, { exact: true })).toBeVisible();
         await expect(main.getByText(current.known, { exact: true })).toBeVisible();
+        for (const metric of current.metrics) await expect(main.getByText(metric, { exact: true })).toBeVisible();
+        await expect(main.getByText(current.citationCount, { exact: true })).toBeVisible();
         await expect(main.getByRole("navigation", { name: current.related })).toBeVisible();
         if (width === 375) {
           await expect(download).toBeInViewport();
           await page.screenshot({ path: `${shots}/report-snapshot-current-${locale}-375.png`, fullPage: false });
+          const card = main.getByRole("listitem").filter({ has: page.locator(`a[href="/api/reports/snapshots/${snapshotId}?format=json"]`) });
+          await card.locator("dl").screenshot({ path: `${shots}/report-snapshot-metrics-${locale}-375.png` });
         }
         await expectNoOverflow(page);
       }
@@ -187,6 +186,17 @@ test("report snapshots keep the current download readable and recoverable", asyn
       else expect(Buffer.compare(originalJson, body)).toBe(0);
       expect(body.toString("utf8")).toContain(brandName);
     }
+    const first = JSON.parse(originalJson.toString("utf8"));
+    expect(first.report_id).toBe(snapshotId);
+    expect(first.comparisons.recommendation_rate).toMatchObject({ common_query_count: 3, before_sample_count: 3, after_sample_count: 3 });
+    expect(first.comparisons.recommendation_rate.delta_pp).toBeCloseTo(66.6667);
+    expect(first.comparisons.official_site_citation_rate).toMatchObject({ common_query_count: 1, delta_pp: null, before_sample_count: 1 });
+    const firstHtmlResponse = await context.request.get(`/api/reports/snapshots/${snapshotId}?format=html`);
+    expect(firstHtmlResponse.ok()).toBeTruthy();
+    const firstHtml = await firstHtmlResponse.text();
+    expect(firstHtml).toContain(snapshotId);
+    expect(firstHtml).toMatch(/<h2>推荐率<\/h2>[\s\S]*?共同题 3\/4[\s\S]*?\+66\.7pp/);
+    expect(firstHtml).toMatch(/<h2>官网引用率<\/h2>[\s\S]*?共同题 1\/4[\s\S]*?N\/A/);
 
     await page.setViewportSize({ width: 375, height: 800 });
     await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
@@ -198,16 +208,12 @@ test("report snapshots keep the current download readable and recoverable", asyn
     expect(downloadFile).toBeTruthy();
     expect(Buffer.compare(originalJson, await readFile(downloadFile!))).toBe(0);
 
-    const revisedAfter = {
-      start: after.start,
-      endExclusive: after.endExclusive,
-      samples: [
-        windowSample("q1", 1), windowSample("q2", 1), windowSample("q3", 1), windowSample("q4", 1, "q4-v2"),
-      ],
-    };
+    const legacy = reportFixture("report-history", {
+      userId: accounts[0]?.userId, brandId, retestId: retest.retest.id, observationId: after.samples[1].observationId,
+    });
     const revised = await post(context, "/api/reports", {
       action: "revise-report", brandId, operationId: randomUUID(), snapshotId,
-      before, after: revisedAfter, locale: "zh-CN", brandName, note: "label correction",
+      before, after, locale: "en", brandName, note: "label correction",
     });
     const nextId = revised.snapshot.id as string;
     expect(nextId).not.toBe(snapshotId);
@@ -217,6 +223,17 @@ test("report snapshots keep the current download readable and recoverable", asyn
     expect(Buffer.compare(originalJson, preserved)).toBe(0);
     const successor = await (await context.request.get(`/api/reports/snapshots/${nextId}?format=json`)).body();
     expect(Buffer.compare(originalJson, successor)).not.toBe(0);
+    const corrected = JSON.parse(successor.toString("utf8"));
+    expect(corrected.comparisons.recommendation_rate.delta_pp).toBe(100);
+    expect(corrected.evidence[after.samples[1].observationId].analysis_version).toBe(2);
+    const successorHtml = await (await context.request.get(`/api/reports/snapshots/${nextId}?format=html`)).text();
+    expect(successorHtml).toContain(nextId);
+    expect(successorHtml).toContain("<h2>Mention rate</h2>");
+    expect(successorHtml).toMatch(/<h2>Recommendation rate<\/h2>[\s\S]*?\+100\.0pp/);
+    expect(successorHtml).toMatch(/<h2>Official site citation rate<\/h2>[\s\S]*?N\/A/);
+    expect(await (await context.request.get(`/api/reports/snapshots/${legacy.id}?format=json`)).text()).toBe(legacy.json);
+    expect(await (await context.request.get(`/api/reports/snapshots/${legacy.id}?format=html`)).text()).toBe(legacy.html);
+    console.info(`Isolated snapshots ${snapshotId} → ${nextId}, historical ${legacy.id}; common questions 3/3/1.`);
 
     for (const locale of ["zh-CN", "en"] as const) {
       const current = copy[locale];
@@ -234,6 +251,9 @@ test("report snapshots keep the current download readable and recoverable", asyn
         await expect(main.getByText(`created · ${current.previous} ${snapshotId}`)).toBeVisible();
         await expect(main.getByText("superseded", { exact: true })).toBeVisible();
         await expect(main.getByText(brandName, { exact: true })).toHaveCount(0);
+        const historyRow = main.getByRole("listitem").filter({ has: page.locator(`a[href="/api/reports/snapshots/${legacy.id}?format=json"]`) });
+        await expect(historyRow.getByText(current.legacyMetric, { exact: true })).toBeVisible();
+        await expect(historyRow.getByText(current.metrics[2], { exact: true })).toHaveCount(0);
         if (width === 375) {
           await expect(download).toBeInViewport();
           await page.screenshot({ path: `${shots}/report-snapshot-revised-${locale}-375.png`, fullPage: false });

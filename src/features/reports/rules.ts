@@ -2,6 +2,7 @@ import type { WindowSample } from "./contracts.ts";
 import type { ReportConclusion, ReportGrade } from "./types.ts";
 
 export type MatchKey = string;
+type ComparisonSample = WindowSample & { scopeKey?: string };
 
 export type QueryStat = {
   queryId: string;
@@ -42,10 +43,12 @@ type SideAgg = {
   sourceMissing: boolean;
   brandQuestion: boolean;
   judgable: boolean;
+  scopeKey?: string;
 };
 
-function matchKey(sample: WindowSample): MatchKey {
-  return [
+function matchKey(sample: ComparisonSample): MatchKey {
+  return JSON.stringify([
+    sample.queryId,
     sample.queryVersion,
     sample.track,
     sample.channelVersion,
@@ -53,10 +56,11 @@ function matchKey(sample: WindowSample): MatchKey {
     sample.analysisRuleVersion,
     sample.region,
     String(sample.entityVersion),
-  ].join("|");
+    sample.scopeKey,
+  ]);
 }
 
-function aggregateSide(samples: WindowSample[]): Map<MatchKey, SideAgg> {
+function aggregateSide(samples: ComparisonSample[]): Map<MatchKey, SideAgg> {
   const map = new Map<MatchKey, SideAgg>();
   for (const sample of samples) {
     const key = matchKey(sample);
@@ -70,11 +74,12 @@ function aggregateSide(samples: WindowSample[]): Map<MatchKey, SideAgg> {
       sourceMissing: false,
       brandQuestion: Boolean(sample.brandQuestion),
       judgable: false,
+      scopeKey: sample.scopeKey,
     };
-    current.observationIds.push(sample.observationId);
     if (sample.sourceMissing) current.sourceMissing = true;
     if (sample.brandQuestion) current.brandQuestion = true;
     if (sample.judgable && sample.denominator > 0) {
+      current.observationIds.push(sample.observationId);
       current.judgable = true;
       current.numerator += sample.numerator;
       current.denominator += sample.denominator;
@@ -111,14 +116,13 @@ function versionsByQueryId(map: Map<MatchKey, SideAgg>): Map<string, Set<string>
 }
 
 /** Compare two windows using shared match keys; modified queryIds across versions are excluded. */
-export function compareWindows(beforeSamples: WindowSample[], afterSamples: WindowSample[]): ComparisonResult {
+export function compareWindows(beforeSamples: ComparisonSample[], afterSamples: ComparisonSample[]): ComparisonResult {
   const beforeMap = aggregateSide(beforeSamples);
   const afterMap = aggregateSide(afterSamples);
   const beforeVersions = versionsByQueryId(beforeMap);
   const afterVersions = versionsByQueryId(afterMap);
   const excluded: ExcludedQuery[] = [];
   const included: QueryStat[] = [];
-  const seenExcluded = new Set<string>();
   let sourceMissing = false;
 
   const modifiedQueryIds = new Set<string>();
@@ -129,31 +133,36 @@ export function compareWindows(beforeSamples: WindowSample[], afterSamples: Wind
 
   for (const queryId of modifiedQueryIds) {
     const versions = [...(beforeVersions.get(queryId) ?? []), ...(afterVersions.get(queryId) ?? [])];
-    const key = `modified:${queryId}`;
-    if (seenExcluded.has(key)) continue;
-    seenExcluded.add(key);
     excluded.push({
       queryId,
-      queryVersion: versions.join("->"),
+      queryVersion: [...new Set(versions)].join("->"),
       side: "both",
       reason: "modified",
     });
   }
 
   const allKeys = new Set([...beforeMap.keys(), ...afterMap.keys()]);
+  const sharedScopes = new Set<string>();
+  for (const [key, before] of beforeMap) {
+    const after = afterMap.get(key);
+    if (before.scopeKey && before.judgable && after?.judgable && !modifiedQueryIds.has(before.queryId)) {
+      sharedScopes.add(before.scopeKey);
+    }
+  }
   for (const key of [...allKeys].sort()) {
     const before = beforeMap.get(key);
     const after = afterMap.get(key);
-    const queryId = before?.queryId ?? after!.queryId;
+    const item = before ?? after;
+    if (!item) continue;
+    const { queryId, queryVersion } = item;
     if (modifiedQueryIds.has(queryId)) continue;
 
     if (!before || !after) {
-      const item = before ?? after!;
       excluded.push({
-        queryId: item.queryId,
-        queryVersion: item.queryVersion,
+        queryId,
+        queryVersion,
         side: before ? "before" : "after",
-        reason: "missing_side",
+        reason: beforeVersions.has(queryId) && afterVersions.has(queryId) ? "scope_mismatch" : "missing_side",
       });
       continue;
     }
@@ -172,9 +181,14 @@ export function compareWindows(beforeSamples: WindowSample[], afterSamples: Wind
       excluded.push({
         queryId: before.queryId,
         queryVersion: before.queryVersion,
-        side: "both",
+        side: !before.judgable && !after.judgable ? "both" : !before.judgable ? "before" : "after",
         reason: "not_judgable",
       });
+      continue;
+    }
+
+    if (sharedScopes.size > 1) {
+      excluded.push({ queryId, queryVersion, side: "both", reason: "scope_mismatch" });
       continue;
     }
 
@@ -211,7 +225,8 @@ export function compareWindows(beforeSamples: WindowSample[], afterSamples: Wind
     grade,
     conclusion,
     commonQueryCount,
-    frozenQueryCount: new Set([...beforeSamples, ...afterSamples].map((sample) => sample.queryVersion)).size,
+    frozenQueryCount: new Set([...beforeSamples, ...afterSamples]
+      .filter((sample) => !sample.brandQuestion).map((sample) => sample.queryId)).size,
     before: beforeRate,
     after: afterRate,
     deltaPp,

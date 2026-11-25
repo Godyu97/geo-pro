@@ -11,8 +11,10 @@ import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockRetestButton } from "@/features/functional-mock/run-buttons";
 import { Button } from "@/components/ui/button";
 import { presentSnapshotCost } from "./cost-copy";
-import { listReports, snapshotCostViews, type SnapshotCostView } from "./commands";
+import { listReports, snapshotViews, type SnapshotCostView, type SnapshotView } from "./commands";
 import { m0StageGate } from "./m0-stage-gate";
+import { snapshotMetricLabels } from "./snapshot";
+import { snapshotMetrics, type SnapshotMetric } from "./snapshot-comparisons";
 import type { ReportError } from "./contracts";
 import type { ReportSnapshotRow } from "./dao";
 
@@ -66,6 +68,39 @@ function SnapshotCostLines({
       <p>{lines.laborReason}</p>
     </div>
   );
+}
+
+function SnapshotMetrics({ view, locale, t }: {
+  view: SnapshotView | undefined;
+  locale: Locale;
+  t: Awaited<ReturnType<typeof getTranslator<"reports">>>;
+}) {
+  if (view?.comparisons) {
+    const comparisons = view.comparisons;
+    const points = new Intl.NumberFormat(locale, { signDisplay: "exceptZero", minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    return (
+      <dl className="mt-3 space-y-1 break-words">
+        {snapshotMetrics.map((metric) => {
+          const { common_query_count, delta_pp } = comparisons[metric];
+          return (
+            <div key={metric} className="flex flex-wrap gap-x-2">
+              <dt>{t(snapshotMetricLabels[metric])}</dt>
+              <dd className="text-muted-foreground">
+                {t(common_query_count === 1 ? "snapshotMetricCountOne" : "snapshotMetricCount", {
+                  common: common_query_count, delta: delta_pp === null ? "N/A" : `${points.format(delta_pp)}pp`,
+                })}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    );
+  }
+  if (!view?.metric) return null;
+  const label = Object.hasOwn(snapshotMetricLabels, view.metric)
+    ? t(snapshotMetricLabels[view.metric as SnapshotMetric])
+    : view.metric;
+  return <p className="mt-2 break-words text-muted-foreground">{t("snapshotLegacyMetric", { metric: label })}</p>;
 }
 
 function nextSnapshot(snapshots: readonly ReportSnapshotRow[]) {
@@ -154,13 +189,12 @@ export default async function ReportsListPage({
     console.error("reports-read-failed", { brandId });
     result = { error: "SERVICE_UNAVAILABLE" };
   }
-  let costViews = new Map<string, SnapshotCostView>();
+  let views = new Map<string, SnapshotView>();
   if (!("error" in result)) {
     try {
-      costViews = await snapshotCostViews(connection, session.user.id, result.snapshots);
+      views = await snapshotViews(connection, session.user.id, result.snapshots);
     } catch {
-      console.error("reports-cost-read-failed", { brandId });
-      costViews = new Map(result.snapshots.map((item) => [item.id, { state: "unavailable" as const }]));
+      console.error("reports-snapshot-read-failed", { brandId });
     }
   }
   const mockLane = brandIntakeOrigin(await headers())?.mode === "mock";
@@ -283,8 +317,9 @@ export default async function ReportsListPage({
                   {t("snapshotStatus", { status: item.status })}
                   {item.predecessorId ? ` · ${t("snapshotPrevious", { id: item.predecessorId })}` : ""}
                 </p>
+                <SnapshotMetrics view={views.get(item.id)} locale={locale} t={t} />
                 <SnapshotCostLines
-                  view={costViews.get(item.id)}
+                  view={views.get(item.id)?.cost}
                   locale={locale}
                   unavailable={t("costUnavailable")}
                   absent={t("costAbsent")}

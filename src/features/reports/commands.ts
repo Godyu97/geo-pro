@@ -1,6 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { createObjectStorage } from "../../lib/storage/index.ts";
 import { BrandDao } from "../brands/dao.ts";
@@ -25,6 +26,7 @@ import {
 } from "./cost.ts";
 import { compareWindows, computeD7DueAt, resolveLoopGate } from "./rules.ts";
 import { buildSnapshotDocument, fingerprintBytes, renderSnapshotHtml } from "./snapshot.ts";
+import { loadSnapshotComparisons } from "./snapshot-comparisons.ts";
 
 type Clock = () => string;
 const defaultClock: Clock = () => new Date().toISOString().replace(/\.\d{3}Z$/, ".000Z");
@@ -110,6 +112,20 @@ function inlineSnapshot(row: ReportSnapshotRow) {
 async function loadWindowCost(db: QueryConnection, brandId: string, windows: CostWindows) {
   const groups = await new ReportDao(db).samplingCostGroups(brandId, windows);
   return { cost: summarizeCostGroups(groups), labor: unrecordedLabor };
+}
+
+async function readComparisonEvidence(
+  db: QueryConnection,
+  ownerId: string,
+  input: GenerateReportInput | ReviseReportInput,
+  scope: Parameters<typeof loadSnapshotComparisons>[4],
+) {
+  try {
+    return await loadSnapshotComparisons(db, ownerId, input.brandId, input, scope);
+  } catch {
+    console.error("report-comparison-read-failed", { brandId: input.brandId });
+    return null;
+  }
 }
 
 type StoredSnapshotBody = { ok: true; html: string; json: string } | { ok: false; error: ReportError };
@@ -289,7 +305,9 @@ export async function generateReport(
     requestedIntent: input.publicationId || input.effectiveAt ? "business_loop" : retest.intent,
     effectiveAt: input.effectiveAt ?? retest.effectiveAt,
   });
-  const comparison = compareWindows(input.before.samples, input.after.samples);
+  const metrics = await readComparisonEvidence(db, ownerId, input, retest);
+  if (!metrics) return { error: "SERVICE_UNAVAILABLE" as ReportError };
+  const comparison = metrics.comparisons.recommendation_rate.result;
   const snapshotId = randomUUID();
   const document = buildSnapshotDocument({
     reportId: snapshotId,
@@ -298,11 +316,9 @@ export async function generateReport(
     entityVersion: retest.entityVersion,
     timezone: retest.timezone,
     locale: input.locale,
-    metric: input.metric,
     intent: gate.allowedIntent,
     loopCompleted: gate.loopCompleted,
-    grade: comparison.grade,
-    comparison,
+    metrics,
     windows: {
       before: { start: input.before.start, endExclusive: input.before.endExclusive },
       after: { start: input.after.start, endExclusive: input.after.endExclusive },
@@ -330,7 +346,7 @@ export async function generateReport(
     ownerId,
     retestId: retest.id,
     status: "created",
-    grade: comparison.grade,
+    grade: document.grade,
     intent: gate.allowedIntent,
     loopCompleted: gate.loopCompleted ? 1 : 0,
     predecessorId: null,
@@ -350,7 +366,7 @@ export async function generateReport(
   await dao.updateRetest({
     id: retest.id,
     ownerId,
-    status: comparison.grade === "incomparable" ? "inconclusive" : "completed",
+    status: document.grade === "incomparable" ? "inconclusive" : "completed",
     intent: gate.allowedIntent,
     comparisonJson: JSON.stringify(comparison),
     blockReason: gate.reason,
@@ -383,9 +399,14 @@ export async function reviseReport(
 
   const previous = await dao.findSnapshot(ownerId, input.snapshotId);
   if (!previous || previous.brandId !== input.brandId) return { error: "NOT_FOUND" as ReportError };
+  const retest = await dao.findRetest(ownerId, previous.retestId);
+  if (!retest || retest.brandId !== input.brandId) return { error: "NOT_FOUND" as ReportError };
 
   const now = clock();
-  const comparison = compareWindows(input.before.samples, input.after.samples);
+  const metrics = await readComparisonEvidence(db, ownerId, input, {
+    track: retest.track, entityVersion: previous.entityVersion, timezone: previous.timezone,
+  });
+  if (!metrics) return { error: "SERVICE_UNAVAILABLE" as ReportError };
   const snapshotId = randomUUID();
   const document = buildSnapshotDocument({
     reportId: snapshotId,
@@ -394,11 +415,9 @@ export async function reviseReport(
     entityVersion: previous.entityVersion,
     timezone: previous.timezone,
     locale: input.locale,
-    metric: input.metric,
     intent: previous.intent,
     loopCompleted: previous.loopCompleted === 1,
-    grade: comparison.grade,
-    comparison,
+    metrics,
     windows: {
       before: { start: input.before.start, endExclusive: input.before.endExclusive },
       after: { start: input.after.start, endExclusive: input.after.endExclusive },
@@ -423,14 +442,14 @@ export async function reviseReport(
     ownerId,
     retestId: previous.retestId,
     status: "created",
-    grade: comparison.grade,
+    grade: document.grade,
     intent: previous.intent,
     loopCompleted: previous.loopCompleted,
     predecessorId: previous.id,
     entityVersion: previous.entityVersion,
     timezone: previous.timezone,
     locale: input.locale,
-    sourceMissing: comparison.sourceMissing ? 1 : 0,
+    sourceMissing: document.source_missing ? 1 : 0,
     jsonBytes: "",
     htmlBytes: "",
     jsonSha256: stored.json.sha256,
@@ -482,29 +501,55 @@ export type SnapshotCostView =
   | { state: "absent" }
   | { state: "unavailable" };
 
-export function parseSnapshotCost(json: string): SnapshotCostView {
+const comparisonOverview = z.object({
+  common_query_count: z.number().int().nonnegative(),
+  delta_pp: z.number().nullable(),
+});
+const savedOverview = z.object({
+  metric: z.string().min(1).max(80).optional(),
+  comparisons: z.object({
+    mention_rate: comparisonOverview,
+    recommendation_rate: comparisonOverview,
+    official_site_citation_rate: comparisonOverview,
+  }).optional(),
+  cost: z.unknown(),
+  labor: z.unknown(),
+});
+
+export type SnapshotView = {
+  cost: SnapshotCostView;
+  metric?: string;
+  comparisons?: z.infer<typeof savedOverview>["comparisons"];
+};
+
+function parseSnapshotView(json: string): SnapshotView {
   try {
-    const parsed = JSON.parse(json) as { cost?: unknown; labor?: unknown };
-    const cost = snapshotCostSchema.safeParse(parsed?.cost);
-    const labor = snapshotLaborSchema.safeParse(parsed?.labor);
-    if (!cost.success || !labor.success) return { state: "absent" };
-    return { state: "ready", cost: cost.data, labor: labor.data };
+    const saved = JSON.parse(json);
+    const cost = snapshotCostSchema.safeParse(saved?.cost);
+    const labor = snapshotLaborSchema.safeParse(saved?.labor);
+    const summary = savedOverview.safeParse(saved);
+    return {
+      cost: cost.success && labor.success ? { state: "ready", cost: cost.data, labor: labor.data } : { state: "absent" },
+      metric: summary.data?.metric,
+      comparisons: summary.data?.comparisons,
+    };
   } catch {
-    return { state: "unavailable" };
+    return { cost: { state: "unavailable" } };
   }
 }
 
-/** Read frozen cost and labor from snapshot bytes. A miss is not rewritten as zero. */
-export async function snapshotCostViews(
+/** Read the list summary and cost from the same verified snapshot bytes. */
+export async function snapshotViews(
   db: QueryConnection,
   ownerId: string,
   snapshots: readonly ReportSnapshotRow[],
   options: SnapshotStorageOptions = {},
-): Promise<Map<string, SnapshotCostView>> {
-  const views = new Map<string, SnapshotCostView>();
+): Promise<Map<string, SnapshotView>> {
+  const views = new Map<string, SnapshotView>();
+  const unavailable: SnapshotView = { cost: { state: "unavailable" } };
   const stored: ReportSnapshotRow[] = [];
   for (const snapshot of snapshots) {
-    if (inlineSnapshot(snapshot)) views.set(snapshot.id, parseSnapshotCost(snapshot.jsonBytes));
+    if (inlineSnapshot(snapshot)) views.set(snapshot.id, parseSnapshotView(snapshot.jsonBytes));
     else stored.push(snapshot);
   }
   if (!stored.length) return views;
@@ -523,7 +568,7 @@ export async function snapshotCostViews(
     try {
       objects = await loadBrandObjectsByIds(db, ownerId, brandId, ids);
     } catch {
-      for (const row of rows) views.set(row.id, { state: "unavailable" });
+      for (const row of rows) views.set(row.id, unavailable);
       continue;
     }
     const byId = new Map(objects.map((row) => [row.id, row]));
@@ -531,23 +576,23 @@ export async function snapshotCostViews(
       const row = snapshot.jsonObjectId ? byId.get(snapshot.jsonObjectId) : undefined;
       if (!row || row.status !== "ready" || row.class !== "report-snapshot" || row.fileName !== reportJsonName
         || row.sha256 !== snapshot.jsonSha256 || !row.objectKey) {
-        views.set(snapshot.id, { state: "unavailable" });
+        views.set(snapshot.id, unavailable);
         return;
       }
       try {
         const loaded = await storage.getObject({ key: row.objectKey });
         if (!loaded.ok || loaded.sha256 !== snapshot.jsonSha256) {
-          views.set(snapshot.id, { state: "unavailable" });
+          views.set(snapshot.id, unavailable);
           return;
         }
         const text = new TextDecoder().decode(loaded.body);
         if (fingerprintBytes(text) !== snapshot.jsonSha256) {
-          views.set(snapshot.id, { state: "unavailable" });
+          views.set(snapshot.id, unavailable);
           return;
         }
-        views.set(snapshot.id, parseSnapshotCost(text));
+        views.set(snapshot.id, parseSnapshotView(text));
       } catch {
-        views.set(snapshot.id, { state: "unavailable" });
+        views.set(snapshot.id, unavailable);
       }
     }));
   }

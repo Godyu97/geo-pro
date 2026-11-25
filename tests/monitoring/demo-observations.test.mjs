@@ -16,6 +16,8 @@ import {
   demoErrors,
 } from "../../src/features/monitoring/demo-contracts.ts";
 import { DemoObservationDao, demosForOwnerQuery } from "../../src/features/monitoring/demo-dao.ts";
+import { loadSnapshotComparisons } from "../../src/features/reports/snapshot-comparisons.ts";
+import { saveComparisonFixture } from "../reports/saved-observations.mjs";
 import { buildSnapshotDocument } from "../../src/features/reports/snapshot.ts";
 import { safeReturnTo } from "../../src/lib/auth/return-to.ts";
 import { memoryCache } from "../../src/lib/cache/store.ts";
@@ -33,6 +35,7 @@ const naturalFiles = [
   "src/features/reports/dao.ts",
   "src/features/reports/commands.ts",
   "src/features/reports/snapshot.ts",
+  "src/features/reports/snapshot-comparisons.ts",
   "src/features/reports/rules.ts",
   "src/features/functional-mock/apply-retest.ts",
 ];
@@ -98,40 +101,22 @@ function demoInput(brandId, operationId, answerText = answer) {
   return { operationId, brandId, questionText: question, answerText };
 }
 
-function realSnapshot(brandId, observationId) {
+async function realSnapshot(db, owner, brandId, windows) {
+  const scope = { track: "model_api", timezone: "Asia/Shanghai", entityVersion: 1 };
+  const metrics = await loadSnapshotComparisons(db, owner, brandId, windows, scope);
   return buildSnapshotDocument({
     reportId: "5160d7dc-1cae-4d26-8ce4-fd2b886c8192",
     brandId,
     brandName: "乙品牌",
     entityVersion: 1,
-    timezone: "Asia/Shanghai",
+    timezone: scope.timezone,
     locale: "zh-CN",
-    metric: "recommendation_rate",
     intent: "diagnostic",
     loopCompleted: false,
-    grade: "exploratory",
-    comparison: {
-      grade: "exploratory",
-      conclusion: "unchanged",
-      commonQueryCount: 1,
-      frozenQueryCount: 1,
-      before: 1,
-      after: 1,
-      deltaPp: 0,
-      included: [{
-        queryId: "q-natural",
-        queryVersion: "1",
-        before: { numerator: 1, denominator: 1, rate: 1, observationIds: [observationId] },
-        after: { numerator: 1, denominator: 1, rate: 1, observationIds: [observationId] },
-        sourceMissing: false,
-      }],
-      excluded: [],
-      sourceMissing: false,
-      causality: "not_established",
-    },
+    metrics,
     windows: {
-      before: { start: "2026-11-01T00:00:00.000Z", endExclusive: "2026-11-08T00:00:00.000Z" },
-      after: { start: "2026-11-08T00:00:00.000Z", endExclusive: "2026-11-15T00:00:00.000Z" },
+      before: { start: windows.before.start, endExclusive: windows.before.endExclusive },
+      after: { start: windows.after.start, endExclusive: windows.after.endExclusive },
     },
     publication: null,
     createdAt: time,
@@ -234,7 +219,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       officialSiteCited: "false",
     }, clock);
     assert.equal(natural.error, undefined);
-    const naturalId = natural.observation.id;
+    const reportWindows = await saveComparisonFixture(db, owner, brand);
     const scope = { brandId: brand, sourceMode: "consumer_ui" };
     const before = await readEvidenceOverview(db, owner, scope, memoryCache());
     assert.equal("error" in before, false);
@@ -242,10 +227,10 @@ for (const kind of ["sqlite", "postgresql"]) {
     const answersBefore = await countBy(db, "answer_observation", "brand_id", brand);
     const snapshotsBefore = await countBy(db, "report_snapshot", "brand_id", brand);
     const retestsBefore = await countBy(db, "report_retest", "brand_id", brand);
-    const frozen = realSnapshot(brand, naturalId);
+    const frozen = await realSnapshot(db, owner, brand, reportWindows);
     assert.equal(frozen.is_demo, false);
-    assert.equal(frozen.summary.before, 1);
-    assert.deepEqual(frozen.queries[0].before.observation_ids, [naturalId]);
+    assert.equal(frozen.comparisons.recommendation_rate.before, 0);
+    assert.equal(frozen.comparisons.recommendation_rate.before_sample_count, 3);
 
     const operationId = randomUUID();
     const saved = await recordDemoObservation(db, owner, demoInput(brand, operationId), clock);
@@ -258,11 +243,17 @@ for (const kind of ["sqlite", "postgresql"]) {
     const after = await readEvidenceOverview(db, owner, scope, memoryCache());
     assert.deepEqual(rates(after), rates(before));
     assert.equal(after.answers.some((item) => item.questionText === question), false);
-    const stillFrozen = realSnapshot(brand, naturalId);
+    const stillFrozen = await realSnapshot(db, owner, brand, {
+      ...reportWindows,
+      after: { ...reportWindows.after, samples: [...reportWindows.after.samples, { observationId: saved.observation.id }] },
+    });
+    const recommendation = stillFrozen.comparisons.recommendation_rate;
     assert.equal(stillFrozen.is_demo, false);
-    assert.equal(stillFrozen.summary.before, frozen.summary.before);
-    assert.equal(stillFrozen.summary.after, frozen.summary.after);
-    assert.equal(stillFrozen.queries[0].before.observation_ids.includes(saved.observation.id), false);
+    assert.equal(recommendation.before, frozen.comparisons.recommendation_rate.before);
+    assert.equal(recommendation.after, frozen.comparisons.recommendation_rate.after);
+    assert.equal(recommendation.after_sample_count, 3);
+    assert.equal(recommendation.unavailable_observation_count.after, 1);
+    assert.equal(JSON.stringify(stillFrozen).includes(saved.observation.id), false);
 
     const replay = await recordDemoObservation(db, owner, demoInput(brand, operationId), clock);
     assert.equal(replay.observation.id, saved.observation.id);

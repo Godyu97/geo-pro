@@ -11,10 +11,13 @@ import {
   readSnapshot,
   requestRetest,
   reviseReport,
+  snapshotViews,
 } from "../../src/features/reports/commands.ts";
 import { compareWindows, computeD7DueAt, resolveLoopGate } from "../../src/features/reports/rules.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
+import { correctRecommendation, saveComparisonFixture, saveLegacySnapshot } from "./saved-observations.mjs";
+import { loadSnapshotComparisons, snapshotObservationsQuery } from "../../src/features/reports/snapshot-comparisons.ts";
 
 const time = "2026-11-20T12:00:00.000Z";
 const clock = () => time;
@@ -94,21 +97,6 @@ function sample(overrides) {
   };
 }
 
-function windows(beforeSamples, afterSamples) {
-  return {
-    before: {
-      start: "2026-11-01T00:00:00.000Z",
-      endExclusive: "2026-11-02T00:00:00.000Z",
-      samples: beforeSamples,
-    },
-    after: {
-      start: "2026-11-10T00:00:00.000Z",
-      endExclusive: "2026-11-11T00:00:00.000Z",
-      samples: afterSamples,
-    },
-  };
-}
-
 async function setup(t, kind) {
   const fixture = await testDatabase(kind, { migrateNow: false });
   t.after(() => fixture.cleanup());
@@ -176,20 +164,24 @@ for (const kind of ["sqlite", "postgresql"]) {
     const { db, owner, outsider, brandId } = await setup(t, kind);
     const storage = memoryStorage();
     const options = { env: storageEnv, storage, now: new Date(time) };
-    const shared = windows(
-      [
-        sample({ queryId: "q1", queryVersion: "q1-v1", numerator: 0 }),
-        sample({ queryId: "q2", queryVersion: "q2-v1", numerator: 0 }),
-        sample({ queryId: "q3", queryVersion: "q3-v1", numerator: 0 }),
-        sample({ queryId: "q4", queryVersion: "q4-v1", numerator: 0 }),
-      ],
-      [
-        sample({ queryId: "q1", queryVersion: "q1-v1", numerator: 1 }),
-        sample({ queryId: "q2", queryVersion: "q2-v1", numerator: 0 }),
-        sample({ queryId: "q3", queryVersion: "q3-v1", numerator: 1 }),
-        sample({ queryId: "q4", queryVersion: "q4-v2", numerator: 1 }),
-      ],
-    );
+    const shared = await saveComparisonFixture(db, owner, brandId);
+    const outsiderBrand = randomUUID();
+    const brands = new BrandDao(db);
+    await brands.insertBrand(outsider, outsiderBrand, time);
+    const ownerVersion = await brands.version(owner, brandId);
+    await brands.insertVersion(outsiderBrand, 1, ownerVersion.fields, time);
+    const outsiderEvidence = await saveComparisonFixture(db, outsider, outsiderBrand);
+    const foreignSample = outsiderEvidence.before.samples[0];
+    const query = snapshotObservationsQuery(owner, brandId,
+      [...shared.before.samples, ...shared.after.samples].map((item) => item.observationId));
+    const started = performance.now();
+    assert.equal((await queryWithParameters(db, query.sql, query.values)).length, 8);
+    t.diagnostic(`eight-observation read: ${(performance.now() - started).toFixed(2)} ms`);
+    const explain = kind === "sqlite" ? "EXPLAIN QUERY PLAN" : "EXPLAIN (ANALYZE, TIMING OFF, COSTS OFF)";
+    const plan = await queryWithParameters(db, `${explain} ${query.sql}`, query.values);
+    const planText = plan.map((row) => row.detail ?? row["QUERY PLAN"]).join("\n");
+    assert.match(planText, /answer_analysis_version_uidx|answer_analysis_brand_idx/);
+    t.diagnostic(`bounded observation query: ${planText.split("\n").filter((line) => /answer_observation|answer_analysis|monitoring_slot|run_protocol_pin/.test(line)).join(" | ")}`);
 
     // AC-M0-12-2: business_loop without verification becomes diagnostic
     const retest = await requestRetest(db, owner, {
@@ -216,7 +208,10 @@ for (const kind of ["sqlite", "postgresql"]) {
       brandId,
       operationId: randomUUID(),
       retestId: retest.retest.id,
-      before: shared.before,
+      before: {
+        ...shared.before,
+        samples: [...shared.before.samples, shared.before.samples[0], foreignSample],
+      },
       after: shared.after,
       locale: "zh-CN",
       metric: "recommendation_rate",
@@ -233,21 +228,52 @@ for (const kind of ["sqlite", "postgresql"]) {
     const originalJson = opened.json;
     const originalHtml = opened.html;
     const originalSha = report.snapshot.jsonSha256;
+    const document = JSON.parse(originalJson);
+    const [q1, q2, q3, q4] = shared.questionIds;
+    assert.deepEqual(Object.keys(document.comparisons), ["mention_rate", "recommendation_rate", "official_site_citation_rate"]);
+    assert.equal("metric" in document, false);
+    const { mention_rate: mention, recommendation_rate: recommendation, official_site_citation_rate: citation } = document.comparisons;
+    assert.equal(recommendation.common_query_count, 3);
+    assert.equal(recommendation.frozen_query_count, 4);
+    assert.equal(recommendation.before_sample_count, 3);
+    assert.equal(recommendation.after_sample_count, 3);
+    assert.equal(recommendation.before, 0);
+    assert.equal(recommendation.after, 2 / 3);
+    assert.equal(recommendation.delta_pp, (2 / 3) * 100);
+    assert.equal(mention.delta_pp, (1 / 3 - 1) * 100);
+    assert.equal(citation.common_query_count, 1);
+    assert.equal(citation.before_sample_count, 1);
+    assert.equal(citation.after_sample_count, 1);
+    assert.equal(citation.before, null);
+    assert.equal(citation.after, null);
+    assert.equal(citation.delta_pp, null);
+    assert.equal(citation.reason, "fewer_than_three_judgable_questions");
+    assert.ok(recommendation.excluded_queries.some((item) => item.queryId === q4 && item.reason === "modified"));
+    assert.deepEqual(citation.queries.map((item) => item.query_id), [q1]);
+    assert.ok(citation.excluded_samples.after.some((item) => item.query_id === q2 && item.reason === "incomplete_citations"));
+    assert.ok(citation.excluded_samples.after.some((item) => item.query_id === q3 && item.reason === "unknown_label"));
+    assert.deepEqual(recommendation.excluded_samples.after, []);
+    assert.equal(document.evidence[shared.before.samples[0].observationId].analysis_version, 1);
+    assert.equal(document.evidence[shared.before.samples[0].observationId].scope.observed_region, "unknown");
+    assert.equal(recommendation.unavailable_observation_count.before, 1);
+    assert.equal(originalJson.includes(foreignSample.observationId), false);
+    assert.equal(originalHtml.includes(foreignSample.observationId), false);
+    assert.doesNotMatch(originalJson, /untrusted-|relative_increase/);
+    assert.match(originalHtml, /<h2>提及率<\/h2>/);
+    assert.match(originalHtml, /<h2>推荐率<\/h2>[\s\S]*?共同题 3\/4[\s\S]*?\+66\.7pp/);
+    assert.match(originalHtml, /<h2>官网引用率<\/h2>[\s\S]*?共同题 1\/4[\s\S]*?N\/A/);
+    t.diagnostic(`isolated snapshot ${report.snapshot.id}: common questions mention/recommendation/citation 3/3/1`);
 
     // AC-M0-12-3: revise creates successor; previous bytes unchanged
-    const revisedAfter = windows(shared.before.samples, [
-      sample({ queryId: "q1", queryVersion: "q1-v1", numerator: 1 }),
-      sample({ queryId: "q2", queryVersion: "q2-v1", numerator: 1 }),
-      sample({ queryId: "q3", queryVersion: "q3-v1", numerator: 1 }),
-      sample({ queryId: "q4", queryVersion: "q4-v2", numerator: 1 }),
-    ]).after;
+    const correctedId = shared.after.samples[1].observationId;
+    await correctRecommendation(db, correctedId);
     const revised = await reviseReport(db, owner, {
       action: "revise-report",
       brandId,
       operationId: randomUUID(),
       snapshotId: report.snapshot.id,
       before: shared.before,
-      after: revisedAfter,
+      after: shared.after,
       locale: "zh-CN",
       metric: "recommendation_rate",
       brandName: "己品牌",
@@ -263,7 +289,38 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(revised.previous.jsonBytes, "");
     assert.equal(revised.previous.htmlBytes, "");
     const nextFiles = await readSnapshot(db, owner, revised.snapshot.id, options);
-    assert.notEqual(nextFiles.json, originalJson);
+    const next = JSON.parse(nextFiles.json);
+    assert.equal(next.evidence[correctedId].analysis_version, 2);
+    assert.equal(next.comparisons.recommendation_rate.delta_pp, 100);
+    assert.equal(next.comparisons.official_site_citation_rate.delta_pp, null);
+
+    const legacy = await saveLegacySnapshot(db, owner, brandId, retest.retest.id);
+    const legacySuccessor = await reviseReport(db, owner, {
+      action: "revise-report", brandId, operationId: randomUUID(), snapshotId: legacy.id,
+      before: shared.before, after: shared.after, locale: "en", metric: "official_site_citation_rate",
+    }, clock, options);
+    assert.equal(legacySuccessor.snapshot.predecessorId, legacy.id);
+    const legacyFiles = await readSnapshot(db, owner, legacy.id, options);
+    assert.equal(legacyFiles.json, legacy.json);
+    assert.equal(legacyFiles.html, legacy.html);
+    const snapshotList = await snapshotViews(db, owner, [legacyFiles.snapshot, legacySuccessor.snapshot], options);
+    assert.equal(snapshotList.get(legacy.id).metric, "recommendation_rate");
+    assert.equal(snapshotList.get(legacy.id).comparisons, undefined);
+    assert.equal(snapshotList.get(legacy.id).cost.cost.known[0].minor, 3);
+    assert.equal(snapshotList.get(legacySuccessor.snapshot.id).comparisons.official_site_citation_rate.common_query_count, 1);
+    const englishFiles = await readSnapshot(db, owner, legacySuccessor.snapshot.id, options);
+    assert.match(englishFiles.html, /<h2>Mention rate<\/h2>/);
+    assert.match(englishFiles.html, /<h2>Recommendation rate<\/h2>[\s\S]*?\+100\.0pp/);
+    assert.match(englishFiles.html, /<h2>Official site citation rate<\/h2>[\s\S]*?N\/A/);
+
+    await queryWithParameters(db, "DELETE FROM answer_analysis_version WHERE observation_id = ?", [correctedId]);
+    const withoutAnalysis = await loadSnapshotComparisons(db, owner, brandId, shared, retest.retest);
+    for (const { result, excludedSamples } of Object.values(withoutAnalysis.comparisons)) {
+      assert.equal(result.deltaPp, null);
+      assert.ok(excludedSamples.after.some((item) => item.observation_id === correctedId && item.reason === "missing_analysis"));
+    }
+    assert.equal(withoutAnalysis.comparisons.recommendation_rate.result.commonQueryCount, 2);
+    assert.equal((await readSnapshot(db, owner, revised.snapshot.id, options)).json, nextFiles.json);
 
     // Ownership: outsider cannot read
     const denied = await readSnapshot(db, outsider, report.snapshot.id, options);

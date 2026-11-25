@@ -9,7 +9,7 @@ import {
   readSnapshot,
   requestRetest,
   reviseReport,
-  snapshotCostViews,
+  snapshotViews,
 } from "../../src/features/reports/commands.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { testDatabase } from "../maintenance/helpers.mjs";
@@ -305,9 +305,9 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(enSection.includes("未记录人工工时"), false);
     assert.equal(enSection.includes("not_applicable"), false);
 
-    const views = await snapshotCostViews(db, owner, [zhReport.snapshot, enReport.snapshot], options);
-    assert.equal(views.get(zhReport.snapshot.id).cost.known[0].minor, 3);
-    assert.equal(views.get(enReport.snapshot.id).cost.pending_count, 1);
+    const views = await snapshotViews(db, owner, [zhReport.snapshot, enReport.snapshot], options);
+    assert.equal(views.get(zhReport.snapshot.id).cost.cost.known[0].minor, 3);
+    assert.equal(views.get(enReport.snapshot.id).cost.cost.pending_count, 1);
 
     const emptyRange = reportWindows(
       "2020-01-01T00:00:00.000Z",
