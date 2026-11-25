@@ -22,6 +22,15 @@ export const reportGradeSchema = z.enum(reportGrades);
 export const reportConclusions = ["improved", "unchanged", "declined", "inconclusive", "incomparable"] as const;
 export const reportConclusionSchema = z.enum(reportConclusions);
 
+export const reportDecisionActions = [
+  "continue_content",
+  "supplement_evidence",
+  "continue_observation",
+  "stop",
+] as const;
+export const reportDecisionActionSchema = z.enum(reportDecisionActions);
+export type ReportDecisionAction = z.infer<typeof reportDecisionActionSchema>;
+
 export const reportErrors = {
   SESSION_REQUIRED: 401,
   FORBIDDEN: 403,
@@ -30,6 +39,7 @@ export const reportErrors = {
   WINDOW_NOT_DUE: 409,
   LOOP_NOT_READY: 409,
   CONFLICT: 409,
+  NO_COMPARISON: 409,
   SERVICE_UNAVAILABLE: 503,
 } as const;
 export type ReportError = keyof typeof reportErrors;
@@ -118,4 +128,16 @@ export type ReportWriteInput = z.infer<typeof reportWriteSchema>;
 export const listReportsQuerySchema = z.strictObject({
   brandId: brandIdSchema,
   limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const saveReportDecisionSchema = z.strictObject({
+  brandId: brandIdSchema,
+  snapshotId: opaqueId,
+  action: reportDecisionActionSchema,
+});
+export type SaveReportDecisionInput = z.infer<typeof saveReportDecisionSchema>;
+
+export const reportDecisionWriteSchema = z.strictObject({
+  snapshotId: opaqueId,
+  action: reportDecisionActionSchema,
 });

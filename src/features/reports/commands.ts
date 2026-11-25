@@ -14,11 +14,13 @@ import { MAX_STORED_OBJECT_BYTES } from "../stored-objects/contracts.ts";
 import { loadBrandObjectsByIds, markObjectFailed } from "../stored-objects/dao.ts";
 import type {
   GenerateReportInput,
+  ReportDecisionAction,
   ReportError,
   RequestRetestInput,
   ReviseReportInput,
+  SaveReportDecisionInput,
 } from "./contracts.ts";
-import { ReportDao, type ReportSnapshotRow } from "./dao.ts";
+import { ReportDao, type ReportDecisionRow, type ReportSnapshotRow } from "./dao.ts";
 import {
   snapshotCostSchema,
   snapshotLaborSchema,
@@ -32,10 +34,11 @@ import { compareWindows, computeD7DueAt, resolveLoopGate } from "./rules.ts";
 import { readSnapshotBusiness, summarizeBusinessFeedback, type SnapshotBusinessView } from "./business-feedback.ts";
 import { readExecution, readMetricConclusions, readVisits, type ExecutionReading, type MetricConclusion, type VisitReading } from "./reading.ts";
 import { buildSnapshotDocument, fingerprintBytes, renderSnapshotHtml } from "./snapshot.ts";
-import { loadSnapshotComparisons, type SnapshotMetric } from "./snapshot-comparisons.ts";
+import { loadSnapshotComparisons, snapshotMetrics, type SnapshotMetric } from "./snapshot-comparisons.ts";
 
 type Clock = () => string;
 const defaultClock: Clock = () => new Date().toISOString().replace(/\.\d{3}Z$/, ".000Z");
+const decisionClock: Clock = () => new Date().toISOString();
 
 async function requireOwnedBrand(db: QueryConnection, ownerId: string, brandId: string) {
   const brand = await new BrandDao(db).owned(ownerId, brandId);
@@ -825,4 +828,130 @@ export async function snapshotViews(
     views.set(snapshot.id, { ...body, source });
   }
   return views;
+}
+
+export type ReportDecisionView = {
+  id: string;
+  snapshotId: string;
+  action: ReportDecisionAction;
+  decidedBy: string;
+  decidedAt: string;
+};
+
+function presentDecision(row: ReportDecisionRow): ReportDecisionView {
+  return {
+    id: row.id,
+    snapshotId: row.snapshotId,
+    action: row.action,
+    decidedBy: row.decidedBy,
+    decidedAt: row.decidedAt,
+  };
+}
+
+function hasSavedComparison(json: string): boolean {
+  try {
+    const conclusions = readMetricConclusions(JSON.parse(json));
+    return snapshotMetrics.some((metric) => {
+      const value = conclusions[metric];
+      return value !== undefined && value !== "missing";
+    });
+  } catch {
+    return false;
+  }
+}
+
+export async function listBrandDecisions(
+  db: QueryConnection,
+  actorId: string,
+  brandId: string,
+  snapshotIds: readonly string[],
+) {
+  const brand = await requireOwnedBrand(db, actorId, brandId);
+  if (!brand) return { error: "NOT_FOUND" as const };
+  if (snapshotIds.length === 0) return { decisions: [] as ReportDecisionView[] };
+  const rows = await new ReportDao(db).listDecisions(actorId, brandId, snapshotIds);
+  return { decisions: rows.map(presentDecision) };
+}
+
+export async function readSnapshotDecisions(
+  db: QueryConnection,
+  actorId: string,
+  snapshotId: string,
+) {
+  const identity = await new ReportDao(db).snapshotIdentity(snapshotId);
+  if (!identity || identity.ownerId !== actorId) return { error: "NOT_FOUND" as const };
+  const brand = await requireOwnedBrand(db, actorId, identity.brandId);
+  if (!brand) return { error: "NOT_FOUND" as const };
+  const rows = await new ReportDao(db).listDecisions(actorId, identity.brandId, [snapshotId]);
+  return { decisions: rows.map(presentDecision) };
+}
+
+export async function saveReportDecision(
+  db: DatabaseConnection,
+  actorId: string,
+  input: SaveReportDecisionInput,
+  clock: Clock = decisionClock,
+  options: SnapshotStorageOptions = {},
+) {
+  const dao = new ReportDao(db);
+  const identity = await dao.snapshotIdentity(input.snapshotId);
+  if (!identity || identity.brandId !== input.brandId || identity.ownerId !== actorId) {
+    return { error: "NOT_FOUND" as const };
+  }
+  const brand = await requireOwnedBrand(db, actorId, input.brandId);
+  if (!brand) return { error: "NOT_FOUND" as const };
+  const snapshot = await dao.findSnapshot(actorId, input.snapshotId);
+  if (!snapshot || snapshot.brandId !== input.brandId) return { error: "NOT_FOUND" as const };
+
+  let json = snapshot.jsonBytes;
+  if (!inlineSnapshot(snapshot)) {
+    const stored = await readStoredSnapshot(db, actorId, snapshot, options);
+    if (!stored.ok) return { error: stored.error };
+    json = stored.json;
+  }
+  if (!hasSavedComparison(json)) return { error: "NO_COMPARISON" as const };
+
+  const now = clock();
+  try {
+    return await db.transaction(async (tx) => {
+      const writer = new ReportDao(tx);
+      const current = await writer.findSnapshot(actorId, input.snapshotId);
+      if (!current || current.brandId !== input.brandId
+        || current.jsonSha256 !== snapshot.jsonSha256
+        || current.htmlSha256 !== snapshot.htmlSha256
+        || current.jsonBytes !== snapshot.jsonBytes
+        || current.htmlBytes !== snapshot.htmlBytes) {
+        return { error: "NOT_FOUND" as const };
+      }
+      await writer.insertDecision({
+        id: randomUUID(),
+        brandId: input.brandId,
+        ownerId: actorId,
+        snapshotId: input.snapshotId,
+        action: input.action,
+        decidedBy: actorId,
+        decidedAt: now,
+        createdAt: now,
+      });
+      const decisions = (await writer.listDecisions(actorId, input.brandId, [input.snapshotId])).map(presentDecision);
+      if (!decisions.some((row) => row.action === input.action)) return { error: "NOT_FOUND" as const };
+      return { decisions };
+    });
+  } catch {
+    console.error("report-decision-write-failed", { brandId: input.brandId });
+    return { error: "SERVICE_UNAVAILABLE" as const };
+  }
+}
+
+export async function saveSnapshotDecision(
+  db: DatabaseConnection,
+  actorId: string,
+  snapshotId: string,
+  action: ReportDecisionAction,
+  clock: Clock = decisionClock,
+  options: SnapshotStorageOptions = {},
+) {
+  const identity = await new ReportDao(db).snapshotIdentity(snapshotId);
+  if (!identity || identity.ownerId !== actorId) return { error: "NOT_FOUND" as const };
+  return saveReportDecision(db, actorId, { brandId: identity.brandId, snapshotId, action }, clock, options);
 }

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { registerTestAccount } from "./auth-helpers";
@@ -43,6 +43,12 @@ const copy = {
     visibilityAbsent: "可见性比较缺失。历史指标保持原样，没有可见性结论。",
     visitsAbsent: "站点访问缺失。这份快照没有保存爬虫访问。",
     forbidden: "无效果",
+    decisionHeading: "下轮决策",
+    decisionEmpty: "还没有保存下轮决策。",
+    decisionSave: "保存决策",
+    decisionObserve: "继续观察",
+    decisionEvidence: "补证据",
+    decisionActions: ["继续内容动作", "补证据", "继续观察", "停止"],
   },
   en: {
     title: "Retest & reports",
@@ -76,6 +82,12 @@ const copy = {
     visibilityAbsent: "Visibility comparisons are missing. The historical metric stays as saved, with no visibility conclusion.",
     visitsAbsent: "Site visits are missing. This snapshot has no saved crawler visits.",
     forbidden: "no effect",
+    decisionHeading: "Next-round decision",
+    decisionEmpty: "No next-round decision has been saved.",
+    decisionSave: "Save decision",
+    decisionObserve: "Keep observing",
+    decisionEvidence: "Add evidence",
+    decisionActions: ["Continue the content work", "Add evidence", "Keep observing", "Stop"],
   },
 } as const;
 
@@ -260,6 +272,12 @@ test("report snapshots keep the current download readable and recoverable", asyn
         await expect(card.getByText(current.businessCrawler, { exact: true })).toBeVisible();
         await expect(card.getByText(current.citationCount, { exact: true })).toBeVisible();
         await expect(card.getByText(current.forbidden)).toHaveCount(0);
+        await expect(card.getByRole("heading", { name: current.decisionHeading, exact: true })).toBeVisible();
+        await expect(card.getByText(current.decisionEmpty, { exact: true })).toBeVisible();
+        await expect(card.getByRole("button", { name: current.decisionSave, exact: true })).toBeVisible();
+        for (const label of current.decisionActions) {
+          await expect(card.getByRole("radio", { name: label, exact: true })).toBeVisible();
+        }
         for (const [index, metric] of metricKeys.entries()) {
           const group = card.getByRole("group", { name: current.metrics[index], exact: true });
           await expect(group).toContainText(conclusionLabel(locale, seeded.comparisons[metric].conclusion));
@@ -331,6 +349,91 @@ test("report snapshots keep the current download readable and recoverable", asyn
     expect(downloadFile).toBeTruthy();
     expect(Buffer.compare(originalJson, await readFile(downloadFile!))).toBe(0);
 
+    const decisionCard = () => page.getByRole("main").getByRole("listitem").filter({
+      has: page.locator(`a[href="/api/reports/snapshots/${snapshotId}?format=json"]`),
+    });
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await page.setViewportSize({ width: 375, height: 900 });
+    await page.goto(href);
+    const zhCard = decisionCard();
+    await expect(zhCard.getByText(conclusionCopy["zh-CN"].declined, { exact: true })).toBeVisible();
+    const saveDecision = async (card: Locator) => {
+      const saved = page.waitForResponse((response) => (
+        new URL(response.url()).pathname === "/dashboard/reports" && response.request().method() === "POST"
+      ));
+      await card.getByRole("button", { name: copy["zh-CN"].decisionSave, exact: true }).click();
+      expect((await saved).status()).toBeLessThan(400);
+    };
+    await zhCard.getByRole("radio", { name: copy["zh-CN"].decisionObserve, exact: true }).check();
+    await saveDecision(zhCard);
+    const ownerId = accounts[0]?.userId ?? "";
+    const observed = zhCard.locator("ol li").filter({ hasText: copy["zh-CN"].decisionObserve });
+    await expect(observed).toHaveCount(1);
+    await expect(observed).toContainText(ownerId);
+    await zhCard.getByRole("radio", { name: copy["zh-CN"].decisionObserve, exact: true }).check();
+    await saveDecision(zhCard);
+    await expect(observed).toHaveCount(1);
+    await zhCard.getByRole("radio", { name: copy["zh-CN"].decisionEvidence, exact: true }).check();
+    await saveDecision(zhCard);
+    const savedLines = zhCard.locator("ol li");
+    await expect(savedLines).toHaveCount(2);
+    const savedText = await savedLines.allTextContents();
+    const savedTimes = savedText.map((text) => text.match(/20\d{2}-\d{2}-\d{2}T\S+/)?.[0] ?? "");
+    expect(savedText[0]).toContain(copy["zh-CN"].decisionObserve);
+    expect(savedText[1]).toContain(copy["zh-CN"].decisionEvidence);
+    expect(savedTimes[0] < savedTimes[1]).toBeTruthy();
+    const afterDecision = Buffer.from(await (await context.request.get(`/api/reports/snapshots/${snapshotId}?format=json`)).body());
+    const jsonSha = createHash("sha256").update(originalJson).digest("hex");
+    expect(Buffer.compare(originalJson, afterDecision)).toBe(0);
+    expect(createHash("sha256").update(afterDecision).digest("hex")).toBe(jsonSha);
+    expect(JSON.parse(afterDecision.toString("utf8")).comparisons.mention_rate.conclusion).toBe("declined");
+    const ownerDecisions = await context.request.get(`${origin}/api/reports/snapshots/${snapshotId}/decisions`, {
+      headers: { Origin: origin },
+    });
+    expect(ownerDecisions.ok()).toBeTruthy();
+    const ownerDecisionBody = await ownerDecisions.text();
+    const ownerDecisionJson = JSON.parse(ownerDecisionBody) as {
+      decisions: Array<{ id: string; action: string; decidedAt: string }>;
+    };
+    expect(ownerDecisionJson.decisions.map((row) => row.action)).toEqual([
+      "continue_observation",
+      "supplement_evidence",
+    ]);
+    expect(ownerDecisionJson.decisions[0]?.decidedAt < ownerDecisionJson.decisions[1]?.decidedAt).toBeTruthy();
+    expect(ownerDecisionBody).not.toContain("declined");
+    expect(ownerDecisionBody).not.toContain("观察下降");
+    const deniedRead = await outsider.request.get(`${origin}/api/reports/snapshots/${snapshotId}/decisions`, {
+      headers: { Origin: origin },
+    });
+    expect(deniedRead.status()).toBe(404);
+    const deniedReadBody = await deniedRead.text();
+    expect(deniedReadBody).not.toContain("declined");
+    expect(deniedReadBody).not.toContain("continue_observation");
+    expect(deniedReadBody).not.toContain("supplement_evidence");
+    expect(deniedReadBody).not.toContain("观察下降");
+    expect(deniedReadBody).not.toContain(brandName);
+    const deniedWrite = await outsider.request.post(`${origin}/api/reports/snapshots/${snapshotId}/decisions`, {
+      headers: { Origin: origin, "content-type": "application/json" },
+      data: { action: "stop" },
+    });
+    expect(deniedWrite.status()).toBe(404);
+    const deniedWriteBody = await deniedWrite.text();
+    expect(deniedWriteBody).not.toContain("stop");
+    expect(deniedWriteBody).not.toContain("declined");
+    expect(deniedWriteBody).not.toContain(snapshotId);
+    await context.addCookies([{ name: "geo-locale", value: "en", url: origin }]);
+    await page.setViewportSize({ width: 768, height: 900 });
+    await page.goto(href);
+    const enCard = decisionCard();
+    await expect(enCard.getByRole("radio", { name: copy.en.decisionObserve, exact: true })).toBeVisible();
+    await expect(enCard.getByRole("radio", { name: copy.en.decisionEvidence, exact: true })).toBeVisible();
+    await expect(enCard.locator("ol li").filter({ hasText: copy.en.decisionObserve })).toHaveCount(1);
+    await expect(enCard.locator("ol li").filter({ hasText: copy.en.decisionEvidence })).toHaveCount(1);
+    await expectNoOverflow(page);
+    console.info(
+      `Decision rows ${ownerDecisionJson.decisions.map((row) => `${row.id} ${row.action} ${row.decidedAt}`).join(" | ")} on snapshot ${snapshotId}; json sha256 ${jsonSha}`,
+    );
+
     const legacy = reportFixture("report-history", {
       userId: accounts[0]?.userId, brandId, retestId: retest.retest.id, observationId: after.samples[1].observationId,
     });
@@ -381,6 +484,11 @@ test("report snapshots keep the current download readable and recoverable", asyn
         await expect(historyRow.getByText(current.visibilityAbsent, { exact: true })).toBeVisible();
         await expect(historyRow.getByText(current.visitsAbsent, { exact: true })).toBeVisible();
         await expect(historyRow.getByText(conclusionLabel(locale, "improved"))).toHaveCount(0);
+        await expect(historyRow.getByRole("button", { name: current.decisionSave, exact: true })).toHaveCount(0);
+        const previous = main.getByRole("listitem").filter({
+          has: page.locator(`a[href="/api/reports/snapshots/${snapshotId}?format=json"]`),
+        });
+        await expect(previous.locator("ol li").first()).toContainText(current.decisionObserve);
         await expect(historyRow.getByText(current.metrics[2], { exact: true })).toHaveCount(0);
         if (width === 375) {
           await expect(download).toBeInViewport();

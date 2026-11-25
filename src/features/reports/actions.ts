@@ -18,6 +18,8 @@ import {
   savedReminderSchema,
   savedReviseSchema,
 } from "./saved-retest.ts";
+import { saveReportDecision } from "./commands.ts";
+import { saveReportDecisionSchema } from "./contracts.ts";
 
 const pageErrors = new Set<ReportError>([
   "INVALID_INPUT",
@@ -27,6 +29,7 @@ const pageErrors = new Set<ReportError>([
   "SERVICE_UNAVAILABLE",
   "WINDOW_NOT_DUE",
   "FORBIDDEN",
+  "NO_COMPARISON",
 ]);
 
 function finish(brandId: string, error?: string, notice?: string): never {
@@ -108,5 +111,18 @@ export async function reviseSavedSnapshotAction(formData: FormData) {
   });
   if (!parsed.success) finish(brandId, "INVALID_INPUT");
   const result = await reviseSavedSnapshot(getConnection(), session.user.id, parsed.data);
+  finish(brandId, "error" in result ? result.error : undefined);
+}
+
+export async function saveReportDecisionAction(formData: FormData) {
+  const session = await requireSession();
+  const brandId = String(formData.get("brandId") ?? "");
+  const parsed = saveReportDecisionSchema.safeParse({
+    brandId,
+    snapshotId: formData.get("snapshotId"),
+    action: formData.get("action"),
+  });
+  if (!parsed.success) finish(brandId, "INVALID_INPUT");
+  const result = await saveReportDecision(getConnection(), session.user.id, parsed.data);
   finish(brandId, "error" in result ? result.error : undefined);
 }

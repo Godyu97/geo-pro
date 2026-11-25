@@ -8,12 +8,15 @@ import {
   generateReport,
   listReports,
   readSnapshot,
+  readSnapshotDecisions,
   requestRetest,
   reviseReport,
+  saveSnapshotDecision,
 } from "./commands";
 import { reportSnapshotFileResponse } from "./download";
 import {
   listReportsQuerySchema,
+  reportDecisionWriteSchema,
   reportErrors,
   reportWriteSchema,
   type ReportError,
@@ -85,4 +88,28 @@ export async function reportSnapshotResponse(request: Request, snapshotId: strin
     "Content-Disposition": `attachment; filename="${filename}"`,
     "X-Content-Type-Options": "nosniff",
   });
+}
+
+export async function reportDecisionsResponse(request: Request, snapshotId: string) {
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
+  const session = await requireSession().catch(() => null);
+  if (!session) return errorResponse("SESSION_REQUIRED");
+  const parsed = reportDecisionWriteSchema.pick({ snapshotId: true }).safeParse({ snapshotId });
+  if (!parsed.success) return errorResponse("INVALID_INPUT");
+  const result = await readSnapshotDecisions(getConnection(), session.user.id, parsed.data.snapshotId);
+  if ("error" in result && result.error) return errorResponse(result.error);
+  return Response.json({ decisions: result.decisions }, { headers });
+}
+
+export async function reportDecisionWriteResponse(request: Request, snapshotId: string) {
+  if (!allowsOptionalApiOrigin(request)) return errorResponse("FORBIDDEN");
+  const session = await requireSession().catch(() => null);
+  if (!session) return errorResponse("SESSION_REQUIRED");
+  const body = await request.json().catch(() => null);
+  const action = body && typeof body === "object" && "action" in body ? body.action : undefined;
+  const parsed = reportDecisionWriteSchema.safeParse({ snapshotId, action });
+  if (!parsed.success) return errorResponse("INVALID_INPUT");
+  const result = await saveSnapshotDecision(getConnection(), session.user.id, parsed.data.snapshotId, parsed.data.action);
+  if ("error" in result && result.error) return errorResponse(result.error);
+  return Response.json({ decisions: result.decisions }, { headers });
 }

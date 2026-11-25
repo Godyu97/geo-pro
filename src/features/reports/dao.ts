@@ -4,6 +4,7 @@ import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
 import { costGroupRow, samplingCostGroupsQuery, type CostWindows } from "./cost.ts";
 import {
+  reportDecisionActionSchema,
   reportGradeSchema,
   reportIntentSchema,
   retestKindSchema,
@@ -73,6 +74,18 @@ const snapshotRow = z.object({
 });
 export type ReportSnapshotRow = z.infer<typeof snapshotRow>;
 
+const decisionRow = z.object({
+  id: z.string(),
+  brandId: z.string(),
+  ownerId: z.string(),
+  snapshotId: z.string(),
+  action: reportDecisionActionSchema,
+  decidedBy: z.string(),
+  decidedAt: z.string(),
+  createdAt: z.string(),
+});
+export type ReportDecisionRow = z.infer<typeof decisionRow>;
+
 const retestColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", kind, status, intent, track,
   timezone, entity_version AS "entityVersion", before_run_id AS "beforeRunId", after_run_id AS "afterRunId",
   publication_id AS "publicationId", effective_at AS "effectiveAt", operation_id AS "operationId",
@@ -90,6 +103,10 @@ const snapshotColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", retes
   timezone, locale, source_missing AS "sourceMissing", json_bytes AS "jsonBytes", html_bytes AS "htmlBytes",
   json_sha256 AS "jsonSha256", html_sha256 AS "htmlSha256", operation_id AS "operationId", created_at AS "createdAt",
   html_object_id AS "htmlObjectId", json_object_id AS "jsonObjectId"`;
+
+const decisionColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", snapshot_id AS "snapshotId",
+  action, decided_by AS "decidedBy", decided_at AS "decidedAt", created_at AS "createdAt"`;
+const decisionLookupChunk = 100;
 
 export class ReportDao {
   private readonly db: QueryConnection;
@@ -245,6 +262,39 @@ export class ReportDao {
       [ownerId, brandId, limit],
     );
     return z.array(retestRow).parse(rows);
+  }
+
+  async insertDecision(row: ReportDecisionRow) {
+    await this.query(
+      `INSERT INTO report_decision (
+        id, brand_id, owner_id, snapshot_id, action, decided_by, decided_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (snapshot_id, action) DO NOTHING`,
+      [row.id, row.brandId, row.ownerId, row.snapshotId, row.action, row.decidedBy, row.decidedAt, row.createdAt],
+    );
+  }
+
+  async listDecisions(ownerId: string, brandId: string, snapshotIds: readonly string[]) {
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const id of snapshotIds) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      unique.push(id);
+    }
+    const rows: ReportDecisionRow[] = [];
+    for (let offset = 0; offset < unique.length; offset += decisionLookupChunk) {
+      const group = unique.slice(offset, offset + decisionLookupChunk);
+      const found = await this.query(
+        `SELECT ${decisionColumns} FROM report_decision
+         WHERE brand_id = ? AND owner_id = ? AND snapshot_id IN (${group.map(() => "?").join(", ")})
+         ORDER BY decided_at ASC, id ASC`,
+        [brandId, ownerId, ...group],
+      );
+      rows.push(...z.array(decisionRow).parse(found));
+    }
+    rows.sort((left, right) => left.decidedAt.localeCompare(right.decidedAt) || left.id.localeCompare(right.id));
+    return rows;
   }
 
   /** Existence only, inside the caller's brand. Other brands' rows stay invisible. */

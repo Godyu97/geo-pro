@@ -111,3 +111,31 @@ export const reportSnapshot = sqliteTable("report_snapshot", {
         and length(${table.htmlBytes}) = 0 and length(${table.jsonBytes}) = 0)
     )`),
 ]);
+
+export const reportDecision = sqliteTable("report_decision", {
+  id: text("id").primaryKey(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull(),
+  snapshotId: text("snapshot_id").notNull(),
+  action: text("action").notNull(),
+  decidedBy: text("decided_by").notNull(),
+  decidedAt: text("decided_at").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "report_decision_snapshot_fk",
+    columns: [table.snapshotId],
+    foreignColumns: [reportSnapshot.id],
+  }).onDelete("cascade"),
+  uniqueIndex("report_decision_snapshot_action_uidx").on(table.snapshotId, table.action),
+  index("report_decision_brand_idx").on(table.brandId, table.ownerId, table.decidedAt, table.id),
+  check("report_decision_state_check", sql`${table.action} in ('continue_content', 'supplement_evidence', 'continue_observation', 'stop')
+    and length(${table.id}) = 36
+    and length(${table.brandId}) = 36
+    and length(${table.snapshotId}) = 36
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.decidedBy}) between 1 and 128
+    and length(${table.decidedAt}) between 20 and 40
+    and length(${table.createdAt}) between 20 and 40
+    and ${table.decidedAt} = ${table.createdAt}`),
+]);

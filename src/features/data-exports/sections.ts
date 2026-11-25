@@ -141,6 +141,8 @@ const sections: Record<Exclude<ExportScope, "profile" | "brands">, Slice[]> = {
       src.session_denominator AS "sessionDenominator", src.self_reported AS "selfReported",
       src.crawler_visits AS "crawlerVisits", src.answer_citations AS "answerCitations",
       src.called_included AS "calledIncluded", src.created_at AS "createdAt"`),
+    byId("decisions", "report_decision", `src.snapshot_id AS "snapshotId", src.action AS "action",
+      src.decided_by AS "decidedBy", src.decided_at AS "decidedAt"`),
     byId("snapshots", "report_snapshot", `src.retest_id AS "retestId", src.status AS "status", src.grade AS "grade",
       src.timezone AS "timezone", src.locale AS "locale", src.json_sha256 AS "jsonSha256", src.html_sha256 AS "htmlSha256",
       src.html_object_id AS "htmlObjectId", src.json_object_id AS "jsonObjectId",

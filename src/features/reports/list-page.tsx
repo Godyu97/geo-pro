@@ -11,10 +11,11 @@ import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockRetestButton } from "@/features/functional-mock/run-buttons";
 import { Button } from "@/components/ui/button";
 import { ContentDao } from "@/features/content/dao";
-import { generateSavedSnapshotAction, reviseSavedSnapshotAction } from "./actions";
+import { generateSavedSnapshotAction, reviseSavedSnapshotAction, saveReportDecisionAction } from "./actions";
 import { businessFeedbackLines } from "./business-feedback";
 import { presentSnapshotCost } from "./cost-copy";
-import { listReports, snapshotViews, type SnapshotCostView, type SnapshotExclusion, type SnapshotSourceView, type SnapshotView } from "./commands";
+import { listBrandDecisions, listReports, snapshotViews, type ReportDecisionView, type SnapshotCostView, type SnapshotExclusion, type SnapshotSourceView, type SnapshotView } from "./commands";
+import { reportDecisionActions, type ReportDecisionAction } from "./contracts";
 import { conclusionSentence, executionSentence, visitSentences } from "./reading";
 import { ReportEntryPanel, type ReportPublicationOption } from "./report-entry-panel";
 import { readSavedWindows, readTodoProgress } from "./window-observations";
@@ -228,6 +229,65 @@ function SnapshotReading({
   );
 }
 
+const decisionActionLabel: Record<ReportDecisionAction, "decisionContinueContent" | "decisionSupplementEvidence" | "decisionContinueObservation" | "decisionStop"> = {
+  continue_content: "decisionContinueContent",
+  supplement_evidence: "decisionSupplementEvidence",
+  continue_observation: "decisionContinueObservation",
+  stop: "decisionStop",
+};
+
+function SnapshotDecision({
+  rows,
+  canSave,
+  brandId,
+  snapshotId,
+  t,
+}: {
+  rows: readonly ReportDecisionView[];
+  canSave: boolean;
+  brandId: string;
+  snapshotId: string;
+  t: Awaited<ReturnType<typeof getTranslator<"reports">>>;
+}) {
+  if (!canSave && rows.length === 0) return null;
+  return (
+    <div className="mt-3 min-w-0 space-y-2">
+      <h3 className="font-medium">{t("decisionHeading")}</h3>
+      {rows.length === 0 ? (
+        <p className="break-words leading-6 text-muted-foreground">{t("decisionEmpty")}</p>
+      ) : (
+        <ol className="space-y-2">
+          {rows.map((row) => (
+            <li key={row.id} className="min-w-0 break-all leading-6 text-muted-foreground">
+              {t("decisionRecord", {
+                action: t(decisionActionLabel[row.action]),
+                time: row.decidedAt,
+                decider: row.decidedBy,
+              })}
+            </li>
+          ))}
+        </ol>
+      )}
+      {canSave ? (
+        <form action={saveReportDecisionAction} className="space-y-2">
+          <input type="hidden" name="brandId" value={brandId} />
+          <input type="hidden" name="snapshotId" value={snapshotId} />
+          <fieldset className="min-w-0 space-y-2">
+            <legend className="text-sm leading-6 text-muted-foreground">{t("decisionHint")}</legend>
+            {reportDecisionActions.map((action) => (
+              <label key={action} className="flex min-h-10 items-start gap-2 break-words">
+                <input className="mt-1" type="radio" name="action" value={action} required />
+                <span>{t(decisionActionLabel[action])}</span>
+              </label>
+            ))}
+          </fieldset>
+          <Button type="submit" variant="outline" className={actionClass}>{t("decisionSave")}</Button>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
 function nextSnapshot(snapshots: readonly ReportSnapshotRow[]) {
   const current = snapshots.find((item) => item.status === "created");
   if (current) return { kind: "current" as const, snapshot: current };
@@ -280,7 +340,7 @@ export default async function ReportsListPage({
   const params = await searchParams;
   const actionError = params.error === "INVALID_INPUT" || params.error === "LOOP_NOT_READY" || params.error === "CONFLICT"
     || params.error === "NOT_FOUND" || params.error === "SERVICE_UNAVAILABLE" || params.error === "WINDOW_NOT_DUE"
-    || params.error === "FORBIDDEN"
+    || params.error === "FORBIDDEN" || params.error === "NO_COMPARISON"
     ? params.error
     : null;
   const connection = getConnection();
@@ -360,6 +420,22 @@ export default async function ReportsListPage({
       .map((item) => ({ id: item.id, status: item.status, effectiveAt: item.effectiveAt }));
   } catch {
     console.error("reports-publication-read-failed", { brandId });
+  }
+  const ownerView = scope?.role === "owner";
+  let decisionRows: ReportDecisionView[] = [];
+  if (ownerView) {
+    try {
+      const listed = await listBrandDecisions(connection, session.user.id, brandId, result.snapshots.map((item) => item.id));
+      if (!("error" in listed)) decisionRows = listed.decisions;
+    } catch {
+      console.error("report-decision-read-failed", { brandId });
+    }
+  }
+  const decisionsBySnapshot = new Map<string, ReportDecisionView[]>();
+  for (const row of decisionRows) {
+    const group = decisionsBySnapshot.get(row.snapshotId) ?? [];
+    group.push(row);
+    decisionsBySnapshot.set(row.snapshotId, group);
   }
   const openRetests = new Set(result.snapshots.filter((item) => item.status === "created").map((item) => item.retestId));
   const next = nextSnapshot(result.snapshots);
@@ -481,6 +557,13 @@ export default async function ReportsListPage({
                 </p>
                 <SnapshotSourceNote source={views.get(item.id)?.source ?? result.sources[item.id]} t={t} />
                 <SnapshotReading id={item.id} view={views.get(item.id)} locale={locale} t={t} />
+                <SnapshotDecision
+                  rows={decisionsBySnapshot.get(item.id) ?? []}
+                  canSave={Boolean(ownerView && views.get(item.id)?.comparisons)}
+                  brandId={brandId}
+                  snapshotId={item.id}
+                  t={t}
+                />
                 {item.status === "created" && views.get(item.id)?.comparisons ? (
                   <form action={reviseSavedSnapshotAction} className="mt-3">
                     <input type="hidden" name="brandId" value={brandId} />
