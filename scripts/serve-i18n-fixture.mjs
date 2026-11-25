@@ -715,6 +715,28 @@ await writeFile(strategyCommands, strategySource
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 
+const localObservationCommands = path.join(fixture, "src/features/local-presence/commands.ts");
+const localObservationSource = await readFile(localObservationCommands, "utf8");
+const localObservationRead = "export async function listLocalObservations(db: DatabaseConnection, ownerId: string): Promise<LocalObservationList> {";
+const localObservationWrite = `export async function registerLocalObservation(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: RegisterLocalObservationInput,
+  clock: Clock = systemClock,
+): Promise<{ observation: LocalObservationView } | { error: "NOT_FOUND" }> {`;
+assert.ok(localObservationSource.includes(localObservationRead));
+assert.ok(localObservationSource.includes(localObservationWrite));
+await writeFile(localObservationCommands, localObservationSource
+  .replace(localObservationRead, `${localObservationRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-local-observations-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private local observations fixture failure");
+  }`)
+  .replace(localObservationWrite, `${localObservationWrite}
+  if ((await (await import("next/headers")).cookies()).get("geo-local-observations-write")?.value === "slow") {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

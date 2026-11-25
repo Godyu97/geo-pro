@@ -28,6 +28,15 @@ function toView(row: LocalObservationRecord): LocalObservationView {
   };
 }
 
+export function localObservationsUnavailable(error: unknown) {
+  const traceId = randomUUID();
+  console.error("local-observations-page-unavailable", {
+    traceId,
+    message: error instanceof Error ? error.message : "unknown",
+  });
+  return { error: "SERVICE_UNAVAILABLE" as const, traceId };
+}
+
 export async function listLocalObservations(db: DatabaseConnection, ownerId: string): Promise<LocalObservationList> {
   return db.transaction(async (tx) => {
     const dao = new LocalObservationDao(tx);
