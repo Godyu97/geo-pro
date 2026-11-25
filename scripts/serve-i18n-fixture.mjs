@@ -475,6 +475,16 @@ await writeFile(usageActivity, usageSource.replace(usageRead, `${usageRead}
       throw new Error("Private usage fixture failure");
     }`));
 
+const capabilityService = path.join(fixture, "src/features/capabilities/service.ts");
+const capabilitySource = await readFile(capabilityService, "utf8");
+const capabilityRead = "export async function readUserCapabilities(now = new Date().toISOString()) {\n  try {";
+assert.ok(capabilitySource.includes(capabilityRead));
+await writeFile(capabilityService, capabilitySource.replace(capabilityRead, `${capabilityRead}
+    if ((await (await import("next/headers")).cookies()).get("geo-monitoring-new-read")?.value === "slow-unavailable") {
+      await new Promise(resolve => setTimeout(resolve, 1800));
+      throw new Error("Private monitoring-new fixture failure");
+    }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

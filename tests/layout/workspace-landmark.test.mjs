@@ -235,3 +235,28 @@ test("settings usage keeps header actions, table container, wrapping, and read r
   assert.match(page, /<Table/);
   assert.match(page, /<Badge/);
 });
+
+test("monitoring run confirmation keeps header actions, shared cards, wrapping, and read recovery in the workspace canvas", () => {
+  const page = read("../../src/features/capabilities/run-page.tsx");
+  const confirm = read("../../src/features/capabilities/run-confirm.tsx");
+  const registration = read("../../src/features/monitoring/registration.tsx");
+  const form = read("../../src/features/monitoring/registration-form.tsx");
+  assert.doesNotMatch(page, /<main\b/);
+  assert.doesNotMatch(confirm, /<main\b/);
+  assert.doesNotMatch(registration, /<main\b/);
+  assert.doesNotMatch(form, /<main\b/);
+  assert.match(page, /<header\b/);
+  assert.match(page, /SERVICE_UNAVAILABLE/);
+  assert.match(page, /retry/);
+  assert.match(page, /backMonitoring/);
+  assert.match(page, /whitespace-normal/);
+  assert.match(page, /<Card/);
+  assert.match(confirm, /<CardContent/);
+  assert.match(confirm, /<Badge/);
+  assert.match(confirm, /aria-disabled=\{pending\}/);
+  assert.match(confirm, /\[overflow-wrap:anywhere\]/);
+  assert.match(registration, /<Card/);
+  assert.match(registration, /<Badge/);
+  assert.match(form, /\[overflow-wrap:anywhere\]/);
+  assert.match(form, /whitespace-normal/);
+});

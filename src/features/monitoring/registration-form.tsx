@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
 import type { Messages } from "@/lib/i18n/server";
@@ -19,6 +20,10 @@ type RecentRun = {
   id: string; track: "model_api" | "consumer_ui"; questionCount: number; naturalCount: number;
   channelCount: number; repeatCount: number; slotCount: number; createdAt: string;
 };
+
+const selectClass = "h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const inputClass = "h-10 bg-background";
+const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center aria-disabled:opacity-60";
 
 const nextMessage = {
   "adjust-scope": "QUOTA_INSUFFICIENT",
@@ -64,6 +69,7 @@ export function RegistrationForm({
   }
 
   async function submit(action: "preview" | "accept") {
+    if (pending) return;
     if (action === "accept" && !preview) return;
     if (action === "preview" && track === "model_api" && !/^\d+$/.test(upper.trim())) {
       setStatus(t("NO_TRUSTED_CEILING"));
@@ -114,12 +120,16 @@ export function RegistrationForm({
     ? formatMinorUnits(locale, 0, snapshot.ceiling.currency)
     : formatNumber(locale, 0);
   return (
-    <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
+    <form className="min-w-0 space-y-5" onSubmit={(event) => event.preventDefault()}>
       <fieldset disabled={pending} className="min-w-0 space-y-4">
-        {!emailVerified && <p className="text-sm text-muted-foreground">{t("verifyEmail")}</p>}
-        <label className="block space-y-1 text-sm">
+        {!emailVerified && (
+          <p className="rounded-xl border border-dashed bg-muted/20 px-3.5 py-2.5 text-sm leading-6 text-muted-foreground">
+            {t("verifyEmail")}
+          </p>
+        )}
+        <label className="block min-w-0 space-y-1.5 text-sm">
           <span className="font-medium">{t("promptSet")}</span>
-          <select className="w-full rounded-lg border bg-background px-3 py-2" value={setId} onChange={(event) => edit(() => setSetId(event.target.value))}>
+          <select className={selectClass} value={setId} onChange={(event) => edit(() => setSetId(event.target.value))}>
             {sets.map((item) => (
               <option key={item.id} value={item.id}>
                 {t("promptVersion", { version: item.version })} · {t("scope", { region: item.region, language: item.language })}
@@ -127,44 +137,69 @@ export function RegistrationForm({
             ))}
           </select>
         </label>
-        <fieldset className="space-y-2">
+        <fieldset className="min-w-0 space-y-2">
           <legend className="text-sm font-medium">{t("track")}</legend>
-          {(["model_api", "consumer_ui"] as const).map((item) => (
-            <label key={item} className="flex items-center gap-2 text-sm">
-              <input type="radio" name="monitoring-track" checked={track === item} onChange={() => edit(() => { setTrack(item); setSelected([]); })} />
-              {t(item)}
-            </label>
-          ))}
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            {(["model_api", "consumer_ui"] as const).map((item) => (
+              <label
+                key={item}
+                className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border bg-background px-3.5 py-2.5 text-sm transition-colors hover:bg-muted/40 has-checked:border-primary has-checked:bg-primary/5"
+              >
+                <input
+                  type="radio"
+                  name="monitoring-track"
+                  checked={track === item}
+                  onChange={() => edit(() => { setTrack(item); setSelected([]); })}
+                  className="size-4 shrink-0 accent-primary outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                />
+                <span className="min-w-0 [overflow-wrap:anywhere]">{t(item)}</span>
+              </label>
+            ))}
+          </div>
         </fieldset>
-        <fieldset className="space-y-2">
+        <fieldset className="min-w-0 space-y-2">
           <legend className="text-sm font-medium">{t("channels")}</legend>
-          {visible.length === 0 && <p className="text-sm text-muted-foreground">{t("noChannel")}</p>}
-          {visible.map((item) => (
-            <label key={item.channelId} className="flex min-w-0 items-start gap-2 rounded-lg border p-3 text-sm">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={selected.includes(item.channelId)}
-                onChange={(event) => edit(() => setSelected(event.target.checked
-                  ? [...selected, item.channelId]
-                  : selected.filter((id) => id !== item.channelId)))}
-              />
-              <span className="min-w-0">
-                <span className="block font-medium wrap-anywhere">{item.displayName}</span>
-                <span className="text-muted-foreground">{t(item.eligibility in messages ? item.eligibility as keyof Copy : "CHANNEL_UNVERIFIED")}</span>
-              </span>
-            </label>
-          ))}
+          {visible.length === 0 ? (
+            <p className="rounded-xl border border-dashed bg-muted/20 px-4 py-4 text-sm leading-6 text-muted-foreground">{t("noChannel")}</p>
+          ) : (
+            <div className="space-y-2.5">
+              {visible.map((item) => (
+                <label
+                  key={item.channelId}
+                  className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border bg-background p-3.5 text-sm transition-colors hover:bg-muted/40 has-checked:border-primary has-checked:bg-primary/5"
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-1 size-4 shrink-0 rounded border-input accent-primary outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                    checked={selected.includes(item.channelId)}
+                    onChange={(event) => edit(() => setSelected(event.target.checked
+                      ? [...selected, item.channelId]
+                      : selected.filter((id) => id !== item.channelId)))}
+                  />
+                  <span className="min-w-0 flex-1 space-y-1">
+                    <span className="block font-medium [overflow-wrap:anywhere]">{item.displayName}</span>
+                    <span className="block text-muted-foreground">{t(item.eligibility in messages ? item.eligibility as keyof Copy : "CHANNEL_UNVERIFIED")}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
         </fieldset>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="space-y-1 text-sm">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+          <label className="min-w-0 space-y-1.5 text-sm">
             <span className="block font-medium">{t("repeats")}</span>
-            <input className="w-full rounded-lg border bg-background px-3 py-2" type="number" min={1} max={3} value={repeats}
-              onChange={(event) => edit(() => setRepeats(Number(event.target.value)))} />
+            <Input
+              className={inputClass}
+              type="number"
+              min={1}
+              max={3}
+              value={repeats}
+              onChange={(event) => edit(() => setRepeats(Number(event.target.value)))}
+            />
           </label>
-          <label className="space-y-1 text-sm">
+          <label className="min-w-0 space-y-1.5 text-sm">
             <span className="block font-medium">{t("network")}</span>
-            <select className="w-full rounded-lg border bg-background px-3 py-2" value={network} onChange={(event) => edit(() => setNetwork(event.target.value as "on" | "off" | "unknown"))}>
+            <select className={selectClass} value={network} onChange={(event) => edit(() => setNetwork(event.target.value as "on" | "off" | "unknown"))}>
               <option value="on">{t("networkOn")}</option>
               <option value="off">{t("networkOff")}</option>
               <option value="unknown">{t("networkUnknown")}</option>
@@ -172,28 +207,42 @@ export function RegistrationForm({
           </label>
         </div>
         {track === "model_api" && (
-          <fieldset className="grid gap-3 sm:grid-cols-2">
-            <legend className="text-sm font-medium sm:col-span-2">{t("ceiling")}</legend>
-            <label className="space-y-1 text-sm">
-              <span className="block">{t("currency")}</span>
-              <input className="w-full rounded-lg border bg-background px-3 py-2 uppercase" maxLength={3} value={currency}
-                onChange={(event) => edit(() => setCurrency(event.target.value.toUpperCase()))} />
+          <fieldset className="grid min-w-0 gap-3 rounded-xl border bg-muted/20 p-4 sm:grid-cols-2">
+            <legend className="px-1 text-sm font-medium">{t("ceiling")}</legend>
+            <label className="min-w-0 space-y-1.5 text-sm">
+              <span className="block font-medium">{t("currency")}</span>
+              <Input
+                className={`${inputClass} uppercase`}
+                maxLength={3}
+                value={currency}
+                onChange={(event) => edit(() => setCurrency(event.target.value.toUpperCase()))}
+              />
             </label>
-            <label className="space-y-1 text-sm">
-              <span className="block">{t("upperMinor")}</span>
-              <input className="w-full rounded-lg border bg-background px-3 py-2" inputMode="numeric" value={upper}
-                onChange={(event) => edit(() => setUpper(event.target.value))} />
+            <label className="min-w-0 space-y-1.5 text-sm">
+              <span className="block font-medium">{t("upperMinor")}</span>
+              <Input
+                className={inputClass}
+                inputMode="numeric"
+                value={upper}
+                onChange={(event) => edit(() => setUpper(event.target.value))}
+              />
             </label>
-            {grant && <p className="text-sm text-muted-foreground sm:col-span-2">{t("grantLine", {
-              version: grant.version, reserved: formatNumber(locale, grant.reserved), limit: formatNumber(locale, grant.countLimit),
-              budget: formatMinorUnits(locale, grant.budgetMinor, grant.currency),
-            })}</p>}
+            {grant && (
+              <p className="text-sm leading-6 text-muted-foreground tabular-nums sm:col-span-2">
+                {t("grantLine", {
+                  version: grant.version,
+                  reserved: formatNumber(locale, grant.reserved),
+                  limit: formatNumber(locale, grant.countLimit),
+                  budget: formatMinorUnits(locale, grant.budgetMinor, grant.currency),
+                })}
+              </p>
+            )}
           </fieldset>
         )}
       </fieldset>
       {snapshot && (
-        <div className="space-y-1 rounded-lg border p-3 text-sm">
-          <p className="wrap-anywhere">{t("previewBrand", { name: brandName })}</p>
+        <div className="min-w-0 space-y-2 rounded-xl border bg-muted/30 p-4 text-sm leading-6 sm:p-5">
+          <p className="font-medium [overflow-wrap:anywhere]">{t("previewBrand", { name: brandName })}</p>
           <p>{t("previewScope", {
             version: formatNumber(locale, snapshot.promptSetVersion),
             region: snapshot.region,
@@ -201,7 +250,7 @@ export function RegistrationForm({
           })}</p>
           <ul className="space-y-1">
             {snapshot.channels.map((channel) => (
-              <li key={channel.channelId} className="wrap-anywhere">{t("previewChannel", {
+              <li key={channel.channelId} className="[overflow-wrap:anywhere]">{t("previewChannel", {
                 name: channels.find((item) => item.channelId === channel.channelId)?.displayName ?? channel.channelId,
                 version: formatNumber(locale, channel.version),
               })}</li>
@@ -212,7 +261,7 @@ export function RegistrationForm({
             mode: t(snapshot.requestedNetworkMode === "on" ? "networkOn" : snapshot.requestedNetworkMode === "off" ? "networkOff" : "networkUnknown"),
             repeats: formatNumber(locale, snapshot.repeats),
           })}</p>
-          <p>{t("previewSummary", {
+          <p className="tabular-nums">{t("previewSummary", {
             questions: formatNumber(locale, snapshot.questionCount),
             natural: formatNumber(locale, snapshot.naturalCount),
             channels: formatNumber(locale, snapshot.channels.length),
@@ -220,41 +269,74 @@ export function RegistrationForm({
             slots: formatNumber(locale, snapshot.questionCount * snapshot.channels.length * snapshot.repeats),
           })}</p>
           <p className="text-muted-foreground">{t("recheckNote")}</p>
-          <p>{t("customerPayable", { amount: payable })}</p>
-          {snapshot.ceiling ? (
-            <>
-              <p>{t("trustedCeiling", { amount: formatMinorUnits(locale, snapshot.ceiling.upperMinor, snapshot.ceiling.currency) })}</p>
-              <p>{t("estimateHigh", { amount: formatMinorUnits(locale, snapshot.ceiling.upperMinor * snapshot.questionCount * snapshot.channels.length * snapshot.repeats, snapshot.ceiling.currency) })}</p>
-              <p>{t("estimateLow")}</p>
-              <p>{t("actualUnknown")}</p>
-            </>
-          ) : <p>{t("notCharged")}</p>}
+          <div className="space-y-1 border-t pt-2 tabular-nums">
+            <p>{t("customerPayable", { amount: payable })}</p>
+            {snapshot.ceiling ? (
+              <>
+                <p>{t("trustedCeiling", { amount: formatMinorUnits(locale, snapshot.ceiling.upperMinor, snapshot.ceiling.currency) })}</p>
+                <p>{t("estimateHigh", { amount: formatMinorUnits(locale, snapshot.ceiling.upperMinor * snapshot.questionCount * snapshot.channels.length * snapshot.repeats, snapshot.ceiling.currency) })}</p>
+                <p>{t("estimateLow")}</p>
+                <p>{t("actualUnknown")}</p>
+              </>
+            ) : <p>{t("notCharged")}</p>}
+          </div>
         </div>
       )}
-      {status && <p role="status" className="text-sm">{status}</p>}
+      {status && (
+        <p role="status" className="rounded-xl border bg-muted/30 px-3.5 py-2.5 text-sm leading-6 [overflow-wrap:anywhere]">
+          {status}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" disabled={pending || !setId || selected.length === 0} onClick={() => void submit("preview")}>{t("preview")}</Button>
-        <Button type="button" disabled={pending || !preview} onClick={() => void submit("accept")}>{t("accept")}</Button>
+        <Button
+          type="button"
+          variant="outline"
+          className={actionClass}
+          disabled={pending || !setId || selected.length === 0}
+          aria-disabled={pending || !setId || selected.length === 0}
+          onClick={() => void submit("preview")}
+        >
+          {t("preview")}
+        </Button>
+        <Button
+          type="button"
+          className={actionClass}
+          disabled={pending || !preview}
+          aria-disabled={pending || !preview}
+          onClick={() => void submit("accept")}
+        >
+          {t("accept")}
+        </Button>
       </div>
-      <section className="space-y-2" aria-labelledby="recent-runs">
-        <h3 id="recent-runs" className="text-sm font-medium">{t("recent")}</h3>
-        {recent.length === 0 && <p className="text-sm text-muted-foreground">{t("emptyRecent")}</p>}
-        <ul className="space-y-1 text-sm">
-          {recent.map((item) => (
-            <li key={item.id}>
-              <Link className="underline underline-offset-4" href={`/dashboard/monitoring/runs/${item.id}`} prefetch={false}>
-                {t("openRun", { id: item.id.slice(0, 8) })}
-              </Link>
-              <span className="text-muted-foreground"> · {t(item.track)} · {t("previewSummary", {
-                questions: formatNumber(locale, item.questionCount),
-                natural: formatNumber(locale, item.naturalCount),
-                channels: formatNumber(locale, item.channelCount),
-                repeats: formatNumber(locale, item.repeatCount),
-                slots: formatNumber(locale, item.slotCount),
-              })}</span>
-            </li>
-          ))}
-        </ul>
+      <section className="min-w-0 space-y-3 border-t pt-4" aria-labelledby="recent-runs">
+        <h3 id="recent-runs" className="text-sm font-semibold">{t("recent")}</h3>
+        {recent.length === 0 ? (
+          <p className="rounded-xl border border-dashed bg-muted/20 px-4 py-4 text-sm leading-6 text-muted-foreground">{t("emptyRecent")}</p>
+        ) : (
+          <ul className="space-y-2.5 text-sm">
+            {recent.map((item) => (
+              <li key={item.id} className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border bg-background p-3.5">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="font-medium">{t(item.track)}</p>
+                  <p className="text-muted-foreground tabular-nums [overflow-wrap:anywhere]">
+                    {t("previewSummary", {
+                      questions: formatNumber(locale, item.questionCount),
+                      natural: formatNumber(locale, item.naturalCount),
+                      channels: formatNumber(locale, item.channelCount),
+                      repeats: formatNumber(locale, item.repeatCount),
+                      slots: formatNumber(locale, item.slotCount),
+                    })}
+                  </p>
+                </div>
+                <Button asChild size="sm" variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal text-center">
+                  <Link href={`/dashboard/monitoring/runs/${item.id}`} prefetch={false}>
+                    {t("openRun", { id: item.id.slice(0, 8) })}
+                  </Link>
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </form>
   );
