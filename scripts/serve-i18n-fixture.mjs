@@ -398,6 +398,16 @@ await writeFile(monitoringService, monitoringSource.replace(runRead, `${runRead}
       throw new Error("Private run fixture failure");
     }`));
 
+const assetCommands = path.join(fixture, "src/features/asset-reuse/image-asset-commands.ts");
+const assetSource = await readFile(assetCommands, "utf8");
+const assetRead = 'export async function listImageAssets(db: QueryConnection, actorId: string, brandId: string): Promise<ImageAssetList> {';
+assert.ok(assetSource.includes(assetRead));
+await writeFile(assetCommands, assetSource.replace(assetRead, `${assetRead}
+  if ((await (await import("next/headers")).cookies()).get("geo-image-assets-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private image assets fixture failure");
+  }`));
+
 function command(args) {
   const child = spawn("pnpm", ["exec", "next", ...args], { cwd: root, env: process.env, stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => child.kill(signal));

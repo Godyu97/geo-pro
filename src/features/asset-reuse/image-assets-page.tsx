@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
+import { brandIdSchema } from "../brands/contracts.ts";
 import { BrandDao } from "../brands/dao.ts";
 import {
   expireImageAssetAction,
@@ -12,8 +15,12 @@ import {
 } from "./image-asset-actions.ts";
 import { listImageAssets } from "./image-asset-commands.ts";
 import type { ImageAssetDetail, ImageRights } from "./image-asset-contracts.ts";
+import { ImageRightsConfirmation } from "./image-rights-confirmation.tsx";
 
-const inputClass = "block w-full rounded-md border bg-background px-3 py-2 text-sm";
+const assetsPath = "/dashboard/content/assets";
+const contentPath = "/dashboard/content";
+const actionClass = "min-h-10 whitespace-normal text-center";
+type Translator = Awaited<ReturnType<typeof getTranslator<"imageAssets">>>;
 
 const errorCodes = ["NOT_FOUND", "INVALID_INPUT", "RIGHTS_CLOSED", "FORBIDDEN", "SESSION_REQUIRED", "SERVICE_UNAVAILABLE"] as const;
 const noticeCodes = ["registered", "useAdded", "revoked", "expired"] as const;
@@ -37,6 +44,25 @@ export async function generateMetadata() {
   return { title: t("title"), robots: { index: false, follow: false } };
 }
 
+async function loadAssets(ownerId: string, requestedBrandId: string | string[] | undefined) {
+  const requested = brandIdSchema.safeParse(requestedBrandId);
+  if (requestedBrandId !== undefined && !requested.success) {
+    return { state: "notFound" } as const;
+  }
+  let brandId = requested.data;
+  try {
+    const connection = getConnection();
+    brandId ??= (await new BrandDao(connection).active(ownerId))?.id;
+    if (!brandId) return { state: "noBrand" } as const;
+    const listed = await listImageAssets(connection, ownerId, brandId);
+    if ("error" in listed) return { state: "notFound" } as const;
+    return { state: "ready", brandId, assets: listed.assets } as const;
+  } catch {
+    console.error("image-asset-list-unavailable");
+    return { state: "unavailable", brandId } as const;
+  }
+}
+
 export default async function ImageAssetsPage({
   searchParams,
 }: {
@@ -45,81 +71,95 @@ export default async function ImageAssetsPage({
   const session = await requireSession();
   const params = await searchParams;
   const t = await getTranslator("imageAssets");
-  const connection = getConnection();
-  const active = await new BrandDao(connection).active(session.user.id);
-  const brandId = typeof params.brandId === "string" ? params.brandId : active?.id;
+  const workspace = await loadAssets(session.user.id, params.brandId);
   const error = typeof params.error === "string" && isErrorCode(params.error) ? params.error : null;
   const notice = typeof params.notice === "string" && isNoticeCode(params.notice) ? params.notice : null;
 
-  if (!brandId) {
+  if (workspace.state !== "ready") {
+    const noBrand = workspace.state === "noBrand";
+    const unavailable = workspace.state === "unavailable";
+    const href = unavailable
+      ? (workspace.brandId ? `${assetsPath}?brandId=${workspace.brandId}` : assetsPath)
+      : noBrand ? "/dashboard/brands" : contentPath;
+    const action = unavailable ? t("reload") : noBrand ? t("goBrands") : t("back");
     return (
-      <div className="space-y-6">
+      <div className="space-y-3">
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>
-        <Button asChild><Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link></Button>
-      </div>
-    );
-  }
-
-  const listed = await listImageAssets(connection, session.user.id, brandId);
-  if ("error" in listed) {
-    return (
-      <div role="alert" className="space-y-2 text-sm">
-        <p>{t(listed.error)}</p>
-        <Link href="/dashboard/content" prefetch={false} className="underline underline-offset-4">{t("back")}</Link>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-8">
-      <div>
-        <p className="text-sm">
-          <Link href={`/dashboard/content?brandId=${brandId}`} prefetch={false} className="underline underline-offset-4">{t("back")}</Link>
+        <p role={noBrand ? undefined : "alert"} className="max-w-2xl text-sm leading-7 text-muted-foreground">
+          {t(noBrand ? "noBrand" : unavailable ? "SERVICE_UNAVAILABLE" : "NOT_FOUND")}
         </p>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+        <Button asChild className={actionClass}>
+          {unavailable ? <a href={href}>{action}</a> : <Link href={href} prefetch={false}>{action}</Link>}
+        </Button>
       </div>
+    );
+  }
 
-      {error ? <p role="alert" className="text-sm">{t(error)}</p> : null}
-      {notice ? <p role="status" className="text-sm">{t(notice)}</p> : null}
+  const { brandId, assets } = workspace;
+  return (
+    <div className="min-w-0 space-y-6">
+      <header className="space-y-3">
+        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
+        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("description")}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild className={actionClass}><a href="#image-asset-file-name">{t("startRegistration")}</a></Button>
+          {assets.length > 0 && (
+            <Button asChild variant="outline" className={actionClass}><a href="#image-assets-list">{t("viewAssets")}</a></Button>
+          )}
+          <Button asChild variant="outline" className={actionClass}>
+            <Link href={`${contentPath}?brandId=${brandId}`} prefetch={false}>{t("back")}</Link>
+          </Button>
+        </div>
+      </header>
 
-      <form action={registerImageAssetAction} className="max-w-xl space-y-3 rounded-2xl border px-4 py-4 text-sm">
-        <input type="hidden" name="brandId" value={brandId} />
-        <label className="block">
-          <span className="mb-1 block text-muted-foreground">{t("fileName")}</span>
-          <input className={inputClass} name="fileName" required maxLength={120} />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-muted-foreground">{t("version")}</span>
-          <input className={inputClass} name="version" inputMode="numeric" defaultValue="1" />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-muted-foreground">{t("byteSize")}</span>
-          <input className={inputClass} name="byteSize" inputMode="numeric" />
-        </label>
-        <Button type="submit">{t("register")}</Button>
-      </form>
+      {error ? <p role="alert" className="rounded-lg border border-destructive/30 bg-card p-3 text-sm text-destructive">{t(error)}</p> : null}
+      {notice ? <p role="status" className="rounded-lg border bg-card p-3 text-sm">{t(notice)}</p> : null}
 
-      {listed.assets.length === 0 ? (
-        <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">{t("empty")}</p>
-      ) : (
-        <ul className="space-y-4">
-          {listed.assets.map((item) => (
-            <AssetCard key={item.asset.id} item={item} brandId={brandId} />
-          ))}
-        </ul>
-      )}
+      <Card className="max-w-xl">
+        <CardContent>
+          <h2 id="register-image-asset" className="mb-3 font-semibold">{t("register")}</h2>
+          <form aria-labelledby="register-image-asset" action={registerImageAssetAction} className="space-y-3 text-sm">
+            <input type="hidden" name="brandId" value={brandId} />
+            <label className="block">
+              <span className="mb-1 block">{t("fileName")}</span>
+              <Input id="image-asset-file-name" className="min-h-10 scroll-mt-24" name="fileName" required maxLength={120} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block">{t("version")}</span>
+              <Input className="min-h-10" name="version" inputMode="numeric" defaultValue="1" />
+            </label>
+            <label className="block">
+              <span className="mb-1 block">{t("byteSize")}</span>
+              <Input className="min-h-10" name="byteSize" inputMode="numeric" />
+            </label>
+            <Button type="submit" className={actionClass}>{t("register")}</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <section aria-labelledby="image-assets-list" className="space-y-3">
+        <h2 id="image-assets-list" tabIndex={-1} className="scroll-mt-24 rounded-sm font-semibold focus-visible:outline-2 focus-visible:outline-ring">
+          {t("assetList")}
+        </h2>
+        {assets.length === 0 ? (
+          <p className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">{t("empty")}</p>
+        ) : (
+          <ul className="space-y-4">
+            {assets.map((item) => (
+              <AssetCard key={item.asset.id} item={item} brandId={brandId} t={t} />
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
 
-async function AssetCard({ item, brandId }: { item: ImageAssetDetail; brandId: string }) {
-  const t = await getTranslator("imageAssets");
+function AssetCard({ item, brandId, t }: { item: ImageAssetDetail; brandId: string; t: Translator }) {
   const closed = item.asset.rightsStatus !== "active";
   return (
-    <li className="rounded-2xl border px-4 py-4 text-sm">
-      <p className="font-medium break-all">{item.asset.fileName}</p>
+    <li className="min-w-0 rounded-xl border bg-card p-4 text-sm text-card-foreground">
+      <h3 className="font-semibold [overflow-wrap:anywhere]">{item.asset.fileName}</h3>
       <p className="mt-2 leading-6 text-muted-foreground">
         {t("versionLine", { version: String(item.asset.version) })}
         {" · "}
@@ -127,7 +167,7 @@ async function AssetCard({ item, brandId }: { item: ImageAssetDetail; brandId: s
       </p>
       <p className="mt-2 leading-6">{t(rightsKey(item.asset.rightsStatus))}</p>
 
-      <h2 className="mt-4 font-medium">{t("uses")}</h2>
+      <h4 className="mt-4 font-medium">{t("uses")}</h4>
       {item.uses.length === 0 ? (
         <p className="mt-2 text-muted-foreground">{t("noUses")}</p>
       ) : (
@@ -140,7 +180,7 @@ async function AssetCard({ item, brandId }: { item: ImageAssetDetail; brandId: s
         </ul>
       )}
 
-      <h2 className="mt-4 font-medium">{t("todos")}</h2>
+      <h4 className="mt-4 font-medium">{t("todos")}</h4>
       {item.todos.length === 0 ? (
         <p className="mt-2 text-muted-foreground">{t("noTodos")}</p>
       ) : (
@@ -159,26 +199,22 @@ async function AssetCard({ item, brandId }: { item: ImageAssetDetail; brandId: s
           <input type="hidden" name="id" value={item.asset.id} />
           <label className="block">
             <span className="mb-1 block text-muted-foreground">{t("contentVersion")}</span>
-            <input className={inputClass} name="contentVersionId" required maxLength={36} />
+            <Input className="min-h-10" name="contentVersionId" required maxLength={36} />
           </label>
-          <Button type="submit">{t("addUse")}</Button>
+          <Button type="submit" className={actionClass}>{t("addUse")}</Button>
         </form>
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
         {item.asset.rightsStatus === "revoked" ? null : (
-          <form action={revokeImageAssetAction}>
-            <input type="hidden" name="brandId" value={brandId} />
-            <input type="hidden" name="id" value={item.asset.id} />
-            <Button type="submit" variant="outline">{t("revoke")}</Button>
-          </form>
+          <ImageRightsConfirmation action={revokeImageAssetAction} brandId={brandId} id={item.asset.id}
+            fileName={item.asset.fileName} title={t("revoke")} description={t("revokeDescription")}
+            confirm={t("confirmRevoke")} cancel={t("cancel")} pending={t("saving")} />
         )}
         {item.asset.rightsStatus === "active" ? (
-          <form action={expireImageAssetAction}>
-            <input type="hidden" name="brandId" value={brandId} />
-            <input type="hidden" name="id" value={item.asset.id} />
-            <Button type="submit" variant="outline">{t("expire")}</Button>
-          </form>
+          <ImageRightsConfirmation action={expireImageAssetAction} brandId={brandId} id={item.asset.id}
+            fileName={item.asset.fileName} title={t("expire")} description={t("expireDescription")}
+            confirm={t("confirmExpire")} cancel={t("cancel")} pending={t("saving")} />
         ) : null}
       </div>
     </li>
