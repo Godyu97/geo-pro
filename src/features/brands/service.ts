@@ -18,6 +18,14 @@ export async function readBrandData<T>(read: (dao: BrandDao) => Promise<T>) {
   }
 }
 
+export async function readNewBrandWorkspace(ownerId: string) {
+  return readBrandData(async (dao) => {
+    const active = await dao.active(ownerId);
+    if (active) return { active, draft: null, policy: null };
+    return { active, draft: await dao.draft(ownerId, "new"), policy: await dao.currentRetentionPolicy() };
+  });
+}
+
 export async function readDeletionPreview(ownerId: string, brandId: string) {
   return readBrandData((dao) => dao.deletionImpact(ownerId, brandId));
 }

@@ -413,6 +413,39 @@ test("entity accuracy workspaces keep header actions, shared cards, wrapping, an
   assert.match(correctionsWorkspace, /whitespace-normal/);
 });
 
+test("brand intake keeps the next action, draft name, and read recovery", () => {
+  const brands = read("../../src/features/brands/pages.tsx");
+  const form = read("../../src/features/brands/brand-form.tsx");
+  const service = read("../../src/features/brands/service.ts");
+  const loading = read("../../src/app/(dashboard)/dashboard/brands/new/loading.tsx");
+  const intake = brands.slice(brands.indexOf("export async function NewBrandPage"), brands.indexOf("export async function BrandDetailsPage"));
+  assert.doesNotMatch(intake, /<main\b/);
+  assert.match(intake, /<BrandCanvas/);
+  assert.match(brands.slice(brands.indexOf("function BrandCanvas"), brands.indexOf("function ClosedBrandIntake")), /<header\b/);
+  assert.match(intake, /createTask/);
+  assert.match(intake, /createTaskDraft/);
+  assert.match(intake, /createTaskActive/);
+  assert.match(intake, /startIntake/);
+  assert.match(intake, /resumeDraft/);
+  assert.match(intake, /viewBrand/);
+  assert.match(intake, /relatedEntries/);
+  assert.match(intake, /#brand-name/);
+  assert.match(intake, /BrandIntakeJump/);
+  assert.match(intake, /\[overflow-wrap:anywhere\]/);
+  assert.match(intake, /BrandScopeFailure/);
+  assert.match(intake, /t\("unavailable"\)/);
+  assert.match(intake, /t\("reload"\)/);
+  assert.match(intake, /t\("trace"/);
+  assert.match(intake, /readNewBrandWorkspace/);
+  assert.match(service, /export async function readNewBrandWorkspace/);
+  assert.match(form, /id="brand-intake"/);
+  assert.match(form, /aria-disabled=\{pending\}/);
+  assert.match(form, /whitespace-normal/);
+  assert.match(form, /\[overflow-wrap:anywhere\]/);
+  assert.match(loading, /role="status"/);
+  assert.match(loading, /t\("loading"\)/);
+});
+
 test("brand deletion and recovery keep header actions, opaque recovery, and read recovery", () => {
   const brands = read("../../src/features/brands/pages.tsx");
   const buttons = read("../../src/features/brands/deletion-buttons.tsx");

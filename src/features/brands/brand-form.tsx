@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ComponentProps, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,18 @@ import {
 import type { BrandDraft, RetentionPolicyRecord } from "./dao";
 import { brandErrorMessage, brandFieldMessage } from "./error-messages";
 import { useBrandMutation } from "./use-brand-mutation";
+
+export function BrandIntakeJump({ href, children, onClick, ...props }: ComponentProps<"a"> & { href: string; children: ReactNode }) {
+  return (
+    <a {...props} href={href} onClick={(event) => {
+      onClick?.(event);
+      const target = document.getElementById(href.slice(1));
+      if (!target) return;
+      event.preventDefault();
+      target.focus();
+    }}>{children}</a>
+  );
+}
 
 const steps = [
   { label: "stepBrand", fields: ["name", "description", "website", "aliases"] },
@@ -75,6 +87,7 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
   const focus = useRef<BrandFieldName | "heading" | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const composing = useRef(false);
+  const submitting = useRef(false);
   const staleDraft = Boolean(draft && target && draft.baseRevision !== target.expectedBrandRevision);
   const nextStep = step === 0 ? 1 : 2;
   const previousStep = step === 2 ? 1 : 0;
@@ -100,7 +113,7 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
   }
 
   async function save(intent: "draft" | "advance" | "submit") {
-    if (composing.current || pending || staleDraft) return;
+    if (composing.current || pending || staleDraft || submitting.current) return;
     const fields = { ...values, aliases: lines(values.aliases), competitors: lines(values.competitors), questions: lines(values.questions) };
     const parse = (intent === "draft" ? brandDraftFieldsSchema : brandFieldsSchema).safeParse(fields);
     if (!parse.success) {
@@ -113,30 +126,35 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
         return;
       }
     }
-    setInvalid([]);
-    setSaved(false);
-    if (intent === "submit") {
-      if (!target && (!policy || !acceptedPolicy)) {
-        setAcceptRequired(true);
-        return;
-      }
-      const result = await send({
-        action: "submit", target, expectedDraft, fields,
-        ...(target || !policy ? {} : { acceptedPolicyVersion: policy.version }),
-      });
-      if (result?.kind === "brand") router.replace("/dashboard/brands/" + result.id);
+    if (intent === "submit" && !target && (!policy || !acceptedPolicy)) {
+      setAcceptRequired(true);
       return;
     }
-    const result = await send({ action: "saveDraft", target, expectedDraft, fields, step: intent === "advance" ? nextStep : step });
-    if (result?.kind === "draft") {
-      setExpectedDraft(result.version);
-      setSaved(true);
-      if (intent === "advance") move(nextStep);
+    submitting.current = true;
+    setInvalid([]);
+    setSaved(false);
+    try {
+      if (intent === "submit") {
+        const result = await send({
+          action: "submit", target, expectedDraft, fields,
+          ...(target || !policy ? {} : { acceptedPolicyVersion: policy.version }),
+        });
+        if (result?.kind === "brand") router.replace("/dashboard/brands/" + result.id);
+        return;
+      }
+      const result = await send({ action: "saveDraft", target, expectedDraft, fields, step: intent === "advance" ? nextStep : step });
+      if (result?.kind === "draft") {
+        setExpectedDraft(result.version);
+        setSaved(true);
+        if (intent === "advance") move(nextStep);
+      }
+    } finally {
+      submitting.current = false;
     }
   }
 
   async function discard() {
-    if (!expectedDraft) return;
+    if (!expectedDraft || pending || submitting.current) return;
     const result = await send({ action: "discardDraft", brandId: target?.brandId ?? null, expectedDraft });
     if (result?.kind === "draft") window.location.reload();
   }
@@ -147,7 +165,7 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
   }
 
   return (
-    <Card className="max-w-3xl py-0 shadow-none">
+    <Card className="min-w-0 max-w-3xl py-0 shadow-none">
       <CardContent className="space-y-6 p-5 sm:p-7">
         <ol aria-label={t("steps")} className="grid grid-cols-3 gap-2 text-sm">
           {steps.map(({ label }, index) => (
@@ -158,7 +176,7 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
           ))}
         </ol>
         <div className="space-y-2">
-          <h2 ref={heading} tabIndex={-1} className="text-xl font-semibold">{t(steps[step].label)}</h2>
+          <h2 id="brand-intake" ref={heading} tabIndex={-1} className="break-words text-xl font-semibold">{t(steps[step].label)}</h2>
           <p className="text-sm leading-6 text-muted-foreground">{t("draftHelp")}</p>
           {saved && <p role="status" className="text-sm font-medium">{t("draftSaved")}</p>}
           {mockFilled && <p role="status" className="text-sm font-medium">{t("mockProfileFilled")}</p>}
@@ -209,7 +227,7 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
               event.preventDefault();
             }
           }}>
-          <fieldset disabled={pending || staleDraft} className="space-y-5">
+          <fieldset disabled={staleDraft} className="min-w-0 space-y-5">
             {steps[step].fields.map((field) => {
               const id = "brand-" + field;
               const hint = hints[field];
@@ -233,7 +251,7 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
                   <Label htmlFor={id}>{t(labels[field])}</Label>
                   {hint && <p id={id + "-hint"} className="text-sm leading-6 text-muted-foreground">{t(hint)}</p>}
                   {multiline.has(field) ? (
-                    <textarea {...props} rows={field === "questions" ? 5 : 3} className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs focus-visible:ring-2 focus-visible:ring-ring md:text-sm" />
+                    <textarea {...props} rows={field === "questions" ? 5 : 3} className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-ring md:text-sm" />
                   ) : (
                     <Input {...props} type="text" inputMode={field === "website" ? "url" : undefined}
                       list={field === "region" || field === "language" ? id + "-choices" : undefined} />
@@ -244,9 +262,10 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
                 </div>
               );
             })}
-            <div className="flex flex-wrap gap-2 pt-2">
+            <div className="flex min-w-0 flex-wrap gap-2 pt-2">
               {mockProfile && (
-                <Button type="button" variant="outline" onClick={() => {
+                <Button type="button" variant="outline" aria-disabled={pending} className="h-auto max-w-full whitespace-normal" onClick={() => {
+                  if (pending || submitting.current) return;
                   setValues(formFields(mockProfile));
                   setInvalid([]);
                   setSaved(false);
@@ -255,14 +274,14 @@ export function BrandForm({ actorId, draft, target, current, messages, mockProfi
                   setStep(0);
                 }}>{t("applyMockProfile")}</Button>
               )}
-              <Button type="submit" disabled={step === 2 && !target && !policy}>{t(step === 2 ? target ? "saveChanges" : "createBrand" : "next")}</Button>
-              {step > 0 && <Button type="button" variant="outline" onClick={() => move(previousStep)}>{t("back")}</Button>}
-              <Button type="button" variant="outline" onClick={() => void save("draft")}>{t("saveDraft")}</Button>
+              <Button type="submit" aria-disabled={pending} className="h-auto max-w-full whitespace-normal" disabled={step === 2 && !target && !policy}>{pending ? t("saving") : t(step === 2 ? target ? "saveChanges" : "createBrand" : "next")}</Button>
+              {step > 0 && <Button type="button" variant="outline" aria-disabled={pending} className="h-auto max-w-full whitespace-normal" onClick={() => { if (!pending && !submitting.current) move(previousStep); }}>{t("back")}</Button>}
+              <Button type="button" variant="outline" aria-disabled={pending} className="h-auto max-w-full whitespace-normal" onClick={() => void save("draft")}>{t("saveDraft")}</Button>
             </div>
           </fieldset>
           {pending && <p role="status" className="mt-3 text-sm">{t("saving")}</p>}
         </form>
-        {expectedDraft && <Button type="button" variant="ghost" disabled={pending} onClick={() => void discard()}>{t("discardDraft")}</Button>}
+        {expectedDraft && <Button type="button" variant="ghost" aria-disabled={pending} className="h-auto max-w-full whitespace-normal" onClick={() => void discard()}>{t("discardDraft")}</Button>}
       </CardContent>
     </Card>
   );

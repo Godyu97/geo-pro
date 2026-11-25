@@ -84,10 +84,19 @@ await writeFile(settingsPage, (await readFile(settingsPage, "utf8")).replace(
 ));
 
 const brandService = path.join(fixture, "src/features/brands/service.ts");
-await writeFile(brandService, (await readFile(brandService, "utf8")).replace(
+const brandServiceSource = (await readFile(brandService, "utf8")).replace(
   '    return { data: await read(new BrandDao(getConnection())) };',
   '    const brandProbe = (await (await import("next/headers")).headers()).get("cookie") ?? "";\n    if (brandProbe.includes("geo-brands-unavailable=1")) throw new Error("Private brand fixture failure");\n    if (brandProbe.includes("geo-brands-slow=1")) await new Promise(resolve => setTimeout(resolve, 1500));\n    return { data: await read(new BrandDao(getConnection())) };',
-));
+);
+const intakeRead = `export async function readNewBrandWorkspace(ownerId: string) {
+  return readBrandData(async (dao) => {`;
+assert.ok(brandServiceSource.includes(intakeRead));
+await writeFile(brandService, brandServiceSource.replace(intakeRead, `export async function readNewBrandWorkspace(ownerId: string) {
+  if ((await (await import("next/headers")).cookies()).get("geo-brand-intake-read")?.value === "slow-unavailable") {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    throw new Error("Private brand intake fixture failure");
+  }
+  return readBrandData(async (dao) => {`));
 
 const evidenceCommands = path.join(fixture, "src/features/evidence/commands.ts");
 const evidenceSource = await readFile(evidenceCommands, "utf8");
@@ -636,7 +645,8 @@ const deletionCommand = `export async function executeBrandCommand(
 ): Promise<CommandResult> {`;
 assert.ok(deletionCommandSource.includes(deletionCommand));
 await writeFile(deletionCommands, deletionCommandSource.replace(deletionCommand, `${deletionCommand}
-  if ((await (await import("next/headers")).cookies()).get("geo-brand-deletion-write")?.value === "slow") {
+  const brandWrite = await (await import("next/headers")).cookies();
+  if (brandWrite.get("geo-brand-deletion-write")?.value === "slow" || brandWrite.get("geo-brand-intake-write")?.value === "slow") {
     await new Promise(resolve => setTimeout(resolve, 1200));
   }`));
 

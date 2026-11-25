@@ -11,7 +11,7 @@ import { accountAccessPath } from "@/features/account/email/contracts";
 import { requireSession } from "@/lib/auth/session";
 import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
-import { BrandForm } from "./brand-form";
+import { BrandForm, BrandIntakeJump } from "./brand-form";
 import { BrandStatusButton } from "./brand-status-button";
 import { brandRecoveryError } from "./commands";
 import { archiveCursorSchema, brandIdSchema, brandVersionParam } from "./contracts";
@@ -28,7 +28,7 @@ import {
 } from "@/features/monitoring/brand-readiness";
 import { readBrandMonitoringReadiness } from "@/features/monitoring/service";
 import { readPilotAdmission, type PilotAdmissionItem } from "./pilot-admission";
-import { brandUnavailable, readBrandData, readDeletionPreview, readDeletionRecovery } from "./service";
+import { brandUnavailable, readBrandData, readDeletionPreview, readDeletionRecovery, readNewBrandWorkspace } from "./service";
 import type { RetentionView } from "./dao";
 
 type Query = Record<string, string | string[] | undefined>;
@@ -374,21 +374,68 @@ export async function NewBrandPage() {
   if (decision.state === "closed") return closedBrandIntake(t);
   if (decision.state === "denied") return <DevActorDenied t={t} />;
   const intake = decision.intake;
-  const result = await readBrandData(async (dao) => {
-    const active = await dao.active(user.id);
-    if (active) return { active, draft: null, policy: null };
-    return { active, draft: await dao.draft(user.id, "new"), policy: await dao.currentRetentionPolicy() };
-  });
+  const result = await readNewBrandWorkspace(user.id).catch(() => brandUnavailable());
+  const related = [{ href: "/dashboard/brands", label: t("allBrands") }, ...brandResourceLinks(t)];
+  if ("unavailable" in result) {
+    return (
+      <BrandScopeFailure
+        title={t("createTitle")}
+        message={t("unavailable")}
+        trace={t("trace", { id: result.traceId })}
+        reloadLabel={t("reload")}
+        reloadHref="/dashboard/brands/new"
+        backLabel={t("allBrands")}
+        backHref="/dashboard/brands"
+      />
+    );
+  }
+  const { active, draft, policy } = result.data;
+  if (active) {
+    return (
+      <BrandCanvas
+        title={t("createTitle")}
+        summary={<p className="max-w-3xl break-words text-sm leading-6 text-muted-foreground">{t("createTaskActive")}</p>}
+        primary={(
+          <Button asChild className={brandActionClass}>
+            <Link href={"/dashboard/brands/" + active.id} prefetch={false}>{t("viewBrand")}</Link>
+          </Button>
+        )}
+        relatedLabel={t("relatedEntries")}
+        related={related}
+      >
+        <IntakeNotice t={t} mode={intake.mode} />
+        <Card className="min-w-0 max-w-3xl py-0 shadow-none">
+          <CardContent className="space-y-3 p-5 sm:p-6">
+            <p role="status" className="break-words text-sm leading-6">{t("limitReached")}</p>
+            <p className="text-sm font-medium [overflow-wrap:anywhere]">{active.name}</p>
+            <p className="break-words text-sm leading-6 text-muted-foreground">{t("archiveFirst")}</p>
+          </CardContent>
+        </Card>
+      </BrandCanvas>
+    );
+  }
   return (
-    <BrandFrame title={t("createTitle")} back="/dashboard/brands" backLabel={t("allBrands")}>
-      <IntakeNotice t={t} mode={intake.mode} />
-      {"unavailable" in result ? <BrandLoadFailure t={t} href="/dashboard/brands/new" /> : result.data.active ? (
-        <div className="max-w-3xl space-y-3 rounded-xl border bg-card p-5">
-          <p role="status" className="text-sm leading-6">{t("limitReached")} {t("archiveFirst")}</p>
-          <Button asChild><Link href={"/dashboard/brands/" + result.data.active.id} prefetch={false}>{t("viewBrand")}</Link></Button>
+    <BrandCanvas
+      title={t("createTitle")}
+      summary={(
+        <div className="max-w-3xl space-y-2">
+          <p className="break-words text-sm leading-6 text-muted-foreground">{draft ? t("createTaskDraft") : t("createTask")}</p>
+          {draft?.fields.name ? <p className="text-sm font-medium [overflow-wrap:anywhere]">{draft.fields.name}</p> : null}
         </div>
-      ) : <BrandForm key={user.id} actorId={user.id} draft={result.data.draft} target={null} policy={result.data.policy} messages={getMessages(locale).brands} mockProfile={intake.mode === "mock" ? mockBrandFields : undefined} />}
-    </BrandFrame>
+      )}
+      primary={(
+        <Button asChild className={brandActionClass}>
+          <BrandIntakeJump href={draft?.step === 1 ? "#brand-region" : draft?.step === 2 ? "#brand-questions" : "#brand-name"}>
+            {draft ? t("resumeDraft") : t("startIntake")}
+          </BrandIntakeJump>
+        </Button>
+      )}
+      relatedLabel={t("relatedEntries")}
+      related={related}
+    >
+      <IntakeNotice t={t} mode={intake.mode} />
+      <BrandForm key={user.id} actorId={user.id} draft={draft} target={null} policy={policy} messages={getMessages(locale).brands} mockProfile={intake.mode === "mock" ? mockBrandFields : undefined} />
+    </BrandCanvas>
   );
 }
 
