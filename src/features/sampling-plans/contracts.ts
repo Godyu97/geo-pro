@@ -86,6 +86,7 @@ export const driveDueWindowSchema = z.strictObject({
   })).max(32),
   promptIds: z.array(brandIdSchema).max(10),
   promptSetId: brandIdSchema.optional(),
+  existingRunId: brandIdSchema.optional(),
 });
 
 export const samplingPlanErrors = {
@@ -93,6 +94,7 @@ export const samplingPlanErrors = {
   FORBIDDEN: 403,
   NOT_FOUND: 404,
   INVALID_INPUT: 400,
+  EXISTING_RUN_REJECTED: 400,
   PLAN_PHASE_CONFLICT: 409,
   VERSION_CONFLICT: 409,
   SERVICE_UNAVAILABLE: 503,

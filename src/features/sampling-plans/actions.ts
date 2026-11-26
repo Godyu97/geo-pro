@@ -28,7 +28,7 @@ import {
 } from "./contracts.ts";
 
 const plansPath = "/dashboard/monitoring/plans";
-const pageErrors = new Set(["NOT_FOUND", "INVALID_INPUT", "PLAN_PHASE_CONFLICT", "VERSION_CONFLICT"]);
+const pageErrors = new Set(["NOT_FOUND", "INVALID_INPUT", "EXISTING_RUN_REJECTED", "PLAN_PHASE_CONFLICT", "VERSION_CONFLICT"]);
 
 function finish(error?: string): never {
   revalidatePath(plansPath);
@@ -160,6 +160,7 @@ export async function driveDueSamplingWindowAction(formData: FormData) {
   const degrade = String(formData.get("degradeChannelId") ?? "").trim();
   const promptIds = String(formData.get("promptIds") ?? "").split(/[\s,]+/).filter(Boolean);
   const promptSetId = String(formData.get("promptSetId") ?? "").trim();
+  const existingRunId = String(formData.get("existingRunId") ?? "").trim();
   const parsed = driveDueWindowSchema.safeParse({
     planId: String(formData.get("planId") ?? ""),
     timezone: String(formData.get("timezone") ?? "").trim(),
@@ -170,6 +171,7 @@ export async function driveDueSamplingWindowAction(formData: FormData) {
     })),
     promptIds,
     ...(promptSetId ? { promptSetId } : {}),
+    ...(existingRunId ? { existingRunId } : {}),
   });
   if (!parsed.success) finish("INVALID_INPUT");
   const result = await driveDueSamplingWindow(getConnection(), session.user.id, parsed.data);

@@ -118,6 +118,7 @@ export function decideDueWindow(input: {
   existing: readonly DueIdentity[];
   promptIds: readonly string[];
   allowOfficialStart: boolean;
+  officialSlotId?: string;
 }): DueDecision {
   if (!isTimeZone(input.timeZone) || !Number.isFinite(Date.parse(input.now))) {
     return { pauses: [], official: [], manuals: [], replays: [], pending: [], invalid: "timezone" };
@@ -174,7 +175,7 @@ export function decideDueWindow(input: {
       manuals.push({ slotId: slot.id, channelId: slot.channelId, windowId, promptIds: input.promptIds });
       continue;
     }
-    if (!input.allowOfficialStart) {
+    if (!input.allowOfficialStart || (input.officialSlotId !== undefined && slot.id !== input.officialSlotId)) {
       pending.push(slot.id);
       continue;
     }

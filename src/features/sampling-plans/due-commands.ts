@@ -129,6 +129,7 @@ async function rememberDueRows(
   ownerId: string,
   input: DriveDueWindowInput,
   allowOfficialStart: boolean,
+  officialSlotId?: string,
 ): Promise<RememberedDue> {
   return db.transaction(async (tx) => {
     const plans = new SamplingPlanDao(tx);
@@ -159,6 +160,7 @@ async function rememberDueRows(
       })),
       promptIds: input.promptIds,
       allowOfficialStart,
+      ...(officialSlotId ? { officialSlotId } : {}),
     });
     if (decision.invalid) return { error: "INVALID_INPUT" as const };
     const prompts = new PromptDao(tx, current.brandId);
@@ -239,8 +241,11 @@ async function finishOfficial(
   ownerId: string,
   planId: string,
   executor: DueOfficialExecutor,
+  onlySlotId?: string,
 ) {
-  const pending = (await new SamplingDueDao(db).runsForPlan(ownerId, planId)).filter((row) => row.status === "reserved");
+  const pending = (await new SamplingDueDao(db).runsForPlan(ownerId, planId)).filter((row) => (
+    row.status === "reserved" && (onlySlotId === undefined || row.slotId === onlySlotId)
+  ));
   if (pending.length === 0) return;
   const slots = await new SamplingPlanDao(db).slotsForPlans(ownerId, [planId]);
   const costById = new Map(slots.map((slot) => [slot.id, slot.costMinor]));
@@ -604,15 +609,78 @@ export async function driveDueSamplingWindow(
   }
 }
 
+/** Runs the owner can register onto a due official slot without calling the provider again. */
+export async function listAttachableOfficialRuns(db: DatabaseConnection, ownerId: string, brandId: string) {
+  const owned = await new BrandDao(db).owned(ownerId, brandId);
+  if (!owned) return [];
+  return new SamplingDueDao(db).attachableOfficialRuns(ownerId, brandId);
+}
+
+async function prepareExistingRun(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: DriveDueWindowInput,
+): Promise<
+  | { error: "NOT_FOUND" | "PLAN_PHASE_CONFLICT" | "EXISTING_RUN_REJECTED" | "INVALID_INPUT" }
+  | { replay: true }
+  | { slotId: string; receipt: Awaited<ReturnType<SamplingDueDao["attachableOfficialRuns"]>>[number] }
+> {
+  if (!input.existingRunId) return { error: "INVALID_INPUT" };
+  const plans = new SamplingPlanDao(db);
+  const due = new SamplingDueDao(db);
+  const current = await plans.latest(ownerId, input.planId);
+  if (!current) return { error: "NOT_FOUND" };
+  if (current.phase !== "active") return { error: "PLAN_PHASE_CONFLICT" };
+  const [receipt] = await due.attachableOfficialRuns(ownerId, current.brandId, input.existingRunId);
+  if (!receipt) return { error: "EXISTING_RUN_REJECTED" };
+  const linked = await due.dueRunsForMonitoringRun(ownerId, current.brandId, receipt.id);
+  if (linked.length > 1) return { error: "EXISTING_RUN_REJECTED" };
+  const [existing] = linked;
+  if (existing && existing.planId !== current.id) return { error: "EXISTING_RUN_REJECTED" };
+  if (existing) return { replay: true };
+  const gate = input.channels.find((channel) => channel.channelId === receipt.channelId);
+  if (input.channels.length > 0 && gate?.state !== "eligible") return { error: "EXISTING_RUN_REJECTED" };
+  const runWindow = localWindowId(receipt.createdAt, input.timezone);
+  if (!runWindow) return { error: "INVALID_INPUT" };
+  const remaining = current.budgetMinor - current.spentMinor - current.pendingMinor;
+  const slots = await plans.slotsForPlans(ownerId, [current.id]);
+  const target = slots
+    .filter((slot) => (
+      slot.manual === 0
+      && slot.status === "scheduled"
+      && slot.at <= input.now
+      && slot.channelId === receipt.channelId
+      && slot.costMinor <= remaining
+      && localWindowId(slot.at, input.timezone) === runWindow
+    ))
+    .sort((left, right) => left.at.localeCompare(right.at) || left.id.localeCompare(right.id))[0];
+  if (!target) return { error: "EXISTING_RUN_REJECTED" };
+  return { slotId: target.id, receipt };
+}
+
 async function driveParsed(
   db: DatabaseConnection,
   ownerId: string,
   input: DriveDueWindowInput,
   executor: DueOfficialExecutor | undefined,
 ): Promise<DueDriveResult | Failure> {
-  const saved = await rememberDueRows(db, ownerId, input, Boolean(executor));
+  if (input.existingRunId && executor) return { error: "INVALID_INPUT" };
+  const adoption = input.existingRunId
+    ? await prepareExistingRun(db, ownerId, input)
+    : null;
+  if (adoption && "error" in adoption) return adoption;
+  const adopting = adoption && "receipt" in adoption ? adoption : null;
+  const activeExecutor = adopting
+    ? async (start: Parameters<DueOfficialExecutor>[0]) => {
+      if (start.slotId !== adopting.slotId || start.channelId !== adopting.receipt.channelId) {
+        throw new Error("EXISTING_RUN_SLOT_MISMATCH");
+      }
+      return { runId: adopting.receipt.id, chargedMinor: adopting.receipt.knownMinor };
+    }
+    : executor;
+  const saved = await rememberDueRows(db, ownerId, input, Boolean(activeExecutor), adopting?.slotId);
   if ("error" in saved) return saved;
-  if (executor) await finishOfficial(db, ownerId, input.planId, executor);
+  if (activeExecutor) await finishOfficial(db, ownerId, input.planId, activeExecutor, adopting?.slotId);
   const due = new SamplingDueDao(db);
   const plans = new SamplingPlanDao(db);
   const [runs, slots, versions] = await Promise.all([
@@ -620,6 +688,12 @@ async function driveParsed(
     plans.slotsForPlans(ownerId, [input.planId]),
     plans.versions(ownerId, input.planId),
   ]);
+  if (
+    input.existingRunId
+    && !runs.some((row) => row.monitoringRunId === input.existingRunId && row.status === "accepted")
+  ) {
+    return { error: "EXISTING_RUN_REJECTED" };
+  }
   const evidence = await loadFacts(due, ownerId, saved.plan.brandId, input.timezone, slots, runs);
   const statusById = new Map(slots.map((slot) => [slot.id, slot.status]));
   const groups = new Map<string, SamplingSlotRecord[]>();

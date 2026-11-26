@@ -17,10 +17,15 @@ import {
 import {
   driveDueSamplingWindow,
   listAlertWindowSources,
+  listAttachableOfficialRuns,
   listSamplingDueWindows,
   manualSheetsForBrand,
   readSamplingWindowDetail,
 } from "../../src/features/sampling-plans/due-commands.ts";
+import {
+  attachableOfficialRunsQuery,
+  samplingDueRunByMonitoringRunQuery,
+} from "../../src/features/sampling-plans/due-dao.ts";
 import { localWindowId } from "../../src/features/sampling-plans/due-window.ts";
 import { manualSheetLines } from "../../src/features/sampling-plans/rules.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
@@ -931,4 +936,242 @@ for (const kind of ["sqlite", "postgresql"]) {
       await fixture.cleanup();
     }
   });
+
+  test(`${kind}: an existing official run registers onto the due slot without a new charge`, async () => {
+    const fixture = await testDatabase(kind);
+    try {
+      const db = fixture.connection;
+      const [owner, outsider] = await Promise.all([account(db), account(db)]);
+      const brand = randomUUID();
+      const brands = new BrandDao(db);
+      await brands.insertBrand(owner, brand, time);
+      await brands.insertVersion(brand, 1, brandFields, time);
+      const capturedAt = "2026-11-26T02:00:00.000Z";
+      const now = "2026-11-26T08:00:00.000Z";
+      const channelId = "official-api";
+      const good = await succeededRun(db, brand, owner, channelId, capturedAt, [1, 1, 1]);
+      const unknown = await succeededRun(db, brand, owner, channelId, capturedAt, [null]);
+      const listed = await listAttachableOfficialRuns(db, owner, brand);
+      assert.deepEqual(listed.map((run) => run.id), [good.runId]);
+      assert.equal(listed[0].knownMinor, 3);
+      assert.equal(listed[0].slotCount, 3);
+      assert.deepEqual(await listAttachableOfficialRuns(db, outsider, brand), []);
+
+      const planSlot = randomUUID();
+      const opened = await saveSamplingPlan(db, owner, {
+        action: "create",
+        brandId: brand,
+        phase: "active",
+        currency: "CNY",
+        budgetMinor: 100,
+        spentMinor: 0,
+        pendingMinor: 0,
+        nextAt: now,
+        slots: [slot(planSlot, channelId, capturedAt, "scheduled", false, 3)],
+      }, () => time);
+      const input = {
+        ...drive(opened.plan.id, [{ channelId, state: "eligible" }], [], now),
+        existingRunId: good.runId,
+      };
+      const [attemptsBefore] = await queryWithParameters(db, "SELECT COUNT(*) AS count FROM monitoring_attempt WHERE brand_id = ?", [brand]);
+      const [quotaBefore] = await queryWithParameters(db, "SELECT COUNT(*) AS count FROM quota_attempt WHERE brand_id = ?", [brand]);
+      const first = await driveDueSamplingWindow(db, owner, input);
+      assert.equal(first.alert, null);
+      assert.equal(first.runs.filter((run) => run.monitoringRunId === good.runId && run.status === "accepted").length, 1);
+      assert.equal(first.runs.find((run) => run.monitoringRunId === good.runId).chargedMinor, 3);
+      const reading = first.readings.find((item) => item.windowId === "2026-11-26");
+      assert.equal(reading.plannedCount, 3);
+      assert.equal(reading.eligibleCount, 3);
+      assert.equal(reading.coverageSufficient, true);
+      assert.equal(reading.waitingForTrend, true);
+      assert.equal(reading.judgedCount, 0);
+      const [spent] = await queryWithParameters(db, "SELECT spent_minor AS spent FROM sampling_plan WHERE id = ? AND version = ?", [opened.plan.id, opened.plan.version]);
+      assert.equal(Number(spent.spent), 0);
+      const [attemptsAfter] = await queryWithParameters(db, "SELECT COUNT(*) AS count FROM monitoring_attempt WHERE brand_id = ?", [brand]);
+      const [quotaAfter] = await queryWithParameters(db, "SELECT COUNT(*) AS count FROM quota_attempt WHERE brand_id = ?", [brand]);
+      assert.equal(Number(attemptsAfter.count), Number(attemptsBefore.count));
+      assert.equal(Number(quotaAfter.count), Number(quotaBefore.count));
+      assert.equal(Number(quotaAfter.count), 0);
+
+      const second = await driveDueSamplingWindow(db, owner, input);
+      assert.equal(second.runs.filter((run) => run.status === "accepted").length, 1);
+      assert.equal(second.runs[0].chargedMinor, 3);
+      assert.equal(second.alert, null);
+      const [dueCount] = await queryWithParameters(db, "SELECT COUNT(*) AS count FROM sampling_due_run WHERE plan_id = ?", [opened.plan.id]);
+      assert.equal(Number(dueCount.count), 1);
+
+      const otherSlot = randomUUID();
+      const other = await saveSamplingPlan(db, owner, {
+        action: "create",
+        brandId: brand,
+        phase: "active",
+        currency: "CNY",
+        budgetMinor: 100,
+        spentMinor: 0,
+        pendingMinor: 0,
+        nextAt: now,
+        slots: [slot(otherSlot, channelId, capturedAt, "scheduled", false, 3)],
+      }, () => time);
+      assert.deepEqual(
+        await driveDueSamplingWindow(db, owner, { ...drive(other.plan.id, [{ channelId, state: "eligible" }], [], now), existingRunId: good.runId }),
+        { error: "EXISTING_RUN_REJECTED" },
+      );
+      const wrongDay = randomUUID();
+      const mismatched = await saveSamplingPlan(db, owner, {
+        action: "create",
+        brandId: brand,
+        phase: "active",
+        currency: "CNY",
+        budgetMinor: 100,
+        spentMinor: 0,
+        pendingMinor: 0,
+        nextAt: now,
+        slots: [slot(wrongDay, channelId, "2026-11-25T02:00:00.000Z", "scheduled", false, 3)],
+      }, () => time);
+      assert.equal((await driveDueSamplingWindow(db, owner, {
+        ...drive(mismatched.plan.id, [{ channelId, state: "eligible" }], [], now),
+        existingRunId: good.runId,
+      })).error, "EXISTING_RUN_REJECTED");
+      assert.equal((await driveDueSamplingWindow(db, owner, {
+        ...drive(opened.plan.id, [{ channelId, state: "eligible" }], [], now),
+        existingRunId: unknown.runId,
+      })).error, "EXISTING_RUN_REJECTED");
+      assert.equal((await driveDueSamplingWindow(db, outsider, input)).error, "NOT_FOUND");
+
+      const extra = Array.from({ length: 500 }, () => randomUUID());
+      await queryWithParameters(
+        db,
+        `INSERT INTO brand (id, owner_id, status, revision, entity_version, created_at)
+         VALUES ${extra.map(() => "(?, ?, 'archived', 1, 1, ?)").join(", ")}`,
+        extra.flatMap((id) => [id, outsider, capturedAt]),
+      );
+      await queryWithParameters(
+        db,
+        `INSERT INTO monitoring_run (
+          id, brand_id, owner_id, operation_id, fingerprint, track, prompt_set_id, prompt_set_version,
+          repeat_count, question_count, natural_count, channel_count, slot_count, region, language,
+          requested_network_mode, currency, upper_minor, estimate_high_minor, customer_payable_minor,
+          status, sampling_complete, created_at
+        ) VALUES ${extra.map(() => "(?, ?, ?, ?, ?, 'model_api', ?, 1, 1, 1, 1, 1, 1, 'CN', 'zh-CN', 'off', 'CNY', 20, 20, 0, 'succeeded', 1, ?)").join(", ")}`,
+        extra.flatMap((id) => [id, id, outsider, randomUUID(), fingerprint(), randomUUID(), capturedAt]),
+      );
+      await queryWithParameters(
+        db,
+        `INSERT INTO monitoring_slot (
+          id, run_id, brand_id, question_id, natural_question, channel_id, channel_version, repeat_index,
+          reservation_id, status, created_at, adopted_attempt_id, late
+        ) VALUES ${extra.map(() => "(?, ?, ?, ?, 1, 'official-api', 2, 1, NULL, 'failed', ?, NULL, 0)").join(", ")}`,
+        extra.flatMap((id) => [randomUUID(), id, id, randomUUID(), capturedAt]),
+      );
+      await queryWithParameters(
+        db,
+        `INSERT INTO sampling_plan (
+          id, version, brand_id, owner_id, phase, currency, budget_minor, spent_minor, pending_minor, created_at
+        ) VALUES ${extra.map(() => "(?, 1, ?, ?, 'active', 'CNY', 10, 0, 0, ?)").join(", ")}`,
+        extra.flatMap((id) => [id, id, outsider, capturedAt]),
+      );
+      const fillerSlots = extra.map(() => randomUUID());
+      await queryWithParameters(
+        db,
+        `INSERT INTO sampling_slot (
+          id, plan_id, brand_id, owner_id, channel_id, at, status, manual, cost_minor
+        ) VALUES ${extra.map(() => "(?, ?, ?, ?, 'bulk-channel', ?, 'scheduled', 1, 1)").join(", ")}`,
+        extra.flatMap((id, index) => [fillerSlots[index], id, id, outsider, capturedAt]),
+      );
+      await queryWithParameters(
+        db,
+        `INSERT INTO sampling_due_run (
+          id, plan_id, plan_version, brand_id, owner_id, channel_id, window_id, slot_id, timezone,
+          kind, status, monitoring_run_id, charged_minor, prompt_ids_json, created_at
+        ) VALUES ${extra.map(() => "(?, ?, 1, ?, ?, 'bulk-channel', '2026-11-26', ?, 'Asia/Shanghai', 'manual', 'sheet', NULL, 0, ?, ?)").join(", ")}`,
+        extra.flatMap((id, index) => [randomUUID(), id, id, outsider, fillerSlots[index], JSON.stringify([randomUUID()]), capturedAt]),
+      );
+      const explain = db.kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN ";
+      const runsQuery = attachableOfficialRunsQuery(owner, brand);
+      const linkQuery = samplingDueRunByMonitoringRunQuery(owner, brand, good.runId);
+      if (db.kind === "postgresql") {
+        await db.query("ANALYZE monitoring_run");
+        await db.query("ANALYZE monitoring_slot");
+        await db.query("ANALYZE monitoring_attempt");
+        await db.query("ANALYZE sampling_due_run");
+      }
+      const runPlan = JSON.stringify(await queryWithParameters(db, explain + runsQuery.sql, runsQuery.values));
+      const linkPlan = JSON.stringify(await queryWithParameters(db, explain + linkQuery.sql, linkQuery.values));
+      assert.match(runPlan, /monitoring_run_brand_recent_idx|monitoring_slot_position_uidx|monitoring_attempt_run_idx/);
+      assert.match(linkPlan, /sampling_due_run_owner_idx|sampling_due_run_slot_uidx/);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+}
+
+function fingerprint() {
+  return randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "");
+}
+
+async function succeededRun(db, brandId, ownerId, channelId, createdAt, charges) {
+  const runId = randomUUID();
+  const slotCount = charges.length;
+  await queryWithParameters(
+    db,
+    `INSERT INTO monitoring_run (
+      id, brand_id, owner_id, operation_id, fingerprint, track, prompt_set_id, prompt_set_version,
+      repeat_count, question_count, natural_count, channel_count, slot_count, region, language,
+      requested_network_mode, currency, upper_minor, estimate_high_minor, customer_payable_minor,
+      status, sampling_complete, created_at
+    ) VALUES (?, ?, ?, ?, ?, 'model_api', ?, 1, 1, ?, ?, 1, ?, 'CN', 'zh-CN', 'off', 'CNY', 20, ?, 0, 'succeeded', 1, ?)`,
+    [
+      runId, brandId, ownerId, randomUUID(), fingerprint(), randomUUID(), slotCount, slotCount, slotCount,
+      20 * slotCount, createdAt,
+    ],
+  );
+  const slots = [];
+  for (const charge of charges) {
+    const slotId = randomUUID();
+    const attemptId = randomUUID();
+    slots.push(slotId);
+    await queryWithParameters(
+      db,
+      `INSERT INTO monitoring_slot (
+        id, run_id, brand_id, question_id, natural_question, channel_id, channel_version, repeat_index,
+        reservation_id, status, created_at, adopted_attempt_id, late
+      ) VALUES (?, ?, ?, ?, 1, ?, 2, 1, NULL, 'queued', ?, NULL, 0)`,
+      [slotId, runId, brandId, randomUUID(), channelId, createdAt],
+    );
+    await queryWithParameters(
+      db,
+      `INSERT INTO monitoring_attempt (
+        id, slot_id, run_id, brand_id, kind, ordinal, transport, synthetic, disposition, raw_text,
+        currency, upper_minor, actual_minor, cost_state, quota_attempt_id, late, created_at
+      ) VALUES (?, ?, ?, ?, 'sampling', 1, 'official_api', 0, 'adopted', '隔离回答', 'CNY', 20, ?, ?, NULL, 0, ?)`,
+      [attemptId, slotId, runId, brandId, charge, charge === null ? "pending" : "known", createdAt],
+    );
+    await queryWithParameters(
+      db,
+      "UPDATE monitoring_slot SET status = 'succeeded', adopted_attempt_id = ? WHERE id = ?",
+      [attemptId, slotId],
+    );
+    if (charge === null) continue;
+    const observationId = randomUUID();
+    await queryWithParameters(
+      db,
+      `INSERT INTO answer_observation (
+        id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method, question_text, answer_text,
+        fingerprint, captured_at, region, language, requested_network_mode, entity_version, citation_set_state,
+        evidence_state, locator_ref, collector_id, missing_reason, created_at, target_region, observed_region,
+        new_session, product_mode, network_trigger
+      ) VALUES (?, ?, ?, ?, ?, 'model_api', 'official_api', 'question', 'answer text', ?, ?, 'CN', 'zh-CN',
+        'off', 1, 'complete', 'complete', NULL, NULL, NULL, ?, 'CN', 'unknown', 'unknown', 'unknown', 'not_triggered')`,
+      [observationId, brandId, ownerId, slotId, attemptId, fingerprint(), createdAt, createdAt],
+    );
+    await queryWithParameters(
+      db,
+      `INSERT INTO answer_analysis_version (
+        id, observation_id, brand_id, version, entity_version, rule_version, mentioned, recommended,
+        official_site_cited, evidence_span, status, revised_from, reason, reviewer_id, created_at
+      ) VALUES (?, ?, ?, 1, 1, 'metrics-v3', 'unknown', 'unknown', 'unknown', NULL, 'classified', NULL, NULL, NULL, ?)`,
+      [randomUUID(), observationId, brandId, createdAt],
+    );
+  }
+  return { runId, slots };
 }

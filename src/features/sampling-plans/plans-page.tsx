@@ -22,10 +22,10 @@ import {
 } from "./actions";
 import { listSamplingPlans } from "./commands";
 import type { SamplingPlanView } from "./commands";
-import { listSamplingDueWindows, manualSheetsForBrand, readSamplingWindowDetail } from "./due-commands";
+import { listAttachableOfficialRuns, listSamplingDueWindows, manualSheetsForBrand, readSamplingWindowDetail } from "./due-commands";
 
 const fieldClass = "h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
-const knownErrors = ["PLAN_PHASE_CONFLICT", "NOT_FOUND", "INVALID_INPUT", "VERSION_CONFLICT"] as const;
+const knownErrors = ["PLAN_PHASE_CONFLICT", "NOT_FOUND", "INVALID_INPUT", "EXISTING_RUN_REJECTED", "VERSION_CONFLICT"] as const;
 const phases = ["draft", "active", "paused", "ended"] as const;
 const statuses = ["scheduled", "completed", "failed", "paused"] as const;
 
@@ -301,6 +301,7 @@ export default async function SamplingPlansPage({
   const promptVersions = plans.some((plan) => plan.phase === "active")
     ? (await new PromptDao(connection, active.id).versions()).slice(0, 20)
     : [];
+  const attachable = await listAttachableOfficialRuns(connection, session.user.id, active.id);
 
   return (
     <div className="min-w-0 space-y-6">
@@ -329,6 +330,26 @@ export default async function SamplingPlansPage({
       {"error" in listed && listed.error ? (
         <p role="alert" className="rounded-xl border border-dashed px-4 py-3 text-sm">{t(listed.error)}</p>
       ) : null}
+
+      <section aria-labelledby="attachable-runs-title" className="min-w-0 space-y-3 rounded-2xl border bg-card p-4 sm:p-5">
+        <h2 id="attachable-runs-title" className="text-lg font-semibold">{t("completedRunsTitle")}</h2>
+        {attachable.length === 0 ? (
+          <p className="text-sm text-muted-foreground wrap-anywhere">{t("completedRunsEmpty")}</p>
+        ) : (
+          <ul className="min-w-0 space-y-2">
+            {attachable.map((run) => (
+              <li key={run.id} className="font-mono text-sm [overflow-wrap:anywhere]">
+                {t("completedRunLine", {
+                  id: run.id,
+                  at: run.createdAt,
+                  channel: run.channelId,
+                  amount: amount(run.currency, run.knownMinor),
+                })}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {plans.length === 0 ? (
         "error" in listed ? null : (
@@ -418,6 +439,11 @@ export default async function SamplingPlansPage({
                   ? t("readingWaiting", { count: formatNumber(locale, reading.comparableWindows) })
                   : t("readingReady")}
               </p>
+              <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
+                <Link href={`/dashboard/monitoring/plans?planId=${encodeURIComponent(plan.id)}&windowId=${encodeURIComponent(reading.windowId)}`} prefetch={false}>
+                  {t("openWindow")}
+                </Link>
+              </Button>
               {reading.coverageSufficient ? null : <p>{t("readingCoverage")}</p>}
             </div>
           ))}
@@ -439,6 +465,24 @@ export default async function SamplingPlansPage({
                 <label className="text-sm sm:col-span-2">
                   <span className="mb-1 block text-muted-foreground">{t("promptIds")}</span>
                   <input name="promptIds" className={fieldClass} />
+                </label>
+                <label className="text-sm sm:col-span-2">
+                  <span className="mb-1 block text-muted-foreground">{t("existingRun")}</span>
+                  <select name="existingRunId" defaultValue="" className={fieldClass}>
+                    <option value="">{t("existingRunNone")}</option>
+                    {attachable
+                      .filter((run) => plan.slots.some((slot) => !slot.manual && slot.channelId === run.channelId))
+                      .map((run) => (
+                        <option key={run.id} value={run.id}>
+                          {t("existingRunOption", {
+                            id: run.id.slice(0, 8),
+                            at: run.createdAt,
+                            amount: amount(run.currency, run.knownMinor),
+                          })}
+                        </option>
+                      ))}
+                  </select>
+                  <span className="mt-1 block text-xs text-muted-foreground">{t("existingRunHint")}</span>
                 </label>
                 {promptVersions.length > 0 ? (
                   <label className="text-sm sm:col-span-2">

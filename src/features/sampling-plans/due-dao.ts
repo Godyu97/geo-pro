@@ -152,11 +152,77 @@ export function samplingDueRunsForWindowsQuery(
   };
 }
 
+const attachableRunRow = z.object({
+  id: brandIdSchema,
+  status: z.literal("succeeded"),
+  createdAt: z.iso.datetime({ precision: 3 }),
+  currency: z.string().length(3),
+  channelId: z.string().min(1).max(64),
+  knownMinor: z.coerce.number().int().nonnegative(),
+  slotCount: z.coerce.number().int().positive(),
+});
+
+const linkedDueRow = z.object({
+  id: brandIdSchema,
+  planId: brandIdSchema,
+  slotId: brandIdSchema,
+  status: dueStatusSchema,
+});
+
+export type AttachableOfficialRunRecord = z.infer<typeof attachableRunRow>;
+
+/** Succeeded single-channel official runs whose sampling attempts all have a known charge. */
+export function attachableOfficialRunsQuery(ownerId: string, brandId: string, runId?: string) {
+  const values: QueryValue[] = [ownerId, brandId];
+  const runFilter = runId ? " AND r.id = ?" : "";
+  if (runId) values.push(runId);
+  values.push(runId ? 1 : 20);
+  return {
+    sql: `SELECT r.id, r.status, r.created_at AS "createdAt", r.currency,
+      MIN(s.channel_id) AS "channelId",
+      SUM(CASE WHEN a.kind = 'sampling' AND a.disposition = 'adopted' AND a.cost_state = 'known' THEN a.actual_minor ELSE 0 END) AS "knownMinor",
+      COUNT(DISTINCT s.id) AS "slotCount"
+      FROM monitoring_run r
+      INNER JOIN monitoring_slot s ON s.run_id = r.id AND s.brand_id = r.brand_id
+      LEFT JOIN monitoring_attempt a ON a.run_id = r.id AND a.slot_id = s.id AND a.brand_id = r.brand_id
+      WHERE r.owner_id = ? AND r.brand_id = ? AND r.track = 'model_api' AND r.status = 'succeeded' AND r.sampling_complete = 1${runFilter}
+      GROUP BY r.id, r.status, r.created_at, r.currency
+      HAVING COUNT(DISTINCT s.channel_id) = 1
+        AND SUM(CASE WHEN a.kind = 'sampling' AND a.cost_state <> 'known' THEN 1 ELSE 0 END) = 0
+        AND SUM(CASE WHEN a.kind = 'sampling' AND a.disposition = 'adopted' THEN 1 ELSE 0 END) = COUNT(DISTINCT s.id)
+      ORDER BY r.created_at DESC, r.id ASC
+      LIMIT ?`,
+    values,
+  };
+}
+
+export function samplingDueRunByMonitoringRunQuery(ownerId: string, brandId: string, monitoringRunId: string) {
+  return {
+    sql: `SELECT id, plan_id AS "planId", slot_id AS "slotId", status
+      FROM sampling_due_run
+      WHERE owner_id = ? AND brand_id = ? AND monitoring_run_id = ?
+      LIMIT 2`,
+    values: [ownerId, brandId, monitoringRunId] as QueryValue[],
+  };
+}
+
 export class SamplingDueDao {
   private readonly db: QueryConnection;
 
   constructor(db: QueryConnection) {
     this.db = db;
+  }
+
+  async attachableOfficialRuns(ownerId: string, brandId: string, runId?: string) {
+    const query = attachableOfficialRunsQuery(ownerId, brandId, runId);
+    const rows = await queryWithParameters(this.db, query.sql, query.values);
+    return z.array(attachableRunRow).parse(rows);
+  }
+
+  async dueRunsForMonitoringRun(ownerId: string, brandId: string, monitoringRunId: string) {
+    const query = samplingDueRunByMonitoringRunQuery(ownerId, brandId, monitoringRunId);
+    const rows = await queryWithParameters(this.db, query.sql, query.values);
+    return z.array(linkedDueRow).parse(rows);
   }
 
   async runsForPlan(ownerId: string, planId: string) {
