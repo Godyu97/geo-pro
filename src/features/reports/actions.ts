@@ -23,6 +23,8 @@ import { saveReportDecisionSchema } from "./contracts.ts";
 
 const pageErrors = new Set<ReportError>([
   "INVALID_INPUT",
+  "WINDOWS_NOT_ORDERED",
+  "WINDOWS_MISSING_ANSWERS",
   "LOOP_NOT_READY",
   "CONFLICT",
   "NOT_FOUND",

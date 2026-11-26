@@ -35,6 +35,7 @@ import { readSnapshotBusiness, summarizeBusinessFeedback, type SnapshotBusinessV
 import { readExecution, readMetricConclusions, readVisits, type ExecutionReading, type MetricConclusion, type VisitReading } from "./reading.ts";
 import { buildSnapshotDocument, fingerprintBytes, renderSnapshotHtml } from "./snapshot.ts";
 import { loadSnapshotComparisons, snapshotMetrics, type SnapshotMetric } from "./snapshot-comparisons.ts";
+import { orderedWindowBounds } from "./window-observations.ts";
 
 type Clock = () => string;
 const defaultClock: Clock = () => new Date().toISOString().replace(/\.\d{3}Z$/, ".000Z");
@@ -276,6 +277,8 @@ export async function requestRetest(
   }
 
   if (!input.after) return { error: "INVALID_INPUT" as ReportError };
+  const bounds = orderedWindowBounds({ before: input.before, after: input.after }, input.timezone);
+  if (bounds.error) return { error: bounds.error };
 
   const comparison = compareWindows(input.before.samples, input.after.samples);
   const retestId = randomUUID();
@@ -326,6 +329,8 @@ export async function generateReport(
 
   const retest = await dao.findRetest(ownerId, input.retestId);
   if (!retest || retest.brandId !== input.brandId) return { error: "NOT_FOUND" as ReportError };
+  const bounds = orderedWindowBounds(input, retest.timezone);
+  if (bounds.error) return { error: bounds.error };
 
   const now = clock();
   const gate = resolveLoopGate({
@@ -429,6 +434,8 @@ export async function reviseReport(
   if (!previous || previous.brandId !== input.brandId) return { error: "NOT_FOUND" as ReportError };
   const retest = await dao.findRetest(ownerId, previous.retestId);
   if (!retest || retest.brandId !== input.brandId) return { error: "NOT_FOUND" as ReportError };
+  const bounds = orderedWindowBounds(input, previous.timezone);
+  if (bounds.error) return { error: bounds.error };
 
   const now = clock();
   const metrics = await readComparisonEvidence(db, ownerId, input, {

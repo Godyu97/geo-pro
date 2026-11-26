@@ -216,7 +216,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.match(windowPlanText, /answer_observation/);
     t.diagnostic(`window observation query: ${windowPlanText.split("\n").filter((line) => /answer_observation|Index|SCAN|Seq/.test(line)).join(" | ")}`);
 
-    const saved = await requestSavedComparison(db, owner, {
+    const savedInput = {
       brandId,
       operationId: randomUUID(),
       intent: "business_loop",
@@ -224,10 +224,26 @@ for (const kind of ["sqlite", "postgresql"]) {
       timezone: "Asia/Shanghai",
       beforeStart: "2026-11-01",
       beforeEnd: "2026-11-08",
-      afterStart: "2026-11-09",
+      afterStart: "2026-11-08",
       afterEnd: "2026-11-16",
       locale: "zh-CN",
+    };
+    for (const after of [
+      { afterStart: "2026-11-01", afterEnd: "2026-11-08" },
+      { afterStart: "2026-11-07", afterEnd: "2026-11-16" },
+      { afterStart: "2026-10-01", afterEnd: "2026-11-01" },
+    ]) {
+      const rejected = await requestSavedComparison(db, owner, { ...savedInput, ...after }, clock);
+      assert.equal(rejected.error, "WINDOWS_NOT_ORDERED");
+    }
+    const missingAfter = await requestSavedComparison(db, owner, {
+      ...savedInput, afterStart: "2026-11-11", afterEnd: "2026-11-16",
     }, clock);
+    assert.equal(missingAfter.error, "WINDOWS_MISSING_ANSWERS");
+    assert.equal(savedComparisonSchema.safeParse({ ...savedInput, beforeStart: "2026-02-30" }).success, false);
+    assert.equal((await listReports(db, owner, brandId)).retests.length, 0);
+
+    const saved = await requestSavedComparison(db, owner, savedInput, clock);
     assert.equal(saved.error, undefined);
     assert.equal(saved.downgraded, true);
     assert.equal(saved.loopCompleted, false);
@@ -264,7 +280,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       brandId, operationId: randomUUID(), intent: "diagnostic", track: "model_api", timezone: "Asia/Shanghai",
       beforeStart: "2020-01-01", beforeEnd: "2020-01-02", afterStart: "2020-01-03", afterEnd: "2020-01-04", locale: "zh-CN",
     }, clock);
-    assert.equal(emptyWindow.error, "INVALID_INPUT");
+    assert.equal(emptyWindow.error, "WINDOWS_MISSING_ANSWERS");
     const missingLoop = await requestSavedReminder(db, owner, {
       brandId, operationId: randomUUID(), track: "model_api", timezone: "Asia/Shanghai", locale: "zh-CN",
     }, clock);
@@ -281,7 +297,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(outsiderSaved.error, "NOT_FOUND");
 
     // AC-M0-12-2: business_loop without verification becomes diagnostic
-    const retest = await requestRetest(db, owner, {
+    const retestInput = {
       action: "request-retest",
       brandId,
       operationId: randomUUID(),
@@ -294,13 +310,16 @@ for (const kind of ["sqlite", "postgresql"]) {
       after: shared.after,
       locale: "zh-CN",
       metric: "recommendation_rate",
-    }, clock);
+    };
+    const overlappingRetest = await requestRetest(db, owner, { ...retestInput, after: shared.before }, clock);
+    assert.equal(overlappingRetest.error, "WINDOWS_NOT_ORDERED");
+    const retest = await requestRetest(db, owner, retestInput, clock);
     assert.equal(retest.error, undefined);
     assert.equal(retest.retest.intent, "diagnostic");
     assert.equal(retest.loopCompleted, false);
     assert.equal(retest.comparison.commonQueryCount, 3);
 
-    const report = await generateReport(db, owner, {
+    const reportInput = {
       action: "generate-report",
       brandId,
       operationId: randomUUID(),
@@ -313,7 +332,10 @@ for (const kind of ["sqlite", "postgresql"]) {
       locale: "zh-CN",
       metric: "recommendation_rate",
       brandName: "己品牌",
-    }, clock, options);
+    };
+    const overlappingReport = await generateReport(db, owner, { ...reportInput, after: shared.before }, clock, options);
+    assert.equal(overlappingReport.error, "WINDOWS_NOT_ORDERED");
+    const report = await generateReport(db, owner, reportInput, clock, options);
     assert.equal(report.error, undefined);
     assert.equal(report.loopCompleted, false);
     assert.equal(report.snapshot.intent, "diagnostic");
@@ -364,7 +386,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     // AC-M0-12-3: revise creates successor; previous bytes unchanged
     const correctedId = shared.after.samples[1].observationId;
     await correctRecommendation(db, correctedId);
-    const revised = await reviseReport(db, owner, {
+    const revisionInput = {
       action: "revise-report",
       brandId,
       operationId: randomUUID(),
@@ -375,7 +397,10 @@ for (const kind of ["sqlite", "postgresql"]) {
       metric: "recommendation_rate",
       brandName: "己品牌",
       note: "label correction",
-    }, clock, options);
+    };
+    const overlappingRevision = await reviseReport(db, owner, { ...revisionInput, after: shared.before }, clock, options);
+    assert.equal(overlappingRevision.error, "WINDOWS_NOT_ORDERED");
+    const revised = await reviseReport(db, owner, revisionInput, clock, options);
     assert.equal(revised.error, undefined);
     assert.equal(revised.snapshot.predecessorId, report.snapshot.id);
     assert.equal(revised.previous.status, "superseded");

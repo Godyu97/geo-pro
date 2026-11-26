@@ -6,7 +6,7 @@ import { queryWithParameters, type DatabaseConnection, type QueryConnection } fr
 import { BrandDao } from "../brands/dao.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { ContentDao } from "../content/dao.ts";
-import { isTimeZone, windowBounds } from "../sampling-plans/due-window.ts";
+import { isTimeZone } from "../sampling-plans/due-window.ts";
 import type { ReportError, WindowSample } from "./contracts.ts";
 import { reportIntentSchema, reportTrackSchema } from "./contracts.ts";
 import { ReportDao } from "./dao.ts";
@@ -19,9 +19,9 @@ import {
 } from "./commands.ts";
 import { resolveLoopGate } from "./rules.ts";
 import { loadSnapshotComparisons } from "./snapshot-comparisons.ts";
-import { readSavedWindows, windowObservationsQuery, type SavedWindows } from "./window-observations.ts";
+import { orderedWindowBounds, readSavedWindows, windowObservationsQuery, type SavedWindows } from "./window-observations.ts";
 
-const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const day = z.iso.date();
 const localeSchema = z.enum(["zh-CN", "en"]).default("zh-CN");
 
 export const savedComparisonSchema = z.strictObject({
@@ -91,14 +91,6 @@ function carrier(track: WindowSample["track"], entityVersion: number, observatio
   };
 }
 
-function instantBounds(start: string, endExclusive: string, timezone: string) {
-  if (!isTimeZone(timezone)) return null;
-  const left = windowBounds(start, timezone);
-  const right = windowBounds(endExclusive, timezone);
-  if (!left || !right || left.start >= right.start) return null;
-  return { start: left.start, endExclusive: right.start };
-}
-
 async function ownedBrand(db: QueryConnection, ownerId: string, brandId: string) {
   return new BrandDao(db).owned(ownerId, brandId);
 }
@@ -120,10 +112,10 @@ async function idsInWindow(
   ownerId: string,
   brandId: string,
   track: string,
-  start: string,
-  endExclusive: string,
+  window: { start: number; endExclusive: number },
 ) {
-  const query = windowObservationsQuery(ownerId, brandId, track, start, endExclusive);
+  const query = windowObservationsQuery(ownerId, brandId, track,
+    new Date(window.start).toISOString(), new Date(window.endExclusive).toISOString());
   const loaded = await queryWithParameters(db, query.sql, query.values);
   return z.array(z.object({ id: z.string() })).parse(loaded).map((row) => row.id);
 }
@@ -136,14 +128,16 @@ async function windowIds(
   timezone: string,
   windows: SavedWindows,
 ) {
-  const before = instantBounds(windows.before.start, windows.before.endExclusive, timezone);
-  const after = instantBounds(windows.after.start, windows.after.endExclusive, timezone);
-  if (!before || !after) return { error: "INVALID_INPUT" as const };
+  const bounds = orderedWindowBounds(windows, timezone);
+  if (bounds.error) return { error: bounds.error };
   const [beforeIds, afterIds] = await Promise.all([
-    idsInWindow(db, ownerId, brandId, track, before.start, before.endExclusive),
-    idsInWindow(db, ownerId, brandId, track, after.start, after.endExclusive),
+    idsInWindow(db, ownerId, brandId, track, bounds.before),
+    idsInWindow(db, ownerId, brandId, track, bounds.after),
   ]);
-  if (beforeIds.length < 1 || afterIds.length < 1 || beforeIds.length > 500 || afterIds.length > 500) {
+  if (beforeIds.length === 0 || afterIds.length === 0) {
+    return { error: "WINDOWS_MISSING_ANSWERS" as const };
+  }
+  if (beforeIds.length > 500 || afterIds.length > 500) {
     return { error: "INVALID_INPUT" as const };
   }
   return { beforeIds, afterIds };

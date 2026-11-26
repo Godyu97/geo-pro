@@ -343,6 +343,7 @@ export default async function ReportsListPage({
   const actionError = params.error === "INVALID_INPUT" || params.error === "LOOP_NOT_READY" || params.error === "CONFLICT"
     || params.error === "NOT_FOUND" || params.error === "SERVICE_UNAVAILABLE" || params.error === "WINDOW_NOT_DUE"
     || params.error === "FORBIDDEN" || params.error === "NO_COMPARISON"
+    || params.error === "WINDOWS_NOT_ORDERED" || params.error === "WINDOWS_MISSING_ANSWERS"
     ? params.error
     : null;
   const connection = getConnection();

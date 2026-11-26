@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { isTimeZone, windowBounds } from "../sampling-plans/due-window.ts";
 
-const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const day = z.iso.date();
+const timestamp = z.iso.datetime({ offset: true });
 
 const savedWindows = z.object({
   before: z.object({ start: day, endExclusive: day }),
@@ -13,6 +15,28 @@ const savedRecord = z.object({
 });
 
 export type SavedWindows = z.infer<typeof savedWindows>;
+
+export function windowInstant(value: string, timezone: string) {
+  if (day.safeParse(value).success) return Date.parse(windowBounds(value, timezone)?.start ?? "");
+  return timestamp.safeParse(value).success ? Date.parse(value) : NaN;
+}
+
+export function orderedWindowBounds(windows: SavedWindows, timezone: string) {
+  if (!isTimeZone(timezone)) return { error: "INVALID_INPUT" as const };
+  const before = {
+    start: windowInstant(windows.before.start, timezone),
+    endExclusive: windowInstant(windows.before.endExclusive, timezone),
+  };
+  const after = {
+    start: windowInstant(windows.after.start, timezone),
+    endExclusive: windowInstant(windows.after.endExclusive, timezone),
+  };
+  if (!(before.start < before.endExclusive && after.start < after.endExclusive)) {
+    return { error: "INVALID_INPUT" as const };
+  }
+  if (before.endExclusive > after.start) return { error: "WINDOWS_NOT_ORDERED" as const };
+  return { before, after };
+}
 
 /** Brand-scoped observation ids. The caller supplies the window instants; ids are not taken from a form. */
 export function windowObservationsQuery(

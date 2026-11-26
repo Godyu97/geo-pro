@@ -5,9 +5,9 @@ import { z } from "zod";
 import { queryWithParameters, type QueryConnection } from "../../lib/db/connection.ts";
 import { triStateSchema } from "../evidence/contracts.ts";
 import { draftContent, primaryTypes } from "../prompts/contracts.ts";
-import { windowBounds } from "../sampling-plans/due-window.ts";
 import { reportTrackSchema, type GenerateReportInput } from "./contracts.ts";
 import { compareWindows } from "./rules.ts";
+import { windowInstant } from "./window-observations.ts";
 
 export const snapshotMetrics = ["mention_rate", "recommendation_rate", "official_site_citation_rate"] as const;
 export type SnapshotMetric = typeof snapshotMetrics[number];
@@ -121,11 +121,6 @@ function scopeOf(row: Observation) {
     product_mode: row.productMode,
     language: row.language,
   };
-}
-
-function windowInstant(value: string, timezone: string) {
-  if (z.iso.date().safeParse(value).success) return Date.parse(windowBounds(value, timezone)?.start ?? "");
-  return Date.parse(value);
 }
 
 function prepareWindow(
