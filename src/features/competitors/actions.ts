@@ -46,21 +46,14 @@ export async function recordMentionsAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   const brandId = String(formData.get("brandId") ?? "");
   const ordered = formData.get("ordered") === "on";
-  const setLabels = formData.getAll("setLabel").map(String);
-  const mentions = setLabels.length > 0
-    ? setLabels.map((label) => {
-      const state = String(formData.get(`state:${label}`) ?? "false");
-      const raw = String(formData.get(`position:${label}`) ?? "").trim();
-      return raw.length > 0
-        ? { label, state, position: Number(raw) }
-        : { label, state };
-    })
-    : formData.getAll("label").map(String).map((label) => {
-      const raw = String(formData.get(`position:${label}`) ?? "").trim();
-      return raw.length > 0
-        ? { label, state: "true" as const, position: Number(raw) }
-        : { label, state: "true" as const };
-    });
+  const mentions = formData.getAll("setLabel").map((item) => {
+    const label = String(item);
+    const state = String(formData.get(`state:${label}`) ?? "");
+    const raw = String(formData.get(`position:${label}`) ?? "").trim();
+    return raw.length > 0
+      ? { label, state, position: Number(raw) }
+      : { label, state };
+  });
   const parsed = recordMentionsSchema.safeParse({
     brandId,
     setId: String(formData.get("setId") ?? ""),
@@ -68,7 +61,7 @@ export async function recordMentionsAction(formData: FormData): Promise<void> {
     ordered,
     mentions,
   });
-  if (!parsed.success) finish(brandId, "INVALID_INPUT");
+  if (!parsed.success || parsed.data.mentions.length === 0) finish(brandId, "INVALID_INPUT");
   const result = await recordCompetitorMentions(getConnection(), session.user.id, parsed.data);
   if ("error" in result) finish(brandId, result.error);
   finish(brandId);

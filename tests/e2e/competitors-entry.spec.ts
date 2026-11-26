@@ -99,10 +99,29 @@ test("competitor analysis stays readable for long names, citations and a missing
     await expect(before.getByRole("cell").nth(3)).toHaveText("0");
     await expect(before.getByRole("cell").nth(4)).toHaveText("0");
 
+    const answer = main.getByLabel("回答", { exact: true });
+    const finding = main.getByLabel(longName, { exact: true });
+    const saveMentions = main.getByRole("button", { name: "保存提及", exact: true });
+    await expect(answer).toHaveValue("");
+    await expect(finding).toHaveValue("");
+    await saveMentions.click();
+    await expect(answer).toBeFocused();
+    await answer.selectOption({ index: 1 });
+    await saveMentions.click();
+    await expect(finding).toBeFocused();
+    await saveMentions.evaluate((button: HTMLButtonElement) => { button.formNoValidate = true; });
+    await saveMentions.click();
+    await expect(page).toHaveURL(/error=INVALID_INPUT/);
+    await expect(before.getByRole("cell").nth(3)).toHaveText("0");
+    await expect(before.getByRole("cell").nth(4)).toHaveText("0");
+    await saveMentions.evaluate((button: HTMLButtonElement) => { button.formNoValidate = false; });
+
     const mention = async () => {
+      await answer.selectOption({ index: 1 });
       await main.getByLabel(shortName, { exact: true }).selectOption("true");
       await main.getByLabel(longName, { exact: true }).selectOption("true");
-      await main.getByRole("button", { name: "保存提及", exact: true }).click();
+      await saveMentions.click();
+      await expect(page).not.toHaveURL(/error=/);
     };
     await mention();
     await mention();
@@ -388,6 +407,7 @@ test("ordered recommendations show appearance, first-place, and conditional mean
     // Unchecked ordered refuses position input
     await main.locator("select[name=observationId]").selectOption(unorderedObs);
     await main.getByLabel("甲", { exact: true }).selectOption("true");
+    await main.getByLabel("乙", { exact: true }).selectOption("false");
     await main.getByLabel("位置 甲", { exact: true }).fill("1");
     await main.getByRole("button", { name: "保存提及", exact: true }).click();
     await expect(main.getByText("输入无效。", { exact: true })).toBeVisible();

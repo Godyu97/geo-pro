@@ -467,24 +467,33 @@ export default async function CompetitorAnalysisPage({
 
       <section className={panelClass}>
         <h2 className="text-lg font-semibold">{t("record")}</h2>
-        {workspace.observations.length === 0 || !workspace.selected ? (
+        {workspace.observations.length === 0 || !workspace.selected?.labels.length ? (
           <p className="text-sm leading-7 text-muted-foreground">{t("noObservations")}</p>
         ) : (
           <form action={recordMentionsAction} className="min-w-0 space-y-3">
             <input type="hidden" name="brandId" value={brandId} />
             <input type="hidden" name="setId" value={workspace.selected.id} />
-            <label className="block min-w-0 text-sm">
-              <span className="mb-1 block text-muted-foreground">{t("observation")}</span>
-              <span className={selectWrap}>
-                <select name="observationId" className="h-10 w-full max-w-full rounded-md border bg-background px-3">
+            <div className="min-w-0 text-sm">
+              <label htmlFor="competitor-observation" className="mb-1 block text-muted-foreground">
+                {t("observation")}
+              </label>
+              <div className={selectWrap}>
+                <select
+                  id="competitor-observation"
+                  name="observationId"
+                  required
+                  defaultValue=""
+                  className="h-10 w-full max-w-full rounded-md border bg-background px-3"
+                >
+                  <option value="" disabled>{t("chooseObservation")}</option>
                   {workspace.observations.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.questionId ? `[${item.questionId}] ${item.questionText}` : `[${t("missingQuestionIdTag")}] ${item.questionText}`}
+                      {t("observationOption", { id: item.id.slice(0, 8), question: item.questionText })}
                     </option>
                   ))}
                 </select>
-              </span>
-            </label>
+              </div>
+            </div>
             <fieldset className="min-w-0 space-y-2">
               <legend className="text-sm text-muted-foreground">{t("brand")}</legend>
               {workspace.selected.labels.map((label) => (
@@ -495,9 +504,11 @@ export default async function CompetitorAnalysisPage({
                     <select
                       name={`state:${label}`}
                       aria-label={label}
-                      defaultValue="false"
-                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                      required
+                      defaultValue=""
+                      className="h-9 max-w-full rounded-md border bg-background px-2 text-sm"
                     >
+                      <option value="" disabled>{t("chooseMentionState")}</option>
                       <option value="false">{t("mentionFalse")}</option>
                       <option value="true">{t("mentionTrue")}</option>
                       <option value="unknown">{t("mentionUnknown")}</option>
