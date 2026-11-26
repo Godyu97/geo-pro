@@ -199,6 +199,9 @@ test("sampling plans show due manual work and budget pauses in both languages", 
 
     const main = page.getByRole("main");
     const processWindow = main.getByRole("button", { name: "处理到期窗口", exact: true });
+    const sheetText = (text: string) => main.getByText(text, { exact: true }).and(main.locator("p"));
+    const version = main.getByRole("combobox", { name: "冻结题集版本", exact: true });
+    const questionChoice = (text: string) => main.getByRole("checkbox", { name: text.replace(/\s+/g, " "), exact: true });
     await main.getByRole("textbox", { name: "时区", exact: true }).fill("Invalid/Timezone");
     await Promise.all([
       page.waitForResponse((res) => res.request().method() === "POST" && res.url().includes("/dashboard/monitoring/plans")),
@@ -208,7 +211,9 @@ test("sampling plans show due manual work and budget pauses in both languages", 
 
     // Reject a request mixing in another brand's question ID.
     await main.getByRole("textbox", { name: "时区", exact: true }).fill("Asia/Shanghai");
-    await main.getByRole("textbox", { name: "人工题单的问题编号", exact: true }).fill(`${questionA} ${foreignId}`);
+    await main.locator('input[name="promptIds"]').evaluate((element, value) => {
+      element.setAttribute("value", value);
+    }, `${questionA} ${foreignId}`);
     await Promise.all([
       page.waitForResponse((res) => res.request().method() === "POST" && res.url().includes("/dashboard/monitoring/plans")),
       processWindow.press("Enter"),
@@ -218,14 +223,22 @@ test("sampling plans show due manual work and budget pauses in both languages", 
     expect((await dueCounts(brandId!)).runs).toEqual([]);
 
     // Generate manual sheet on v2 preserving [questionB, questionA] order.
-    await main.getByRole("textbox", { name: "人工题单的问题编号", exact: true }).fill(`${questionB} ${questionA}`);
+    await version.selectOption(setV1Id);
+    await expect(questionChoice(v1TextA)).toBeVisible();
+    await expect(questionChoice(v2TextB)).toHaveCount(0);
+    await questionChoice(v1TextA).check();
+    await version.selectOption(setV2Id);
+    await expect(questionChoice(v2TextA)).not.toBeChecked();
+    await questionChoice(v2TextB).press("Space");
+    await questionChoice(v2TextA).check();
+    await expect(main.getByRole("status").filter({ hasText: "已选 2 题，最多 10 题。" })).toBeVisible();
     await Promise.all([
       page.waitForResponse((res) => res.request().method() === "POST" && res.url().includes("/dashboard/monitoring/plans")),
       processWindow.press("Enter"),
     ]);
     await expect(main.getByText(`冻结题集版本 2（${setV2Id}）`, { exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(main.getByText(v2TextB, { exact: true })).toBeVisible();
-    await expect(main.getByText(v2TextA, { exact: true })).toBeVisible();
+    await expect(sheetText(v2TextB)).toBeVisible();
+    await expect(sheetText(v2TextA)).toBeVisible();
     await expect(main.getByText("人工，非自动采集", { exact: true })).toHaveCount(2);
     await expect(main.getByText(/人工题单 .+ 已生成，不会记成自动采集。/)).toBeVisible();
     await expect(main.getByText(v1TextA, { exact: true })).toHaveCount(0);
@@ -263,18 +276,18 @@ test("sampling plans show due manual work and budget pauses in both languages", 
 
     await page.reload();
     await expect(main.getByText(`冻结题集版本 2（${setV2Id}）`, { exact: true })).toBeVisible();
-    await expect(main.getByText(v2TextB, { exact: true })).toBeVisible();
-    await expect(main.getByText(v2TextA, { exact: true })).toBeVisible();
-    await expect(main.getByText(v3TextA, { exact: true })).toHaveCount(0);
+    await expect(sheetText(v2TextB)).toBeVisible();
+    await expect(sheetText(v2TextA)).toBeVisible();
+    await expect(sheetText(v3TextA)).toHaveCount(0);
 
     // Re-running the old slot adds no sheet or monitoring run.
-    await main.getByRole("textbox", { name: "人工题单的问题编号", exact: true }).fill(questionC);
+    await questionChoice(v3TextC).check();
     await Promise.all([
       page.waitForResponse((res) => res.request().method() === "POST" && res.url().includes("/dashboard/monitoring/plans")),
       main.getByRole("button", { name: "处理到期窗口", exact: true }).click(),
     ]);
-    await expect(main.getByText(v2TextA, { exact: true })).toBeVisible();
-    await expect(main.getByText(v3TextA, { exact: true })).toHaveCount(0);
+    await expect(sheetText(v2TextA)).toBeVisible();
+    await expect(sheetText(v3TextA)).toHaveCount(0);
     const second = await dueCounts(brandId!);
     expect(second.runs).toEqual([{ kind: "manual", count: 1 }]);
     expect(second.attempts).toBe(0);
@@ -320,11 +333,12 @@ test("sampling plans show due manual work and budget pauses in both languages", 
 
     await page.reload();
     const v3Section = main.locator(`section[aria-labelledby="plan-${v3Plan.id}"]`);
-    await v3Section.getByRole("textbox", { name: "人工题单的问题编号", exact: true }).fill(`${questionC} ${questionA}`);
+    await v3Section.getByRole("checkbox", { name: v3TextC, exact: true }).check();
+    await v3Section.getByRole("checkbox", { name: v3TextA, exact: true }).check();
     await v3Section.getByRole("button", { name: "处理到期窗口", exact: true }).click();
     await expect(main.getByText(`冻结题集版本 3（${setV3Id}）`, { exact: true })).toBeVisible();
-    await expect(main.getByText(v3TextC, { exact: true })).toBeVisible();
-    await expect(main.getByText(v3TextA, { exact: true })).toBeVisible();
+    await expect(sheetText(v3TextC)).toBeVisible();
+    await expect(sheetText(v3TextA)).toBeVisible();
     const v2SectionText = await main.locator(`section[aria-labelledby="plan-${plan.id}"]`).innerText();
     expect(v2SectionText.indexOf(v2TextB)).toBeLessThan(v2SectionText.indexOf(v2TextA));
     const v3SectionText = await v3Section.innerText();
@@ -356,7 +370,8 @@ test("sampling plans show due manual work and budget pauses in both languages", 
     ]) {
       await context.addCookies([{ name: "geo-locale", value: locale, url: baseURL }]);
       await page.reload();
-      const slots = main.getByRole("region", { name: schedule, exact: true }).first();
+      const slots = main.locator(`section[aria-labelledby="plan-${plan.id}"]`)
+        .getByRole("region", { name: schedule, exact: true });
       for (const width of [1440, 768, 375]) {
         await page.setViewportSize({ width, height: 800 });
         await expect(main).toHaveCount(1);
@@ -368,10 +383,10 @@ test("sampling plans show due manual work and budget pauses in both languages", 
         await expect(main.getByText(v3Version, { exact: true })).toBeVisible();
         await expect(main.getByText(unverifiedHeader, { exact: true })).toBeVisible();
         await expect(main.getByText(unverifiedLine, { exact: true })).toHaveCount(2);
-        await expect(main.getByText(v2TextA, { exact: true })).toHaveCSS("white-space", "pre-wrap");
-        await expect(main.getByText(v2TextB, { exact: true })).toBeVisible();
-        await expect(main.getByText(v3TextC, { exact: true })).toBeVisible();
-        await expect(main.getByText(v3TextA, { exact: true })).toBeVisible();
+        await expect(sheetText(v2TextA)).toHaveCSS("white-space", "pre-wrap");
+        await expect(sheetText(v2TextB)).toBeVisible();
+        await expect(sheetText(v3TextC)).toBeVisible();
+        await expect(sheetText(v3TextA)).toBeVisible();
         await expect(main.getByText(manualLabel, { exact: true })).toHaveCount(6);
         await expect(main.getByText(v1TextA, { exact: true })).toHaveCount(0);
         await expect(main.getByText(foreignText, { exact: true })).toHaveCount(0);

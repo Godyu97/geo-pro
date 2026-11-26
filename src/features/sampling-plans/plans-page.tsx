@@ -6,7 +6,7 @@ import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
-import { getLocale, getTranslator } from "@/lib/i18n/server";
+import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts";
 import { BrandDao } from "../brands/dao";
 import { PromptDao } from "../prompts/dao";
@@ -23,6 +23,7 @@ import {
 import { listSamplingPlans } from "./commands";
 import type { SamplingPlanView } from "./commands";
 import { listAttachableOfficialRuns, listSamplingDueWindows, manualSheetsForBrand, readSamplingWindowDetail } from "./due-commands";
+import { ManualSheetQuestions } from "./manual-sheet-questions";
 
 const fieldClass = "h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const knownErrors = ["PLAN_PHASE_CONFLICT", "NOT_FOUND", "INVALID_INPUT", "EXISTING_RUN_REJECTED", "VERSION_CONFLICT"] as const;
@@ -299,8 +300,15 @@ export default async function SamplingPlansPage({
   const sheets = await manualSheetsForBrand(connection, active.id, due.runs);
   const sheetByRun = new Map(sheets.map((sheet) => [sheet.runId, sheet]));
   const promptVersions = plans.some((plan) => plan.phase === "active")
-    ? (await new PromptDao(connection, active.id).versions()).slice(0, 20)
+    ? (await new PromptDao(connection, active.id).versions()).slice(0, 20).map((set) => ({
+      id: set.id,
+      version: set.version,
+      questions: set.content.questions
+        .filter((question) => question.status === "confirmed")
+        .map(({ id, text }) => ({ id, text })),
+    }))
     : [];
+  const { promptSetVersion, promptSetOption, manualSheetQuestions, manualSheetSelection, manualSheetNoQuestions } = getMessages(locale).samplingPlans;
   const attachable = await listAttachableOfficialRuns(connection, session.user.id, active.id);
 
   return (
@@ -463,10 +471,6 @@ export default async function SamplingPlansPage({
                   <input name="degradeChannelId" maxLength={64} className={fieldClass} />
                 </label>
                 <label className="text-sm sm:col-span-2">
-                  <span className="mb-1 block text-muted-foreground">{t("promptIds")}</span>
-                  <input name="promptIds" className={fieldClass} />
-                </label>
-                <label className="text-sm sm:col-span-2">
                   <span className="mb-1 block text-muted-foreground">{t("existingRun")}</span>
                   <select name="existingRunId" defaultValue="" className={fieldClass}>
                     <option value="">{t("existingRunNone")}</option>
@@ -485,16 +489,8 @@ export default async function SamplingPlansPage({
                   <span className="mt-1 block text-xs text-muted-foreground">{t("existingRunHint")}</span>
                 </label>
                 {promptVersions.length > 0 ? (
-                  <label className="text-sm sm:col-span-2">
-                    <span className="mb-1 block text-muted-foreground">{t("promptSetVersion")}</span>
-                    <select key={promptVersions[0]?.id} name="promptSetId" defaultValue={promptVersions[0]?.id} className={fieldClass}>
-                      {promptVersions.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {t("promptSetOption", { version: formatNumber(locale, item.version), id: item.id })}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <ManualSheetQuestions key={promptVersions[0]?.id} versions={promptVersions} locale={locale} fieldClass={fieldClass}
+                    messages={{ promptSetVersion, promptSetOption, manualSheetQuestions, manualSheetSelection, manualSheetNoQuestions }} />
                 ) : (
                   <p className="text-sm text-muted-foreground sm:col-span-2">{t("noPromptSet")}</p>
                 )}

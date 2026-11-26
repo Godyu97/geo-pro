@@ -90,6 +90,8 @@ export function pauseUnaffordableSlots(
   return { slots: next, pausedIds, remaining };
 }
 
+export const manualSheetQuestionLimit = 10;
+
 /** Consumer sheets are manual work. They never claim the consumer channel was collected automatically. */
 export function consumerSheet(promptIds: readonly string[]) {
   return {

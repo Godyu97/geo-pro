@@ -2,7 +2,7 @@ import { z } from "zod";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { minorAmountSchema, quotaCurrencySchema } from "../quotas/contracts.ts";
 import { isTimeZone } from "./due-window.ts";
-import type { PlanPhase, SamplingSlotStatus } from "./rules.ts";
+import { manualSheetQuestionLimit, type PlanPhase, type SamplingSlotStatus } from "./rules.ts";
 
 export const trendThresholdPpSchema = z.number().finite().positive();
 
@@ -84,7 +84,7 @@ export const driveDueWindowSchema = z.strictObject({
     channelId: channelIdSchema,
     state: dueChannelStateSchema,
   })).max(32),
-  promptIds: z.array(brandIdSchema).max(10),
+  promptIds: z.array(brandIdSchema).max(manualSheetQuestionLimit),
   promptSetId: brandIdSchema.optional(),
   existingRunId: brandIdSchema.optional(),
 });
