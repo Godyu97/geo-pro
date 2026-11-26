@@ -197,6 +197,29 @@ await writeFile(briefCommands, (await readFile(briefCommands, "utf8")).replace(p
   }
   const dao = new ContentDao(db);`));
 
+// Supply known webpage observations only inside the isolated browser app.
+const publicPageFetch = path.join(fixture, "src/lib/http/public-page-fetch.ts");
+const publicPageFetchSource = await readFile(publicPageFetch, "utf8");
+const fetchEntry = "export async function fetchPublicPage(";
+assert.ok(publicPageFetchSource.includes(fetchEntry));
+await writeFile(publicPageFetch, publicPageFetchSource.replace(fetchEntry, "async function fetchFromNetwork(") + `
+export async function fetchPublicPage(rawUrl: string, options?: FetchOptions): Promise<PublicPageFetchOutcome> {
+  const url = new URL(rawUrl);
+  if (url.origin === "https://content-publication.example.com") {
+    const { cookies } = await import("next/headers");
+    const httpStatus = (await cookies()).get("geo-publication-restricted")?.value === "1" ? 401 : 200;
+    const body = "<title>合成报价</title><p>合成说明售价 100 CNY</p>";
+    return { ok: true, ...classifyFetchedDocument({ pathname: url.pathname, httpStatus, body }) };
+  }
+  if (url.origin === "https://beian-equipment.example.com" && ["/draft", "/published"].includes(url.pathname)) {
+    const body = "<p>支持离线巡检。合成产品说明，不得用于真实营销。</p><p>价格按门店数报价。合成报价说明，不得用于真实营销。</p><p>服务范围覆盖示例门店。合成日期说明，不得用于真实营销。</p>";
+    return { ok: true, ...classifyFetchedDocument({ pathname: url.pathname, httpStatus: 200, body }) };
+  }
+  return fetchFromNetwork(rawUrl, options);
+}
+`);
+process.env.GEO_PUBLIC_PAGE_FETCH = "true";
+
 const variantRead = `export async function readChannelVariants(
   db: DatabaseConnection,
   ownerId: string,

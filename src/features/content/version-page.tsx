@@ -513,28 +513,6 @@ export default async function ContentVersionPage({
               <span className="mb-1 block text-muted-foreground">{t("channelDeclaration")}</span>
               <input name="channelDeclaration" required className={inputClass} />
             </label>
-            <label className="block min-w-0 text-sm">
-              <span className="mb-1 block text-muted-foreground">{t("accessClass")}</span>
-              <select name="accessClass" className={inputClass} defaultValue="">
-                <option value="">{t("skipFixture")}</option>
-                <option value="public">public</option>
-                <option value="login_wall">login_wall</option>
-                <option value="draft_box">draft_box</option>
-                <option value="removed">removed</option>
-              </select>
-            </label>
-            <label className="block min-w-0 text-sm">
-              <span className="mb-1 block text-muted-foreground">{t("httpStatus")}</span>
-              <input name="httpStatus" type="number" defaultValue={200} className={inputClass} />
-            </label>
-            <label className="block min-w-0 text-sm sm:col-span-2">
-              <span className="mb-1 block text-muted-foreground">{t("fixtureTitle")}</span>
-              <input name="fixtureTitle" className={inputClass} />
-            </label>
-            <label className="block min-w-0 text-sm sm:col-span-2">
-              <span className="mb-1 block text-muted-foreground">{t("fixtureBody")}</span>
-              <textarea name="fixtureBody" rows={5} className={areaClass} />
-            </label>
             <div className="sm:col-span-2">
               <Button type="submit" className={actionClass}>{t("submitPublication")}</Button>
             </div>

@@ -2232,7 +2232,7 @@ async function applyPublicCheck(
 export async function submitPublication(
   db: DatabaseConnection,
   ownerId: string,
-  input: SubmitPublicationInput,
+  input: SubmitPublicationInput & { fixturePage?: FixturePage },
   clock: Clock = () => new Date().toISOString(),
 ) {
   return catchMaintenance(locked(db, ownerId, async (transaction) => {
@@ -2310,7 +2310,7 @@ export async function submitPublication(
 export async function verifyPublication(
   db: DatabaseConnection,
   ownerId: string,
-  input: VerifyPublicationInput,
+  input: VerifyPublicationInput & { fixturePage?: FixturePage },
   clock: Clock = () => new Date().toISOString(),
   fetchPage: PublicPageFetcher = fetchPublicPage,
 ) {

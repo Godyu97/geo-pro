@@ -108,41 +108,13 @@ function PublicCheckForm({
   liveFetchEnabled: boolean;
 }) {
   return (
-    <form action={verifyPublicationAction} className="grid min-w-0 max-w-full gap-3 sm:grid-cols-2">
+    <form action={verifyPublicationAction} className="min-w-0 max-w-full space-y-3">
       <input type="hidden" name="brandId" value={publication.brandId} />
       <input type="hidden" name="publicationId" value={publication.id} />
-      <div className="sm:col-span-2">
-        <Button type="submit" className={actionClass}>{t("runPublicCheck")}</Button>
-      </div>
-      <p className="break-words text-sm leading-6 text-muted-foreground sm:col-span-2">{t("fixtureHint")}</p>
-      <p className="break-words text-sm leading-6 text-muted-foreground sm:col-span-2">
+      <Button type="submit" disabled={!liveFetchEnabled} className={actionClass}>{t("runPublicCheck")}</Button>
+      <p className="break-words text-sm leading-6 text-muted-foreground">
         {liveFetchEnabled ? t("liveFetchEnabled") : t("liveFetchDisabled")}
       </p>
-      <label className="flex min-w-0 items-start gap-2 text-sm sm:col-span-2">
-        <input name="useLiveFetch" type="checkbox" value="true" className="mt-1" />
-        <span className="break-words">{t("useLiveFetch")}</span>
-      </label>
-      <label className="block min-w-0 text-sm">
-        <span className="mb-1 block text-muted-foreground">{t("accessClass")}</span>
-        <select name="accessClass" className={inputClass} defaultValue="public">
-          <option value="public">public</option>
-          <option value="login_wall">login_wall</option>
-          <option value="draft_box">draft_box</option>
-          <option value="removed">removed</option>
-        </select>
-      </label>
-      <label className="block min-w-0 text-sm">
-        <span className="mb-1 block text-muted-foreground">{t("httpStatus")}</span>
-        <input name="httpStatus" type="number" defaultValue={200} className={inputClass} />
-      </label>
-      <label className="block min-w-0 text-sm sm:col-span-2">
-        <span className="mb-1 block text-muted-foreground">{t("fixtureTitle")}</span>
-        <input name="fixtureTitle" className={inputClass} />
-      </label>
-      <label className="block min-w-0 text-sm sm:col-span-2">
-        <span className="mb-1 block text-muted-foreground">{t("fixtureBody")}</span>
-        <textarea name="fixtureBody" rows={6} className={areaClass} />
-      </label>
     </form>
   );
 }

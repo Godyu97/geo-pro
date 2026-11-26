@@ -489,8 +489,7 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     expect(pack.status()).toBe(200);
     expect(await pack.text()).toContain(facts[0][2]);
 
-    const publishedBody = await page.getByRole("textbox", { name: "正文（Markdown）", exact: true }).inputValue();
-    async function publish(path: string, accessClass: string, body: string) {
+    async function publish(path: string) {
       await page.goto(versionUrl);
       await expect(page.getByRole("heading", { name: "发布回填与核验", exact: true })).toBeVisible();
       const textbox = (name: string) => page.getByRole("textbox", { name, exact: true });
@@ -498,15 +497,14 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
       await textbox("目标账号 / 页面归属").fill("fixture-owner");
       await textbox("用户申报发布时间").fill("2026-11-18T02:00:00.000Z");
       await textbox("渠道声明确认").fill("隔离验收，不是真实发布");
-      await choose(page, "访问类别", accessClass);
-      await textbox("页面正文（fixture）").fill(body);
       await page.getByRole("button", { name: "提交发布回填", exact: true }).click();
+      await page.getByRole("button", { name: "运行公开核验", exact: true }).click();
     }
-    await publish("/draft", "draft_box", "草稿链接，不能算公开发布");
+    await publish("/draft");
     await expect(page.getByText("draft_only", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("无（草稿/受限不计生效）")).toBeVisible();
     await page.goto(versionUrl);
-    await publish("/published", "public", publishedBody);
+    await publish("/published");
     await expect(page.getByText("verified_public", { exact: true }).first()).toBeVisible();
     const publicationId = page.url().match(/\/publications\/([0-9a-f-]{36})/)?.[1];
     const effectiveAt = (await page.locator("body").innerText()).match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/)?.[0];

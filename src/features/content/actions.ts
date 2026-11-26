@@ -325,16 +325,6 @@ export async function submitPublicationAction(formData: FormData): Promise<void>
   const session = await requireSession();
   const versionId = String(formData.get("versionId") ?? "");
   const predecessorId = String(formData.get("predecessorId") ?? "").trim();
-  const accessClass = String(formData.get("accessClass") ?? "");
-  const fixturePage = accessClass
-    ? {
-      accessClass,
-      httpStatus: Number(formData.get("httpStatus") ?? 200),
-      title: String(formData.get("fixtureTitle") ?? ""),
-      bodyText: String(formData.get("fixtureBody") ?? ""),
-      pageMarker: String(formData.get("pageMarker") ?? "") || undefined,
-    }
-    : undefined;
   const parsed = submitPublicationSchema.safeParse({
     action: "submit-publication",
     brandId: String(formData.get("brandId") ?? ""),
@@ -346,7 +336,6 @@ export async function submitPublicationAction(formData: FormData): Promise<void>
     publisherId: String(formData.get("publisherId") ?? session.user.id),
     claimedPublishedAt: String(formData.get("claimedPublishedAt") ?? ""),
     channelDeclaration: String(formData.get("channelDeclaration") ?? ""),
-    ...(fixturePage ? { fixturePage } : {}),
   });
   if (!parsed.success) {
     if (submitPublicationSchema.shape.versionId.safeParse(versionId).success) {
@@ -363,21 +352,11 @@ export async function submitPublicationAction(formData: FormData): Promise<void>
 export async function verifyPublicationAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   const publicationId = String(formData.get("publicationId") ?? "");
-  const useLiveFetch = String(formData.get("useLiveFetch") ?? "") === "true";
   const parsed = verifyPublicationSchema.safeParse({
     action: "verify-publication",
     brandId: String(formData.get("brandId") ?? ""),
     operationId: randomUUID(),
     publicationId,
-    ...(useLiveFetch ? {} : {
-      fixturePage: {
-        accessClass: String(formData.get("accessClass") ?? ""),
-        httpStatus: Number(formData.get("httpStatus") ?? 200),
-        title: String(formData.get("fixtureTitle") ?? ""),
-        bodyText: String(formData.get("fixtureBody") ?? ""),
-        pageMarker: String(formData.get("pageMarker") ?? "") || undefined,
-      },
-    }),
   });
   if (!parsed.success) return;
   const result = await verifyPublication(getConnection(), session.user.id, parsed.data);

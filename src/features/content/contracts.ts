@@ -94,15 +94,6 @@ export const publicationActionKindSchema = z.enum(publicationActionKinds);
 export const publicationActionStatuses = ["open", "done", "cancelled"] as const;
 export const publicationActionStatusSchema = z.enum(publicationActionStatuses);
 
-export const fixturePageSchema = z.strictObject({
-  accessClass: z.enum(["public", "login_wall", "draft_box", "removed"]),
-  httpStatus: z.int().min(100).max(599),
-  title: z.string().max(500),
-  bodyText: z.string().max(100_000),
-  pageMarker: z.string().max(500).optional(),
-});
-export type FixturePageInput = z.infer<typeof fixturePageSchema>;
-
 export const contentErrors = {
   SESSION_REQUIRED: 401,
   FORBIDDEN: 403,
@@ -325,7 +316,6 @@ export const submitPublicationSchema = z.strictObject({
   publisherId: z.string().trim().min(1).max(200),
   claimedPublishedAt: z.iso.datetime({ precision: 3 }),
   channelDeclaration: z.string().trim().min(1).max(500),
-  fixturePage: fixturePageSchema.optional(),
 });
 export type SubmitPublicationInput = z.infer<typeof submitPublicationSchema>;
 
@@ -334,7 +324,6 @@ export const verifyPublicationSchema = z.strictObject({
   brandId: brandIdSchema,
   operationId: brandIdSchema,
   publicationId: brandIdSchema,
-  fixturePage: fixturePageSchema.optional(),
 });
 export type VerifyPublicationInput = z.infer<typeof verifyPublicationSchema>;
 

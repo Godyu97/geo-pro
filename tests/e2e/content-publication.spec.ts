@@ -13,11 +13,10 @@ const claimedAt = "2026-11-20T10:00:00.000Z";
 const copy = {
   "zh-CN": {
     title: "发布核验详情",
-    checkTask: "这是发布回填，还不是公开核验。先运行公开核验。HTTP 成功本身不会写成已生效。",
+    checkTask: "已登记发布，等待核验页面是否公开且与批准内容一致。",
     limitedTask: "页面受限，不能按公开发布成功处理，也没有生效时间。下一步是提交人工证据。",
-    check: "运行公开核验（隔离页）",
+    check: "运行公开核验",
     manual: "提交人工证据",
-    accessClass: "访问类别",
     url: "公开 URL",
     version: "关联稿件",
     none: "无（草稿/受限不计生效）",
@@ -33,11 +32,10 @@ const copy = {
   },
   en: {
     title: "Publication verification",
-    checkTask: "This is a publication backfill, not a public verification. Run the public check first. HTTP success alone does not set an effective time.",
+    checkTask: "Publication recorded. Verify that the page is public and matches the approved content.",
     limitedTask: "This page is restricted. It is not a successful public release and has no effective time. Submit manual evidence next.",
-    check: "Run public check (fixture page)",
+    check: "Run public check",
     manual: "Submit manual evidence",
-    accessClass: "Access class",
     url: "Public URL",
     version: "Content version",
     none: "None (draft/restricted pages never set it)",
@@ -166,16 +164,27 @@ test("publication backfill keeps the next check readable and recoverable", async
     });
     expect(approved.ok(), approved.ok() ? "" : await approved.text()).toBeTruthy();
     const ownerId = accounts[0]?.userId ?? "";
-    const published = await context.request.post("/api/content", {
-      headers: { Origin: origin },
-      data: {
-        action: "submit-publication", brandId, operationId: randomUUID(), versionId,
-        targetAccount: "合成账号", pageUrl: longUrl, publisherId: ownerId,
-        claimedPublishedAt: claimedAt, channelDeclaration: "合成渠道，仅隔离验收",
-      },
-    });
+    const contentCommand = (data: object) => context.request.post("/api/content", { headers: { Origin: origin }, data });
+    const backfillInput = {
+      action: "submit-publication", brandId, operationId: randomUUID(), versionId,
+      targetAccount: "合成账号", pageUrl: longUrl, publisherId: ownerId,
+      claimedPublishedAt: claimedAt, channelDeclaration: "合成渠道，仅隔离验收",
+    };
+    const clientObservation = { accessClass: "public", httpStatus: 200, title: "合成报价", bodyText: factFields.claim };
+    const rejectedBackfill = await contentCommand({ ...backfillInput, fixturePage: clientObservation });
+    expect(rejectedBackfill.status()).toBe(400);
+    const published = await contentCommand(backfillInput);
     expect(published.ok(), published.ok() ? "" : await published.text()).toBeTruthy();
-    const publicationId = (await published.json()).publicationId as string;
+    const publishedBody = await published.json();
+    expect(publishedBody).toMatchObject({ status: "submitted", effectiveAt: null, replayed: false });
+    const publicationId = publishedBody.publicationId as string;
+    const verifyInput = (id: string) => ({
+      action: "verify-publication", brandId, publicationId: id, operationId: randomUUID(),
+    });
+    const rejectedCheck = await contentCommand({ ...verifyInput(publicationId), fixturePage: clientObservation });
+    expect(rejectedCheck.status()).toBe(400);
+    const pending = await context.request.get(`/api/content/publications/${publicationId}`);
+    expect((await pending.json()).checks).toEqual([]);
     expect(publicationId).toMatch(/^[0-9a-f-]{36}$/);
     const href = `/dashboard/content/publications/${publicationId}`;
 
@@ -192,6 +201,7 @@ test("publication backfill keeps the next check readable and recoverable", async
         await expect(main.getByText(current.checkTask, { exact: true })).toBeVisible();
         const check = main.getByRole("button", { name: current.check, exact: true });
         await expect(check).toHaveCount(1);
+        await expect(main.locator('[name="useLiveFetch"], [name="fixtureBody"], [name="accessClass"]')).toHaveCount(0);
         await expect(main.getByRole("button", { name: current.manual, exact: true })).toHaveCount(0);
         await expect(main.getByText("submitted", { exact: true })).toBeVisible();
         await expect(main.getByText(current.none, { exact: true })).toBeVisible();
@@ -208,10 +218,12 @@ test("publication backfill keeps the next check readable and recoverable", async
     }
 
     await page.setViewportSize({ width: 375, height: 800 });
-    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await context.addCookies([
+      { name: "geo-locale", value: "zh-CN", url: origin },
+      { name: "geo-publication-restricted", value: "1", url: origin },
+    ]);
     await page.goto(href);
     await page.evaluate(() => window.scrollTo(0, 0));
-    await page.getByRole("combobox", { name: copy["zh-CN"].accessClass }).selectOption("login_wall");
     await activateFromKeyboard(page, page.getByRole("main").getByRole("button", { name: copy["zh-CN"].check, exact: true }));
     await page.evaluate(() => window.scrollTo(0, 0));
     await expect(page.getByRole("main").getByText("access_limited", { exact: true })).toBeVisible();
@@ -276,18 +288,18 @@ test("publication backfill keeps the next check readable and recoverable", async
     await expectNoOverflow(stranger);
     await stranger.screenshot({ path: `${shots}/content-publication-hidden-en-375.png`, fullPage: false });
 
-    const contentCommand = (data: object) => context.request.post("/api/content", { headers: { Origin: origin }, data });
-    const checkPublic = (id: string) => contentCommand({
-      action: "verify-publication", brandId, publicationId: id, operationId: randomUUID(),
-      fixturePage: { accessClass: "public", httpStatus: 200, title: "合成报价", bodyText: factFields.claim },
-    });
     const readRecord = async (id: string) => {
       const result = await context.request.get(`/api/content/publications/${id}`);
       expect(result.ok(), result.ok() ? "" : await result.text()).toBeTruthy();
       return (await result.json()).publication;
     };
-    const verified = await checkPublic(publicationId);
+    await context.clearCookies({ name: "geo-publication-restricted" });
+    const verified = await contentCommand(verifyInput(publicationId));
     expect(verified.ok(), verified.ok() ? "" : await verified.text()).toBeTruthy();
+    const checked = await context.request.get(`/api/content/publications/${publicationId}`);
+    const { checks } = await checked.json();
+    const publicCheck = checks.find((check: { resultStatus: string }) => check.resultStatus === "verified_public");
+    expect(JSON.parse(publicCheck.evidenceJson)).toMatchObject({ source: "public_fetch" });
     const original = await readRecord(publicationId);
     expect(original).toMatchObject({ status: "verified_public", evidenceGrade: "public", supersededBy: null });
     expect(original.effectiveAt).toEqual(expect.any(String));
@@ -300,12 +312,15 @@ test("publication backfill keeps the next check readable and recoverable", async
         const predecessor = page.getByRole("combobox", { name: copy[locale].predecessorField });
         await expect(predecessor).toBeVisible();
         await expect(predecessor).toHaveValue("");
-        await expect(page.locator(`#publication-predecessors option[value="${publicationId}"]`)).toHaveAttribute("label", new RegExp("合成账号"));
+        const previousOption = page.getByRole("main").locator(`#publication-predecessors option[value="${publicationId}"]`);
+        await expect(previousOption).toHaveCount(1);
+        await expect(previousOption).toHaveAttribute("label", /合成账号/);
         await expectNoOverflow(page);
       }
     }
     await page.setViewportSize({ width: 375, height: 800 });
-    const backfill = page.locator("#publication-backfill");
+    const backfill = page.getByRole("main").locator("#publication-backfill");
+    await expect(backfill.locator('[name="fixtureBody"], [name="accessClass"]')).toHaveCount(0);
     await backfill.getByLabel(copy.en.url, { exact: true }).fill(longUrl);
     await backfill.getByLabel("Target account / page ownership").fill("合成账号");
     await backfill.getByLabel("User-claimed publish time").fill(claimedAt);
@@ -323,10 +338,8 @@ test("publication backfill keeps the next check readable and recoverable", async
     expect(await readRecord(updateId)).toMatchObject({ predecessorId: publicationId, status: "submitted", effectiveAt: null });
     expect(await readRecord(publicationId)).toMatchObject({ supersededBy: null, effectiveAt: original.effectiveAt });
 
-    const restricted = await contentCommand({
-      action: "verify-publication", brandId, publicationId: updateId, operationId: randomUUID(),
-      fixturePage: { accessClass: "login_wall", httpStatus: 200, title: "合成报价", bodyText: factFields.claim },
-    });
+    await context.addCookies([{ name: "geo-publication-restricted", value: "1", url: origin }]);
+    const restricted = await contentCommand(verifyInput(updateId));
     expect(restricted.ok(), restricted.ok() ? "" : await restricted.text()).toBeTruthy();
     expect(await readRecord(updateId)).toMatchObject({ status: "access_limited", effectiveAt: null });
     expect(await readRecord(publicationId)).toMatchObject({ supersededBy: null, effectiveAt: original.effectiveAt });
