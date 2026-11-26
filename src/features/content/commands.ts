@@ -944,15 +944,15 @@ export async function readPlan(
   brandId: string,
   planId: string,
 ) {
-  const adopted = await adoptOwner(db, ownerId, brandId, "read");
+  const adopted = await authorizeBrandActor(db, ownerId, brandId, "read");
   if (!adopted) return denied("NOT_FOUND");
-  ownerId = adopted;
+  ownerId = adopted.ownerId;
   const dao = new ContentDao(db);
   const plan = await dao.getPlan(ownerId, brandId, planId);
   if (!plan) return denied("NOT_FOUND");
   const [briefs, ownedCitations, publications] = await Promise.all([
     dao.listBriefsByPlan(ownerId, brandId, planId, 100),
-    dao.listOwnedPageCitations(ownerId, brandId, 200),
+    adopted.role === "read_only" ? [] : dao.listOwnedPageCitations(ownerId, brandId, 200),
     dao.listClusterPublications(ownerId, brandId, 200),
   ]);
   const versionsByBrief = await dao.latestBriefVersionsByBriefIds(
@@ -987,9 +987,9 @@ export async function listBriefs(
   limit = 20,
   now = new Date().toISOString(),
 ) {
-  const adopted = await adoptOwner(db, ownerId, brandId, "read", now);
+  const adopted = await authorizeBrandActor(db, ownerId, brandId, "read", now);
   if (!adopted) return denied("NOT_FOUND");
-  ownerId = adopted;
+  ownerId = adopted.ownerId;
   const brands = new BrandDao(db);
   const brand = await brands.owned(ownerId, brandId);
   if (!brand) return denied("NOT_FOUND");
@@ -997,7 +997,7 @@ export async function listBriefs(
   const [briefs, plans, ownedCitations, publications] = await Promise.all([
     dao.listBriefs(ownerId, brandId, limit),
     dao.listPlans(ownerId, brandId, limit),
-    dao.listOwnedPageCitations(ownerId, brandId, 200),
+    adopted.role === "read_only" ? [] : dao.listOwnedPageCitations(ownerId, brandId, 200),
     dao.listClusterPublications(ownerId, brandId, 200),
   ]);
   const versionsByBrief = await dao.latestBriefVersionsByBriefIds(

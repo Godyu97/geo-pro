@@ -14,6 +14,7 @@ import {
   type IngestAdoptedInput,
   type ReviseAnalysisInput,
   type SubmitManualInput,
+  type UpdateCitationInput,
   canAppendReferenceLink,
   isNativeCitationOrigin,
   isReferenceLinkOrigin,
@@ -563,6 +564,76 @@ export async function appendReferenceLink(
   return releaseOverview(ownerId, input.brandId, result, cache);
 }
 
+function citationUpdateFingerprint(input: UpdateCitationInput) {
+  return operationFingerprint({
+    action: input.action,
+    brandId: input.brandId,
+    observationId: input.observationId,
+    citationId: input.citationId,
+    ownership: input.ownership,
+    pageStatus: input.pageStatus,
+  });
+}
+
+export async function updateCitationOwnership(
+  db: DatabaseConnection,
+  actorId: string,
+  input: UpdateCitationInput,
+  clock: Clock = () => new Date().toISOString(),
+  cache?: CacheStore,
+) {
+  const operationKey = `update-citation:${input.operationId}`;
+  const fingerprint = citationUpdateFingerprint(input);
+  function replay(storedFingerprint: string) {
+    if (storedFingerprint !== fingerprint) return denied("OPERATION_CONFLICT");
+    return {
+      citation: { id: input.citationId, ownership: input.ownership, pageStatus: input.pageStatus },
+      replayed: true as const,
+    };
+  }
+
+  let outcome;
+  try {
+    outcome = await db.transaction(async (tx) => {
+      const access = await authorizeBrandActor(tx, actorId, input.brandId, "write", clock());
+      if (!access) return denied("NOT_FOUND");
+
+      const dao = new EvidenceDao(tx);
+      const existing = await dao.operationRecord(actorId, operationKey);
+      if (existing) return replay(existing.fingerprint);
+
+      const observation = await dao.lockObservation(access.ownerId, input.observationId);
+      if (!observation || observation.brandId !== input.brandId) return denied("NOT_FOUND");
+
+      const citation = await dao.updateNativeCitationStatus({
+        id: input.citationId,
+        observationId: observation.id,
+        brandId: input.brandId,
+        ownership: input.ownership,
+        pageStatus: input.pageStatus,
+      });
+      if (!citation) {
+        const exists = await dao.citationExists(observation.id, input.brandId, input.citationId);
+        return denied(exists ? "INVALID_INPUT" : "NOT_FOUND");
+      }
+
+      const now = clock();
+      await dao.recordOperation(actorId, operationKey, fingerprint, null, now, input.brandId);
+      await dao.recordCitationRevision(access.ownerId, input.brandId, randomUUID(), now);
+      return { citation, replayed: false as const, ownerId: access.ownerId };
+    });
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    if (!await authorizeBrandActor(db, actorId, input.brandId, "write", clock())) return denied("NOT_FOUND");
+    const existing = await new EvidenceDao(db).operationRecord(actorId, operationKey);
+    if (!existing) throw error;
+    return replay(existing.fingerprint);
+  }
+  if (!("ownerId" in outcome)) return outcome;
+  await invalidateEvidenceOverview(outcome.ownerId, input.brandId, cache ?? openCache());
+  return { citation: outcome.citation, replayed: outcome.replayed };
+}
+
 export async function readManualEvidenceContext(
   db: DatabaseConnection,
   ownerId: string,
@@ -660,7 +731,7 @@ export async function readObservation(
   const identity = await dao.observationIdentity(observationId);
   if (!identity) return null;
   const adopted = await authorizeBrandActor(db, ownerId, identity.brandId, "read");
-  if (!adopted || adopted.ownerId !== identity.ownerId) return null;
+  if (!adopted || adopted.role === "read_only" || adopted.ownerId !== identity.ownerId) return null;
   ownerId = adopted.ownerId;
   const observation = await dao.observationForOwner(ownerId, observationId);
   if (!observation) return null;
@@ -689,7 +760,7 @@ export async function readObservationBySlot(
   slotId: string,
 ) {
   const adopted = await authorizeBrandActor(db, ownerId, brandId, "read");
-  if (!adopted) return null;
+  if (!adopted || adopted.role === "read_only") return null;
   ownerId = adopted.ownerId;
   const dao = new EvidenceDao(db);
   const observation = await dao.observationBySlot(ownerId, brandId, slotId);

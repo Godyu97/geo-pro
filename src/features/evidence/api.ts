@@ -15,6 +15,7 @@ import {
   completeManualEvidence,
   reviseAnalysis,
   submitManualEvidence,
+  updateCitationOwnership,
 } from "./commands";
 import { evidenceErrors, evidenceWriteSchema, type EvidenceError } from "./contracts";
 
@@ -65,7 +66,9 @@ export async function evidenceWriteResponse(request: Request) {
           ? await completeManualEvidence(connection, ownerId, parsed.data)
           : parsed.data.action === "revise-analysis"
             ? await reviseAnalysis(connection, ownerId, parsed.data)
-            : await appendReferenceLink(connection, ownerId, parsed.data);
+            : parsed.data.action === "update-citation"
+              ? await updateCitationOwnership(connection, ownerId, parsed.data)
+              : await appendReferenceLink(connection, ownerId, parsed.data);
     if (result && "error" in result && !("observation" in result)) {
       return failure(result.error, undefined, result.next);
     }

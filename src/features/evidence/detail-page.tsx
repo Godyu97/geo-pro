@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { listActionDrafts } from "../optimization/action-drafts";
 import { generateOptimizationAction } from "../optimization/actions";
 import { ActionDraftPanel } from "../optimization/draft-panel";
+import { authorizeBrandActor } from "../team-access/brand-scope";
 import { AnalysisDraftPanel } from "./analysis-draft-form";
+import { CitationOwnershipForm } from "./citation-ownership-form";
 import { readManualEvidenceContext, readObservation } from "./commands";
 import { canAppendReferenceLink, isNativeCitationOrigin, isReferenceLinkOrigin } from "./contracts";
 import { ReferenceLinkForm } from "./reference-link-form";
@@ -50,7 +52,12 @@ export default async function EvidenceDetailPage({
   if (!detail) notFound();
 
   const { observation, citations, analyses, latestAnalysis, citationPool, drafts, capture } = detail;
-  const actionDrafts = await listActionDrafts(getConnection(), session.user.id, observation.brandId, observation.id);
+  const evidenceMessages = getMessages(locale).evidence;
+  const [actionDrafts, writeScope] = await Promise.all([
+    listActionDrafts(getConnection(), session.user.id, observation.brandId, observation.id),
+    authorizeBrandActor(getConnection(), session.user.id, observation.brandId, "write"),
+  ]);
+  const canWrite = Boolean(writeScope);
   const label = (value: "true" | "false" | "unknown") => t(value);
   const requestedNetwork = observation.requestedNetworkMode === "on"
     ? "requestedNetworkOn"
@@ -162,11 +169,21 @@ export default async function EvidenceDetailPage({
         {citations.some((item) => isNativeCitationOrigin(item.citationOrigin)) ? (
           <ul className="space-y-2 text-sm">
             {citations.filter((item) => isNativeCitationOrigin(item.citationOrigin)).map((item) => (
-              <li key={item.id} className="wrap-anywhere rounded-lg border p-3">
+              <li key={item.id} className="wrap-anywhere space-y-2 rounded-lg border p-3">
                 <p>{t(item.citationOrigin)}</p>
                 <p>{t("citationNormalized")}: {item.normalizedUrl}</p>
                 <p>{t("citationRaw")}: {item.rawUrl}</p>
-                <p>{item.ownership} · {item.pageStatus}</p>
+                <p>{t(`ownership_${item.ownership}`)} · {t(`pageStatus_${item.pageStatus}`)}</p>
+                {canWrite && (
+                  <CitationOwnershipForm
+                    brandId={observation.brandId}
+                    observationId={observation.id}
+                    citationId={item.id}
+                    initialOwnership={item.ownership}
+                    initialPageStatus={item.pageStatus}
+                    messages={evidenceMessages}
+                  />
+                )}
               </li>
             ))}
           </ul>
@@ -182,7 +199,7 @@ export default async function EvidenceDetailPage({
                   <p>{t(item.citationOrigin)}</p>
                   <p>{t("citationNormalized")}: {item.normalizedUrl}</p>
                   <p>{t("citationRaw")}: {item.rawUrl}</p>
-                  <p>{item.ownership} · {item.pageStatus}</p>
+                  <p>{t(`ownership_${item.ownership}`)} · {t(`pageStatus_${item.pageStatus}`)}</p>
                 </li>
               ))}
             </ul>
@@ -195,7 +212,7 @@ export default async function EvidenceDetailPage({
                 <p>{t(item.citationOrigin)}</p>
                 <p>{t("citationNormalized")}: {item.normalizedUrl}</p>
                 <p>{t("citationRaw")}: {item.rawUrl}</p>
-                <p>{item.ownership} · {item.pageStatus}</p>
+                <p>{t(`ownership_${item.ownership}`)} · {t(`pageStatus_${item.pageStatus}`)}</p>
               </li>
             ))}
           </ul>

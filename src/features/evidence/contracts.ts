@@ -173,6 +173,23 @@ export const appendReferenceSchema = z.strictObject({
 });
 export type AppendReferenceInput = z.infer<typeof appendReferenceSchema>;
 
+export const citationUpdateResultSchema = z.object({
+  id: brandIdSchema,
+  ownership: z.enum(ownershipStates),
+  pageStatus: z.enum(pageStatuses),
+});
+
+export const updateCitationSchema = z.strictObject({
+  action: z.literal("update-citation"),
+  brandId: brandIdSchema,
+  observationId: brandIdSchema,
+  citationId: brandIdSchema,
+  operationId: brandIdSchema,
+  ownership: citationUpdateResultSchema.shape.ownership,
+  pageStatus: citationUpdateResultSchema.shape.pageStatus,
+});
+export type UpdateCitationInput = z.infer<typeof updateCitationSchema>;
+
 export const reviseAnalysisSchema = z.strictObject({
   action: z.literal("revise-analysis"),
   brandId: brandIdSchema,
@@ -220,6 +237,7 @@ export const evidenceWriteSchema = z.discriminatedUnion("action", [
   completeManualSchema,
   reviseAnalysisSchema,
   appendReferenceSchema,
+  updateCitationSchema,
 ]);
 export type EvidenceWriteInput = z.infer<typeof evidenceWriteSchema>;
 

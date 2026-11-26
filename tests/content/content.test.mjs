@@ -32,6 +32,7 @@ import {
   fillDraftFromTemplate,
   normalizePlanPageUrl,
 } from "../../src/features/content/rules.ts";
+import { grantBrandMember } from "../../src/features/team-access/commands.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
 
@@ -593,6 +594,18 @@ for (const kind of ["sqlite", "postgresql"]) {
     const parsedCoverage = JSON.parse(persistedPlan.plan.coverageJson);
     assert.deepEqual(parsedCoverage.existing, [existingUrl]);
     assert.deepEqual(parsedCoverage.pendingUpdate, []);
+
+    await grantBrandMember(db, ownerA, { userId: ownerB, brandId: brandA, role: "read_only", expiresAt: null }, time);
+    const readOnlyPlan = await readPlan(db, ownerB, brandA, updateSaved.planId);
+    const readOnlyList = await listBriefs(db, ownerB, brandA, 50, time);
+    assert.equal(readOnlyPlan.plan.id, updateSaved.planId);
+    assert.ok(readOnlyList.clusterPlans.some((item) => item.questionCluster === clusterName));
+    for (const result of [readOnlyPlan, readOnlyList]) {
+      const serialized = JSON.stringify(result);
+      assert.equal(serialized.includes(citId), false);
+      assert.equal(serialized.includes(obsId), false);
+      assert.equal(serialized.includes("citation_ownership"), false);
+    }
     assert.equal(parsedCoverage.gaps.length, 1);
 
     const plannedView = listed.clusterPlans.find((item) => item.questionCluster === plannedCluster);

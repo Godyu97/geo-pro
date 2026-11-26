@@ -12,6 +12,7 @@ import {
   readObservation,
   reviseAnalysis,
   submitManualEvidence,
+  updateCitationOwnership,
 } from "../../src/features/evidence/commands.ts";
 import { scopedObservationQuery } from "../../src/features/evidence/dao.ts";
 import { officialAttemptCapture } from "../../src/features/evidence/rules.ts";
@@ -369,6 +370,22 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(apiView.answers.find((item) => item.observationId === complete.observation.id).mentioned, "false");
     assert.ok(consumerView.sampleIds.includes(manual.observation.id));
     assert.equal(consumerView.sampleIds.includes(complete.observation.id), false);
+
+    assert.deepEqual(apiView.metrics.ownedPageCited.pooled, { numerator: 0, denominator: 1, rate: 0 });
+    const native = complete.citations[0];
+    const confirmed = await updateCitationOwnership(db, owner, {
+      action: "update-citation",
+      brandId: brand,
+      observationId: complete.observation.id,
+      citationId: native.id,
+      operationId: randomUUID(),
+      ownership: "owned_account",
+      pageStatus: "reachable",
+    }, clock, cache);
+    assert.deepEqual(confirmed.citation, { id: native.id, ownership: "owned_account", pageStatus: "reachable" });
+    const afterConfirmation = await readEvidenceOverview(db, owner, { brandId: brand, sourceMode: "model_api" }, cache);
+    assert.deepEqual(afterConfirmation.metrics.ownedPageCited.pooled, { numerator: 1, denominator: 2, rate: 0.5 });
+    assert.equal(afterConfirmation.metrics.officialSiteCited.reason, "official-website-not-applicable");
 
     const scoped = scopedObservationQuery({ ownerId: owner, brandId: brand, sourceMode: "model_api" });
     const plan = await queryWithParameters(db, `${kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN "}${scoped.sql}`, scoped.values);

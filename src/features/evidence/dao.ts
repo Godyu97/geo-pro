@@ -6,7 +6,7 @@ import { brandIdSchema } from "../brands/contracts.ts";
 import { networkModes } from "../capabilities/contracts.ts";
 import { functionalMockMarker } from "../functional-mock/mode.ts";
 import {
-  analysisDraftStatuses, analysisStatuses, captureMethods, citationOrigins, citationSetStates, evidenceStates,
+  analysisDraftStatuses, analysisStatuses, captureMethods, citationOrigins, citationSetStates, citationUpdateResultSchema, evidenceStates,
   nativeCitationOrigins,
   networkTriggers, ownershipStates, pageStatuses, sourceModes, triStateSchema,
 } from "./contracts.ts";
@@ -118,6 +118,9 @@ const sqlCount = z.preprocess((value) => {
 
 const sqlText = z.preprocess((value) => typeof value === "string" ? value : "", z.string());
 
+// Internal keys cannot collide with the UUIDs accepted by write APIs.
+const citationRevisionPrefix = "evidence-citation-revision:";
+
 const overviewContextSchema = z.object({
   name: z.string().nullable(),
   content: z.string().nullable(),
@@ -136,6 +139,7 @@ const overviewContextSchema = z.object({
   linkedRuns: sqlCount,
   citations: sqlCount,
   citationAt: sqlText,
+  citationRevision: sqlText,
   capabilityAt: sqlText,
   latestPromptSetId: sqlText,
 });
@@ -391,11 +395,15 @@ export class EvidenceDao {
   }
 
   async operation(ownerId: string, operationId: string) {
+    return (await this.operationRecord(ownerId, operationId))?.result ?? null;
+  }
+
+  async operationRecord(ownerId: string, operationId: string) {
     const [row] = await this.query(
-      `SELECT result FROM brand_operation WHERE owner_id = ? AND operation_id = ?`,
+      `SELECT fingerprint, result FROM brand_operation WHERE owner_id = ? AND operation_id = ?`,
       [ownerId, operationId],
     );
-    return row ? z.object({ result: z.string() }).parse(row).result : null;
+    return row ? z.object({ fingerprint: z.string(), result: z.string() }).parse(row) : null;
   }
 
   async recordOperation(ownerId: string, operationId: string, fingerprint: string, result: unknown, time: string, scope: string) {
@@ -403,6 +411,16 @@ export class EvidenceDao {
       `INSERT INTO brand_operation (owner_id, operation_id, fingerprint, result, created_at, scope)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [ownerId, operationId, fingerprint, JSON.stringify(result), time, scope],
+    );
+  }
+
+  async recordCitationRevision(ownerId: string, brandId: string, revision: string, time: string) {
+    await this.query(
+      `INSERT INTO brand_operation (owner_id, operation_id, fingerprint, result, created_at, scope)
+       VALUES (?, ?, ?, '{}', ?, ?)
+       ON CONFLICT (owner_id, operation_id) DO UPDATE
+       SET fingerprint = excluded.fingerprint, created_at = excluded.created_at`,
+      [ownerId, citationRevisionPrefix + brandId, revision, time, brandId],
     );
   }
 
@@ -559,6 +577,34 @@ export class EvidenceDao {
     return rows.map((row) => citationRow.parse(row));
   }
 
+  async citationExists(observationId: string, brandId: string, citationId: string) {
+    const [row] = await this.query(
+      `SELECT id FROM answer_citation
+       WHERE id = ? AND observation_id = ? AND brand_id = ?`,
+      [citationId, observationId, brandId],
+    );
+    return Boolean(row);
+  }
+
+  async updateNativeCitationStatus(input: {
+    id: string;
+    observationId: string;
+    brandId: string;
+    ownership: CitationRow["ownership"];
+    pageStatus: CitationRow["pageStatus"];
+  }) {
+    const origins = nativeCitationOrigins.map((origin) => `'${origin}'`).join(", ");
+    const [row] = await this.query(
+      `UPDATE answer_citation
+       SET ownership = ?, page_status = ?
+       WHERE id = ? AND observation_id = ? AND brand_id = ?
+         AND citation_origin IN (${origins})
+       RETURNING id, ownership, page_status AS "pageStatus"`,
+      [input.ownership, input.pageStatus, input.id, input.observationId, input.brandId],
+    );
+    return row ? citationUpdateResultSchema.parse(row) : null;
+  }
+
   async analysesFor(observationId: string) {
     const rows = await this.query(
       `SELECT ${analysisColumns} FROM answer_analysis_version WHERE observation_id = ? ORDER BY version`,
@@ -645,6 +691,9 @@ export class EvidenceDao {
                  AND d.status = 'accepted') AS "linkedRuns",
               (SELECT COUNT(*) FROM answer_citation c WHERE c.brand_id = b.id) AS "citations",
               (SELECT COALESCE(MAX(c.created_at), '') FROM answer_citation c WHERE c.brand_id = b.id) AS "citationAt",
+              COALESCE((SELECT op.fingerprint FROM brand_operation op
+                WHERE op.owner_id = b.owner_id AND op.operation_id = '${citationRevisionPrefix}' || b.id
+              ), '') AS "citationRevision",
               (SELECT COALESCE(MAX(v.changed_at), '') FROM capability_version v) AS "capabilityAt",
               (SELECT p.id FROM prompt_set p WHERE p.brand_id = b.id
                  ORDER BY p.created_at DESC, p.id DESC LIMIT 1) AS "latestPromptSetId"
@@ -680,6 +729,7 @@ export class EvidenceDao {
       parsed.linkedRuns,
       parsed.citations,
       parsed.citationAt,
+      parsed.citationRevision,
       parsed.capabilityAt,
       parsed.latestPromptSetId,
     ].join("|");
