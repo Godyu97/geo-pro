@@ -37,6 +37,14 @@ const copy = {
     reload: "重新载入",
     missing: "找不到这条观察，或它不属于当前账号。",
     openBrand: "去建档",
+    taskStopped: "这份观察已提前停止。已写入的检查点和槽位编号仍可查看。下一步是查看停止原因。",
+    stopTitle: "提前停止观察",
+    saveStop: "停止观察",
+    stopped: "已停止",
+    invalid: "观察记录无效。请检查日期、题数、排除题、因素、说明、对照页标识和停止原因。",
+    unwritten: "这个检查点尚未写入。",
+    unwrittenNote: "这里只保留已停止状态和停止原因。",
+    retained: "已保留槽位",
   },
   en: {
     title: "Observation plan",
@@ -60,8 +68,18 @@ const copy = {
     reload: "Reload",
     missing: "This observation was not found, or it belongs to another account.",
     openBrand: "Open brands",
+    taskStopped: "This observation was stopped early. Written checkpoints and slot IDs remain available. Review the stop reason next.",
+    stopTitle: "Stop the observation early",
+    saveStop: "Stop observation",
+    stopped: "Stopped",
+    invalid: "The observation record is invalid. Check the dates, counts, excluded questions, factor, note, control page identifier, and stop reason.",
+    unwritten: "This checkpoint has not been written.",
+    unwrittenNote: "Only the stopped status and the stop reason are kept here.",
+    retained: "Retained slots",
   },
 } as const;
+
+const stopReason = "客户要求在 D+28 前提前停止。";
 
 function localDatabaseURL() {
   const databaseURL = process.env.DATABASE_URL;
@@ -127,6 +145,7 @@ async function expectNoOverflow(page: Page) {
 }
 
 test("observation plans keep the next checkpoint readable and recoverable", async ({ page, context, browser }) => {
+  test.setTimeout(120_000);
   test.setTimeout(300_000);
   page.setDefaultTimeout(20_000);
   const shots = ".cache/issue-135/observation-plan";
@@ -404,6 +423,57 @@ test("observation plans keep the next checkpoint readable and recoverable", asyn
     await expect(page.getByText(copy.en.exploratoryTask, { exact: true })).toBeVisible();
     await expect(page.getByText(frozenSetId, { exact: true })).toBeVisible();
 
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await page.setViewportSize({ width: 1440, height: 800 });
+    await page.goto(href);
+    const blankStop = page.locator("form").filter({ has: page.getByRole("heading", { name: copy["zh-CN"].stopTitle, exact: true }) });
+    await blankStop.locator("textarea[name='reason']").fill("   ");
+    await blankStop.getByRole("button", { name: copy["zh-CN"].saveStop, exact: true }).click();
+    await expect(page.getByRole("main").getByRole("alert")).toContainText(copy["zh-CN"].invalid);
+    await expect(page.getByText(copy["zh-CN"].exploratoryTask, { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: copy["zh-CN"].saveStop, exact: true })).toBeVisible();
+    const beforeStop = await readObservations(context, brandId);
+    expect(beforeStop.observations[0]?.status).toBe("checkpoint_due");
+    expect(beforeStop.observations[0]?.checkpoints).toHaveLength(2);
+
+    const reasonStop = page.locator("form").filter({ has: page.getByRole("heading", { name: copy["zh-CN"].stopTitle, exact: true }) });
+    await reasonStop.locator("textarea[name='reason']").fill(stopReason);
+    await reasonStop.getByRole("button", { name: copy["zh-CN"].saveStop, exact: true }).click();
+    await expect(page.getByText(copy["zh-CN"].taskStopped, { exact: true })).toBeVisible();
+
+    for (const locale of ["zh-CN", "en"] as const) {
+      const current = copy[locale];
+      const reasonLine = locale === "zh-CN" ? `停止原因：${stopReason}` : `Stop reason: ${stopReason}`;
+      await context.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+      for (const width of [375, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(href);
+        await page.evaluate(() => window.scrollTo(0, 0));
+        const main = page.getByRole("main");
+        await expect(main.getByText(current.taskStopped, { exact: true })).toBeVisible();
+        await expect(main.getByText(current.stopped, { exact: true }).first()).toBeVisible();
+        await expect(main.getByText(reasonLine, { exact: true }).first()).toBeVisible();
+        await expect(main.getByText(current.retained, { exact: false }).first()).toBeVisible();
+        await expect(main.getByText(seededSlotIds[0]!, { exact: true }).first()).toBeVisible();
+        const dueCard = main.locator("article").filter({ hasText: dueDay });
+        await expect(dueCard.getByText(current.exploratory, { exact: true })).toBeVisible();
+        await expect(dueCard).toContainText(seededSlotIds[0]!);
+        const unwritten = main.locator("article").filter({ has: page.getByText("D+28", { exact: true }) });
+        await expect(unwritten).toContainText(current.unwritten);
+        await expect(unwritten).toContainText(reasonLine);
+        await expect(unwritten).toContainText(current.unwrittenNote);
+        await expect(main.getByRole("button", { name: current.requestFormal, exact: true })).toHaveCount(0);
+        await expectNoOverflow(page);
+        if (locale === "zh-CN" && width === 375) {
+          await page.screenshot({ path: `${shots}/observation-plan-stopped-zh-CN-375.png`, fullPage: false });
+        }
+      }
+    }
+    const stopped = await readObservations(context, brandId);
+    expect(stopped.observations[0]?.status).toBe("stopped");
+    expect(stopped.observations[0]?.checkpoints).toHaveLength(2);
+    expect(stopped.observations[0]?.checkpoints.find((item) => item.evaluatedOn === dueDay)?.mode).toBe("exploratory");
+
     const stranger = await outsider.newPage();
     await outsider.addCookies([{ name: "geo-locale", value: "en", url: origin }]);
     await stranger.setViewportSize({ width: 375, height: 800 });
@@ -416,6 +486,8 @@ test("observation plans keep the next checkpoint readable and recoverable", asyn
     await expect(hidden.getByText(brandName)).toHaveCount(0);
     await expect(hidden.getByRole("link", { name: copy.en.openBrand, exact: true })).toBeInViewport();
     await expect(hidden.getByRole("button", { name: copy.en.requestFormal, exact: true })).toHaveCount(0);
+    await expect(hidden.getByText(stopReason)).toHaveCount(0);
+    await expect(hidden.getByText(seededSlotIds[0]!)).toHaveCount(0);
     await expectNoOverflow(stranger);
     await stranger.screenshot({ path: `${shots}/observation-plan-hidden-en-375.png`, fullPage: false });
   } finally {

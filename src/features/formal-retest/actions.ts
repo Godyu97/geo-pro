@@ -5,11 +5,11 @@ import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { brandIdSchema } from "../brands/contracts.ts";
-import { appendFormalConfounder, createFormalObservation, recordFormalCheckpoint, registerFormalControl } from "./commands.ts";
+import { appendFormalConfounder, createFormalObservation, recordFormalCheckpoint, registerFormalControl, stopFormalObservation } from "./commands.ts";
 import { createFormalObservationSchema, recordFormalCheckpointSchema } from "./contracts.ts";
 
 const observationsPath = "/dashboard/reports/observations";
-const pageErrors = new Set(["NOT_FOUND", "INVALID_INPUT", "THRESHOLD_REJECTED", "CHECKPOINT_EXISTS"]);
+const pageErrors = new Set(["NOT_FOUND", "INVALID_INPUT", "THRESHOLD_REJECTED", "CHECKPOINT_EXISTS", "OBSERVATION_STOPPED"]);
 
 function finish(error?: string): never {
   revalidatePath(observationsPath);
@@ -63,6 +63,16 @@ export async function appendFormalConfounderAction(formData: FormData) {
   if (formData.has("thresholdPp")) raw.thresholdPp = formData.get("thresholdPp");
   if (formData.has("threshold")) raw.threshold = formData.get("threshold");
   const result = await appendFormalConfounder(getConnection(), session.user.id, observationId.data, raw);
+  finish("error" in result ? result.error : undefined);
+}
+
+export async function stopFormalObservationAction(formData: FormData) {
+  const session = await requireSession();
+  const observationId = brandIdSchema.safeParse(formData.get("observationId"));
+  if (!observationId.success) finish("INVALID_INPUT");
+  const result = await stopFormalObservation(getConnection(), session.user.id, observationId.data, {
+    reason: formData.get("reason"),
+  });
   finish("error" in result ? result.error : undefined);
 }
 

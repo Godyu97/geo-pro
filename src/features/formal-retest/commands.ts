@@ -12,6 +12,7 @@ import {
   appendFormalConfounderSchema,
   formalCheckpointEvaluationSchema,
   registerFormalControlSchema,
+  stopFormalObservationSchema,
   type CreateFormalObservationInput,
   type RecordFormalCheckpointInput,
 } from "./contracts.ts";
@@ -31,6 +32,7 @@ import {
   evaluateFormalCheckpointGate,
   recordConfounders,
   registerControlPage,
+  stopObservation,
   type BaselineAssessment,
   type Checkpoint,
   type ConfounderFactor,
@@ -89,6 +91,8 @@ export type FormalObservationView = {
   effectiveOn: string;
   frozenNonBrandCount: number;
   status: FormalObservationRecord["status"];
+  stopReason: string | null;
+  retainedSlotIds: string[];
   createdAt: string;
   updatedAt: string;
   baseline: FormalBaselineView;
@@ -175,6 +179,14 @@ function baselineFor(context: Awaited<ReturnType<typeof loadBaselineContext>>, e
   return toBaselineView(assessBaseline({ effectiveOn, timeZone: context.timeZone, events: context.events }));
 }
 
+function retainedSlotIds(checkpoints: readonly FormalCheckpointRecord[]) {
+  const ids = new Set<string>();
+  for (const row of checkpoints) {
+    for (const id of parseEvaluation(row.evaluationJson)?.slotIds ?? []) ids.add(id);
+  }
+  return [...ids].sort((left, right) => left.localeCompare(right));
+}
+
 function toObservation(
   row: FormalObservationRecord,
   checkpoints: readonly FormalCheckpointRecord[],
@@ -189,6 +201,8 @@ function toObservation(
     effectiveOn: row.effectiveOn,
     frozenNonBrandCount: row.frozenNonBrandCount,
     status: row.status,
+    stopReason: row.stopReason,
+    retainedSlotIds: retainedSlotIds(checkpoints.filter((item) => item.observationId === row.id)),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     baseline,
@@ -340,6 +354,7 @@ export async function createFormalObservation(
       effectiveOn: input.effectiveOn,
       frozenNonBrandCount: input.frozenNonBrandCount,
       status: "observing",
+      stopReason: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -361,6 +376,7 @@ export async function recordFormalCheckpoint(
     if (!observation) return { error: "NOT_FOUND" as const };
     const owned = await new BrandDao(tx).owned(ownerId, observation.brandId);
     if (!owned) return { error: "NOT_FOUND" as const };
+    if (observation.status === "stopped") return { error: "OBSERVATION_STOPPED" as const };
     const due = checkpointDue({
       effectiveOn: observation.effectiveOn,
       today: input.today,
@@ -522,5 +538,66 @@ export async function registerFormalControl(
     }
     const controls = await dao.controlsFor(ownerId, [observation.id]);
     return { controls: controls.map(toControl) };
+  });
+}
+
+async function observationView(
+  db: QueryConnection,
+  ownerId: string,
+  observation: FormalObservationRecord,
+  checkpoints: readonly FormalCheckpointRecord[],
+  confounders: readonly FormalConfounderRecord[],
+  controls: readonly FormalControlRecord[],
+) {
+  const baseline = baselineFor(await loadBaselineContext(db, ownerId, observation.brandId), observation.effectiveOn);
+  return toObservation(observation, checkpoints, confounders, controls, baseline);
+}
+
+export async function readFormalObservation(db: DatabaseConnection, ownerId: string, observationId: string) {
+  const dao = new FormalObservationDao(db);
+  const observation = await dao.observationForOwner(ownerId, observationId);
+  if (!observation) return { error: "NOT_FOUND" as const };
+  const owned = await new BrandDao(db).owned(ownerId, observation.brandId);
+  if (!owned) return { error: "NOT_FOUND" as const };
+  const checkpoints = await dao.checkpointsFor(ownerId, [observation.id]);
+  const confounders = await dao.confoundersFor(ownerId, [observation.id]);
+  const controls = await dao.controlsFor(ownerId, [observation.id]);
+  return {
+    observation: await observationView(db, ownerId, observation, checkpoints, confounders, controls),
+  };
+}
+
+export async function stopFormalObservation(
+  db: DatabaseConnection,
+  ownerId: string,
+  observationId: string,
+  input: unknown,
+  clock: Clock = systemClock,
+) {
+  return db.transaction(async (tx) => {
+    const dao = new FormalObservationDao(tx);
+    const observation = await dao.observationForOwner(ownerId, observationId);
+    if (!observation) return { error: "NOT_FOUND" as const };
+    const owned = await new BrandDao(tx).owned(ownerId, observation.brandId);
+    if (!owned) return { error: "NOT_FOUND" as const };
+    const parsed = stopFormalObservationSchema.safeParse(input);
+    if (!parsed.success) return { error: "INVALID_INPUT" as const };
+    const checkpoints = await dao.checkpointsFor(ownerId, [observation.id]);
+    const decision = stopObservation({
+      reason: parsed.data.reason,
+      slotIds: retainedSlotIds(checkpoints),
+    });
+    if (!decision.stopped) return { error: "INVALID_INPUT" as const };
+    if (observation.status === "stopped") return { error: "OBSERVATION_STOPPED" as const };
+    const now = clock();
+    const marked = await dao.markStopped(ownerId, observation.id, decision.reason, now);
+    if (!marked) return { error: "OBSERVATION_STOPPED" as const };
+    const confounders = await dao.confoundersFor(ownerId, [observation.id]);
+    const controls = await dao.controlsFor(ownerId, [observation.id]);
+    const stopped = { ...observation, status: "stopped" as const, stopReason: decision.reason, updatedAt: now };
+    return {
+      observation: await observationView(tx, ownerId, stopped, checkpoints, confounders, controls),
+      retainedSlotIds: decision.retainedSlotIds,
+    };
   });
 }

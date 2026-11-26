@@ -23,8 +23,13 @@ const observationRow = z.object({
   effectiveOn: calendarDaySchema,
   frozenNonBrandCount: z.number().int().min(1).max(500),
   status: observationStatusSchema,
+  stopReason: z.string().trim().min(1).max(400).nullable(),
   createdAt: z.iso.datetime({ precision: 3 }),
   updatedAt: z.iso.datetime({ precision: 3 }),
+}).superRefine((row, ctx) => {
+  if ((row.status === "stopped") !== (row.stopReason !== null)) {
+    ctx.addIssue({ code: "custom", message: "stopReason" });
+  }
 });
 
 const checkpointRow = z.object({
@@ -115,7 +120,7 @@ export type FormalControlInsert = FormalControlRecord & { ownerId: string };
 
 const observationColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", frozen_set_id AS "frozenSetId",
   effective_on AS "effectiveOn", frozen_non_brand_count AS "frozenNonBrandCount", status,
-  created_at AS "createdAt", updated_at AS "updatedAt"`;
+  stop_reason AS "stopReason", created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 const checkpointColumns = `id, observation_id AS "observationId", brand_id AS "brandId", checkpoint, mode,
   comparable_count AS "comparableCount", excluded_json AS "excludedJson", evaluation_json AS "evaluationJson",
@@ -126,6 +131,13 @@ const confounderColumns = `id, observation_id AS "observationId", brand_id AS "b
 
 const controlColumns = `id, observation_id AS "observationId", brand_id AS "brandId", page_key AS "pageKey",
   label, registered_at AS "registeredAt"`;
+
+export function formalObservationForOwnerQuery(ownerId: string, observationId: string) {
+  return {
+    sql: `SELECT ${observationColumns} FROM formal_observation WHERE id = ? AND owner_id = ? LIMIT 1`,
+    values: [observationId, ownerId] as QueryValue[],
+  };
+}
 
 export function formalObservationListQuery(ownerId: string, brandId: string) {
   return {
@@ -293,14 +305,14 @@ export class FormalObservationDao {
     const groups = rows.map((row) => {
       values.push(
         row.id, row.brandId, row.ownerId, row.frozenSetId, row.effectiveOn,
-        row.frozenNonBrandCount, row.status, row.createdAt, row.updatedAt,
+        row.frozenNonBrandCount, row.status, row.stopReason, row.createdAt, row.updatedAt,
       );
-      return "(?, ?, ?, ?, ?, ?, ?, ?, ?)";
+      return "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     });
     await queryWithParameters(
       this.db,
       `INSERT INTO formal_observation (
-        id, brand_id, owner_id, frozen_set_id, effective_on, frozen_non_brand_count, status, created_at, updated_at
+        id, brand_id, owner_id, frozen_set_id, effective_on, frozen_non_brand_count, status, stop_reason, created_at, updated_at
       ) VALUES ${groups.join(", ")}`,
       values,
     );
@@ -334,11 +346,8 @@ export class FormalObservationDao {
 
   async observationForOwner(ownerId: string, observationId: string) {
     const lock = this.db.kind === "postgresql" ? " FOR UPDATE" : "";
-    const [row] = await queryWithParameters(
-      this.db,
-      `SELECT ${observationColumns} FROM formal_observation WHERE id = ? AND owner_id = ? LIMIT 1${lock}`,
-      [observationId, ownerId],
-    );
+    const query = formalObservationForOwnerQuery(ownerId, observationId);
+    const [row] = await queryWithParameters(this.db, `${query.sql}${lock}`, query.values);
     return row ? observationRow.parse(row) : null;
   }
 
@@ -419,6 +428,17 @@ export class FormalObservationDao {
   async verifiedPublications(ownerId: string, brandId: string) {
     const query = verifiedPublicationQuery(ownerId, brandId);
     return z.array(baselineEventRow).parse(await queryWithParameters(this.db, query.sql, query.values));
+  }
+
+  async markStopped(ownerId: string, observationId: string, reason: string, updatedAt: string) {
+    const rows = await queryWithParameters(
+      this.db,
+      `UPDATE formal_observation SET status = 'stopped', stop_reason = ?, updated_at = ?
+       WHERE id = ? AND owner_id = ? AND status IN ('observing', 'checkpoint_due')
+       RETURNING id`,
+      [reason, updatedAt, observationId, ownerId],
+    );
+    return rows.length === 1;
   }
 
   async markCheckpointDue(ownerId: string, observationId: string, updatedAt: string) {

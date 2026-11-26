@@ -6,10 +6,11 @@ import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts";
 import { BrandDao } from "../brands/dao";
-import { appendFormalConfounderAction, createFormalObservationAction, recordFormalCheckpointAction, registerFormalControlAction } from "./actions";
+import { appendFormalConfounderAction, createFormalObservationAction, recordFormalCheckpointAction, registerFormalControlAction, stopFormalObservationAction } from "./actions";
 import { listFormalObservations, type FormalObservationView } from "./commands";
 
-const knownErrors = ["NOT_FOUND", "INVALID_INPUT", "THRESHOLD_REJECTED", "CHECKPOINT_EXISTS"] as const;
+const knownErrors = ["NOT_FOUND", "INVALID_INPUT", "THRESHOLD_REJECTED", "CHECKPOINT_EXISTS", "OBSERVATION_STOPPED"] as const;
+const checkpointOrder = ["d7", "d14", "d28"] as const;
 const createFormId = "observation-create";
 const actionClass = "h-auto max-w-full whitespace-normal";
 const inputClass = "h-10 w-full min-w-0 max-w-full rounded-md border bg-background px-3 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
@@ -46,7 +47,8 @@ function associated(form?: string) {
 }
 
 function nextObservation(observations: readonly FormalObservationView[]) {
-  const open = observations.find((item) => {
+  const active = observations.filter((item) => item.status !== "stopped");
+  const open = active.find((item) => {
     const latest = item.checkpoints.at(-1);
     return !latest || latest.mode === "progress";
   });
@@ -56,10 +58,12 @@ function nextObservation(observations: readonly FormalObservationView[]) {
       observation: open,
     };
   }
-  const exploratory = observations.find((item) => item.checkpoints.at(-1)?.mode === "exploratory");
+  const exploratory = active.find((item) => item.checkpoints.at(-1)?.mode === "exploratory");
   if (exploratory) return { kind: "exploratory" as const, observation: exploratory };
-  const formal = observations.find((item) => item.checkpoints.at(-1)?.mode === "formal");
+  const formal = active.find((item) => item.checkpoints.at(-1)?.mode === "formal");
   if (formal) return { kind: "formal" as const, observation: formal };
+  const stopped = observations.find((item) => item.status === "stopped");
+  if (stopped) return { kind: "stopped" as const, observation: stopped };
   return { kind: "empty" as const, observation: null };
 }
 
@@ -149,6 +153,44 @@ function CheckpointFields({
   );
 }
 
+function StopNotice({
+  t,
+  observation,
+  checkpointLabel,
+}: {
+  t: Translate;
+  observation: FormalObservationView;
+  checkpointLabel: { d7: string; d14: string; d28: string };
+}) {
+  const reason = observation.stopReason ?? "";
+  const missing = checkpointOrder.filter((item) => !observation.checkpoints.some((checkpoint) => checkpoint.checkpoint === item));
+  return (
+    <div id={`stopped-${observation.id}`} className="min-w-0 scroll-mt-28 space-y-3 rounded-xl border border-dashed p-4">
+      <h3 className="text-base font-semibold">{t("stopTitle")}</h3>
+      <p className="text-sm">{t("statusStopped")}</p>
+      <p className="text-sm leading-7 [overflow-wrap:anywhere]">{t("stopReasonLine", { reason })}</p>
+      {observation.retainedSlotIds.length > 0 ? (
+        <div className="space-y-1">
+          <p className="text-sm font-medium">{t("retainedSlotsHeading", { count: digits(observation.retainedSlotIds.length) })}</p>
+          <ul className="flex flex-wrap gap-2 text-xs">
+            {observation.retainedSlotIds.map((slotId) => (
+              <li key={`${observation.id}-kept-${slotId}`} className="[overflow-wrap:anywhere] tabular-nums">{slotId}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {missing.map((checkpoint) => (
+        <article key={`${observation.id}-open-${checkpoint}`} className="min-w-0 space-y-1">
+          <p className="text-sm font-medium">{checkpointLabel[checkpoint]}</p>
+          <p className="text-sm leading-7">{t("unwrittenCheckpoint")}</p>
+          <p className="text-sm leading-7 [overflow-wrap:anywhere]">{t("stopReasonLine", { reason })}</p>
+          <p className="text-sm leading-7 text-muted-foreground">{t("unwrittenCheckpointNote")}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export async function generateMetadata() {
   const t = await getTranslator("formalObservations");
   return { title: t("title"), robots: { index: false, follow: false } };
@@ -235,6 +277,7 @@ export default async function FormalObservationsPage({
     progress: "taskProgress",
     exploratory: "taskExploratory",
     formal: "taskFormal",
+    stopped: "taskStopped",
   } as const;
   const checkpointFormId = next.observation ? `formal-checkpoint-${next.observation.id}` : "";
   const recordsCheckpoint = next.kind === "pending" || next.kind === "progress";
@@ -250,12 +293,16 @@ export default async function FormalObservationsPage({
   } as const;
   const checkpointLabel = { d7: t("checkpointD7"), d14: t("checkpointD14"), d28: t("checkpointD28") } as const;
   const factorLabel = { model: t("factorModel"), marketing: t("factorMarketing"), price: t("factorPrice") } as const;
-  const statusLabel = { observing: t("statusObserving"), checkpoint_due: t("statusCheckpointDue") } as const;
+  const statusLabel = { observing: t("statusObserving"), checkpoint_due: t("statusCheckpointDue"), stopped: t("statusStopped") } as const;
   const primary = next.kind === "empty" ? (
     <form id={createFormId} action={createFormalObservationAction}>
       <input type="hidden" name="brandId" value={brandId} />
       <Button type="submit" className={actionClass}>{t("create")}</Button>
     </form>
+  ) : next.kind === "stopped" && next.observation ? (
+    <Button asChild className={actionClass}>
+      <Link href={`#stopped-${next.observation.id}`} prefetch={false}>{t("viewStopped")}</Link>
+    </Button>
   ) : recordsCheckpoint && next.observation ? (
     <form id={checkpointFormId} action={recordFormalCheckpointAction}>
       <input type="hidden" name="observationId" value={next.observation.id} />
@@ -337,6 +384,24 @@ export default async function FormalObservationsPage({
             )}
             <p className="text-sm tabular-nums">{t("frozenLine", { count: digits(observation.frozenNonBrandCount) })}</p>
 
+            {observation.status === "stopped" ? (
+              <StopNotice t={t} observation={observation} checkpointLabel={checkpointLabel} />
+            ) : (
+              <form action={stopFormalObservationAction} className="grid min-w-0 gap-4 sm:grid-cols-2">
+                <h3 className="text-base font-semibold sm:col-span-2">{t("stopTitle")}</h3>
+                <p className="text-sm leading-7 text-muted-foreground sm:col-span-2">{t("stopHint")}</p>
+                <input type="hidden" name="observationId" value={observation.id} />
+                <label className="min-w-0 space-y-2 text-sm break-words sm:col-span-2">
+                  <span>{t("stopReason")}</span>
+                  <textarea name="reason" required maxLength={400} className={areaClass} />
+                  <span className="block text-muted-foreground">{t("stopReasonHint")}</span>
+                </label>
+                <div>
+                  <Button type="submit" className={actionClass}>{t("saveStop")}</Button>
+                </div>
+              </form>
+            )}
+
             <div className="min-w-0 space-y-4">
               <h3 className="text-base font-semibold">{t("controlsHeading")}</h3>
               <p className="text-sm leading-7 text-muted-foreground">{t("controlsHint")}</p>
@@ -367,7 +432,7 @@ export default async function FormalObservationsPage({
               ))}
             </div>
 
-            {checkpointTarget ? (
+            {observation.status === "stopped" ? null : checkpointTarget ? (
               <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                 <CheckpointFields t={t} form={checkpointFormId} checkpointLabel={checkpointLabel} />
               </div>

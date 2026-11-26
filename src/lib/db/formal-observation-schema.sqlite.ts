@@ -12,9 +12,14 @@ export const formalObservation = sqliteTable("formal_observation", {
   status: text("status").notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  stopReason: text("stop_reason"),
 }, (table) => [
   index("formal_observation_owner_idx").on(table.ownerId, table.brandId, table.createdAt, table.id),
-  check("formal_observation_state_check", sql`${table.status} in ('observing', 'checkpoint_due')
+  check("formal_observation_state_check", sql`${table.status} in ('observing', 'checkpoint_due', 'stopped')
+    and (
+      (${table.status} <> 'stopped' and ${table.stopReason} is null)
+      or (${table.status} = 'stopped' and ${table.stopReason} is not null and length(trim(${table.stopReason})) between 1 and 400)
+    )
     and ${table.frozenNonBrandCount} between 1 and 500
     and length(${table.frozenSetId}) between 1 and 64
     and length(${table.effectiveOn}) = 10

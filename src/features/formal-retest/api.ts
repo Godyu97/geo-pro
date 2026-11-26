@@ -14,8 +14,10 @@ import {
   listFormalConfounders,
   listFormalControls,
   listFormalObservations,
+  readFormalObservation,
   recordFormalCheckpoint,
   registerFormalControl,
+  stopFormalObservation,
 } from "./commands.ts";
 import {
   createFormalObservationSchema,
@@ -89,6 +91,41 @@ export async function formalObservationCreateResponse(request: Request) {
   } catch {
     const traceId = randomUUID();
     console.error("formal-observation-create-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function formalObservationReadResponse(request: Request, observationId: string) {
+  const gate = await requireTrustedOrigin(request);
+  if ("error" in gate) return gate.error;
+  const id = brandIdSchema.safeParse(observationId);
+  if (!id.success) return failure("INVALID_INPUT");
+  try {
+    if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
+    const result = await readFormalObservation(getConnection(), gate.session.session.user.id, id.data);
+    if ("error" in result && result.error) return failure(result.error);
+    return json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("formal-observation-read-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function formalObservationStopResponse(request: Request, observationId: string) {
+  const gate = await requireTrustedOrigin(request);
+  if ("error" in gate) return gate.error;
+  const id = brandIdSchema.safeParse(observationId);
+  if (!id.success) return failure("INVALID_INPUT");
+  try {
+    if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
+    const body = await readBoundedJson(request, 4096);
+    const result = await stopFormalObservation(getConnection(), gate.session.session.user.id, id.data, body);
+    if ("error" in result && result.error) return failure(result.error);
+    return json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("formal-observation-stop-unavailable", { traceId });
     return failure("SERVICE_UNAVAILABLE", traceId);
   }
 }
