@@ -126,8 +126,9 @@ function ExportPreflightForm({
   );
 }
 
-function taskCopy(t: Translate, status: VersionStatus, approvalCurrent: boolean, readOnly: boolean) {
-  if (readOnly) return t("readOnly");
+function taskCopy(t: Translate, status: VersionStatus, approvalCurrent: boolean, readOnlyReason: "grant" | "archived" | null) {
+  if (readOnlyReason === "grant") return t("versionReadOnlyGrant");
+  if (readOnlyReason === "archived") return t("readOnly");
   if (status === "draft") return t("versionTaskDraft");
   if (status === "in_review") return t("versionTaskReview");
   if (status === "rejected") return t("versionTaskRejected");
@@ -173,10 +174,11 @@ export default async function ContentVersionPage({
   }
 
   const db = getConnection();
-  const { version, approvals, packages, assets, publications, publicationPredecessors, approvalCurrent, readOnly } = detail;
+  const { version, approvals, packages, assets, publications, publicationPredecessors, approvalCurrent, readOnly, readOnlyReason } = detail;
+  const canAccessDelivery = readOnlyReason !== "grant";
   const operationId = typeof query.op === "string" ? query.op : null;
   const exportError = exportUiError(query.exportError);
-  const exported = operationId
+  const exported = operationId && canAccessDelivery
     ? await readExportJob(db, session.user.id, version.brandId, operationId)
     : null;
   const job = exported && !("error" in exported) ? exported : null;
@@ -187,10 +189,10 @@ export default async function ContentVersionPage({
   const status = version.status;
   const headerPreflight = canEdit && status === "approved" && approvalCurrent;
   const links = [
-    ...back,
-    { href: `/dashboard/content/versions/${version.id}/variants`, label: t("openChannelVariants") },
+    { href: `/dashboard/content?brandId=${encodeURIComponent(version.brandId)}`, label: t("backToVersions") },
+    ...(canAccessDelivery ? [{ href: `/dashboard/content/versions/${version.id}/variants`, label: t("openChannelVariants") }] : []),
     { href: `/dashboard/brands/${version.brandId}/facts`, label: t("brandFactsLink") },
-    { href: `/dashboard/content/sources?brandId=${encodeURIComponent(version.brandId)}`, label: t("sourcesLink") },
+    ...(canAccessDelivery ? [{ href: `/dashboard/content/sources?brandId=${encodeURIComponent(version.brandId)}`, label: t("sourcesLink") }] : []),
   ];
 
   return (
@@ -199,7 +201,7 @@ export default async function ContentVersionPage({
       summary={(
         <div className="max-w-2xl space-y-3">
           <p role="status" className="break-words text-sm leading-7 text-muted-foreground">
-            {taskCopy(t, status, approvalCurrent, readOnly)}
+            {taskCopy(t, status, approvalCurrent, readOnlyReason)}
           </p>
           {reviewError ? <p role="alert" className="break-words text-sm leading-7 text-destructive">{t(reviewError)}</p> : null}
           <Badge variant="secondary">{status}</Badge>
@@ -225,7 +227,7 @@ export default async function ContentVersionPage({
         <p className="[overflow-wrap:anywhere]">{t("channel")}: {version.targetChannel}</p>
         <p className="[overflow-wrap:anywhere]">{t("labelingVersion")}: {version.labelingProfileVersion}</p>
         <p>{t("labelingStatus")}: {t(version.labelingProfileStatus)}</p>
-        <p>{t("imagesAttached")}: {assets.length}</p>
+        {canAccessDelivery ? <p>{t("imagesAttached")}: {assets.length}</p> : null}
         <p className="[overflow-wrap:anywhere] text-xs leading-5 text-muted-foreground">{t("fingerprint")}: {detail.currentFingerprint}</p>
         {canEdit && status === "in_review" ? (
           <div className="pt-2">
@@ -278,9 +280,14 @@ export default async function ContentVersionPage({
             </div>
           </form>
         </section>
-      ) : null}
+      ) : (
+        <section aria-labelledby="version-body-heading" className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">
+          <h2 id="version-body-heading" className="text-lg font-semibold">{t("bodyMarkdown")}</h2>
+          <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-6">{version.bodyMarkdown}</p>
+        </section>
+      )}
 
-      <section className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">
+      <section hidden={!canAccessDelivery} className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">
         <h2 className="text-lg font-semibold">{t("assetsRegistered")}</h2>
         {assets.length ? (
           <ul className="space-y-2 text-sm">
@@ -370,7 +377,7 @@ export default async function ContentVersionPage({
         )}
       </section>
 
-      <section className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">
+      <section hidden={!canAccessDelivery} className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">
         <h2 className="text-lg font-semibold">{t("exportTitle")}</h2>
         <p className="break-words text-sm leading-6 text-muted-foreground">{t("exportHint")}</p>
         {exportError ? <p role="alert" className="break-words text-sm leading-6">{t(exportError)}</p> : null}
@@ -411,7 +418,7 @@ export default async function ContentVersionPage({
         ) : null}
       </section>
 
-      <section className="min-w-0 space-y-3">
+      <section hidden={!canAccessDelivery} className="min-w-0 space-y-3">
         <h2 className="text-lg font-semibold">{t("packages")}</h2>
         {packages.length === 0 ? (
           <p className="rounded-2xl border border-dashed bg-card px-4 py-5 text-sm leading-6 text-muted-foreground">{t("packagesEmpty")}</p>

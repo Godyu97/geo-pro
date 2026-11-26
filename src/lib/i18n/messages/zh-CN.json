@@ -1663,6 +1663,7 @@
     "SERVICE_UNAVAILABLE": "文件暂时无法保存或读取。请稍后重试。",
     "versions": "稿件版本",
     "versionDetail": "稿件详情",
+    "versionReadOnlyGrant": "你有该品牌的只读权限。",
     "versionTaskDraft": "这篇稿件仍是待审草稿。先提交审核；生成不会自动批准。",
     "versionTaskReview": "这篇稿件正在审核。批准或拒绝都会留下记录，批准不等于公开发布。",
     "versionTaskRejected": "这篇稿件已被拒绝。修改后可以再次提交审核。",

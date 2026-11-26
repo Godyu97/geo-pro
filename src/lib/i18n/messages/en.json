@@ -1663,6 +1663,7 @@
     "SERVICE_UNAVAILABLE": "The file could not be saved or read. Try again shortly.",
     "versions": "Content versions",
     "versionDetail": "Version detail",
+    "versionReadOnlyGrant": "You have read-only access to this brand.",
     "versionTaskDraft": "This draft still needs review. Submit it before approval. Generation does not approve it.",
     "versionTaskReview": "This draft is in review. Approval and rejection are both recorded. Approval is not publication.",
     "versionTaskRejected": "This draft was rejected. Edit it, then submit it for review again.",

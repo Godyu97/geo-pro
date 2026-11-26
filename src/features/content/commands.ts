@@ -1070,23 +1070,20 @@ export async function readContentVersion(
   const dao = new ContentDao(db);
   const identity = await dao.contentVersionIdentity(versionId);
   if (!identity) return denied("NOT_FOUND");
-  let ownerId = actorId;
-  if (identity.ownerId !== actorId) {
-    const delegated = await delegatedOwnerId(db, actorId, identity.brandId, "content");
-    const adopted = await adoptOwner(db, actorId, identity.brandId, "read");
-    if (delegated && delegated === identity.ownerId) ownerId = identity.ownerId;
-    else if (adopted && adopted === identity.ownerId) ownerId = adopted;
-    else return denied("NOT_FOUND");
-  }
+  const scope = await authorizeBrandActor(db, actorId, identity.brandId, "read");
+  const ownerId = scope?.ownerId ?? await delegatedOwnerId(db, actorId, identity.brandId, "content");
+  if (ownerId !== identity.ownerId) return denied("NOT_FOUND");
   const version = await dao.getContentVersion(ownerId, versionId);
   if (!version || version.brandId !== identity.brandId) return denied("NOT_FOUND");
   // Frozen or foreign brands never expose approvals or package metadata.
   const brand = await new BrandDao(db).owned(ownerId, version.brandId);
   if (!brand) return denied("NOT_FOUND");
+  const restricted = scope?.role === "read_only";
+  const readOnlyReason: "grant" | "archived" | null = restricted ? "grant" : brand.status === "archived" ? "archived" : null;
   const [approvals, packageRows, assets, publications, publicationPredecessors] = await Promise.all([
     dao.listApprovals(ownerId, version.id),
-    dao.listPackagesForVersion(ownerId, version.id),
-    dao.getAssetsByIds(ownerId, version.brandId, parseIds(version.imageAssetIdsJson)),
+    restricted ? [] : dao.listPackagesForVersion(ownerId, version.id),
+    restricted ? [] : dao.getAssetsByIds(ownerId, version.brandId, parseIds(version.imageAssetIdsJson)),
     dao.listPublicationsForVersion(ownerId, version.id),
     actorId === ownerId && brand.status === "active" && version.status === "approved"
       ? dao.listPublicationPredecessors(ownerId, version.brandId, 30)
@@ -1094,7 +1091,7 @@ export async function readContentVersion(
   ]);
   const currentFingerprint = versionFingerprint(version);
   return {
-    version,
+    version: restricted ? { ...version, imageAssetIdsJson: "[]" } : version,
     approvals,
     packages: packageRows.map(summarizePackage),
     assets,
@@ -1103,7 +1100,8 @@ export async function readContentVersion(
     currentFingerprint,
     approvalCurrent: version.status === "approved"
       && approvals.some((item) => item.decision === "approved" && item.contentFingerprint === currentFingerprint),
-    readOnly: brand.status !== "active",
+    readOnly: readOnlyReason !== null,
+    readOnlyReason,
   };
 }
 

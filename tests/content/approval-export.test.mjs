@@ -28,6 +28,7 @@ import {
   validateExportSubset,
 } from "../../src/features/content/package.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
+import { grantBrandMember } from "../../src/features/team-access/commands.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
 
 const storageEnv = {
@@ -597,6 +598,35 @@ for (const kind of ["sqlite", "postgresql"]) {
     await queryWithParameters(db, "UPDATE brand SET frozen_at = ?, restore_until = ? WHERE id = ?", [time, time, brand]);
     assert.equal((await readContentVersion(db, owner, versionId)).error, "NOT_FOUND");
     assert.equal((await act.readPackage(packageId)).error, "NOT_FOUND");
+  });
+
+  run("read-only members see the draft without attachment or package metadata", async (t, ctx) => {
+    const { db, owner, outsider: reader, brand, act } = ctx;
+    const { versionIds: [versionId] } = await ctx.drafts(["Synthetic 100 CNY"]);
+    const { asset } = await act.asset({ visibility: "internal", contentRef: "ref://internal-image" });
+    assert.equal((await act.update(versionId, { imageAssetIds: [asset.id] })).error, undefined);
+    const operationId = randomUUID();
+    await act.preflight([versionId], operationId, "review");
+    const exported = await act.confirm(operationId, [versionId]);
+    const [pkg] = exported.packages;
+    const ownerDetail = await readContentVersion(db, owner, versionId);
+    assert.equal(ownerDetail.readOnly, false);
+    assert.equal(ownerDetail.assets[0].contentRef, "ref://internal-image");
+    assert.equal(ownerDetail.packages[0].id, pkg.id);
+
+    const grant = await grantBrandMember(db, owner, { userId: reader, brandId: brand, role: "read_only", expiresAt: null }, time);
+    assert.equal(grant.error, undefined);
+    const readerDetail = await readContentVersion(db, reader, versionId);
+    assert.equal(readerDetail.readOnly, true);
+    assert.equal(readerDetail.readOnlyReason, "grant");
+    assert.equal(readerDetail.version.bodyMarkdown, ownerDetail.version.bodyMarkdown);
+    assert.equal(readerDetail.currentFingerprint, ownerDetail.currentFingerprint);
+    assert.deepEqual(JSON.parse(readerDetail.version.imageAssetIdsJson), []);
+    assert.deepEqual(readerDetail.assets, []);
+    assert.deepEqual(readerDetail.packages, []);
+    assert.equal((await act.submit(versionId, reader)).error, "NOT_FOUND");
+    assert.equal((await act.preflight([versionId], randomUUID(), "review", reader)).error, "NOT_FOUND");
+    assert.equal((await act.readPackage(pkg.id, reader)).error, "NOT_FOUND");
   });
 }
 
