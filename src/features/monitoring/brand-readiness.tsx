@@ -71,6 +71,15 @@ export function readinessAction(historical: boolean, result: BrandReadinessResul
   return { kind: "retry" };
 }
 
+export function canPreviewMonitoringScope(historical: boolean, result: BrandReadinessResult) {
+  if (historical || result.kind !== "ready" || result.report.canConfirm) return false;
+  const blocked = result.report.next;
+  if (blocked.includes("archived") || blocked.includes("add-questions") || blocked.includes("choose-channel")) return false;
+  if ((result.promptSet?.naturalCount ?? 0) < minimumNaturalQuestions) return false;
+  return result.report.official.some((item) => item.eligibility === "eligible")
+    || result.report.manual.some((item) => item.eligibility === "eligible");
+}
+
 export function readinessStepHref(brandId: string, step: ReadinessNext) {
   if (step === "add-questions" || step === "review-inactive") return `/dashboard/brands/${brandId}/questions`;
   if (step === "request-quota") return "/dashboard/settings#pilot-quotas";
@@ -179,11 +188,15 @@ export async function BrandMonitoringReadiness({
         <Link className="underline underline-offset-4 [overflow-wrap:anywhere]" href="/dashboard/settings#pilot-quotas" prefetch={false}>{t("readinessOpenQuota")}</Link>
         <Link className="underline underline-offset-4 [overflow-wrap:anywhere]" href="/dashboard/monitoring/protocols" prefetch={false}>{t("readinessOpenProtocols")}</Link>
       </div>
-      {report.canConfirm && !(promoted && action.kind === "confirm") && (
+      {(report.canConfirm && !(promoted && action.kind === "confirm")) ? (
         <Button asChild>
           <Link href={`/dashboard/monitoring/new?brandId=${brand.id}`} prefetch={false}>{t("readinessConfirm")}</Link>
         </Button>
-      )}
+      ) : (!promoted && canPreviewMonitoringScope(historical, result)) ? (
+        <Button asChild variant="outline">
+          <Link href={`/dashboard/monitoring/new?brandId=${brand.id}`} prefetch={false}>{t("readinessPreview")}</Link>
+        </Button>
+      ) : null}
     </section>
   );
 }

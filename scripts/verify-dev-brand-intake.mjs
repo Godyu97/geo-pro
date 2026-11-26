@@ -161,18 +161,15 @@ try {
   assert.match(peerHtml, /Set up a brand or resume a draft/);
   assert.doesNotMatch(peerHtml, /追溯原始证据/);
 
-  const denied = await request("/api/brands", {
-    actor: outsider,
-    data: mutation(outsider, { action: "submit", target: null, expectedDraft: null, fields, acceptedPolicyVersion }),
-  });
-  assert.equal(denied.status, 403);
-  assert.equal((await denied.json()).error.code, "DEV_ACTOR_DENIED");
-  for (const [locale, title] of [["zh-CN", "当前账号不能使用开发环境联调"], ["en", "This account cannot use development intake"]]) {
-    const page = await request("/dashboard/brands", { actor: outsider, locale });
-    const html = await page.text();
-    assert.match(html, new RegExp(title));
-    assert.doesNotMatch(html, /追溯原始证据/);
-  }
+  const outsiderBrands = await request("/dashboard/brands", { actor: outsider, locale: "en" });
+  assert.equal(outsiderBrands.status, 200);
+  const outsiderHtml = await outsiderBrands.text();
+  assert.match(outsiderHtml, /Development intake/);
+  assert.match(outsiderHtml, /Set up a brand or resume a draft/);
+  assert.doesNotMatch(outsiderHtml, /追溯原始证据/);
+  const outsiderForeignBrand = await request("/api/brands?id=" + brand.id, { actor: outsider });
+  assert.equal(outsiderForeignBrand.status, 404);
+  assert.equal((await outsiderForeignBrand.json()).error.code, "NOT_FOUND");
 
   const factId = randomUUID();
   const factFields = {
@@ -263,7 +260,7 @@ try {
   const firstBody = await firstSet.json();
   assert.equal(firstBody.selected.content.questions[0].text, texts[0]);
   assert.equal((await request(promptPath + "?version=" + frozenId, { actor: peer })).status, 404);
-  assert.equal((await request(factPath, { actor: outsider })).status, 403);
+  assert.equal((await request(factPath, { actor: outsider })).status, 404);
   const confirmPath = "/dashboard/monitoring/new?brandId=" + brand.id;
   for (const [locale, readiness, count, quota, confirmation, foreignMessage] of [
     ["zh-CN", "监测准备", "已确认自然发现题 3 / 3，确认题共 3", "没有可用于官方 API 的有效采样额度", "登记监测运行", "找不到该品牌或运行"],

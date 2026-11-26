@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { SignOutButton } from "@/components/layout/sign-out-button";
 import { Card, CardContent } from "@/components/ui/card";
-import { brandFixtureOrigin } from "@/features/brands/intake";
+import { brandIntakeDecision } from "@/features/brands/intake";
 import { DataExportPanel } from "@/features/data-exports/settings-panel";
 import { MonitoringCapabilityPanel } from "@/features/capabilities/settings-panel";
 import { PilotQuotaPanel } from "@/features/quotas/settings-panel";
@@ -28,7 +28,7 @@ export default async function AccountSettingsPage() {
   const quota = await getTranslator("quotas");
   const capabilities = await getTranslator("capabilities");
   const email = await getTranslator("accountEmail");
-  const brandManagementAvailable = Boolean(brandFixtureOrigin(await headers()));
+  const brandManagementAvailable = brandIntakeDecision(await headers(), user.email).state === "open";
   const emailVerified = hasVerifiedEmail(user);
 
   return (

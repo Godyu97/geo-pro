@@ -152,6 +152,24 @@ for (const kind of ["sqlite", "postgresql"]) {
     };
     assert.equal((await previewMonitoringRun(db, owner, { action: "preview", ...base, ceiling: null }, secret, clock)).error, "NO_TRUSTED_CEILING");
     assert.equal((await previewMonitoringRun(db, owner, { action: "preview", ...base, brandId: otherBrand }, secret, clock)).error, "NOT_FOUND");
+    const ungrantedOwner = await account(db, true);
+    const ungrantedBrand = randomUUID();
+    await brands.insertBrand(ungrantedOwner, ungrantedBrand, time);
+    await brands.insertVersion(ungrantedBrand, 1, fields, time);
+    const ungrantedSetId = randomUUID();
+    await new PromptDao(db, ungrantedBrand).insertSet({
+      id: ungrantedSetId, setId: ungrantedSetId, version: 1, entityVersion: 1, region: "CN", language: "zh-CN", createdAt: time,
+      content: { clusters: [{ id: clusterId, audience: "购买者", intent: "比较使用条件", primaryPage: "", conversionAction: "" }], questions },
+    });
+    const ungrantedPreview = await previewMonitoringRun(db, ungrantedOwner, {
+      ...base, action: "preview", brandId: ungrantedBrand, promptSetId: ungrantedSetId,
+    }, secret, clock);
+    assert.equal(ungrantedPreview.error, undefined);
+    assert.equal(ungrantedPreview.snapshot.grantVersion, null);
+    assert.equal(ungrantedPreview.snapshot.questionCount, 4);
+    assert.equal((await acceptMonitoringRun(db, ungrantedOwner, {
+      action: "accept", ...ungrantedPreview.snapshot, token: ungrantedPreview.token, operationId: randomUUID(),
+    }, secret, clock)).error, "NOT_ENTITLED");
     const stale = await previewMonitoringRun(db, owner, { action: "preview", ...base }, secret, clock);
     await recordCapability(db, operator, capability(operator, {
       expectedVersion: verified.version, channelId: verified.channelId, reason: "verification", status: "verified",

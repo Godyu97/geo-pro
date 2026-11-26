@@ -35,6 +35,10 @@ export function brandFixtureOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv
 }
 
 export type BrandIntake = { mode: BrandIntakeMode; origin: string };
+export type BrandIntakeDecision =
+  | { state: "closed" }
+  | { state: "denied"; intake: BrandIntake }
+  | { state: "open"; intake: BrandIntake };
 
 const materialModes = new Set<BrandIntakeMode>(["fixture", "mock", "dev"]);
 
@@ -62,10 +66,11 @@ export type DevIntakeBlock = "switch_missing" | "target_mismatch" | "host_mismat
 /** Why the development lane is closed. HTTP responses stay generic; this is for tests and operators. */
 export function explainDevIntake(headers: HeaderSource, env: NodeJS.ProcessEnv = process.env): { status: DevIntakeBlock; origin?: string } {
   if (functionalMockRequested(env) && env.GEO_BRAND_DEV_INTAKE === "true") return { status: "lane_conflict" };
-  if (env.GEO_BRAND_DEV_INTAKE !== "true") return { status: "switch_missing" };
+  const devServer = env.NODE_ENV === "development" && env.GEO_BRAND_DEV_INTAKE !== "false" && env.GEO_BRAND_DEV_INTAKE !== "0";
+  if (!devServer && env.GEO_BRAND_DEV_INTAKE !== "true") return { status: "switch_missing" };
   const expected = env.GEO_BRAND_DEV_INTAKE_DATABASE?.trim() ?? "";
   const actual = configuredDatabaseName(env);
-  if (!expected || !actual || expected !== actual) return { status: "target_mismatch" };
+  if (!actual || (expected ? expected !== actual : !devServer)) return { status: "target_mismatch" };
   const app = configuredOrigin(env);
   if (!app || !hostMatches(headers, app)) return { status: "host_mismatch" };
   return { status: "open", origin: app.origin };
@@ -97,11 +102,11 @@ export function brandIntakeOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv 
   return null;
 }
 
-export function brandIntakeDecision(headers: HeaderSource, email: string, env: NodeJS.ProcessEnv = process.env) {
+export function brandIntakeDecision(headers: HeaderSource, email: string, env: NodeJS.ProcessEnv = process.env): BrandIntakeDecision {
+  void email;
   const intake = brandIntakeOrigin(headers, env);
-  if (!intake) return { state: "closed" as const };
-  if (intake.mode === "dev" && !devIntakeActorAllowed(email, env)) return { state: "denied" as const, intake };
-  return { state: "open" as const, intake };
+  if (!intake) return { state: "closed" };
+  return { state: "open", intake };
 }
 
 /** Fixture, functional mock, and authorized development material editors. Production real intake stays on its own gate. */

@@ -25,6 +25,7 @@ import { brandIntakeDecision, type BrandIntakeMode } from "./intake";
 import { CapabilityRetryButton } from "@/features/capabilities/retry-button";
 import {
   BrandMonitoringReadiness,
+  canPreviewMonitoringScope,
   readinessAction,
   readinessStepHref,
   readinessStepLabel,
@@ -544,6 +545,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
     id, status: brand.status, website,
   }, snapshot);
   const action = readinessAction(snapshot, readiness);
+  const canPreviewScope = canPreviewMonitoringScope(snapshot, readiness);
   const monitoring = await getTranslator("monitoring");
   const factsTitle = getMessages(locale).brandFacts.title;
   const questionsTitle = getMessages(locale).promptSets.title;
@@ -554,6 +556,10 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
   ) : canWrite && action.kind === "confirm" ? (
     <Button asChild className={brandActionClass}>
       <Link href={"/dashboard/monitoring/new?brandId=" + id} prefetch={false}>{t("readinessConfirm")}</Link>
+    </Button>
+  ) : canWrite && action.kind === "next" && action.step === "request-quota" && canPreviewScope ? (
+    <Button asChild className={brandActionClass}>
+      <Link href={"/dashboard/monitoring/new?brandId=" + id} prefetch={false}>{t("readinessPreview")}</Link>
     </Button>
   ) : canWrite && action.kind === "next" ? (
     <Button asChild className={brandActionClass}>

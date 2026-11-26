@@ -267,6 +267,9 @@ export function RegistrationForm({
                 <p>{t("estimateHigh", { amount: formatMinorUnits(locale, snapshot.ceiling.upperMinor * snapshot.questionCount * snapshot.channels.length * snapshot.repeats, snapshot.ceiling.currency) })}</p>
                 <p>{t("estimateLow")}</p>
                 <p>{t("actualUnknown")}</p>
+                {snapshot.grantVersion === null && (
+                  <p className="text-muted-foreground">{t("previewQuotaNotice")}</p>
+                )}
               </>
             ) : <p>{t("notCharged")}</p>}
           </div>

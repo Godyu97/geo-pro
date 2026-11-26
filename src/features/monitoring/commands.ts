@@ -56,7 +56,13 @@ function sameScope(left: PreviewSnapshot, right: PreviewSnapshot) {
     && left.region === right.region && left.language === right.language;
 }
 
-async function loadScope(connection: QueryConnection, ownerId: string, input: PreviewRequest, now: string): Promise<Prepared | Denied> {
+async function loadScope(
+  connection: QueryConnection,
+  ownerId: string,
+  input: PreviewRequest,
+  now: string,
+  requireQuota: boolean,
+): Promise<Prepared | Denied> {
   const monitoring = new MonitoringDao(connection);
   if (input.track === "model_api" && !(await monitoring.emailVerified(ownerId))) return denied("EMAIL_UNVERIFIED", "verify-email");
   if (input.track === "model_api" && !input.ceiling) return denied("NO_TRUSTED_CEILING", "confirm-ceiling");
@@ -83,17 +89,21 @@ async function loadScope(connection: QueryConnection, ownerId: string, input: Pr
   let upperMinor: number | null = null;
   let estimateHighMinor: number | null = null;
   if (input.track === "model_api" && input.ceiling) {
-    const quota = new QuotaDao(connection);
-    const grant = await quota.grant(input.brandId, "sampling");
-    if (!grant || grantState(grant, now) !== "active") return denied("NOT_ENTITLED", "request-quota");
-    if (grant.currency !== input.ceiling.currency) return denied("NOT_ENTITLED", "confirm-ceiling");
     const total = scaleMinor(input.ceiling.upperMinor, slotCount);
     if (total === null) return denied("INVALID_INPUT");
-    const ledger = await quota.ledger(input.brandId, "sampling");
-    if (ledger.reserved + ledger.settled + slotCount > grant.countLimit || ledger.committedMinor + total > grant.budgetMinor) {
-      return denied("QUOTA_INSUFFICIENT", "adjust-scope");
+    const quota = new QuotaDao(connection);
+    const grant = await quota.grant(input.brandId, "sampling");
+    if (requireQuota) {
+      if (!grant || grantState(grant, now) !== "active") return denied("NOT_ENTITLED", "request-quota");
+      if (grant.currency !== input.ceiling.currency) return denied("NOT_ENTITLED", "confirm-ceiling");
+      const ledger = await quota.ledger(input.brandId, "sampling");
+      if (ledger.reserved + ledger.settled + slotCount > grant.countLimit || ledger.committedMinor + total > grant.budgetMinor) {
+        return denied("QUOTA_INSUFFICIENT", "adjust-scope");
+      }
+      grantVersion = grant.version;
+    } else if (grant && grantState(grant, now) === "active" && grant.currency === input.ceiling.currency) {
+      grantVersion = grant.version;
     }
-    grantVersion = grant.version;
     upperMinor = input.ceiling.upperMinor;
     estimateHighMinor = total;
   }
@@ -135,7 +145,7 @@ export async function previewMonitoringRun(
       const brand = await new QuotaDao(transaction).lockBrand(parsed.brandId, ownerId);
       if (!brand) return denied("NOT_FOUND");
       if (brand !== "active") return denied("NOT_ENTITLED");
-      return loadScope(transaction, ownerId, parsed, now());
+      return loadScope(transaction, ownerId, parsed, now(), false);
     });
     if (isDenied(result)) return result;
     return { snapshot: result.snapshot, token: previewToken(result.snapshot, secret) };
@@ -184,7 +194,7 @@ export async function acceptMonitoringRun(
         requestedNetworkMode: parsed.requestedNetworkMode,
         channelIds: parsed.channels.map((channel) => channel.channelId),
         ceiling: parsed.ceiling,
-      }, time);
+      }, time, true);
       if (isDenied(current)) return current;
       if (!sameScope(current.snapshot, parsed)) return denied("VERSION_CONFLICT", "refresh-preview");
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { brandFieldsSchema } from "../../src/features/brands/contracts.ts";
-import { brandIntakeOrigin, brandMaterialAccess, devIntakeActorAllowed, explainDevIntake } from "../../src/features/brands/intake.ts";
+import { brandIntakeOrigin, brandMaterialAccess, explainDevIntake } from "../../src/features/brands/intake.ts";
 import { readPilotAdmission } from "../../src/features/brands/pilot-admission.ts";
 import { mockBrandFields } from "../../src/features/functional-mock/brand-profile.ts";
 
@@ -113,7 +113,7 @@ const devEnv = {
   SQLITE_PATH: "/tmp/geo-pro-dev-intake.sqlite",
 };
 
-test("development intake opens only for the named database, host and allowlisted account", () => {
+test("development intake opens for any signed-in user on the named database or NODE_ENV=development", () => {
   assert.equal(explainDevIntake(devHeaders, { ...devEnv, GEO_BRAND_DEV_INTAKE: "" }).status, "switch_missing");
   assert.equal(brandIntakeOrigin(devHeaders, { ...devEnv, GEO_BRAND_DEV_INTAKE: "" }), null);
 
@@ -129,16 +129,22 @@ test("development intake opens only for the named database, host and allowlisted
   assert.equal(readPilotAdmission(devEnv).realIntakeOpen, false);
 
   assert.deepEqual(brandIntakeOrigin(devHeaders, devEnv), { mode: "dev", origin: "http://127.0.0.1:3121" });
-  assert.equal(devIntakeActorAllowed("owner@example.invalid", devEnv), true);
-  assert.equal(devIntakeActorAllowed("peer@example.invalid", devEnv), true);
-  assert.equal(devIntakeActorAllowed("outsider@example.invalid", devEnv), false);
-  assert.equal(devIntakeActorAllowed("owner@example.invalid", { ...devEnv, GEO_BRAND_DEV_INTAKE_ACTORS: "" }), false);
-
   assert.deepEqual(brandMaterialAccess(devHeaders, "owner@example.invalid", devEnv), {
     ok: true, origin: "http://127.0.0.1:3121", mode: "dev",
   });
-  assert.deepEqual(brandMaterialAccess(devHeaders, "outsider@example.invalid", devEnv), {
-    ok: false, error: "devActorDenied",
+  assert.deepEqual(brandMaterialAccess(devHeaders, "outsider@example.invalid", {
+    ...devEnv,
+    GEO_BRAND_DEV_INTAKE_ACTORS: "",
+  }), {
+    ok: true, origin: "http://127.0.0.1:3121", mode: "dev",
+  });
+  assert.deepEqual(brandMaterialAccess(devHeaders, "anyone@example.invalid", {
+    NODE_ENV: "development",
+    BETTER_AUTH_URL: "http://127.0.0.1:3121",
+    DATABASE_PROVIDER: "sqlite",
+    SQLITE_PATH: "/tmp/geo-pro-dev-intake.sqlite",
+  }), {
+    ok: true, origin: "http://127.0.0.1:3121", mode: "dev",
   });
   assert.equal(brandMaterialAccess(devHeaders, "owner@example.invalid", attested).ok, false);
 
