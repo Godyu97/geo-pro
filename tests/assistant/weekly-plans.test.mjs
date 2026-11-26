@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -9,13 +10,15 @@ import {
   executeConfirmedPlan,
   listAssistantPlans,
   readAssistantPlan,
+  readAssistantPlanReview,
+  saveAssistantPlanReview,
 } from "../../src/features/assistant/commands.ts";
 import { createAssistantPlanSchema } from "../../src/features/assistant/contracts.ts";
-import { assistantPlanListQuery } from "../../src/features/assistant/dao.ts";
+import { assistantPlanListQuery, assistantPlanReviewsQuery } from "../../src/features/assistant/dao.ts";
 import { initialBrandFields } from "../../src/features/brands/contracts.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
-import { structure, testDatabase } from "../maintenance/helpers.mjs";
+import { migrateThrough, structure, testDatabase } from "../maintenance/helpers.mjs";
 
 const time = "2026-11-22T08:00:00.000Z";
 const env = {
@@ -103,11 +106,11 @@ function responseFor(text) {
 
 for (const kind of ["sqlite", "postgresql"]) {
   test(`${kind}: weekly drafts ignore budget instructions, block only the stale fact, and stay an observation`, async () => {
-    const fixture = await testDatabase(kind);
+    const fixture = await testDatabase(kind, { migrateNow: false });
     const ddl = await testDatabase(kind, { ddl: true });
     try {
       const db = fixture.connection;
-      assert.deepEqual(await structure(db), await structure(ddl.connection));
+      await migrateThrough(db, kind === "sqlite" ? "0091_goofy_spacker_dave" : "0092_bouncy_bruce_banner");
       const [owner, outsider] = await Promise.all([account(db), account(db)]);
       const brand = randomUUID();
       const brands = new BrandDao(db);
@@ -292,26 +295,95 @@ for (const kind of ["sqlite", "postgresql"]) {
         successes: 1,
         items: [
           { action: "保留执行", factVersionId: facts[3] },
-          { action: "尚未确认", factVersionId: facts[4] },
+          { action: "到期阻断", factVersionId: facts[4] },
+          { action: "尚未确认", factVersionId: facts[0] },
         ],
       }, options);
-      await confirmPlanItems(db, owner, partial.plan.id, { itemIds: [partial.plan.items[0].id] }, options);
+      await confirmPlanItems(db, owner, partial.plan.id, { itemIds: partial.plan.items.slice(0, 2).map((item) => item.id) }, options);
       await queryWithParameters(
         db,
         `UPDATE brand_fact_version SET state = 'revoked', revoked_at = ? WHERE brand_id = ? AND id = ?`,
         [time, brand, facts[4]],
       );
       const partialResult = await executeConfirmedPlan(db, owner, partial.plan.id, options);
-      assert.deepEqual(partialResult.plan.items.map((item) => item.status), ["executed", "draft"]);
-      assert.equal(partialResult.plan.items.length, 2);
+      assert.deepEqual(partialResult.plan.items.map((item) => item.status), ["executed", "blocked", "draft"]);
+
+      execFileSync("pnpm", ["db:migrate"], { env: { ...process.env, ...fixture.env }, stdio: "inherit" });
+      assert.deepEqual(await structure(db), await structure(ddl.connection));
+      assert.deepEqual(await readAssistantPlan(db, owner, partial.plan.id), partialResult);
+      const nextStep = "下周先补证对应事实。";
+      const reviewCount = async () => Number((await db.query("SELECT COUNT(*) AS count FROM assistant_plan_review"))[0].count);
+      const planRowsBefore = await db.query("SELECT * FROM assistant_plan ORDER BY id");
+      const planItemsBefore = await db.query("SELECT * FROM assistant_plan_item ORDER BY id");
+      const grantsBefore = await db.query("SELECT * FROM quota_grant ORDER BY brand_id, kind, version");
+      const aiCallsBefore = calls.length;
+
+      assert.deepEqual(await saveAssistantPlanReview(db, owner, drafted.plan.id, { nextStep }), { error: "PLAN_NOT_SETTLED" });
+      for (const text of ["  ", "下一步分两行\n继续", "优化必有效。", "高胜率。", "a GUARANTEED improvement."]) {
+        assert.deepEqual(await saveAssistantPlanReview(db, owner, partial.plan.id, { nextStep: text }), { error: "INVALID_REVIEW" });
+      }
+      assert.deepEqual(await saveAssistantPlanReview(db, outsider, partial.plan.id, { nextStep }), { error: "NOT_FOUND" });
+      assert.equal(await reviewCount(), 0);
+
+      const failingDb = {
+        ...db,
+        transaction: (work) => db.transaction(async (tx) => {
+          await work(tx);
+          throw new Error("isolated review rollback");
+        }),
+      };
+      await assert.rejects(saveAssistantPlanReview(failingDb, owner, partial.plan.id, { nextStep }), /isolated review rollback/);
+      assert.equal(await reviewCount(), 0);
+      const watchedReview = watch(db);
+      const [saved, retried] = await Promise.all([
+        saveAssistantPlanReview(watchedReview.connection, owner, partial.plan.id, { nextStep }, options),
+        saveAssistantPlanReview(watchedReview.connection, owner, partial.plan.id, { nextStep: ` ${nextStep} ` }, options),
+      ]);
+      assert.equal(watchedReview.captured.filter(({ sql }) => /INSERT INTO assistant_plan_review/.test(sql)).length, 1);
+      assert.deepEqual(saved, retried);
+      const review = saved.plan.review;
+      assert.deepEqual(review, {
+        id: review.id, planId: partial.plan.id, executedCount: 1, staleBlockedCount: 1,
+        nextStep, createdAt: review.createdAt,
+      });
+      assert.deepEqual(await saveAssistantPlanReview(db, owner, partial.plan.id, { nextStep: "换一句。" }), { error: "REVIEW_ALREADY_SAVED" });
+      assert.deepEqual(await readAssistantPlanReview(db, owner, partial.plan.id), { review });
+      const hiddenReview = await readAssistantPlanReview(db, outsider, partial.plan.id);
+      assert.deepEqual(hiddenReview, { error: "NOT_FOUND" });
+      assert.deepEqual(hiddenReview, await readAssistantPlanReview(db, outsider, randomUUID()));
+      assert.equal(JSON.stringify(hiddenReview).includes(nextStep), false);
+      assert.equal(await reviewCount(), 1);
+      const englishReview = await saveAssistantPlanReview(db, owner, execution.plan.id, { nextStep: "Refresh the supporting fact next week." }, options);
+      assert.equal(englishReview.plan.review.nextStep, "Refresh the supporting fact next week.");
+      assert.equal(englishReview.plan.review.executedCount, 2);
+      assert.equal(englishReview.plan.review.staleBlockedCount, 1);
+      await assert.rejects(
+        () => queryWithParameters(db, `INSERT INTO assistant_plan_review
+          (id, plan_id, executed_count, stale_blocked_count, next_step, created_at) VALUES (?, ?, 1, 1, ?, ?)`,
+        [randomUUID(), partial.plan.id, nextStep, time]),
+        /unique|duplicate/i,
+      );
+      assert.equal(await reviewCount(), 2);
+      assert.deepEqual(await db.query("SELECT * FROM assistant_plan ORDER BY id"), planRowsBefore);
+      assert.deepEqual(await db.query("SELECT * FROM assistant_plan_item ORDER BY id"), planItemsBefore);
+      assert.deepEqual(await db.query("SELECT * FROM quota_grant ORDER BY brand_id, kind, version"), grantsBefore);
+      assert.equal(await publications(), 0);
+      assert.equal(await sampling(), 0);
+      assert.equal(calls.length, aiCallsBefore);
 
       const denied = await readAssistantPlan(db, outsider, execution.plan.id);
       assert.deepEqual(denied, { error: "NOT_FOUND" });
       assert.equal(JSON.stringify(denied).includes("执行1"), false);
       const deniedList = await listAssistantPlans(db, outsider, brand);
       assert.deepEqual(deniedList, { error: "NOT_FOUND" });
-      const visible = await listAssistantPlans(db, owner, brand);
+      const watchedList = watch(db);
+      const listStarted = performance.now();
+      const visible = await listAssistantPlans(watchedList.connection, owner, brand);
+      const listElapsed = performance.now() - listStarted;
       assert.equal(visible.plans.some((plan) => plan.items.some((item) => item.action === "执行1")), true);
+      assert.deepEqual(visible.plans.find((plan) => plan.id === partial.plan.id).review, review);
+      assert.equal(watchedList.captured.length, 4);
+      assert.equal(watchedList.captured.filter(({ sql }) => /FROM assistant_plan_review/.test(sql)).length, 1);
 
       await assert.rejects(
         () => queryWithParameters(
@@ -325,21 +397,49 @@ for (const kind of ["sqlite", "postgresql"]) {
         /CHECK|check constraint/i,
       );
 
-      const filler = Array.from({ length: 200 }, () => randomUUID());
+      const otherBrand = randomUUID();
+      await brands.insertBrand(outsider, otherBrand, time);
+      await brands.insertVersion(otherBrand, 1, {
+        ...initialBrandFields,
+        name: "合成复盘批量读取品牌",
+        description: "仅用于隔离数据规模验证",
+      }, time);
+      const filler = Array.from({ length: 1200 }, () => randomUUID());
       await queryWithParameters(
         db,
         `INSERT INTO assistant_plan (
           id, brand_id, owner_id, material_hash, status, controls_unchanged, ignored, budget_minor,
           strategy_label, guaranteed, successes, created_at, updated_at
-        ) VALUES ${filler.map(() => "(?, ?, ?, ?, 'draft', 1, 0, 0, 'observation', 0, 1, ?, ?)").join(", ")}`,
-        filler.flatMap((id) => [id, brand, owner, "a".repeat(64), time, time]),
+        ) VALUES ${filler.map(() => "(?, ?, ?, ?, 'settled', 1, 0, 0, 'observation', 0, 1, ?, ?)").join(", ")}`,
+        filler.flatMap((id) => [id, otherBrand, outsider, "a".repeat(64), time, time]),
       );
-      if (db.kind === "postgresql") await db.query("ANALYZE assistant_plan");
+      await queryWithParameters(
+        db,
+        `INSERT INTO assistant_plan_review (id, plan_id, executed_count, stale_blocked_count, next_step, created_at)
+         VALUES ${filler.map(() => "(?, ?, 1, 0, 'Check the fact.', ?)").join(", ")}`,
+        filler.flatMap((id) => [randomUUID(), id, time]),
+      );
+      if (db.kind === "postgresql") {
+        await db.query("ANALYZE assistant_plan");
+        await db.query("ANALYZE assistant_plan_review");
+      }
+      const watchedLargeList = watch(db);
+      const largeListStarted = performance.now();
+      const largeList = await listAssistantPlans(watchedLargeList.connection, outsider, otherBrand);
+      const largeListElapsed = performance.now() - largeListStarted;
+      assert.equal(largeList.plans.length, 20);
+      assert.equal(largeList.plans.every((plan) => plan.review.planId === plan.id), true);
+      assert.equal(watchedLargeList.captured.length, watchedList.captured.length);
       const listQuery = assistantPlanListQuery(owner, brand);
       const explain = db.kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN ";
       const listPlan = JSON.stringify(await queryWithParameters(db, explain + listQuery.sql, listQuery.values));
       assert.match(listPlan, /assistant_plan_owner_idx/);
+      const reviewQuery = assistantPlanReviewsQuery(owner, [partial.plan.id]);
+      const reviewPlan = JSON.stringify(await queryWithParameters(db, explain + reviewQuery.sql, reviewQuery.values));
+      assert.match(reviewPlan, /assistant_plan_review_plan_uidx/);
       console.log(`${kind} assistant plan list uses assistant_plan_owner_idx`);
+      console.log(`${kind} synthetic review plan=${partial.plan.id} review=${review.id} budget=${saved.plan.budgetMinor}`);
+      console.log(`${kind} review lists: ${visible.plans.length} plans / ${watchedList.captured.length} queries / ${listElapsed.toFixed(1)} ms; ${largeList.plans.length} of ${filler.length} plans / ${watchedLargeList.captured.length} queries / ${largeListElapsed.toFixed(1)} ms; review uses assistant_plan_review_plan_uidx`);
 
       const zh = JSON.parse(await readFile(new URL("../../src/lib/i18n/messages/zh-CN.json", import.meta.url), "utf8"));
       const en = JSON.parse(await readFile(new URL("../../src/lib/i18n/messages/en.json", import.meta.url), "utf8"));

@@ -5,6 +5,10 @@ export type EvidenceStrength = (typeof evidenceStrengths)[number];
 
 const guaranteeSentence = /高胜率|必有效|guaranteed\s+improvement/i;
 
+export function containsGuaranteeClaim(text: string) {
+  return guaranteeSentence.test(text);
+}
+
 export function evidenceStrengthAllowed(successes: number, strength: EvidenceStrength) {
   if (successes >= 2) return strength === "single_observation" || strength === "repeated_observation";
   if (successes === 1) return strength === "single_observation";
@@ -17,7 +21,7 @@ export function stripGuaranteeSentences(text: string) {
   return pieces
     .filter((part) => {
       const sentence = part.trim();
-      return sentence.length > 0 && !guaranteeSentence.test(sentence);
+      return sentence.length > 0 && !containsGuaranteeClaim(sentence);
     })
     .join("")
     .trim();

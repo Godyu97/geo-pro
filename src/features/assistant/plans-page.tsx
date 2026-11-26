@@ -71,12 +71,15 @@ export default async function AssistantPlansPage({
   }
 
   const hasPlans = result.plans.length > 0;
+  const onlySettled = hasPlans && result.plans.every((plan) => plan.status === "settled");
   return (
     <div className="min-w-0 space-y-6">
       <header className="min-w-0 space-y-3">
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{t("description")}</p>
-        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{hasPlans ? t("plansTask") : t("createTask")}</p>
+        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+          {onlySettled ? t("reviewTask") : hasPlans ? t("plansTask") : t("createTask")}
+        </p>
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <span className="font-medium text-foreground">{t("activeBrand")}</span>
           <span className="min-w-0 [overflow-wrap:anywhere]">{result.brandName}</span>
@@ -84,7 +87,7 @@ export default async function AssistantPlansPage({
         <div className="flex flex-wrap gap-2">
           {hasPlans ? (
             <Button asChild className={actionClass}>
-              <AssistantJump href="#assistant-plans">{t("viewPlans")}</AssistantJump>
+              <AssistantJump href="#assistant-plans">{onlySettled ? t("viewSettledPlans") : t("viewPlans")}</AssistantJump>
             </Button>
           ) : (
             <Button asChild className={actionClass}>

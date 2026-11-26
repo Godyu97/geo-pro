@@ -45,6 +45,12 @@ const copy = {
     saving: "正在保存…",
     confirmedNotice: "所选条目已确认。",
     executedNotice: "已确认的条目已执行。预算和授权没有改变。",
+    reviewTitle: "本周复盘",
+    reviewNextStep: "建议的下一步",
+    saveReview: "确认并保存复盘",
+    reviewSaved: "复盘已保存。",
+    reviewCounts: "已执行 1 项，因事实失效受阻 1 项。",
+    invalidReview: "请输入一句非空的下一步建议（最多 500 字），并删除保证收益的表述。",
     loading: "正在读取每周行动…",
     unavailable: "暂时无法读取或保存草案，请稍后重试。",
     reload: "重新载入",
@@ -78,6 +84,12 @@ const copy = {
     saving: "Saving…",
     confirmedNotice: "The selected items are confirmed.",
     executedNotice: "The confirmed items were executed. The budget and authorization were not changed.",
+    reviewTitle: "Weekly review",
+    reviewNextStep: "Suggested next step",
+    saveReview: "Confirm and save review",
+    reviewSaved: "Review saved.",
+    reviewCounts: "1 executed · 1 blocked because the linked fact was no longer current.",
+    invalidReview: "Enter a one-line next step of up to 500 characters and remove any claims of guaranteed results.",
     loading: "Loading weekly actions…",
     unavailable: "Drafts cannot be read or saved right now. Try again later.",
     reload: "Reload",
@@ -101,6 +113,32 @@ async function register(context: BrowserContext, email: string) {
   });
   expect(response.status()).toBe(200);
   return (await response.json()).user.id as string;
+}
+
+async function createBrand(context: BrowserContext, ownerId: string) {
+  const response = await context.request.post("/api/brands", {
+    headers,
+    data: {
+      action: "submit",
+      actorId: ownerId,
+      operationId: randomUUID(),
+      target: null,
+      expectedDraft: null,
+      acceptedPolicyVersion: publishedRetentionVersion(),
+      fields: {
+        name: brandName,
+        description: "合成每周行动视觉验收资料。",
+        website: "https://assistant-plans.example.com/guide",
+        aliases: [],
+        region: "CN",
+        language: "zh-CN",
+        competitors: [],
+        questions: [],
+      },
+    },
+  });
+  expect(response.status()).toBe(200);
+  return (await response.json()).id as string;
 }
 
 async function expectNoOverflow(page: Page) {
@@ -181,29 +219,7 @@ test("weekly action drafts keep the next action, confirmation, isolation, and re
       }
     }
 
-    const createdBrand = await context.request.post("/api/brands", {
-      headers,
-      data: {
-        action: "submit",
-        actorId: ownerId,
-        operationId: randomUUID(),
-        target: null,
-        expectedDraft: null,
-        acceptedPolicyVersion: publishedRetentionVersion(),
-        fields: {
-          name: brandName,
-          description: "合成每周行动视觉验收资料。",
-          website: "https://assistant-plans.example.com/guide",
-          aliases: [],
-          region: "CN",
-          language: "zh-CN",
-          competitors: [],
-          questions: [],
-        },
-      },
-    });
-    expect(createdBrand.status()).toBe(200);
-    const { id: brandId } = await createdBrand.json();
+    const brandId = await createBrand(context, ownerId);
 
     for (const locale of locales) {
       const t = copy[locale];
@@ -424,6 +440,166 @@ test("weekly action drafts keep the next action, confirmation, isolation, and re
       expect(await sql`SELECT id FROM "user" WHERE id IN ${sql(users)}`).toHaveLength(0);
       expect(await sql`SELECT id FROM assistant_plan WHERE id = ${planId}`).toHaveLength(0);
     }
+    await sql.end();
+  }
+});
+
+test("settled plans keep one owner-confirmed review in either language", async ({ page, context, browser }) => {
+  test.setTimeout(180_000);
+  const outsider = await browser.newContext({ baseURL: origin });
+  const accounts: Array<{ userId: string; email: string }> = [];
+  const sql = openTestDatabase();
+  const planIds = [randomUUID(), randomUUID()];
+  const nextSteps = ["下周复核受阻条目的新事实。", "Review the updated supporting fact with the owner next week."];
+  const screenshotDir = process.env.GEO_ASSISTANT_REVIEW_SCREENSHOTS || ".cache/issue-169";
+  try {
+    const email = `assistant-review-${randomUUID()}@example.invalid`;
+    const ownerId = await register(context, email);
+    accounts.push({ userId: ownerId, email });
+    const otherEmail = `assistant-review-other-${randomUUID()}@example.invalid`;
+    accounts.push({ userId: await register(outsider, otherEmail), email: otherEmail });
+    const brandId = await createBrand(context, ownerId);
+    const [currentFact, staleFact] = [randomUUID(), randomUUID()];
+    await sql`
+      INSERT INTO brand_fact_version
+        (brand_id, id, fact_id, version, entity_version, paste_id, revision, state, content, created_at, confirmed_by, confirmed_at, revoked_at)
+      VALUES
+        (${brandId}, ${currentFact}, ${currentFact}, 1, 1, NULL, 1, 'approved', 'fixture', ${stamp}, ${ownerId}, ${stamp}, NULL),
+        (${brandId}, ${staleFact}, ${staleFact}, 1, 1, NULL, 1, 'revoked', 'fixture', ${stamp}, ${ownerId}, ${stamp}, ${stamp})
+    `;
+    for (const planId of planIds) {
+      await sql`
+        INSERT INTO assistant_plan
+          (id, brand_id, owner_id, material_hash, status, controls_unchanged, ignored, budget_minor,
+           strategy_label, guaranteed, successes, created_at, updated_at)
+        VALUES (${planId}, ${brandId}, ${ownerId}, ${"a".repeat(64)}, 'draft', 1, 0, 2500, 'observation', 0, 0, ${stamp}, ${stamp})
+      `;
+      await sql`
+        INSERT INTO assistant_plan_item
+          (id, plan_id, brand_id, owner_id, position, action_text, fact_version_id, fact_current, status, block_reason, created_at, updated_at)
+        VALUES
+          (${randomUUID()}, ${planId}, ${brandId}, ${ownerId}, 1, 'Check supported fact', ${currentFact}, 1, 'confirmed', NULL, ${stamp}, ${stamp}),
+          (${randomUUID()}, ${planId}, ${brandId}, ${ownerId}, 2, 'Check expired fact', ${staleFact}, 1, 'confirmed', NULL, ${stamp}, ${stamp})
+      `;
+    }
+
+    const route = (planId: string) => `/api/assistant/plans/${planId}/review`;
+    const draft = await context.request.post(route(planIds[0]), { headers, data: { nextStep: nextSteps[0] } });
+    expect(draft.status()).toBe(409);
+    expect((await draft.json()).error.code).toBe("PLAN_NOT_SETTLED");
+    expect(await sql`SELECT id FROM assistant_plan_review WHERE plan_id IN ${sql(planIds)}`).toHaveLength(0);
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await page.goto("/dashboard/assistant/plans");
+    await expect(page.getByRole("region", { name: copy["zh-CN"].reviewTitle })).toHaveCount(0);
+
+    const unauthorized = await page.request.get(route(planIds[0]), { headers: { Origin: "https://untrusted.example.invalid" } });
+    expect(unauthorized.status()).toBe(403);
+    const planRows = () => sql`
+      SELECT id, owner_id, status, budget_minor, controls_unchanged, guaranteed, strategy_label, updated_at
+      FROM assistant_plan WHERE brand_id = ${brandId} ORDER BY id
+    `;
+    const reviews = () => sql`SELECT * FROM assistant_plan_review WHERE plan_id IN ${sql(planIds)} ORDER BY plan_id`;
+    const brandGrants = () => sql`SELECT * FROM quota_grant WHERE brand_id = ${brandId} ORDER BY kind, version`;
+    const initialGrants = await brandGrants();
+    for (const [index, locale] of locales.entries()) {
+      const t = copy[locale];
+      const planId = planIds[index];
+      const nextStep = nextSteps[index];
+      const executed = await context.request.post(`/api/assistant/plans/${planId}/execute`, { headers, data: {} });
+      expect(executed.ok()).toBe(true);
+      const { plan: settlement } = await executed.json();
+      expect(settlement.items.map((item: { status: string }) => item.status)).toEqual(["executed", "blocked"]);
+      const priorPlans = await planRows();
+
+      await context.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+      await page.setViewportSize({ width: 375, height: 800 });
+      await page.goto("/dashboard/assistant/plans");
+      const reviewSection = page.getByRole("region", { name: t.reviewTitle }).filter({
+        has: page.getByRole("button", { name: t.saveReview, exact: true }),
+      });
+      const field = reviewSection.getByRole("textbox", { name: t.reviewNextStep });
+      const save = reviewSection.getByRole("button", { name: t.saveReview, exact: true });
+      async function submitReviewFromKeyboard() {
+        await field.focus();
+        await page.keyboard.press("Tab");
+        await expect(save).toBeFocused();
+        expect(await save.evaluate((button) => button.matches(":focus-visible"))).toBe(true);
+        await page.keyboard.press("Enter");
+      }
+      await submitReviewFromKeyboard();
+      await expect(reviewSection.getByRole("alert")).toHaveText(t.invalidReview);
+      await field.fill(index === 0 ? "必有效" : "guaranteed improvement");
+      await submitReviewFromKeyboard();
+      await expect(reviewSection.getByRole("alert")).toHaveText(t.invalidReview);
+      await expect(field).toHaveValue(index === 0 ? "必有效" : "guaranteed improvement");
+      for (const rejected of [" ", index === 0 ? "必有效" : "guaranteed improvement"]) {
+        const invalid = await context.request.post(route(planId), { headers, data: { nextStep: rejected } });
+        expect(invalid.status()).toBe(400);
+        expect((await invalid.json()).error.code).toBe("INVALID_REVIEW");
+      }
+      expect(await reviews()).toHaveLength(index);
+
+      await field.fill(nextStep);
+      const savedResponse = page.waitForResponse((response) => response.url().endsWith(route(planId)) && response.request().method() === "POST");
+      await submitReviewFromKeyboard();
+      const saved = await savedResponse;
+      expect(saved.ok()).toBe(true);
+      const { plan } = await saved.json();
+      expect(plan.review).toMatchObject({ planId, executedCount: 1, staleBlockedCount: 1, nextStep });
+      await expect(page.getByRole("main").getByText(t.reviewSaved, { exact: true })).toBeVisible();
+      const read = await context.request.get(route(planId), { headers });
+      expect(read.status()).toBe(200);
+      expect(read.headers()["cache-control"]).toBe("private, no-store");
+      expect(await read.json()).toEqual({ review: plan.review });
+
+      const replay = await context.request.post(route(planId), { headers, data: { nextStep } });
+      expect(replay.status()).toBe(200);
+      expect((await replay.json()).plan.review).toEqual(plan.review);
+      expect(await reviews()).toHaveLength(index + 1);
+      expect(await planRows()).toEqual(priorPlans);
+      expect(await brandGrants()).toEqual(initialGrants);
+      console.log(`${locale} synthetic browser plan=${planId} review=${plan.review.id} budget=${plan.budgetMinor}; executed=1 staleBlocked=1`);
+
+      const denied = await outsider.request.get(route(planId), { headers });
+      const missing = await outsider.request.get(route(randomUUID()), { headers });
+      expect(denied.status()).toBe(404);
+      expect(missing.status()).toBe(404);
+      expect(await denied.json()).toEqual(await missing.json());
+      expect(await denied.text()).not.toContain(nextStep);
+    }
+
+    for (const locale of locales) {
+      const t = copy[locale];
+      await context.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+      for (const width of widths) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto("/dashboard/assistant/plans");
+        await expect(page.locator("html")).toHaveAttribute("lang", locale);
+        for (const nextStep of nextSteps) {
+          const review = page.getByRole("region", { name: t.reviewTitle }).filter({ hasText: nextStep });
+          await expect(review.getByText(nextStep, { exact: true })).toBeVisible();
+          await expect(review.getByText(t.reviewCounts, { exact: true })).toBeVisible();
+        }
+        await expect(page.getByRole("button", { name: t.saveReview, exact: true })).toHaveCount(0);
+        await expectNoOverflow(page);
+        if (width === 375) {
+          await page.getByText(nextSteps[0], { exact: true }).scrollIntoViewIfNeeded();
+          await capture(page, screenshotDir, `review-${locale}-375.png`);
+        }
+      }
+    }
+    const stranger = await outsider.newPage();
+    await stranger.goto("/dashboard/assistant/plans");
+    await expect(stranger.getByText(nextSteps[0], { exact: true })).toHaveCount(0);
+    await expect(stranger.getByText(nextSteps[1], { exact: true })).toHaveCount(0);
+  } finally {
+    await outsider.close();
+    for (const account of accounts) {
+      execFileSync(process.execPath, [
+        "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", "cleanup", JSON.stringify(account),
+      ], { stdio: "inherit" });
+    }
+    expect(await sql`SELECT id FROM assistant_plan_review WHERE plan_id IN ${sql(planIds)}`).toHaveLength(0);
     await sql.end();
   }
 });

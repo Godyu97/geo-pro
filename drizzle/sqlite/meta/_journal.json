@@ -645,6 +645,13 @@
       "when": 1795659469426,
       "tag": "0091_goofy_spacker_dave",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "6",
+      "when": 1795660235572,
+      "tag": "0092_hard_mathemanic",
+      "breakpoints": true
     }
   ]
 }

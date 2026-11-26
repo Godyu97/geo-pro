@@ -9,7 +9,9 @@ import { brandIdSchema } from "../brands/contracts.ts";
 import {
   confirmAssistantPlanSchema,
   createAssistantPlanSchema,
+  saveAssistantPlanReviewSchema,
   type AssistantError,
+  type AssistantPlanReviewView,
   type AssistantPlanView,
   type ConfirmAssistantPlanInput,
   type CreateAssistantPlanInput,
@@ -72,7 +74,11 @@ function modelIgnored(outputText: string) {
   return items.length > 5 || requestedChange(record.changeBudget) || requestedChange(record.publish) || materialIgnored(outputText);
 }
 
-function toView(plan: AssistantPlanRecord, items: readonly AssistantPlanItemRecord[]): AssistantPlanView {
+function toView(
+  plan: AssistantPlanRecord,
+  items: readonly AssistantPlanItemRecord[],
+  review: AssistantPlanReviewView | null = null,
+): AssistantPlanView {
   return {
     id: plan.id,
     brandId: plan.brandId,
@@ -81,6 +87,7 @@ function toView(plan: AssistantPlanRecord, items: readonly AssistantPlanItemReco
     budgetMinor: plan.budgetMinor,
     controlsUnchanged: true,
     strategy: { label: "observation", guaranteed: false, successes: plan.successes },
+    review,
     items: items.filter((item) => item.planId === plan.id).map((item) => ({
       id: item.id,
       position: item.position,
@@ -109,7 +116,9 @@ export async function listAssistantPlans(db: DatabaseConnection, ownerId: string
   const dao = new AssistantPlanDao(db);
   const plans = await dao.plansForBrand(ownerId, brand.id);
   const items = await dao.itemsForPlans(ownerId, plans.map((plan) => plan.id));
-  return { plans: plans.map((plan) => toView(plan, items)) };
+  const settledIds = plans.filter((plan) => plan.status === "settled").map((plan) => plan.id);
+  const reviews = new Map((await dao.reviewsForPlans(ownerId, settledIds)).map((review) => [review.planId, review]));
+  return { plans: plans.map((plan) => toView(plan, items, reviews.get(plan.id))) };
 }
 
 export function assistantWorkspaceUnavailable(error: unknown) {
@@ -136,9 +145,57 @@ export async function readAssistantWorkspace(db: DatabaseConnection, ownerId: st
 
 export async function readAssistantPlan(db: DatabaseConnection, ownerId: string, planId: string) {
   if (!brandIdSchema.safeParse(planId).success) return failed("INVALID_INPUT");
-  const plan = await new AssistantPlanDao(db).planForOwner(ownerId, planId);
+  const dao = new AssistantPlanDao(db);
+  const plan = await dao.planForOwner(ownerId, planId);
   if (!plan) return failed("NOT_FOUND");
-  return loadView(new AssistantPlanDao(db), ownerId, plan);
+  const items = await dao.itemsForPlans(ownerId, [plan.id]);
+  const [review] = plan.status === "settled" ? await dao.reviewsForPlans(ownerId, [plan.id]) : [];
+  return { plan: toView(plan, items, review) };
+}
+
+export async function readAssistantPlanReview(db: DatabaseConnection, ownerId: string, planId: string) {
+  const id = brandIdSchema.safeParse(planId);
+  if (!id.success) return failed("INVALID_INPUT");
+  const [review] = await new AssistantPlanDao(db).reviewsForPlans(ownerId, [id.data]);
+  return review ? { review } : failed("NOT_FOUND");
+}
+
+export async function saveAssistantPlanReview(
+  db: DatabaseConnection,
+  ownerId: string,
+  planId: string,
+  input: unknown,
+  options: Pick<PlanOptions, "clock"> = {},
+) {
+  const id = brandIdSchema.safeParse(planId);
+  if (!id.success) return failed("INVALID_INPUT");
+  const parsed = saveAssistantPlanReviewSchema.safeParse(input);
+  if (!parsed.success) return failed("INVALID_REVIEW");
+  return db.transaction(async (tx) => {
+    const brands = new BrandDao(tx);
+    if (!await brands.lockOwner(ownerId)) return failed("NOT_FOUND");
+    const dao = new AssistantPlanDao(tx);
+    const plan = await dao.planForOwner(ownerId, id.data, true);
+    if (!plan || !await brands.owned(ownerId, plan.brandId)) return failed("NOT_FOUND");
+    if (plan.status !== "settled") return failed("PLAN_NOT_SETTLED");
+
+    const [existing] = await dao.reviewsForPlans(ownerId, [plan.id]);
+    if (existing && existing.nextStep !== parsed.data.nextStep) return failed("REVIEW_ALREADY_SAVED");
+
+    const items = await dao.itemsForPlans(ownerId, [plan.id]);
+    if (existing) return { plan: toView(plan, items, existing) };
+
+    const review = {
+      id: randomUUID(),
+      planId: plan.id,
+      executedCount: items.filter((item) => item.status === "executed").length,
+      staleBlockedCount: items.filter((item) => item.status === "blocked" && item.blockReason === "fact_stale").length,
+      nextStep: parsed.data.nextStep,
+      createdAt: stampOf(options.clock),
+    };
+    await dao.insertReview(review);
+    return { plan: toView(plan, items, review) };
+  });
 }
 
 export async function draftWeeklyPlan(

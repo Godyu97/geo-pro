@@ -1812,6 +1812,20 @@ CREATE TABLE "assistant_plan_item" (
     and length("assistant_plan_item"."updated_at") between 20 and 40)
 );
 
+CREATE TABLE "assistant_plan_review" (
+	"id" text PRIMARY KEY NOT NULL,
+	"plan_id" text NOT NULL,
+	"executed_count" integer NOT NULL,
+	"stale_blocked_count" integer NOT NULL,
+	"next_step" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "assistant_plan_review_state_check" CHECK ("assistant_plan_review"."executed_count" between 0 and 5
+    and "assistant_plan_review"."stale_blocked_count" between 0 and 5
+    and "assistant_plan_review"."executed_count" + "assistant_plan_review"."stale_blocked_count" between 1 and 5
+    and length(trim("assistant_plan_review"."next_step")) between 1 and 500
+    and length("assistant_plan_review"."created_at") between 20 and 40)
+);
+
 CREATE TABLE "strategy_template" (
 	"id" text PRIMARY KEY NOT NULL,
 	"brand_id" text NOT NULL,
@@ -2885,6 +2899,7 @@ ALTER TABLE "assistant_plan" ADD CONSTRAINT "assistant_plan_brand_id_brand_id_fk
 ALTER TABLE "assistant_plan_item" ADD CONSTRAINT "assistant_plan_item_plan_id_assistant_plan_id_fk" FOREIGN KEY ("plan_id") REFERENCES "public"."assistant_plan"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "assistant_plan_item" ADD CONSTRAINT "assistant_plan_item_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "assistant_plan_item" ADD CONSTRAINT "assistant_plan_item_fact_fk" FOREIGN KEY ("brand_id","fact_version_id") REFERENCES "public"."brand_fact_version"("brand_id","id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "assistant_plan_review" ADD CONSTRAINT "assistant_plan_review_plan_id_assistant_plan_id_fk" FOREIGN KEY ("plan_id") REFERENCES "public"."assistant_plan"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "strategy_template" ADD CONSTRAINT "strategy_template_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "strategy_template" ADD CONSTRAINT "strategy_template_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "business_lead" ADD CONSTRAINT "business_lead_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
@@ -3134,6 +3149,7 @@ CREATE INDEX "formal_observation_owner_idx" ON "formal_observation" USING btree 
 CREATE INDEX "assistant_plan_owner_idx" ON "assistant_plan" USING btree ("owner_id","brand_id","created_at","id");
 CREATE UNIQUE INDEX "assistant_plan_item_position_uidx" ON "assistant_plan_item" USING btree ("plan_id","position");
 CREATE INDEX "assistant_plan_item_owner_idx" ON "assistant_plan_item" USING btree ("owner_id","plan_id","position");
+CREATE UNIQUE INDEX "assistant_plan_review_plan_uidx" ON "assistant_plan_review" USING btree ("plan_id");
 CREATE INDEX "strategy_template_owner_idx" ON "strategy_template" USING btree ("owner_id","brand_id","created_at","id");
 CREATE UNIQUE INDEX "business_lead_brand_event_uidx" ON "business_lead" USING btree ("brand_id","event_id");
 CREATE INDEX "business_lead_owner_idx" ON "business_lead" USING btree ("owner_id","brand_id","created_at","id");

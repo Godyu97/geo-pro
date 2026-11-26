@@ -8,7 +8,10 @@ import { isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts.ts";
-import { confirmPlanItems, draftWeeklyPlan, executeConfirmedPlan, listAssistantPlans } from "./commands.ts";
+import {
+  confirmPlanItems, draftWeeklyPlan, executeConfirmedPlan, listAssistantPlans,
+  readAssistantPlanReview, saveAssistantPlanReview,
+} from "./commands.ts";
 import {
   assistantErrors,
   confirmAssistantPlanSchema,
@@ -116,6 +119,26 @@ export async function assistantPlanExecuteResponse(request: Request, planId: str
   } catch {
     const traceId = randomUUID();
     console.error("assistant-plan-execute-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
+  }
+}
+
+export async function assistantPlanReviewResponse(request: Request, planId: string) {
+  const gate = await requireTrustedOrigin(request);
+  if ("error" in gate) return gate.error;
+  if (new URL(request.url).searchParams.size || !brandIdSchema.safeParse(planId).success) {
+    return failure("INVALID_INPUT");
+  }
+  const ownerId = gate.session.session.user.id;
+  try {
+    const db = getConnection();
+    const result = request.method === "POST"
+      ? await saveAssistantPlanReview(db, ownerId, planId, await readBoundedJson(request, 8192))
+      : await readAssistantPlanReview(db, ownerId, planId);
+    return "error" in result ? failure(result.error) : json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("assistant-plan-review-unavailable", { traceId });
     return failure("SERVICE_UNAVAILABLE", traceId);
   }
 }

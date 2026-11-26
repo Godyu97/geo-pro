@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, useTransition, type ComponentProps, type FormEvent, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,12 +16,13 @@ import {
   assistantErrors,
   confirmAssistantPlanSchema,
   createAssistantPlanSchema,
+  saveAssistantPlanReviewSchema,
   type AssistantError,
   type AssistantPlanView,
 } from "./contracts";
 
 type Copy = Messages["assistant"];
-type Notice = { kind: "status" | "alert"; text: string };
+type Notice = { kind: "status" | "alert"; text: string; planId?: string };
 type Slot = { action: string; fact: string };
 
 const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center aria-disabled:opacity-60";
@@ -29,7 +30,6 @@ const wrapBadgeClass = "h-auto max-w-full whitespace-normal rounded-xl px-3 py-1
 const textClass = "min-h-28 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const checkboxClass = "mt-0.5 size-4 shrink-0 rounded border border-input accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 const emptySurfaceClass = "rounded-xl border border-dashed bg-card px-4 py-5 text-sm leading-6 text-muted-foreground";
-const currentPath = "/dashboard/assistant";
 
 const itemStatusKey = {
   draft: "statusDraft",
@@ -89,6 +89,7 @@ export function PlansWorkspace({
 }) {
   const t = createTranslator(locale, messages);
   const router = useRouter();
+  const pathname = usePathname();
   const formId = useId();
   const [plans, setPlans] = useState(initialPlans);
   const [material, setMaterial] = useState("");
@@ -110,7 +111,7 @@ export function PlansWorkspace({
     });
   }
 
-  async function submit(path: string, body: unknown, onSuccess: (plan: AssistantPlanView) => void) {
+  async function submit(path: string, body: unknown, onSuccess: (plan: AssistantPlanView) => void, planId?: string) {
     const response = await fetch(path, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -122,17 +123,18 @@ export function PlansWorkspace({
     if (!response.ok) {
       const code = payload && "error" in payload ? payload.error?.code : undefined;
       if (response.status === 401 || code === "SESSION_REQUIRED") {
-        router.push(loginPath(currentPath, "session-required"));
+        router.push(loginPath(pathname, "session-required"));
         return;
       }
       setNotice({
         kind: "alert",
         text: typeof code === "string" && isKnownError(code) ? t(code) : t("SERVICE_UNAVAILABLE"),
+        planId,
       });
       return;
     }
     if (!payload?.plan) {
-      setNotice({ kind: "alert", text: t("SERVICE_UNAVAILABLE") });
+      setNotice({ kind: "alert", text: t("SERVICE_UNAVAILABLE"), planId });
       return;
     }
     onSuccess(payload.plan);
@@ -234,9 +236,34 @@ export function PlansWorkspace({
     });
   }
 
+  function handleReview(event: FormEvent<HTMLFormElement>, planId: string) {
+    event.preventDefault();
+    if (inFlightRef.current) return;
+    const command = saveAssistantPlanReviewSchema.safeParse({
+      nextStep: new FormData(event.currentTarget).get("nextStep"),
+    });
+    if (!command.success) {
+      setNotice({ kind: "alert", text: t("INVALID_REVIEW"), planId });
+      return;
+    }
+    if (!begin(`review:${planId}`)) return;
+    startTransition(async () => {
+      try {
+        await submit(`/api/assistant/plans/${planId}/review`, command.data, (plan) => {
+          setPlans((current) => current.map((item) => item.id === plan.id ? plan : item));
+          setNotice({ kind: "status", text: t("reviewSaved"), planId });
+        }, planId);
+      } catch {
+        setNotice({ kind: "alert", text: t("SERVICE_UNAVAILABLE"), planId });
+      } finally {
+        finish();
+      }
+    });
+  }
+
   return (
     <div className="min-w-0 space-y-6">
-      <NoticeBanner notice={notice} />
+      <NoticeBanner notice={notice?.planId ? null : notice} />
       <Card id="assistant-create" className="min-w-0 scroll-mt-24">
         <CardHeader>
           <CardTitle>
@@ -326,7 +353,9 @@ export function PlansWorkspace({
           {plans.map((plan) => {
             const confirming = pending === `confirm:${plan.id}`;
             const executing = pending === `execute:${plan.id}`;
-            const draftItems = plan.items.filter((item) => item.status === "draft");
+            const savingReview = pending === `review:${plan.id}`;
+            const canConfirm = plan.status === "draft" && plan.items.some((item) => item.status === "draft");
+            const reviewField = `assistant-review-${plan.id}`;
             return (
               <Card key={plan.id} className="min-w-0">
                 <CardHeader>
@@ -345,7 +374,7 @@ export function PlansWorkspace({
                   <p className="text-sm tabular-nums">{t("budgetLine", { amount: formatNumber(locale, plan.budgetMinor) })}</p>
                   <p className="text-sm tabular-nums">{t("successLine", { count: formatNumber(locale, plan.strategy.successes) })}</p>
                   {plan.ignored ? <p className="text-sm leading-6">{t("ignored")}</p> : null}
-                  {draftItems.length > 0 ? (
+                  {canConfirm ? (
                     <form onSubmit={(event) => handleConfirm(event, plan.id)} className="space-y-3">
                       <ul className="space-y-3">
                         {plan.items.map((item) => (
@@ -396,6 +425,44 @@ export function PlansWorkspace({
                         {executing ? t("saving") : t("execute")}
                       </Button>
                     </form>
+                  ) : null}
+                  {plan.status === "settled" ? (
+                    <section className="min-w-0 space-y-3 border-t pt-4" aria-labelledby={`${reviewField}-heading`}>
+                      <h3 id={`${reviewField}-heading`} className="text-sm font-semibold">{t("reviewTitle")}</h3>
+                      {plan.review ? (
+                        <>
+                          <p className="text-sm tabular-nums">
+                            {t("reviewCounts", {
+                              executed: formatNumber(locale, plan.review.executedCount),
+                              blocked: formatNumber(locale, plan.review.staleBlockedCount),
+                            })}
+                          </p>
+                          <dl className="space-y-1 text-sm">
+                            <dt className="font-medium">{t("reviewNextStep")}</dt>
+                            <dd className="[overflow-wrap:anywhere]">{plan.review.nextStep}</dd>
+                          </dl>
+                        </>
+                      ) : (
+                        <form noValidate onSubmit={(event) => handleReview(event, plan.id)} className="min-w-0 space-y-3">
+                          <div className="flex min-w-0 flex-col gap-2">
+                            <Label htmlFor={reviewField}>{t("reviewNextStep")}</Label>
+                            <Input
+                              id={reviewField}
+                              name="nextStep"
+                              required
+                              readOnly={savingReview}
+                              aria-describedby={`${reviewField}-hint`}
+                              className="h-10 bg-background"
+                            />
+                            <p id={`${reviewField}-hint`} className="text-sm text-muted-foreground">{t("reviewHint")}</p>
+                          </div>
+                          <Button type="submit" aria-disabled={savingReview} className={actionClass}>
+                            {savingReview ? t("saving") : t("saveReview")}
+                          </Button>
+                        </form>
+                      )}
+                      <NoticeBanner notice={notice?.planId === plan.id ? notice : null} />
+                    </section>
                   ) : null}
                 </CardContent>
               </Card>

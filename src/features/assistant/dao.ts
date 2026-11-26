@@ -3,7 +3,7 @@ import "server-only";
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
-import { blockReasonSchema, itemStatusSchema, planStatusSchema } from "./contracts.ts";
+import { blockReasonSchema, itemStatusSchema, planStatusSchema, reviewNextStepSchema, type AssistantPlanReviewView } from "./contracts.ts";
 
 const stamp = z.iso.datetime({ precision: 3 });
 const flag = z.coerce.number().int().min(0).max(1);
@@ -54,6 +54,15 @@ const factRow = z.object({
   factCurrent: flag,
 });
 
+const reviewRow = z.object({
+  id: brandIdSchema,
+  planId: brandIdSchema,
+  executedCount: z.coerce.number().int().min(0).max(5),
+  staleBlockedCount: z.coerce.number().int().min(0).max(5),
+  nextStep: reviewNextStepSchema,
+  createdAt: stamp,
+});
+
 export type AssistantPlanRecord = z.infer<typeof planRow>;
 export type AssistantPlanItemRecord = z.infer<typeof itemRow>;
 export type FactCurrentRecord = z.infer<typeof factRow>;
@@ -77,6 +86,19 @@ export function assistantPlanListQuery(ownerId: string, brandId: string) {
       ORDER BY created_at DESC, id ASC
       LIMIT 20`,
     values: [ownerId, brandId] as QueryValue[],
+  };
+}
+
+export function assistantPlanReviewsQuery(ownerId: string, planIds: readonly string[]) {
+  return {
+    sql: `SELECT r.id, r.plan_id AS "planId", r.executed_count AS "executedCount",
+        r.stale_blocked_count AS "staleBlockedCount", r.next_step AS "nextStep", r.created_at AS "createdAt"
+      FROM assistant_plan_review r
+      JOIN assistant_plan p ON p.id = r.plan_id
+      JOIN brand b ON b.id = p.brand_id
+      WHERE p.owner_id = ? AND b.owner_id = ? AND b.frozen_at IS NULL AND p.status = 'settled'
+        AND r.plan_id IN (${planIds.map(() => "?").join(", ")})`,
+    values: [ownerId, ownerId, ...planIds] as QueryValue[],
   };
 }
 
@@ -133,6 +155,21 @@ export class AssistantPlanDao {
   async plansForBrand(ownerId: string, brandId: string) {
     const query = assistantPlanListQuery(ownerId, brandId);
     return z.array(planRow).parse(await queryWithParameters(this.db, query.sql, query.values));
+  }
+
+  async reviewsForPlans(ownerId: string, planIds: readonly string[]) {
+    if (planIds.length === 0) return [];
+    const query = assistantPlanReviewsQuery(ownerId, planIds);
+    return z.array(reviewRow).parse(await queryWithParameters(this.db, query.sql, query.values));
+  }
+
+  async insertReview(review: AssistantPlanReviewView) {
+    await queryWithParameters(
+      this.db,
+      `INSERT INTO assistant_plan_review (id, plan_id, executed_count, stale_blocked_count, next_step, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [review.id, review.planId, review.executedCount, review.staleBlockedCount, review.nextStep, review.createdAt],
+    );
   }
 
   async itemsForPlans(ownerId: string, planIds: readonly string[], forUpdate = false) {

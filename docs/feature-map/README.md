@@ -8,7 +8,7 @@
 
 | 业务域 | 覆盖路由范围 | 模块地图 | 页面数 |
 | --- | --- | --- | --- |
-| 公开/账号/品牌/助理 | `/`、`/login`、`/account-access`、`/dashboard`、`/dashboard/brands/*`、`/dashboard/assistant/*` | [brands-assistant.md](brands-assistant.md) | 19 |
+| 公开/账号/品牌/助理 | `/`、`/login`、`/account-access`、`/dashboard`、`/dashboard/brands/*`、`/dashboard/assistant/*` | [brands-assistant.md](brands-assistant.md) | 20 |
 | 监测与优化 | `/dashboard/monitoring/*`、`/dashboard/optimization/*` | [monitoring-optimization.md](monitoring-optimization.md) | 14 |
 | 内容生产与素材 | `/dashboard/content/*` | [content.md](content.md) | 12 |
 | 复测报告与商业交付 | `/dashboard/reports/*`、`/dashboard/commercial/*` | [reports-commercial.md](reports-commercial.md) | 12 |

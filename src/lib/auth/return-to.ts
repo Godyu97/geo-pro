@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const safeDashboardPaths = [
+  "/dashboard/assistant/plans",
   "/dashboard", "/dashboard/maintenance", "/dashboard/maintenance/capabilities", "/dashboard/maintenance/support",
   "/dashboard/brands/questions", "/dashboard/monitoring/overview", "/dashboard/monitoring/answers",
   "/dashboard/monitoring/competitors", "/dashboard/optimization", "/dashboard/content", "/dashboard/reports",

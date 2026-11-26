@@ -70,6 +70,22 @@ export const assistantPlanItem = pgTable("assistant_plan_item", {
     and length(${table.updatedAt}) between 20 and 40`),
 ]);
 
+export const assistantPlanReview = pgTable("assistant_plan_review", {
+  id: text("id").primaryKey(),
+  planId: text("plan_id").notNull().references(() => assistantPlan.id, { onDelete: "cascade" }),
+  executedCount: integer("executed_count").notNull(),
+  staleBlockedCount: integer("stale_blocked_count").notNull(),
+  nextStep: text("next_step").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("assistant_plan_review_plan_uidx").on(table.planId),
+  check("assistant_plan_review_state_check", sql`${table.executedCount} between 0 and 5
+    and ${table.staleBlockedCount} between 0 and 5
+    and ${table.executedCount} + ${table.staleBlockedCount} between 1 and 5
+    and length(trim(${table.nextStep})) between 1 and 500
+    and length(${table.createdAt}) between 20 and 40`),
+]);
+
 // A reusable observation template. assistant_plan stores one weekly draft and
 // its fixed observation label; it does not keep industry, sampling conditions,
 // evidence strength, or a failure case. guaranteed stays 0 and the label stays
