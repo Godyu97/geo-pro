@@ -216,3 +216,172 @@ test("content brief keeps the next action readable and recoverable", async ({ pa
     }
   }
 });
+
+test("content plan groups confirmed existing pages, planned targets, unverified history, updates, and gaps in both languages", async ({ page, context, browser }) => {
+  test.setTimeout(180_000);
+  const shots = ".cache/issue-173/content-plans";
+  mkdirSync(shots, { recursive: true });
+  const ownerEmail = `content-plan-${randomUUID()}@example.invalid`;
+  const outsiderEmail = `content-plan-other-${randomUUID()}@example.invalid`;
+  const outsider = await browser.newContext({ baseURL: origin, viewport: { width: 375, height: 800 } });
+  const accounts: Array<{ userId: string; email: string; brandId?: string }> = [];
+  try {
+    const ownerId = await register(context, ownerEmail);
+    const outsiderId = await register(outsider, outsiderEmail);
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await outsider.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+
+    const createBrand = async (ctx: BrowserContext, userId: string, name: string, website: string) => {
+      const response = await ctx.request.post("/api/brands", {
+        headers: { Origin: origin },
+        data: {
+          action: "submit", actorId: userId, operationId: randomUUID(), target: null, expectedDraft: null,
+          acceptedPolicyVersion: publishedRetentionVersion(),
+          fields: {
+            name, description: "仅用于内容计划双语隔离验收的合成品牌。",
+            website, aliases: [], region: "CN", language: "zh-CN", competitors: [], questions: [],
+          },
+        },
+      });
+      expect(response.ok(), response.ok() ? "" : await response.text()).toBeTruthy();
+      return (await response.json()).id as string;
+    };
+
+    const brandA = await createBrand(context, ownerId, "合成计划品牌甲", "https://plan-a.example.com");
+    accounts.push({ userId: ownerId, email: ownerEmail, brandId: brandA });
+    const brandB = await createBrand(outsider, outsiderId, "合成计划品牌乙", "https://plan-b.example.com");
+    accounts.push({ userId: outsiderId, email: outsiderEmail, brandId: brandB });
+
+    const existingUrl = "https://plan-a.example.com/pricing";
+    const plannedUrl = "https://plan-a.example.com/planned-guide";
+    const legacyUrl = "https://plan-a.example.com/legacy-unverified";
+    const foreignUrl = "https://plan-b.example.com/foreign-only";
+    const mainCluster = "购买价格簇";
+    const plannedCluster = "待发布计划簇";
+    const legacyCluster = "历史记录簇";
+
+    execFileSync(process.execPath, [
+      "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", "content-plan-fixture",
+      JSON.stringify({ userId: ownerId, brandId: brandA, ownedUrl: existingUrl, legacyCluster, legacyUrl }),
+    ], { stdio: "inherit" });
+
+    const factId = randomUUID();
+    const postBrief = async (
+      ctx: BrowserContext,
+      brandId: string,
+      questionCluster: string,
+      titleCandidate: string,
+      primaryPage: string,
+      factVersionIds: string[],
+      briefId?: string,
+    ) => {
+      const response = await ctx.request.post("/api/content", {
+        headers: { Origin: origin },
+        data: {
+          action: "save-brief-draft",
+          brandId,
+          operationId: randomUUID(),
+          ...(briefId ? { briefId } : {}),
+          questionCluster,
+          fields: {
+            audience: "采购决策人",
+            targetGap: "补充价格口径说明",
+            applicableBoundary: "仅合成验收",
+            primaryPage,
+            conversionAction: "查看合成说明",
+            templateKind: "fact_faq",
+            titleCandidates: [titleCandidate],
+            factVersionIds,
+            competitorSource: null,
+          },
+        },
+      });
+      expect(response.ok(), response.ok() ? "" : await response.text()).toBeTruthy();
+      return (await response.json()).briefId as string;
+    };
+
+    const updateBriefTitle = "更新定价页 Brief";
+    const gapBriefTitle = "缺承接页 Brief";
+    const plannedBriefTitle = "待发布计划 Brief";
+    const foreignBriefTitle = "品牌乙私有 Brief";
+
+    const updateBriefId = await postBrief(context, brandA, mainCluster, updateBriefTitle, existingUrl, [factId]);
+    const gapBriefId = await postBrief(context, brandA, mainCluster, gapBriefTitle, "", [factId]);
+    // Repeat save of the same brief must keep updateBriefId readable without duplicate entries.
+    await postBrief(context, brandA, mainCluster, gapBriefTitle, "", [factId], gapBriefId);
+    await postBrief(context, brandA, plannedCluster, plannedBriefTitle, plannedUrl, [factId]);
+    await postBrief(outsider, brandB, mainCluster, foreignBriefTitle, foreignUrl, [randomUUID()]);
+
+    const planCopy = {
+      "zh-CN": {
+        plansHeading: "问题簇覆盖",
+        existingBadge: "现有页",
+        basisOwned: "依据：已确认自有域名引用",
+        plannedBadge: "计划",
+        needsCheckBadge: "待核对",
+        missingPage: "缺少主页面",
+        updateLink: `更新现有页 Brief：${updateBriefTitle}`,
+        gapLink: `补齐缺口 Brief：${gapBriefTitle}`,
+      },
+      en: {
+        plansHeading: "Question-cluster coverage",
+        existingBadge: "Existing page",
+        basisOwned: "Basis: confirmed owned-domain citation",
+        plannedBadge: "Planned",
+        needsCheckBadge: "Needs verification",
+        missingPage: "The primary page is missing",
+        updateLink: `Update via brief: ${updateBriefTitle}`,
+        gapLink: `Complete gap brief: ${gapBriefTitle}`,
+      },
+    } as const;
+
+    for (const locale of ["zh-CN", "en"] as const) {
+      const current = planCopy[locale];
+      await context.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+      for (const width of [375, 768, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(`/dashboard/content?brandId=${encodeURIComponent(brandA)}`);
+        const plans = page.locator("section", { has: page.getByRole("heading", { name: current.plansHeading, exact: true }) });
+        await expect(plans).toBeVisible();
+        await expect(plans.getByRole("heading", { name: mainCluster, exact: true })).toBeVisible();
+        await expect(plans.getByText(existingUrl, { exact: true })).toHaveCount(1);
+        await expect(plans.getByText(current.existingBadge, { exact: true })).toHaveCount(1);
+        await expect(plans.getByText(current.basisOwned, { exact: true })).toBeVisible();
+        await expect(plans.getByRole("link", { name: current.updateLink, exact: true })).toHaveAttribute(
+          "href",
+          `/dashboard/content/briefs/${updateBriefId}`,
+        );
+        await expect(plans.getByRole("link", { name: current.gapLink, exact: true })).toHaveAttribute(
+          "href",
+          `/dashboard/content/briefs/${gapBriefId}`,
+        );
+        await expect(plans.getByText(current.missingPage, { exact: true })).toBeVisible();
+        await expect(plans.getByText(plannedUrl, { exact: true })).toHaveCount(1);
+        await expect(plans.getByText(current.plannedBadge, { exact: true })).toBeVisible();
+        await expect(plans.getByText(legacyUrl, { exact: true })).toHaveCount(1);
+        await expect(plans.getByText(current.needsCheckBadge, { exact: true })).toBeVisible();
+        await expect(plans.getByText(foreignUrl)).toHaveCount(0);
+        await expect(plans.getByText(foreignBriefTitle)).toHaveCount(0);
+        await expectNoOverflow(page);
+        if (width === 375) {
+          await page.screenshot({ path: `${shots}/content-plans-${locale}-375.png`, fullPage: false });
+        }
+      }
+    }
+
+    await page.setViewportSize({ width: 375, height: 800 });
+    await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await page.goto(`/dashboard/content?brandId=${encodeURIComponent(brandA)}`);
+    const updateEntry = page.getByRole("link", { name: planCopy["zh-CN"].updateLink, exact: true });
+    await activateFromKeyboard(page, updateEntry);
+    await expect(page).toHaveURL(`/dashboard/content/briefs/${updateBriefId}`);
+  } finally {
+    await outsider.close();
+    for (const { userId, email, brandId } of accounts) {
+      execFileSync(process.execPath, [
+        "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", "cleanup",
+        JSON.stringify({ userId, email, ...(brandId ? { brandId } : {}) }),
+      ], { stdio: "inherit" });
+    }
+  }
+});

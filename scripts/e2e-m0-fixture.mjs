@@ -182,6 +182,53 @@ try {
     [unknown ? "unknown" : "safe_failure", unknown ? null : 0, unknown ? "unknown" : "known", payload.runId, slots[0].id]);
     await queryWithParameters(db, `UPDATE monitoring_slot SET status = ? WHERE id = ?`, [toStatus, slots[0].id]);
     process.stdout.write(JSON.stringify({ updated: true }));
+  } else if (command === "content-plan-fixture") {
+    const { userId, brandId, ownedUrl, legacyCluster, legacyUrl } = payload;
+    const now = new Date().toISOString();
+    const obsId = randomUUID();
+    const citId = randomUUID();
+    const fp = Buffer.from(randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "")).toString("hex").slice(0, 64);
+    await queryWithParameters(
+      db,
+      `INSERT INTO answer_observation (
+        id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method,
+        question_text, answer_text, fingerprint, captured_at, region, language,
+        requested_network_mode, entity_version, citation_set_state, evidence_state,
+        created_at, target_region
+      ) VALUES (?, ?, ?, NULL, NULL, 'consumer_ui', 'manual', ?, ?, ?, ?, 'CN', 'zh-CN', 'unknown', 1, 'complete', 'complete', ?, 'CN')`,
+      [obsId, brandId, userId, "合成问题簇页面归属", "合成回答引用了已确认自有页面。", fp, now, now],
+    );
+    await queryWithParameters(
+      db,
+      `INSERT INTO answer_citation (
+        id, observation_id, brand_id, raw_url, normalized_url, citation_origin,
+        position_label, ownership, page_status, created_at
+      ) VALUES (?, ?, ?, ?, ?, 'consumer_visible', '1', 'owned_domain', 'reachable', ?)`,
+      [citId, obsId, brandId, ownedUrl, ownedUrl, now],
+    );
+    if (legacyCluster && legacyUrl) {
+      await queryWithParameters(
+        db,
+        `INSERT INTO content_plan (id, brand_id, owner_id, question_cluster, coverage_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          randomUUID(),
+          brandId,
+          userId,
+          legacyCluster,
+          JSON.stringify({
+            questionCluster: legacyCluster,
+            existing: [legacyUrl],
+            pendingUpdate: [],
+            gaps: [],
+            preferUpdate: legacyUrl,
+          }),
+          now,
+          now,
+        ],
+      );
+    }
+    process.stdout.write(JSON.stringify({ observationId: obsId, citationId: citId }));
   } else if (command === "cleanup") {
     for (const channelId of payload.channelIds ?? []) {
       await queryWithParameters(db, `DELETE FROM sampling_answer_network WHERE channel_id = ?`, [channelId]);

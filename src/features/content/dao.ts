@@ -405,6 +405,78 @@ const channelVariantFrom = `content_channel_variant v
   LEFT JOIN channel_profile_version p
     ON p.id = v.channel_profile_version_id AND p.owner_id = v.owner_id AND p.brand_id = v.brand_id`;
 
+const ownedPageCitationRow = z.object({
+  id: brandIdSchema,
+  observationId: brandIdSchema,
+  rawUrl: z.string().min(1),
+  normalizedUrl: z.string().min(1),
+  ownership: z.enum(["owned_domain", "owned_account"]),
+  citationOrigin: z.string().min(1),
+});
+
+const clusterPublicationRow = z.object({
+  id: brandIdSchema,
+  contentVersionId: brandIdSchema,
+  briefId: brandIdSchema.nullable(),
+  planId: brandIdSchema.nullable(),
+  pageUrl: z.string().min(1),
+  targetAccount: z.string().min(1),
+  status: publicationStatusSchema,
+  effectiveAt: z.iso.datetime({ precision: 3 }).nullable(),
+  evidenceGrade: publicationEvidenceGradeSchema.nullable(),
+  supersededBy: brandIdSchema.nullable(),
+  updatedAt: z.iso.datetime({ precision: 3 }),
+});
+
+export type OwnedPageCitationRow = z.infer<typeof ownedPageCitationRow>;
+export type ClusterPublicationRow = z.infer<typeof clusterPublicationRow>;
+
+export function ownedPageCitationsQuery(ownerId: string, brandId: string, limit: number) {
+  return {
+    sql: `SELECT c.id, c.observation_id AS "observationId", c.raw_url AS "rawUrl",
+            c.normalized_url AS "normalizedUrl", c.ownership, c.citation_origin AS "citationOrigin"
+          FROM answer_citation c
+          JOIN answer_observation o ON o.id = c.observation_id AND o.brand_id = c.brand_id
+          WHERE o.owner_id = ? AND o.brand_id = ?
+            AND o.evidence_state <> 'draft_evidence'
+            AND c.ownership IN ('owned_domain', 'owned_account')
+          ORDER BY c.created_at DESC, c.id DESC
+          LIMIT ?`,
+    values: [ownerId, brandId, limit] as QueryValue[],
+  };
+}
+
+export function clusterPublicationsQuery(ownerId: string, brandId: string, limit: number) {
+  return {
+    sql: `SELECT p.id, p.content_version_id AS "contentVersionId", v.brief_id AS "briefId", b.plan_id AS "planId",
+            p.page_url AS "pageUrl", p.target_account AS "targetAccount", p.status,
+            p.effective_at AS "effectiveAt", p.evidence_grade AS "evidenceGrade",
+            p.superseded_by AS "supersededBy", p.updated_at AS "updatedAt"
+          FROM content_publication p
+          JOIN content_version v ON v.id = p.content_version_id AND v.owner_id = p.owner_id AND v.brand_id = p.brand_id
+          JOIN content_brief b ON b.id = v.brief_id AND b.owner_id = p.owner_id AND b.brand_id = p.brand_id
+          WHERE p.owner_id = ? AND p.brand_id = ?
+          ORDER BY p.updated_at DESC, p.id DESC
+          LIMIT ?`,
+    values: [ownerId, brandId, limit] as QueryValue[],
+  };
+}
+
+export function latestBriefVersionsBatchQuery(brandId: string, briefIds: readonly string[]) {
+  return {
+    sql: `SELECT ${briefVersionColumns.split("\n").map((line) => line.replace(/\b(id|brief_id|brand_id|revision|audience|target_gap|applicable_boundary|primary_page|conversion_action|template_kind|title_candidates_json|fact_version_ids_json|competitor_source|confirmed_at|created_at)\b/g, "v.$1")).join("\n")}
+          FROM content_brief_version v
+          JOIN (
+            SELECT brief_id, MAX(revision) AS max_rev
+            FROM content_brief_version
+            WHERE brand_id = ? AND brief_id IN (${briefIds.map(() => "?").join(", ")})
+            GROUP BY brief_id
+          ) latest ON latest.brief_id = v.brief_id AND latest.max_rev = v.revision
+          WHERE v.brand_id = ?`,
+    values: [brandId, ...briefIds, brandId] as QueryValue[],
+  };
+}
+
 const maintenanceTaskColumns = `id, brand_id AS "brandId", owner_id AS "ownerId",
   fact_version_id AS "factVersionId", status, reason, created_at AS "createdAt", updated_at AS "updatedAt"`;
 
@@ -488,6 +560,13 @@ export class ContentDao {
     );
   }
 
+  async updateBriefPlanAndStatus(id: string, planId: string | null, status: string, updatedAt: string) {
+    await this.query(
+      `UPDATE content_brief SET plan_id = ?, status = ?, updated_at = ? WHERE id = ?`,
+      [planId, status, updatedAt, id],
+    );
+  }
+
   async getBrief(ownerId: string, brandId: string, briefId: string) {
     const [row] = await this.query(
       `SELECT ${briefColumns} FROM content_brief WHERE owner_id = ? AND brand_id = ? AND id = ?`,
@@ -520,6 +599,43 @@ export class ContentDao {
       [ownerId, brandId, limit],
     );
     return rows.map((row) => briefRow.parse(row));
+  }
+
+  async listBriefsByPlan(ownerId: string, brandId: string, planId: string, limit = 100) {
+    const rows = await this.query(
+      `SELECT ${briefColumns} FROM content_brief
+       WHERE owner_id = ? AND brand_id = ? AND plan_id = ?
+       ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      [ownerId, brandId, planId, limit],
+    );
+    return rows.map((row) => briefRow.parse(row));
+  }
+
+  async latestBriefVersionsByBriefIds(brandId: string, briefIds: readonly string[]) {
+    const map = new Map<string, BriefVersionRow>();
+    const unique = [...new Set(briefIds)];
+    for (let offset = 0; offset < unique.length; offset += 100) {
+      const chunk = unique.slice(offset, offset + 100);
+      const spec = latestBriefVersionsBatchQuery(brandId, chunk);
+      const rows = await this.query(spec.sql, spec.values);
+      for (const row of rows) {
+        const parsed = briefVersionRow.parse(row);
+        map.set(parsed.briefId, parsed);
+      }
+    }
+    return map;
+  }
+
+  async listOwnedPageCitations(ownerId: string, brandId: string, limit = 200) {
+    const spec = ownedPageCitationsQuery(ownerId, brandId, limit);
+    const rows = await this.query(spec.sql, spec.values);
+    return z.array(ownedPageCitationRow).parse(rows);
+  }
+
+  async listClusterPublications(ownerId: string, brandId: string, limit = 200) {
+    const spec = clusterPublicationsQuery(ownerId, brandId, limit);
+    const rows = await this.query(spec.sql, spec.values);
+    return z.array(clusterPublicationRow).parse(rows);
   }
 
   async insertBriefVersion(row: BriefVersionRow) {

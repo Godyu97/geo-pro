@@ -78,6 +78,7 @@ import { saveStoredObject, type ObjectStorageClient } from "../stored-objects/co
 import { CONTENT_TYPES, MAX_STORED_OBJECT_BYTES, sanitizeObjectFileName } from "../stored-objects/contracts.ts";
 import { loadBrandObjectsByIds, markObjectFailed, type StoredObjectRow } from "../stored-objects/dao.ts";
 import {
+  buildClusterPlanViews,
   canCancel,
   canPause,
   canResume,
@@ -86,6 +87,7 @@ import {
   coverageFromCluster,
   deriveBatchStatus,
   fillDraftFromTemplate,
+  type BriefGap,
 } from "./rules.ts";
 import {
   evaluateManualEvidence,
@@ -160,89 +162,162 @@ function versionFromFields(
   };
 }
 
+function briefDisplayTitle(briefId: string, version: BriefVersionRow | null) {
+  if (!version) return briefId;
+  const titles = JSON.parse(version.titleCandidatesJson) as string[];
+  return titles.find((item) => item.trim())?.trim() || version.targetGap.trim() || briefId;
+}
+
+async function ensureClusterPlan(
+  dao: ContentDao,
+  ownerId: string,
+  brandId: string,
+  questionCluster: string,
+  now: string,
+) {
+  const existing = await dao.getPlanByCluster(ownerId, brandId, questionCluster);
+  if (existing) return existing;
+  const id = randomUUID();
+  const coverageJson = JSON.stringify(coverageFromCluster({
+    questionCluster,
+    existingPages: [],
+    pendingPages: [],
+    gapPages: [],
+  }));
+  const row = {
+    id,
+    brandId,
+    ownerId,
+    questionCluster,
+    coverageJson,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await dao.insertPlan(row);
+  return row;
+}
+
+async function syncClusterPlanCoverage(
+  dao: ContentDao,
+  ownerId: string,
+  brandId: string,
+  planId: string,
+  now: string,
+  ownedCitations?: Awaited<ReturnType<ContentDao["listOwnedPageCitations"]>>,
+  publications?: Awaited<ReturnType<ContentDao["listClusterPublications"]>>,
+) {
+  const plan = await dao.getPlan(ownerId, brandId, planId);
+  if (!plan) return;
+  const planBriefs = await dao.listBriefsByPlan(ownerId, brandId, planId, 100);
+  const versionsByBrief = await dao.latestBriefVersionsByBriefIds(
+    brandId,
+    planBriefs.map((item) => item.id),
+  );
+  const citations = ownedCitations ?? await dao.listOwnedPageCitations(ownerId, brandId, 200);
+  const pubs = publications ?? await dao.listClusterPublications(ownerId, brandId, 200);
+  const briefInputs = planBriefs.map((brief) => {
+    const version = versionsByBrief.get(brief.id) ?? null;
+    const gaps = version ? contentBriefGaps(parseFields(version)) : [];
+    return {
+      id: brief.id,
+      planId: brief.planId,
+      status: brief.status,
+      title: briefDisplayTitle(brief.id, version),
+      primaryPage: version?.primaryPage ?? "",
+      gaps,
+    };
+  });
+  const [view] = buildClusterPlanViews({
+    plans: [{ ...plan, coverageJson: "{}" }],
+    briefs: briefInputs,
+    ownedCitations: citations,
+    publications: pubs,
+  });
+  const coverage = coverageFromCluster({
+    questionCluster: plan.questionCluster,
+    existingPages: view ? view.existingPages.map((item) => item.url) : [],
+    pendingPages: view ? view.plannedPages.map((item) => item.url) : [],
+    gapPages: view ? view.gaps.map((item) => item.primaryPage || item.briefId) : [],
+  });
+  await dao.updatePlanCoverage(plan.id, JSON.stringify(coverage), now);
+}
+
 export async function saveBriefDraft(
   db: DatabaseConnection,
   ownerId: string,
   input: SaveBriefDraftInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
-  const adopted = await adoptOwner(db, ownerId, input.brandId, "write", clock());
-  if (!adopted) return denied("NOT_FOUND");
-  ownerId = adopted;
-  const brands = new BrandDao(db);
-  const brand = await brands.owned(ownerId, input.brandId);
-  if (!brand || brand.status !== "active") return denied("NOT_FOUND");
-
-  const dao = new ContentDao(db);
   const now = clock();
-  let briefId = input.briefId;
-  let planId = input.planId ?? null;
+  return db.transaction(async (tx) => {
+    const adopted = await adoptOwner(tx, ownerId, input.brandId, "write", now);
+    if (!adopted) return denied("NOT_FOUND");
+    const effectiveOwnerId = adopted;
+    const brands = new BrandDao(tx);
+    const brand = await brands.owned(effectiveOwnerId, input.brandId);
+    if (!brand || brand.status !== "active") return denied("NOT_FOUND");
 
-  if (input.questionCluster) {
-    const existing = await dao.getPlanByCluster(ownerId, input.brandId, input.questionCluster);
-    if (existing) {
-      planId = existing.id;
-      const coverage = coverageFromCluster({
-        questionCluster: input.questionCluster,
-        existingPages: fieldsPrimary(input.fields),
-        pendingPages: [],
-        gapPages: contentBriefGaps(input.fields).length ? [input.fields.primaryPage || "planned"] : [],
-      });
-      await dao.updatePlanCoverage(existing.id, JSON.stringify(coverage), now);
-    } else {
-      planId = randomUUID();
-      const coverage = coverageFromCluster({
-        questionCluster: input.questionCluster,
-        existingPages: fieldsPrimary(input.fields),
-        pendingPages: [],
-        gapPages: contentBriefGaps(input.fields).length ? [input.fields.primaryPage || "planned"] : [],
-      });
-      await dao.insertPlan({
-        id: planId,
-        brandId: input.brandId,
-        ownerId,
-        questionCluster: input.questionCluster,
-        coverageJson: JSON.stringify(coverage),
-        createdAt: now,
-        updatedAt: now,
-      });
+    const dao = new ContentDao(tx);
+    let briefId = input.briefId;
+    let planId = input.planId ?? null;
+    let previousPlanId: string | null = null;
+
+    if (briefId) {
+      const brief = await dao.getBrief(effectiveOwnerId, input.brandId, briefId);
+      if (!brief) return denied("NOT_FOUND");
+      if (brief.status === "invalidated") return denied("INVALID_INPUT");
+      previousPlanId = brief.planId;
+      if (input.questionCluster) {
+        const plan = await ensureClusterPlan(dao, effectiveOwnerId, input.brandId, input.questionCluster, now);
+        planId = plan.id;
+      } else {
+        planId = planId ?? brief.planId;
+      }
+      const latest = await dao.latestBriefVersion(briefId);
+      const revision = (latest?.revision ?? 0) + 1;
+      const versionId = randomUUID();
+      await dao.insertBriefVersion(
+        versionFromFields(versionId, briefId, input.brandId, revision, input.fields, now, null),
+      );
+      if (planId !== brief.planId) {
+        await dao.updateBriefPlanAndStatus(briefId, planId, "draft", now);
+      } else {
+        await dao.updateBriefStatus(briefId, "draft", now);
+      }
+      const planIdsToSync = [...new Set([previousPlanId, planId].filter((id): id is string => Boolean(id)))];
+      if (planIdsToSync.length > 0) {
+        const ownedCitations = await dao.listOwnedPageCitations(effectiveOwnerId, input.brandId, 200);
+        const publications = await dao.listClusterPublications(effectiveOwnerId, input.brandId, 200);
+        for (const syncId of planIdsToSync) {
+          await syncClusterPlanCoverage(dao, effectiveOwnerId, input.brandId, syncId, now, ownedCitations, publications);
+        }
+      }
+      return { briefId, versionId, planId, gaps: contentBriefGaps(input.fields) };
     }
-  }
 
-  if (briefId) {
-    const brief = await dao.getBrief(ownerId, input.brandId, briefId);
-    if (!brief) return denied("NOT_FOUND");
-    if (brief.status === "invalidated") return denied("INVALID_INPUT");
-    const latest = await dao.latestBriefVersion(briefId);
-    const revision = (latest?.revision ?? 0) + 1;
+    if (input.questionCluster) {
+      const plan = await ensureClusterPlan(dao, effectiveOwnerId, input.brandId, input.questionCluster, now);
+      planId = plan.id;
+    }
+
+    briefId = randomUUID();
     const versionId = randomUUID();
-    await dao.insertBriefVersion(versionFromFields(versionId, briefId, input.brandId, revision, input.fields, now, null));
-    if (brief.status === "confirmed") {
-      await dao.updateBriefStatus(briefId, "draft", now);
-    } else {
-      await dao.updateBriefStatus(briefId, "draft", now);
+    await dao.insertBrief({
+      id: briefId,
+      brandId: input.brandId,
+      ownerId: effectiveOwnerId,
+      planId,
+      optimizationTaskId: input.optimizationTaskId ?? null,
+      status: "draft",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await dao.insertBriefVersion(versionFromFields(versionId, briefId, input.brandId, 1, input.fields, now, null));
+    if (planId) {
+      await syncClusterPlanCoverage(dao, effectiveOwnerId, input.brandId, planId, now);
     }
-    return { briefId, versionId, planId: brief.planId ?? planId, gaps: contentBriefGaps(input.fields) };
-  }
-
-  briefId = randomUUID();
-  const versionId = randomUUID();
-  await dao.insertBrief({
-    id: briefId,
-    brandId: input.brandId,
-    ownerId,
-    planId,
-    optimizationTaskId: input.optimizationTaskId ?? null,
-    status: "draft",
-    createdAt: now,
-    updatedAt: now,
+    return { briefId, versionId, planId, gaps: contentBriefGaps(input.fields) };
   });
-  await dao.insertBriefVersion(versionFromFields(versionId, briefId, input.brandId, 1, input.fields, now, null));
-  return { briefId, versionId, planId, gaps: contentBriefGaps(input.fields) };
-}
-
-function fieldsPrimary(fields: BriefDraftFields) {
-  return fields.primaryPage.trim() ? [fields.primaryPage.trim()] : [];
 }
 
 export async function confirmBrief(
@@ -875,7 +950,34 @@ export async function readPlan(
   const dao = new ContentDao(db);
   const plan = await dao.getPlan(ownerId, brandId, planId);
   if (!plan) return denied("NOT_FOUND");
-  return { plan };
+  const [briefs, ownedCitations, publications] = await Promise.all([
+    dao.listBriefsByPlan(ownerId, brandId, planId, 100),
+    dao.listOwnedPageCitations(ownerId, brandId, 200),
+    dao.listClusterPublications(ownerId, brandId, 200),
+  ]);
+  const versionsByBrief = await dao.latestBriefVersionsByBriefIds(
+    brandId,
+    briefs.map((item) => item.id),
+  );
+  const briefInputs = briefs.map((brief) => {
+    const version = versionsByBrief.get(brief.id) ?? null;
+    const gaps = version ? contentBriefGaps(parseFields(version)) : [];
+    return {
+      id: brief.id,
+      planId: brief.planId,
+      status: brief.status,
+      title: briefDisplayTitle(brief.id, version),
+      primaryPage: version?.primaryPage ?? "",
+      gaps,
+    };
+  });
+  const [clusterPlan] = buildClusterPlanViews({
+    plans: [plan],
+    briefs: briefInputs,
+    ownedCitations,
+    publications,
+  });
+  return { plan, clusterPlan };
 }
 
 export async function listBriefs(
@@ -892,15 +994,35 @@ export async function listBriefs(
   const brand = await brands.owned(ownerId, brandId);
   if (!brand) return denied("NOT_FOUND");
   const dao = new ContentDao(db);
-  const [briefs, plans] = await Promise.all([
+  const [briefs, plans, ownedCitations, publications] = await Promise.all([
     dao.listBriefs(ownerId, brandId, limit),
     dao.listPlans(ownerId, brandId, limit),
+    dao.listOwnedPageCitations(ownerId, brandId, 200),
+    dao.listClusterPublications(ownerId, brandId, 200),
   ]);
-  const withVersions = await Promise.all(briefs.map(async (brief) => {
-    const version = await dao.latestBriefVersion(brief.id);
-    return { brief, version, gaps: version ? contentBriefGaps(parseFields(version)) : [] };
-  }));
-  return { briefs: withVersions, plans };
+  const versionsByBrief = await dao.latestBriefVersionsByBriefIds(
+    brandId,
+    briefs.map((brief) => brief.id),
+  );
+  const withVersions = briefs.map((brief) => {
+    const version = versionsByBrief.get(brief.id) ?? null;
+    const gaps: BriefGap[] = version ? contentBriefGaps(parseFields(version)) : [];
+    return { brief, version, gaps };
+  });
+  const clusterPlans = buildClusterPlanViews({
+    plans,
+    briefs: withVersions.map(({ brief, version, gaps }) => ({
+      id: brief.id,
+      planId: brief.planId,
+      status: brief.status,
+      title: briefDisplayTitle(brief.id, version),
+      primaryPage: version?.primaryPage ?? "",
+      gaps,
+    })),
+    ownedCitations,
+    publications,
+  });
+  return { briefs: withVersions, plans, clusterPlans };
 }
 
 export async function readBatch(

@@ -12,17 +12,251 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { exportConfirmAction, exportPreflightAction, generateBatchAction, saveBriefAction } from "./actions";
 import { listBriefs, listContentVersions, readExportJob, type ContentVersionFilter } from "./commands";
-import { exportUiError, type ExportUiError } from "./contracts";
+import { exportUiError, type ContentGapCode, type ExportUiError } from "./contracts";
+import type { ClusterPlanView, PageEvidenceBasis } from "./rules";
 
 const emptyClass = "rounded-2xl border border-dashed bg-card px-4 py-5 text-sm leading-6 text-muted-foreground";
 const itemClass = "min-w-0 rounded-2xl border bg-card px-4 py-4 text-sm";
 const panelClass = "min-w-0 space-y-3 rounded-2xl border bg-card p-5";
 const relatedClass = "inline-flex min-h-10 min-w-0 max-w-full items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 break-words outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const inlineLinkClass = "inline-block max-w-full rounded-sm font-medium underline underline-offset-4 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const fieldClass = "h-10 w-full min-w-0 rounded-md border bg-background px-3 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const areaClass = "w-full min-w-0 rounded-md border bg-background px-3 py-2 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const actionClass = "h-auto max-w-full whitespace-normal";
 const checkClass = "mt-1 size-4 shrink-0 accent-primary focus-visible:ring-3 focus-visible:ring-ring/50";
 const packageFiles = ["content.md", "content.html", "manifest.json", "public-sources.json", "publish-checklist.md"] as const;
+
+type ContentTranslator = Awaited<ReturnType<typeof getTranslator<"content">>>;
+
+const gapMessageKeys = {
+  audienceMissing: "gapAudienceMissing",
+  targetGapMissing: "gapTargetGapMissing",
+  boundaryMissing: "gapBoundaryMissing",
+  sourceMissing: "gapSourceMissing",
+  primaryPageMissing: "gapPrimaryPageMissing",
+  conversionActionMissing: "gapConversionMissing",
+  templateMissing: "gapTemplateMissing",
+  titlesMissing: "gapTitlesMissing",
+  factsMissing: "gapFactsMissing",
+  competitorSourceMissing: "gapCompetitorMissing",
+} as const satisfies Record<ContentGapCode, Parameters<ContentTranslator>[0]>;
+
+function evidenceBasisLabel(t: ContentTranslator, basis: PageEvidenceBasis) {
+  if (basis.kind === "citation_ownership") {
+    return basis.ownership === "owned_domain" ? t("planBasisOwnedDomain") : t("planBasisOwnedAccount");
+  }
+  return basis.status === "verified_public" ? t("planBasisVerifiedPublic") : t("planBasisVerifiedManual");
+}
+
+function ClusterPlanCard({
+  cluster,
+  brandId,
+  locale,
+  t,
+}: {
+  cluster: ClusterPlanView;
+  brandId: string;
+  locale: Awaited<ReturnType<typeof getLocale>>;
+  t: ContentTranslator;
+}) {
+  const hasAnyItem = cluster.existingPages.length > 0
+    || cluster.plannedPages.length > 0
+    || cluster.unverifiedPages.length > 0
+    || cluster.pendingUpdates.length > 0
+    || cluster.gaps.length > 0;
+  return (
+    <li className={`${itemClass} space-y-4`}>
+      <h3 className="break-words text-base font-semibold">{cluster.questionCluster}</h3>
+      {!hasAnyItem ? (
+        <p className="text-muted-foreground">{t("planClusterEmpty")}</p>
+      ) : (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("planExistingPages")}
+            </h4>
+            {cluster.existingPages.length === 0 ? (
+              <p className="text-muted-foreground">{t("planNoExistingPages")}</p>
+            ) : (
+              <ul className="space-y-2">
+                {cluster.existingPages.map((page) => {
+                  const activeBriefs = page.linkedBriefs.filter((item) => item.status !== "invalidated");
+                  const createHref = `/dashboard/content?brandId=${encodeURIComponent(brandId)}&cluster=${encodeURIComponent(cluster.questionCluster)}&primaryPage=${encodeURIComponent(page.url)}#new-brief-heading`;
+                  return (
+                    <li key={page.normalizedUrl} className="min-w-0 space-y-2 rounded-xl border bg-background px-3 py-3">
+                      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                        <p className="min-w-0 flex-1 [overflow-wrap:anywhere] font-medium">{page.url}</p>
+                        <Badge variant="secondary">{t("planExistingBadge")}</Badge>
+                      </div>
+                      <ul className="space-y-1 text-xs text-muted-foreground">
+                        {page.evidence.map((basis) => (
+                          <li key={basis.kind === "citation_ownership" ? basis.citationId : basis.publicationId} className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="break-words">{evidenceBasisLabel(t, basis)}</span>
+                            <Link
+                              href={basis.kind === "citation_ownership"
+                                ? `/dashboard/monitoring/answers/${basis.observationId}`
+                                : `/dashboard/content/publications/${basis.publicationId}`}
+                              prefetch={false}
+                              className={inlineLinkClass}
+                            >
+                              {basis.kind === "citation_ownership" ? t("planViewObservation") : t("planViewPublication")}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2 pt-1">
+                        {activeBriefs.length > 0 ? activeBriefs.map((brief) => (
+                          <Link
+                            key={brief.briefId}
+                            href={`/dashboard/content/briefs/${brief.briefId}`}
+                            prefetch={false}
+                            className={relatedClass}
+                          >
+                            {t("planUpdateExistingAction", { title: brief.title })}
+                          </Link>
+                        )) : (
+                          <Link href={createHref} prefetch={false} className={relatedClass}>
+                            {t("planCreateUpdateBrief")}
+                          </Link>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {cluster.plannedPages.length > 0 ? (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {t("planPlannedPages")}
+              </h4>
+              <ul className="space-y-2">
+                {cluster.plannedPages.map((page) => (
+                  <li key={page.normalizedUrl} className="min-w-0 space-y-2 rounded-xl border bg-background px-3 py-3">
+                    <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                      <p className="min-w-0 flex-1 [overflow-wrap:anywhere] font-medium">{page.url}</p>
+                      <Badge variant="outline">{t("planPlannedBadge")}</Badge>
+                    </div>
+                    {page.linkedBriefs.length > 0 ? (
+                      <div className="flex min-w-0 flex-wrap gap-2">
+                        {page.linkedBriefs.map((brief) => (
+                          <Link
+                            key={brief.briefId}
+                            href={`/dashboard/content/briefs/${brief.briefId}`}
+                            prefetch={false}
+                            className={`${inlineLinkClass} text-xs`}
+                          >
+                            {brief.title} ({brief.status})
+                          </Link>
+                        ))}
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {cluster.unverifiedPages.length > 0 ? (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {t("planUnverifiedPages")}
+              </h4>
+              <ul className="space-y-2">
+                {cluster.unverifiedPages.map((page) => (
+                  <li key={page.normalizedUrl} className="min-w-0 space-y-1 rounded-xl border border-dashed bg-background px-3 py-3">
+                    <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                      <p className="min-w-0 flex-1 [overflow-wrap:anywhere] font-medium">{page.url}</p>
+                      <Badge variant="outline">{t("planNeedsVerificationBadge")}</Badge>
+                    </div>
+                    <p className="break-words text-xs text-muted-foreground">{t("planNeedsVerificationNote")}</p>
+                    {page.linkedBriefs.length > 0 ? (
+                      <div className="flex min-w-0 flex-wrap gap-2 pt-1">
+                        {page.linkedBriefs.map((brief) => (
+                          <Link
+                            key={brief.briefId}
+                            href={`/dashboard/content/briefs/${brief.briefId}`}
+                            prefetch={false}
+                            className={`${inlineLinkClass} text-xs`}
+                          >
+                            {brief.title} ({brief.status})
+                          </Link>
+                        ))}
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {cluster.pendingUpdates.length > 0 ? (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {t("planPendingUpdates")}
+              </h4>
+              <ul className="space-y-2">
+                {cluster.pendingUpdates.map((item) => (
+                  <li key={item.briefId} className="min-w-0 space-y-1 rounded-xl border bg-background px-3 py-3">
+                    <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                      <Link
+                        href={`/dashboard/content/briefs/${item.briefId}`}
+                        prefetch={false}
+                        className={`${inlineLinkClass} min-w-0 flex-1 break-words`}
+                      >
+                        {t("planOpenUpdateBrief", { title: item.title })}
+                      </Link>
+                      <Badge variant="secondary">{item.status}</Badge>
+                    </div>
+                    <p className="[overflow-wrap:anywhere] text-xs text-muted-foreground">
+                      {item.targetsExisting ? t("planTargetsExisting") : t("planTargetsPlanned")}
+                      {item.primaryPage ? ` · ${item.primaryPage}` : ""}
+                      {item.gaps.length > 0 ? ` · ${t("gapCount", { count: formatNumber(locale, item.gaps.length) })}` : ""}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {cluster.gaps.length > 0 ? (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {t("planGaps")}
+              </h4>
+              <ul className="space-y-2">
+                {cluster.gaps.map((item) => (
+                  <li key={item.briefId} className="min-w-0 space-y-1 rounded-xl border border-dashed bg-background px-3 py-3">
+                    <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                      <Link
+                        href={`/dashboard/content/briefs/${item.briefId}`}
+                        prefetch={false}
+                        className={`${inlineLinkClass} min-w-0 flex-1 break-words`}
+                      >
+                        {t("planOpenGapBrief", { title: item.title })}
+                      </Link>
+                      <Badge variant="outline">{item.status}</Badge>
+                    </div>
+                    {item.primaryPage ? (
+                      <p className="[overflow-wrap:anywhere] text-xs text-muted-foreground">{item.primaryPage}</p>
+                    ) : null}
+                    <p className="break-words text-xs text-muted-foreground">
+                      {item.gaps.length > 0
+                        ? item.gaps.map((gap) => t(gapMessageKeys[gap.code])).join(" · ")
+                        : t("gapCount", { count: formatNumber(locale, 0) })}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </li>
+  );
+}
 
 export async function generateMetadata() {
   const t = await getTranslator("content");
@@ -145,6 +379,8 @@ export default async function ContentListPage({
   const mockLane = brandIntakeOrigin(await headers())?.mode === "mock";
   const related = relatedLinks(t, brandId);
   const operationId = typeof params.op === "string" ? params.op : "";
+  const prefillCluster = typeof params.cluster === "string" ? params.cluster : "";
+  const prefillPrimaryPage = typeof params.primaryPage === "string" ? params.primaryPage : "";
   const exportError = exportUiError(params.exportError);
   const exported = operationId ? await readExportJob(connection, session.user.id, brandId, operationId) : null;
   const job: ExportJob | null = exported && !("error" in exported) ? exported : null;
@@ -179,11 +415,11 @@ export default async function ContentListPage({
 
       <section className={panelClass} aria-labelledby="new-brief-heading">
         <h2 id="new-brief-heading" className="text-lg font-semibold">{t("newBrief")}</h2>
-        <form action={saveBriefAction} className="grid min-w-0 gap-3 sm:grid-cols-2">
+        <form key={`${prefillCluster}::${prefillPrimaryPage}`} action={saveBriefAction} className="grid min-w-0 gap-3 sm:grid-cols-2">
           <input type="hidden" name="brandId" value={brandId} />
           <label className="block min-w-0 text-sm break-words sm:col-span-2">
             <span className="mb-1 block text-muted-foreground">{t("questionCluster")}</span>
-            <input name="questionCluster" required className={fieldClass} />
+            <input name="questionCluster" required defaultValue={prefillCluster} className={fieldClass} />
           </label>
           <label className="block min-w-0 text-sm break-words">
             <span className="mb-1 block text-muted-foreground">{t("audience")}</span>
@@ -199,7 +435,7 @@ export default async function ContentListPage({
           </label>
           <label className="block min-w-0 text-sm break-words">
             <span className="mb-1 block text-muted-foreground">{t("primaryPage")}</span>
-            <input name="primaryPage" className={fieldClass} />
+            <input name="primaryPage" defaultValue={prefillPrimaryPage} className={fieldClass} />
           </label>
           <label className="block min-w-0 text-sm break-words">
             <span className="mb-1 block text-muted-foreground">{t("conversionAction")}</span>
@@ -264,15 +500,12 @@ export default async function ContentListPage({
 
       <section className="min-w-0 space-y-3" aria-labelledby="plans-heading">
         <h2 id="plans-heading" className="text-lg font-semibold">{t("plans")}</h2>
-        {listed.plans.length === 0 ? (
+        {listed.clusterPlans.length === 0 ? (
           <p className={emptyClass}>{t("plansEmpty")}</p>
         ) : (
           <ul className="space-y-3">
-            {listed.plans.map((plan) => (
-              <li key={plan.id} className={itemClass}>
-                <p className="break-words font-medium">{plan.questionCluster}</p>
-                <p className="mt-2 break-all text-muted-foreground">{plan.coverageJson}</p>
-              </li>
+            {listed.clusterPlans.map((cluster) => (
+              <ClusterPlanCard key={cluster.planId} cluster={cluster} brandId={brandId} locale={locale} t={t} />
             ))}
           </ul>
         )}
