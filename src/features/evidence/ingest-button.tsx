@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { Messages } from "@/lib/i18n/server";
+import { createOperationId } from "@/lib/operation-id";
 
 export function IngestEvidenceButton({
   brandId,
@@ -37,7 +38,7 @@ export function IngestEvidenceButton({
                 action: "ingest-adopted",
                 brandId,
                 slotId,
-                operationId: crypto.randomUUID(),
+                operationId: createOperationId(),
                 brandName,
                 officialWebsite: officialWebsite || null,
                 aliases: [],

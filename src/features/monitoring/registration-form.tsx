@@ -9,6 +9,7 @@ import { formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
 import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
+import { createOperationId } from "@/lib/operation-id";
 import type { PreviewSnapshot } from "./contracts";
 import { formatMinorUnits } from "./format";
 
@@ -24,21 +25,6 @@ type RecentRun = {
 const selectClass = "h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const inputClass = "h-10 bg-background";
 const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center aria-disabled:opacity-60";
-
-function createOperationId() {
-  try {
-    return crypto.randomUUID();
-  } catch {
-    // The configured development origin is plain HTTP on a LAN name, which is
-    // not a secure context. randomUUID throws there; getRandomValues still works.
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  }
-}
 
 export function RegistrationForm({
   locale, messages, brandId, brandName, sets, channels, grant, recent, emailVerified,
