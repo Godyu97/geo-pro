@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { triStateSchema, type TriState } from "./contracts.ts";
-import { overviewScopeQuery, type OverviewScope } from "./overview-contracts.ts";
+import { overviewScopeQuery, type OverviewUrlScope } from "./overview-contracts.ts";
 
 const keywordSchema = z.string().max(500).refine((value) => value.isWellFormed() && !value.includes("\0"));
 
@@ -123,7 +123,7 @@ export function clusterOptions(
 
 export function answerListPath(
   pathname: string,
-  scope: Pick<OverviewScope, "brandId" | "sourceMode" | "region" | "requestedNetworkMode" | "from" | "to">,
+  scope: OverviewUrlScope,
   filter: AnswerListFilter,
 ) {
   const params = new URLSearchParams(overviewScopeQuery(scope));

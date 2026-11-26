@@ -42,6 +42,8 @@ async function insertObservations(input: {
   brandId: string;
   rows: Array<{
     id: string;
+    slotId?: string;
+    attemptId?: string;
     sourceMode: "model_api" | "consumer_ui";
     captureMethod: "official_api" | "manual";
     questionText: string;
@@ -62,7 +64,7 @@ async function insertObservations(input: {
           evidence_state, locator_ref, collector_id, missing_reason, created_at,
           target_region, observed_region, new_session, product_mode, network_trigger
         ) values (
-          ${row.id}, ${input.brandId}, ${input.ownerId}, null, null, ${row.sourceMode}, ${row.captureMethod},
+          ${row.id}, ${input.brandId}, ${input.ownerId}, ${row.slotId ?? null}, ${row.attemptId ?? null}, ${row.sourceMode}, ${row.captureMethod},
           ${row.questionText}, ${"隔离范围样本，不得用于真实营销。"}, ${sha(row.id)}, ${row.capturedAt},
           ${row.targetRegion}, ${"zh-CN"}, ${row.requestedNetworkMode}, 1, ${"complete"}, ${"complete"},
           null, null, null, ${row.capturedAt}, ${row.targetRegion}, ${row.observedRegion}, ${"unknown"},
@@ -82,6 +84,57 @@ async function insertObservations(input: {
   }
 }
 
+async function seedVersions(ownerId: string, brandId: string, channelId: string) {
+  const sql = postgres(localDatabaseURL(), { max: 1 });
+  const questionId = randomUUID();
+  const promptSetId = randomUUID();
+  const samples = [1, 2].map((version) => ({
+    version, id: randomUUID(), slotId: randomUUID(), attemptId: randomUUID(),
+  }));
+  try {
+    for (const sample of samples) {
+      const runId = randomUUID();
+      await sql`
+        insert into monitoring_run (
+          id, brand_id, owner_id, operation_id, fingerprint, track, prompt_set_id, prompt_set_version,
+          repeat_count, question_count, natural_count, channel_count, slot_count, region, language,
+          requested_network_mode, currency, upper_minor, estimate_high_minor, customer_payable_minor,
+          status, sampling_complete, created_at
+        ) values (
+          ${runId}, ${brandId}, ${ownerId}, ${randomUUID()}, ${sha(runId)}, 'model_api', ${promptSetId},
+          1, 1, 1, 1, 1, 1, 'CN', 'zh-CN', 'off', 'CNY', 10, 10, 0, 'succeeded', 1, ${day}
+        )`;
+      await sql`
+        insert into monitoring_slot (
+          id, run_id, brand_id, question_id, natural_question, channel_id, channel_version, repeat_index,
+          status, created_at, adopted_attempt_id, late
+        ) values (
+          ${sample.slotId}, ${runId}, ${brandId}, ${questionId}, 1, ${channelId}, ${sample.version},
+          1, 'succeeded', ${day}, ${sample.attemptId}, 0
+        )`;
+      await sql`
+        insert into monitoring_attempt (
+          id, slot_id, run_id, brand_id, kind, ordinal, transport, synthetic, disposition, raw_text,
+          cost_state, created_at
+        ) values (
+          ${sample.attemptId}, ${sample.slotId}, ${runId}, ${brandId}, 'sampling', 1, 'official_api', 0,
+          'adopted', '隔离范围样本，不得用于真实营销。', 'none', ${day}
+        )`;
+    }
+  } finally {
+    await sql.end();
+  }
+  await insertObservations({
+    ownerId, brandId,
+    rows: samples.map((sample) => ({
+      ...sample, sourceMode: "model_api", captureMethod: "official_api", questionText: "同题版本样本",
+      targetRegion: "CN", observedRegion: "US", requestedNetworkMode: "off", capturedAt: day,
+      recommended: sample.version === 1 ? "true" : "false",
+    })),
+  });
+  return samples;
+}
+
 async function expectNoOverflow(page: Page) {
   const overflow = await page.evaluate(() => {
     const width = window.innerWidth;
@@ -91,7 +144,7 @@ async function expectNoOverflow(page: Page) {
   expect(overflow).toBeNull();
 }
 
-test("evidence scope stays on overview, answers and detail in both locales", async ({ page, context }) => {
+test("evidence scope stays on overview, answers and detail in both locales", async ({ page, context, browser }) => {
   test.setTimeout(120_000);
   page.setDefaultTimeout(20_000);
   const email = `scope-${randomBytes(8).toString("hex")}@example.invalid`;
@@ -209,8 +262,8 @@ test("evidence scope stays on overview, answers and detail in both locales", asy
     await expect(page.getByText("1 answer in this scope", { exact: true })).toBeVisible();
     await expect(page.getByText("官方关联网", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "View evidence", exact: true })).toHaveAttribute("href", new RegExp(ids.officialOff));
-    await expect(page.locator("#main-content").getByRole("textbox", { name: "Target region", exact: true })).toHaveValue("CN");
-    await expect(page.locator("#main-content").getByRole("combobox", { name: "Requested network", exact: true })).toHaveValue("off");
+    await expect(page.locator("#overview-region")).toHaveValue("CN");
+    await expect(page.locator("#overview-network")).toHaveValue("off");
     for (const width of [375, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await expectNoOverflow(page);
@@ -221,15 +274,121 @@ test("evidence scope stays on overview, answers and detail in both locales", asy
       }
     }
 
-    await page.locator("#main-content").getByRole("textbox", { name: "Target region", exact: true }).fill("JP");
+    await page.locator("#overview-region").fill("JP");
     await page.getByRole("button", { name: "Apply filters", exact: true }).click();
     await expect(page.getByText("0 answers in this scope", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "AI answer list", exact: true })).toBeVisible();
     await expect(page.getByText("This scope has no samples. Change the track, target region, requested network, or time above.", { exact: true })).toBeVisible();
     await page.setViewportSize({ width: 375, height: 900 });
     await expectNoOverflow(page);
-    await expect(page.getByLabel("Target region", { exact: true })).toBeVisible();
+    await expect(page.locator("#overview-region")).toBeVisible();
     await expect(page.getByText("官方关联网", { exact: true })).toHaveCount(0);
+
+    const channelId = randomUUID();
+    const [v1Sample, v2Sample] = await seedVersions(userId, brandId!, channelId);
+    const v1 = `${channelId}@1`;
+    const v2 = `${channelId}@2`;
+    const scope = new URLSearchParams({
+      brandId: brandId!, sourceMode: "model_api", region: "CN", requestedNetworkMode: "off",
+      from: "2026-11-20T00:00:00.000Z", to: "2026-11-20T23:59:59.999Z",
+    });
+    const requestScoped = (path: string, channel?: string) => context.request.get(
+      `/api/monitoring/${path}?${scope}${channel ? `&channel=${encodeURIComponent(channel)}` : ""}`,
+    );
+    const auto = await requestScoped("overview");
+    expect(auto.status()).toBe(200);
+    expect(await auto.json()).toMatchObject({
+      channelSelectionRequired: true, metrics: { recommended: { equalWeight: null } }, answers: [],
+    });
+    for (const [channel, id, recommendation] of [[v1, v1Sample.id, 1], [v2, v2Sample.id, 0]] as const) {
+      const metricResponse = await requestScoped("overview", channel);
+      const answerResponse = await requestScoped("answers", channel);
+      expect(metricResponse.status()).toBe(200);
+      expect(answerResponse.status()).toBe(200);
+      expect(await metricResponse.json()).toMatchObject({
+        scope: { channel, sourceMode: "model_api", region: "CN", requestedNetworkMode: "off" },
+        channelSelectionRequired: false, sampleIds: [id],
+        metrics: { recommended: { equalWeight: recommendation, pooled: { denominator: 1 } } },
+      });
+      expect((await answerResponse.json()).answers.map((answer: { observationId: string }) => answer.observationId)).toEqual([id]);
+    }
+    expect((await requestScoped("answers", "v1")).status()).toBe(400);
+    const outsiderEmail = `scope-outsider-${randomBytes(8).toString("hex")}@example.invalid`;
+    const outsider = await browser.newContext({ baseURL });
+    let outsiderId: string | undefined;
+    try {
+      const response = await registerTestAccount(outsider, { name: "Outside scope", email: outsiderEmail, password });
+      expect(response.status()).toBe(200);
+      outsiderId = (await response.json()).user.id;
+      for (const path of ["overview", "answers"]) {
+        expect((await outsider.request.get(`/api/monitoring/${path}?${scope}&channel=${encodeURIComponent(v1)}`)).status()).toBe(404);
+      }
+      expect((await outsider.request.get(`/api/monitoring/answers/${v1Sample.id}`, {
+        headers: { Origin: baseURL },
+      })).status()).toBe(404);
+    } finally {
+      await outsider.close();
+      if (outsiderId) cleanupAccount(outsiderId, outsiderEmail);
+    }
+
+    await page.goto(`/dashboard/monitoring/overview?${scope}`);
+    await expect(page.getByRole("status").filter({ hasText: "Choose one version above" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Recommendation rate", exact: true })).toHaveCount(0);
+    const version = page.getByRole("combobox", { name: "Official channel version", exact: true });
+    await version.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(version).toHaveValue(v1);
+    await page.getByRole("button", { name: "Apply filters", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/channel=.*%401/);
+    await expect(page.getByText("同题版本样本", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Recommendation rate", exact: true }).locator(".."))
+      .toContainText("100.0%");
+    for (const width of [375, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expectNoOverflow(page);
+      if (width === 375) await page.screenshot({ path: test.info().outputPath("en-official-version-overview-375.png") });
+    }
+    await page.getByRole("link", { name: "View answers", exact: true }).click();
+    for (const width of [375, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expectNoOverflow(page);
+    }
+    await page.getByRole("link", { name: "View evidence", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/evidence/${v1Sample.id}.*channel=.*%401`));
+    await page.reload();
+    await expect(page.getByText("隔离范围样本，不得用于真实营销。", { exact: true })).toBeVisible();
+    await page.getByLabel("Interface language", { exact: true }).selectOption("zh-CN");
+    await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+    await page.getByRole("link", { name: "返回回答列表", exact: true }).click();
+    const chineseVersion = page.getByRole("combobox", { name: "官方通道版本", exact: true });
+    await expect(chineseVersion).toHaveValue(v1);
+    await expect(page.getByRole("link", { name: "查看证据", exact: true })).toHaveAttribute("href", new RegExp(v1Sample.id));
+    for (const width of [375, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expectNoOverflow(page);
+      if (width === 768) {
+        await page.getByRole("heading", { name: "AI 回答列表", exact: true }).scrollIntoViewIfNeeded();
+        await page.screenshot({ path: test.info().outputPath("zh-CN-official-version-answers-768.png") });
+      }
+    }
+    await page.getByRole("link", { name: "返回概览", exact: true }).click();
+    await expect(chineseVersion).toHaveValue(v1);
+    for (const width of [375, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expectNoOverflow(page);
+    }
+    await chineseVersion.selectOption(v2);
+    await page.getByRole("button", { name: "应用筛选", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/channel=.*%402/);
+    await expect(page.getByRole("heading", { name: "推荐率", exact: true }).locator("..")).toContainText("0.0%");
+    await page.getByRole("link", { name: "查看回答列表", exact: true }).click();
+    await expect(chineseVersion).toHaveValue(v2);
+    await expect(page.getByRole("link", { name: "查看证据", exact: true })).toHaveAttribute("href", new RegExp(v2Sample.id));
+    await chineseVersion.selectOption("unknown");
+    await page.getByRole("button", { name: "应用筛选", exact: true }).click();
+    await expect(page.getByRole("link", { name: "查看证据", exact: true })).toHaveAttribute("href", new RegExp(ids.officialOff));
   } finally {
     if (userId) cleanupAccount(userId, email);
   }

@@ -176,7 +176,8 @@ export default async function EvidenceOverviewPage({
   }
 
   const answersHref = overviewScopePath("/dashboard/monitoring/answers", parsed.data);
-  const hasSamples = overview.viewStatus !== "empty";
+  const hasSamples = overview.viewStatus !== "empty" || overview.answers.length > 0;
+  const showMetrics = hasSamples || (parsed.data.channel !== undefined && overview.coverage.status === "ready");
   const clusterByQuestion = new Map<string, string>();
   const clusterRows = overview.questionClusters.map((row, index) => {
     const label = row.cluster
@@ -203,14 +204,18 @@ export default async function EvidenceOverviewPage({
       relatedLabel={t("relatedEntries")}
       related={related}
     >
-      <OverviewScopeForm scope={parsed.data} t={t} />
+      <OverviewScopeForm scope={parsed.data} t={t} channelOptions={overview.channelOptions} />
 
-      <CollectionLine
-        capture={overview.collection.lastCapturedAt
-          ? t("lastCapture", { time: formatDateTime(locale, new Date(overview.collection.lastCapturedAt)) })
-          : t("noCapture")}
-        expired={overview.collection.capabilityExpired ? t("capabilityExpired") : null}
-      />
+      {overview.channelSelectionRequired ? (
+        <p className="rounded-xl border bg-card px-4 py-3 text-sm leading-6" role="status">{t("channelSelectionRequired")}</p>
+      ) : (
+        <CollectionLine
+          capture={overview.collection.lastCapturedAt
+            ? t("lastCapture", { time: formatDateTime(locale, new Date(overview.collection.lastCapturedAt)) })
+            : t("noCapture")}
+          expired={overview.collection.capabilityExpired ? t("capabilityExpired") : null}
+        />
+      )}
 
       {overview.smallSample ? (
         <p className="break-words rounded-xl border border-dashed bg-card px-4 py-3 text-sm leading-6 text-muted-foreground" role="status">
@@ -218,7 +223,7 @@ export default async function EvidenceOverviewPage({
         </p>
       ) : null}
 
-      {overview.viewStatus === "empty" ? (
+      {overview.channelSelectionRequired ? null : !showMetrics ? (
         <section className="min-w-0 rounded-2xl border border-dashed bg-card px-4 py-8 text-center sm:px-6 sm:py-10">
           <h2 className="break-words font-medium">{t("emptyTitle")}</h2>
           <p className="mx-auto mt-2 max-w-lg break-words text-sm leading-7 text-muted-foreground">{t("emptyBody")}</p>
@@ -297,6 +302,7 @@ export default async function EvidenceOverviewPage({
                   metricNa={t("metricNa")}
                   officialNa={t("officialNa")}
                   ownedNa={t("ownedNa")}
+                  citationNa={t("citationNa")}
                 />
               );
             })}

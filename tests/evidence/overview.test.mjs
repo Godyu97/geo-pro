@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
-import { submitManualEvidence } from "../../src/features/evidence/commands.ts";
+import { reviseAnalysis, submitManualEvidence } from "../../src/features/evidence/commands.ts";
 import {
   capabilityExpiryQuery,
   citationOwnershipQuery,
@@ -22,12 +22,14 @@ import {
   summarizeQuestionClusters,
 } from "../../src/features/evidence/metrics.ts";
 import { readEvidenceOverview } from "../../src/features/evidence/overview-commands.ts";
+import { invalidateEvidenceOverview, overviewCacheIdentity, readOverviewCache } from "../../src/features/evidence/overview-cache.ts";
 import {
   overviewScopeForReturn,
   overviewScopeFromSearch,
   overviewScopePath,
 } from "../../src/features/evidence/overview-contracts.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
+import { memoryCache, openCache } from "../../src/lib/cache/store.ts";
 import { migrateThrough, testDatabase } from "../maintenance/helpers.mjs";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -467,6 +469,18 @@ test("unknown region and network stay out of a positive filter unless that value
   assert.deepEqual(windowed.map((item) => item.observationId), [early.observationId]);
 });
 
+test("official channel scope survives parsing and return links", () => {
+  const brandId = randomUUID();
+  const channel = `${randomUUID()}@2`;
+  const parsed = overviewScopeFromSearch({ brandId, sourceMode: "model_api", channel });
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.data.channel, channel);
+  const returned = overviewScopeForReturn({ brandId, channel, from: "invalid" }, { brandId, sourceMode: "model_api" });
+  assert.equal(new URL(overviewScopePath("/answers", returned), "http://localhost").searchParams.get("channel"), channel);
+  assert.equal(overviewScopeFromSearch({ brandId, channel: "not-a-version" }).success, false);
+  assert.equal(overviewScopeFromSearch({ brandId, sourceMode: "consumer_ui", channel }).data.channel, undefined);
+});
+
 test("return links keep a valid region when the time window cannot be parsed", () => {
   const brandId = randomUUID();
   const scope = overviewScopeForReturn({
@@ -687,20 +701,29 @@ for (const kind of ["sqlite", "postgresql"]) {
       await queryWithParameters(db, `INSERT INTO monitoring_slot (
         id, run_id, brand_id, question_id, natural_question, channel_id, channel_version, repeat_index,
         reservation_id, status, created_at, adopted_attempt_id, late
-      ) VALUES (?, ?, ?, ?, 1, ?, 1, 1, NULL, 'failed', ?, NULL, 0)`,
-      [monitorId, runId, brand, randomUUID(), channelId, day]);
+      ) VALUES (?, ?, ?, ?, 1, ?, ?, 1, NULL, 'failed', ?, NULL, 0)`,
+      [monitorId, runId, brand, partial.questionId ?? randomUUID(), channelId, partial.version ?? 1, day]);
       await queryWithParameters(db, `INSERT INTO sampling_due_run (
         id, plan_id, plan_version, brand_id, owner_id, channel_id, window_id, slot_id, timezone,
         kind, status, monitoring_run_id, charged_minor, prompt_ids_json, created_at
       ) VALUES (?, ?, 1, ?, ?, ?, '2026-11-20', ?, 'Asia/Shanghai', 'official', 'accepted', ?, 0, NULL, ?)`,
       [randomUUID(), planId, brand, owner, channelId, planSlotId, runId, day]);
+      if (partial.failed) return null;
+      const attemptId = randomUUID();
+      await queryWithParameters(db, `INSERT INTO monitoring_attempt (
+        id, slot_id, run_id, brand_id, kind, ordinal, transport, synthetic, disposition, raw_text,
+        cost_state, created_at
+      ) VALUES (?, ?, ?, ?, 'sampling', 1, 'official_api', 0, 'adopted', '合成测试回答', 'none', ?)`,
+      [attemptId, monitorId, runId, brand, day]);
+      await queryWithParameters(db, `UPDATE monitoring_slot
+        SET status = 'succeeded', adopted_attempt_id = ? WHERE id = ?`, [attemptId, monitorId]);
       const observationId = randomUUID();
       await evidence.insertObservation({
         id: observationId,
         brandId: brand,
         ownerId: owner,
         slotId: monitorId,
-        attemptId: null,
+        attemptId,
         sourceMode: "model_api",
         captureMethod: "official_api",
         questionText: partial.questionText,
@@ -716,7 +739,7 @@ for (const kind of ["sqlite", "postgresql"]) {
         productMode: "unknown",
         networkTrigger: partial.networkTrigger,
         entityVersion: 1,
-        citationSetState: "complete",
+        citationSetState: partial.citationSetState ?? "complete",
         evidenceState: "complete",
         locatorRef: null,
         collectorId: null,
@@ -730,8 +753,8 @@ for (const kind of ["sqlite", "postgresql"]) {
         version: 1,
         entityVersion: 1,
         ruleVersion: analysisRuleVersion,
-        mentioned: "true",
-        recommended: "true",
+        mentioned: partial.mentioned ?? "true",
+        recommended: partial.recommended ?? "true",
         officialSiteCited: "false",
         evidenceSpan: null,
         status: "classified",
@@ -811,5 +834,150 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.match(linkPlan, /sampling_due_run/);
     assert.match(citePlan, /answer_citation/);
     assert.match(expiryPlan, /capability_version/);
+
+    const v1 = `${channelId}@1`;
+    const v2 = `${channelId}@2`;
+    await queryWithParameters(db, `INSERT INTO capability_version (
+      channel_id, version, operation_id, fingerprint, actor_id, reason, status, display_name, product_entry, mode,
+      model_version, availability, search_required, citation_capability, region_target, region_actual, limits_summary,
+      sop_summary, verified_at, expires_at, public_visible, changed_at
+    ) SELECT channel_id, 2, ?, ?, actor_id, reason, status, display_name, product_entry, mode,
+      model_version, availability, search_required, citation_capability, region_target, region_actual, limits_summary,
+      sop_summary, verified_at, ?, public_visible, changed_at FROM capability_version
+      WHERE channel_id = ? AND version = 1`,
+    [randomUUID(), "e".repeat(64), "2026-12-01T00:00:00.000Z", channelId]);
+    const window = {
+      brandId: brand, sourceMode: "model_api", region: "CN", requestedNetworkMode: "on",
+      from: "2026-11-22T00:00:00.000Z", to: "2026-11-22T23:59:59.999Z",
+    };
+    const capturedAt = "2026-11-22T08:00:00.000Z";
+    const q1 = randomUUID();
+    const q2 = randomUUID();
+    async function versioned(version, questionId, recommended, extras = {}) {
+      const id = randomUUID();
+      await queryWithParameters(db, `INSERT INTO sampling_slot (
+        id, plan_id, brand_id, owner_id, channel_id, at, status, manual, cost_minor
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1)`,
+      [id, planId, brand, owner, channelId, capturedAt, extras.failed ? "failed" : "completed"]);
+      return linkedAnswer(id, {
+        version, questionId, recommended, requestedNetworkMode: "on", capturedAt,
+        questionText: questionId === q1 ? "版本题一" : "版本题二",
+        networkTrigger: "triggered", citationSetState: "missing", ...extras,
+      });
+    }
+    const positive = await versioned(1, q1, "true", { mentioned: "false", citationSetState: "partial" });
+    const negative = await versioned(1, q1, "false");
+    const q2Ids = [];
+    for (let index = 0; index < 3; index++) q2Ids.push(await versioned(1, q2, "true"));
+    const networkUnknown = await versioned(1, q1, "true", { networkTrigger: "unknown" });
+    await versioned(1, q1, "unknown", { failed: true });
+    const otherVersion = await versioned(2, q1, "false", { citationSetState: "complete" });
+    const legacy = randomUUID();
+    const consumer = randomUUID();
+    for (const [id, sourceMode, captureMethod] of [
+      [legacy, "model_api", "official_api"], [consumer, "consumer_ui", "manual"],
+    ]) {
+      await insertScopedObservation(db, {
+        id, ownerId: owner, brandId: brand, sourceMode, captureMethod, questionText: "版本题一",
+        capturedAt, targetRegion: "CN", observedRegion: "unknown", requestedNetworkMode: "on", recommended: "true",
+      });
+    }
+
+    const cache = memoryCache();
+    const scopedView = (channel, store = cache, actor = owner) => readEvidenceOverview(
+      db, actor, { ...window, channel }, store, () => now,
+    );
+    const noVersion = await scopedView(undefined);
+    assert.equal(noVersion.channelSelectionRequired, true);
+    assert.deepEqual(noVersion.channelOptions.map((item) => item.value), [v1, v2, "unknown"]);
+    assert.equal(noVersion.metrics.recommended.equalWeight, null);
+    assert.equal(noVersion.coverage.reason, "channel-selection-required");
+    assert.deepEqual(noVersion.answers, []);
+    const first = await scopedView(v1);
+    const second = await scopedView(v2);
+    const ids = (view) => new Set(view.answers.map((answer) => answer.observationId));
+    assert.deepEqual(ids(first), new Set([positive, negative, ...q2Ids, networkUnknown]));
+    assert.deepEqual(new Set(first.sampleIds), new Set([positive, negative, ...q2Ids]));
+    assert.equal(first.metrics.recommended.equalWeight, 0.75);
+    assert.deepEqual(first.metrics.recommended.pooled, { numerator: 4, denominator: 5, rate: 0.8 });
+    assert.deepEqual(first.metrics.recommended.perQuestion.map(({ questionKey, numerator, denominator }) =>
+      [questionKey, numerator, denominator]).sort(), [[q1, 1, 2], [q2, 3, 3]].sort());
+    assert.equal(first.metrics.mentioned.pooled.numerator, 4);
+    assert.equal(first.metrics.mentioned.pooled.denominator, 5);
+    assert.equal(first.metrics.officialSiteCited.pooled.denominator, 0);
+    assert.equal(first.metrics.officialSiteCited.status, "na");
+    assert.equal(first.metrics.officialSiteCited.reason, "no-complete-citations");
+    assert.equal(first.coverage.planned, 7);
+    assert.equal(first.coverage.valid, 6);
+    assert.equal(first.coverage.eligible, 5);
+    assert.equal(first.coverage.failed, 1);
+    assert.equal(first.coverage.networkUnknown, 1);
+    assert.equal(first.collection.capabilityExpired, true);
+    assert.deepEqual(ids(second), new Set([otherVersion]));
+    assert.equal(second.metrics.recommended.equalWeight, 0);
+    assert.equal(second.coverage.planned, 1);
+    assert.equal(second.collection.capabilityExpired, false);
+    const historical = await scopedView("unknown");
+    assert.deepEqual(ids(historical), new Set([legacy]));
+    assert.equal(historical.coverage.planned, 0);
+    const consumerView = await readEvidenceOverview(db, owner, { ...window, sourceMode: "consumer_ui" }, cache);
+    assert.deepEqual(ids(consumerView), new Set([consumer]));
+    assert.deepEqual(await scopedView(v1, cache, await account(db)), { error: "NOT_FOUND" });
+    const href = first.nextActions.find((action) => action.kind === "view_answers").href;
+    assert.equal(new URL(href, "http://localhost").searchParams.get("channel"), v1);
+
+    const unlinkedSlot = randomUUID();
+    await queryWithParameters(db, `INSERT INTO sampling_slot (
+      id, plan_id, brand_id, owner_id, channel_id, at, status, manual, cost_minor
+    ) VALUES (?, ?, ?, ?, ?, ?, 'failed', 0, 1)`,
+    [unlinkedSlot, planId, brand, owner, channelId, capturedAt]);
+    const broadWindow = { ...window, region: undefined, requestedNetworkMode: undefined };
+    const withoutLink = await readEvidenceOverview(db, owner, { ...broadWindow, channel: v1 }, cache, () => now);
+    assert.equal(withoutLink.coverage.planned, 7);
+    const unassigned = await readEvidenceOverview(db, owner, { ...broadWindow, channel: "unknown" }, cache, () => now);
+    assert.equal(unassigned.coverage.planned, 1);
+    await linkedAnswer(unlinkedSlot, { version: 1, questionId: q1, requestedNetworkMode: "on", failed: true });
+    const afterLink = await readEvidenceOverview(db, owner, { ...broadWindow, channel: v1 }, cache, () => now);
+    assert.equal(afterLink.coverage.planned, 8);
+    assert.equal(afterLink.coverage.failed, 2);
+
+    for (const driver of process.env.REDIS_URL ? ["memory", "redis"] : ["memory"]) {
+      const writer = driver === "memory" ? memoryCache() : openCache({ ...process.env, GEO_CACHE_DRIVER: "redis" });
+      const reader = driver === "memory" ? writer : openCache({ ...process.env, GEO_CACHE_DRIVER: "redis" });
+      t.after(() => invalidateEvidenceOverview(owner, brand, writer));
+      const context = await evidence.overviewReadContext(owner, brand);
+      const expected = { brandId: brand, sourceMode: window.sourceMode, hasOfficialWebsite: true };
+      const key = (channel) => overviewCacheIdentity({
+        ...expected, ownerId: owner, scope: { ...window, channel }, token: context.token,
+      });
+      const before = await scopedView(v1, writer);
+      await scopedView(v2, writer);
+      assert.deepEqual(ids(await readOverviewCache(reader, key(v1), { ...expected, channel: v1 })), ids(first));
+      assert.deepEqual(ids(await readOverviewCache(reader, key(v2), { ...expected, channel: v2 })), ids(second));
+      const revised = await reviseAnalysis(db, owner, {
+        action: "revise-analysis", operationId: randomUUID(), brandId: brand,
+        observationId: negative, expectedVersion: driver === "memory" ? 1 : 2,
+        mentioned: "true", recommended: driver === "memory" ? "true" : "false",
+        officialSiteCited: "unknown", reason: "隔离版本缓存失效验证",
+      }, () => now, writer);
+      assert.equal(revised.error, undefined);
+      assert.equal(await readOverviewCache(reader, key(v1), { ...expected, channel: v1 }), null);
+      assert.equal(await readOverviewCache(reader, key(v2), { ...expected, channel: v2 }), null);
+      const after = await scopedView(v1, reader);
+      assert.notEqual(after.metrics.recommended.equalWeight, before.metrics.recommended.equalWeight);
+      assert.equal((await scopedView(v2, reader)).metrics.recommended.equalWeight, 0);
+      console.log(`${kind} ${driver} channel cache: independent hits, invalidated by revision`);
+    }
+    await queryWithParameters(db, "UPDATE answer_observation SET answer_text = ? WHERE id = ?", [
+      "[FUNCTIONAL-MOCK] 合成演示", legacy,
+    ]);
+    const withoutDemo = await scopedView(v1, memoryCache());
+    assert.deepEqual(withoutDemo.channelOptions.map((item) => item.value), [v1, v2]);
+
+    const versionQuery = scopedObservationQuery({ ...window, channel: v1, ownerId: owner });
+    const versionPlan = await queryWithParameters(db, `${explainPrefix}${versionQuery.sql}`, versionQuery.values);
+    assert.match(versionQuery.sql, /s\.channel_id = \?.*s\.channel_version = \?/);
+    assert.match(JSON.stringify(versionPlan), /monitoring_slot|INDEX.*s/);
+    console.log(`${kind} official channel scope P=7 V=6 E=5 Jm=5 Jr=5 Jc=0; EXPLAIN ${JSON.stringify(versionPlan)}`);
   });
 }

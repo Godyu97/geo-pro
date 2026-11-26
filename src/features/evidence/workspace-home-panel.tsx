@@ -8,6 +8,7 @@ import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { TaskSummaryList } from "../optimization/task-summary.tsx";
 import { CollectionLine, CoverageCard, MetricCard } from "./metric-card.tsx";
 import type { RateBreakdown } from "./metrics.ts";
+import { overviewScopePath } from "./overview-contracts.ts";
 import { readWorkspaceHome } from "./workspace-home.ts";
 
 const entryOrder = ["brands", "monitoring", "optimization", "content", "reports"] as const;
@@ -75,12 +76,22 @@ export async function WorkspaceHomePanel({ ownerId }: { ownerId: string }) {
         />
       </div>
 
-      <CollectionLine
-        capture={view.collection.lastCapturedAt
-          ? overview("lastCapture", { time: formatDateTime(locale, new Date(view.collection.lastCapturedAt)) })
-          : overview("noCapture")}
-        expired={view.collection.capabilityExpired ? overview("capabilityExpired") : null}
-      />
+      {view.channelSelectionRequired ? (
+        <p className="rounded-xl border px-4 py-3 text-sm" role="status">
+          {overview("channelSelectionRequired")}{" "}
+          <Link className="underline" href={overviewScopePath("/dashboard/monitoring/overview", {
+            brandId: view.scope.brandId,
+            sourceMode: view.scope.sourceMode,
+          })}>{overview("title")}</Link>
+        </p>
+      ) : (
+        <CollectionLine
+          capture={view.collection.lastCapturedAt
+            ? overview("lastCapture", { time: formatDateTime(locale, new Date(view.collection.lastCapturedAt)) })
+            : overview("noCapture")}
+          expired={view.collection.capabilityExpired ? overview("capabilityExpired") : null}
+        />
+      )}
 
       {view.smallSample ? (
         <p className="rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground" role="status">
@@ -88,7 +99,7 @@ export async function WorkspaceHomePanel({ ownerId }: { ownerId: string }) {
         </p>
       ) : null}
 
-      <div className="space-y-3">
+      {view.channelSelectionRequired ? null : <div className="space-y-3">
         <h3 className="text-base font-semibold">{dashboard("metricsTitle")}</h3>
         <div className="grid gap-4 lg:grid-cols-4">
           <CoverageCard
@@ -144,11 +155,12 @@ export async function WorkspaceHomePanel({ ownerId }: { ownerId: string }) {
                 metricNa={overview("metricNa")}
                 officialNa={overview("officialNa")}
                 ownedNa={overview("ownedNa")}
+                citationNa={overview("citationNa")}
               />
             );
           })}
         </div>
-      </div>
+      </div>}
 
       <div className="space-y-3">
         <h3 className="text-base font-semibold">{overview("suggestions")}</h3>

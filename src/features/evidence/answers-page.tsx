@@ -218,6 +218,7 @@ export default async function EvidenceAnswersPage({
       <OverviewScopeForm
         scope={parsed.data}
         t={t}
+        channelOptions={overview.channelOptions}
         list={{
           filter: filters.data,
           clusters,
@@ -236,7 +237,7 @@ export default async function EvidenceAnswersPage({
           },
         }}
       />
-      <p className="break-words text-sm text-muted-foreground">{answerCount}</p>
+      {!overview.channelSelectionRequired ? <p className="break-words text-sm text-muted-foreground">{answerCount}</p> : null}
       {listFiltered ? (
         <Button asChild variant="outline" className={actionClass}>
           <Link href={scopePath} prefetch={false}>{t("clearListFilters")}</Link>
@@ -258,7 +259,9 @@ export default async function EvidenceAnswersPage({
         </div>
       )}
 
-      {overview.answers.length === 0 ? (
+      {overview.channelSelectionRequired ? (
+        <p className={emptyClass} role="status">{t("channelSelectionRequired")}</p>
+      ) : overview.answers.length === 0 ? (
         <p className={emptyClass}>{t("emptyAnswers")}</p>
       ) : visible.length === 0 ? (
         <p className={emptyClass}>{t("noMatch")}</p>

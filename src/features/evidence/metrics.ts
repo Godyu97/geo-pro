@@ -19,6 +19,7 @@ export type OverviewSample = {
   requestedNetworkMode: NetworkMode;
   capturedAt: string;
   evidenceState: "draft_evidence" | "complete" | "incomplete" | "contested";
+  protocolQualified?: boolean;
   citationSetState: "complete" | "partial" | "unsupported" | "missing";
   mentioned: TriState;
   recommended: TriState;
@@ -103,7 +104,8 @@ export function ownedPageJudgement(
 }
 
 function isEligible(sample: OverviewSample) {
-  return sample.evidenceState === "complete" || sample.evidenceState === "contested";
+  return sample.protocolQualified !== false
+    && (sample.evidenceState === "complete" || sample.evidenceState === "contested");
 }
 
 function isPrimaryQuestion(sample: OverviewSample) {
@@ -138,7 +140,7 @@ function blankRate(
   };
 }
 
-function buildMetric(samples: OverviewSample[], kind: MetricKind): RateBreakdown {
+function buildMetric(samples: OverviewSample[], kind: MetricKind, hasOfficialWebsite: boolean): RateBreakdown {
   const cites = kind === "officialSiteCited" || kind === "ownedPageCited";
   const population = kind === "officialSiteCited"
     ? samples.filter((item) => item.hasOfficialWebsite)
@@ -147,7 +149,7 @@ function buildMetric(samples: OverviewSample[], kind: MetricKind): RateBreakdown
   const citationComplete = population.filter((item) => item.citationSetState === "complete").length;
   const citationFields = cites ? citationComplete : null;
 
-  if (kind === "officialSiteCited" && population.length === 0) {
+  if (kind === "officialSiteCited" && !hasOfficialWebsite) {
     return blankRate("official-website-not-applicable", 0, 0, 0);
   }
 
@@ -214,9 +216,10 @@ function buildMetric(samples: OverviewSample[], kind: MetricKind): RateBreakdown
   };
 
   if (equalCount === 0) {
-    const reason = kind === "ownedPageCited" && citationComplete > 0 && judgedSlots === 0
-      ? "no-judgable-owned-citations"
-      : judgedSlots + unknownSlots === 0 ? "no-eligible-samples" : "no-judgable-samples";
+    let reason = "no-judgable-samples";
+    if (consideredCount === 0) reason = "no-eligible-samples";
+    else if (cites && citationComplete === 0) reason = "no-complete-citations";
+    else if (kind === "ownedPageCited") reason = "no-judgable-owned-citations";
     return {
       status: "na",
       reason,
@@ -241,14 +244,17 @@ function buildMetric(samples: OverviewSample[], kind: MetricKind): RateBreakdown
   };
 }
 
-export function aggregateOverviewMetrics(samples: OverviewSample[]): OverviewMetrics {
+export function aggregateOverviewMetrics(
+  samples: OverviewSample[],
+  hasOfficialWebsite = samples.some((sample) => sample.hasOfficialWebsite),
+): OverviewMetrics {
   const eligible = samples.filter(isEligible);
   const primary = eligible.filter(isPrimaryQuestion);
   const metrics = {
-    mentioned: buildMetric(primary, "mentioned"),
-    recommended: buildMetric(primary, "recommended"),
-    officialSiteCited: buildMetric(primary, "officialSiteCited"),
-    ownedPageCited: buildMetric(primary, "ownedPageCited"),
+    mentioned: buildMetric(primary, "mentioned", hasOfficialWebsite),
+    recommended: buildMetric(primary, "recommended", hasOfficialWebsite),
+    officialSiteCited: buildMetric(primary, "officialSiteCited", hasOfficialWebsite),
+    ownedPageCited: buildMetric(primary, "ownedPageCited", hasOfficialWebsite),
   } satisfies Record<MetricKind, RateBreakdown>;
 
   const sampleIds = primary.map((item) => item.observationId);
@@ -363,11 +369,12 @@ export type CoverageAnswer = {
   newSession: TriState;
   searchRequired: boolean;
   newSessionRequired: boolean;
+  frozenOfficial?: boolean;
 };
 
 export type CoverageSummary = {
   status: "ready" | "na";
-  reason: "no-frozen-plan-slots" | "no-due-slots" | null;
+  reason: "no-frozen-plan-slots" | "no-due-slots" | "channel-selection-required" | null;
   planned: number;
   valid: number;
   eligible: number;
@@ -395,18 +402,16 @@ function emptyCoverage(reason: CoverageSummary["reason"]): CoverageSummary {
   };
 }
 
-function answerQuality(answer: CoverageAnswer) {
+export function answerQuality(answer: CoverageAnswer) {
   const evidenceOk = answer.evidenceState === "complete" || answer.evidenceState === "contested";
   if (!evidenceOk) return { qualified: false, valid: false, networkUnknown: false };
   const networkRequired = answer.searchRequired || answer.requestedNetworkMode === "on";
-  if (networkRequired && answer.networkTrigger === "unknown") {
-    return { qualified: false, valid: false, networkUnknown: true };
-  }
+  const networkUnknown = networkRequired && answer.networkTrigger === "unknown";
   const networkOk = !networkRequired || answer.networkTrigger === "triggered";
   const sessionOk = !answer.newSessionRequired || answer.newSession === "true";
   const sourcesOk = answer.citationSetState === "complete";
-  if (!networkOk || !sessionOk || !sourcesOk) return { qualified: false, valid: false, networkUnknown: false };
-  return { qualified: true, valid: true, networkUnknown: false };
+  const qualified = networkOk && sessionOk && (answer.frozenOfficial || sourcesOk);
+  return { qualified, valid: answer.frozenOfficial || qualified, networkUnknown };
 }
 
 function slotInScope(

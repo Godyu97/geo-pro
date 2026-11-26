@@ -1,12 +1,16 @@
 import { Button } from "@/components/ui/button";
 import type { AnswerListFilter } from "./answer-list";
 import { KeywordField } from "./keyword-field";
-import type { OverviewScope } from "./overview-contracts";
+import type { OverviewPayload } from "./overview-cache";
+import { unknownOfficialChannel, type OverviewUrlScope } from "./overview-contracts";
 
-type ScopeTranslator = (key:
+type ScopeTranslator = ((key:
   | "track"
   | "trackApi"
   | "trackConsumer"
+  | "officialChannelVersion"
+  | "unknownOfficialChannelVersion"
+  | "automaticChannelVersion"
   | "region"
   | "regionHint"
   | "regionPlaceholder"
@@ -18,7 +22,8 @@ type ScopeTranslator = (key:
   | "from"
   | "to"
   | "timeHint"
-  | "applyFilters") => string;
+  | "applyFilters") => string)
+  & ((key: "channelVersionOption", params: { name: string; version: string }) => string);
 
 const fieldClass = "h-10 w-full min-w-0 rounded-md border bg-background px-3 sm:w-auto";
 
@@ -70,11 +75,17 @@ export function OverviewScopeForm({
   scope,
   t,
   list,
+  channelOptions = [],
 }: {
-  scope: Pick<OverviewScope, "brandId" | "sourceMode" | "region" | "requestedNetworkMode" | "from" | "to">;
+  scope: OverviewUrlScope;
   t: ScopeTranslator;
   list?: AnswerListForm;
+  channelOptions?: OverviewPayload["channelOptions"];
 }) {
+  const options = scope.channel && !channelOptions.some((option) => option.value === scope.channel)
+    ? [...channelOptions, { value: scope.channel, displayName: null }]
+    : channelOptions;
+
   return (
     <form className="flex min-w-0 max-w-full flex-wrap items-end gap-3 rounded-2xl border bg-secondary/40 p-4" method="get">
       <input type="hidden" name="brandId" value={scope.brandId} />
@@ -90,6 +101,27 @@ export function OverviewScopeForm({
           <option value="consumer_ui">{t("trackConsumer")}</option>
         </select>
       </label>
+      {scope.sourceMode === "model_api" && options.length > 0 ? (
+        <label className="min-w-0 max-w-full break-words text-sm" htmlFor="overview-channel">
+          <span className="mb-1 block text-muted-foreground">{t("officialChannelVersion")}</span>
+          <select
+            id="overview-channel"
+            name="channel"
+            key={scope.channel ?? ""}
+            defaultValue={scope.channel ?? ""}
+            className={`${fieldClass} sm:max-w-64`}
+          >
+            <option value="">{t("automaticChannelVersion")}</option>
+            {options.map(({ value, displayName }) => {
+              const [id, version] = value.split("@");
+              const label = value === unknownOfficialChannel
+                ? t("unknownOfficialChannelVersion")
+                : t("channelVersionOption", { name: displayName ?? id, version });
+              return <option key={value} value={value}>{label}</option>;
+            })}
+          </select>
+        </label>
+      ) : null}
       <label className="min-w-0 max-w-full break-words text-sm" htmlFor="overview-region">
         <span className="mb-1 block text-muted-foreground">{t("region")}</span>
         <input

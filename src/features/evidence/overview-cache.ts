@@ -7,9 +7,9 @@ import { networkModes } from "../capabilities/contracts.ts";
 import { priorityBuckets, taskStatuses } from "../optimization/contracts.ts";
 import { sourceModes, triStateSchema } from "./contracts.ts";
 import { analysisRuleVersion } from "./rules.ts";
-import type { OverviewScope } from "./overview-contracts.ts";
+import { officialChannelScopeSchema, type OverviewScope } from "./overview-contracts.ts";
 
-export const overviewRuleVersion = "s-m0-07-v3";
+export const overviewRuleVersion = "s-m0-07-v4";
 export const overviewCacheTtlSeconds = 60;
 const chunkChars = 3500;
 const indexLimit = 30;
@@ -47,12 +47,18 @@ export const overviewPayloadSchema = z.object({
     brandId: z.string(),
     brandName: z.string(),
     sourceMode: z.enum(sourceModes),
+    channel: officialChannelScopeSchema.nullable(),
     region: z.string().nullable(),
     requestedNetworkMode: z.enum(networkModes).nullable(),
     from: z.string().nullable(),
     to: z.string().nullable(),
     hasOfficialWebsite: z.boolean(),
   }),
+  channelSelectionRequired: z.boolean(),
+  channelOptions: z.array(z.object({
+    value: officialChannelScopeSchema,
+    displayName: z.string().nullable(),
+  })),
   viewStatus: z.enum(["empty", "partial", "ready", "insufficient"]),
   eligibleCount: z.number(),
   sampleCount: z.number(),
@@ -74,7 +80,7 @@ export const overviewPayloadSchema = z.object({
   })),
   coverage: z.object({
     status: z.enum(["ready", "na"]),
-    reason: z.enum(["no-frozen-plan-slots", "no-due-slots"]).nullable(),
+    reason: z.enum(["no-frozen-plan-slots", "no-due-slots", "channel-selection-required"]).nullable(),
     planned: z.number(),
     valid: z.number(),
     eligible: z.number(),
@@ -156,6 +162,7 @@ export function overviewCacheIdentity(input: {
     input.ownerId,
     input.brandId,
     input.scope.sourceMode,
+    input.scope.channel ?? "",
     input.scope.region ?? "",
     input.scope.requestedNetworkMode ?? "",
     input.scope.from ?? "",
@@ -199,7 +206,7 @@ async function deleteStored(cache: CacheStore, key: string) {
 export async function readOverviewCache(
   cache: CacheStore,
   identity: string,
-  expected: { brandId: string; sourceMode: OverviewPayload["scope"]["sourceMode"]; hasOfficialWebsite: boolean },
+  expected: Pick<OverviewScope, "brandId" | "sourceMode" | "channel"> & { hasOfficialWebsite: boolean },
 ): Promise<OverviewPayload | null> {
   const key = metaKey(identity);
   let logged = false;
@@ -242,6 +249,7 @@ export async function readOverviewCache(
     const payload = overviewPayloadSchema.parse(JSON.parse(raw));
     if (payload.scope.brandId !== expected.brandId
       || payload.scope.sourceMode !== expected.sourceMode
+      || payload.scope.channel !== (expected.channel ?? null)
       || payload.scope.hasOfficialWebsite !== expected.hasOfficialWebsite) {
       return null;
     }

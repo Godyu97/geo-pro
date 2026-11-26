@@ -4,11 +4,13 @@ import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { networkModes } from "../capabilities/contracts.ts";
+import { functionalMockMarker } from "../functional-mock/mode.ts";
 import {
   analysisDraftStatuses, analysisStatuses, captureMethods, citationOrigins, citationSetStates, evidenceStates,
   nativeCitationOrigins,
   networkTriggers, ownershipStates, pageStatuses, sourceModes, triStateSchema,
 } from "./contracts.ts";
+import { officialChannelKey, unknownOfficialChannel, type OverviewUrlScope } from "./overview-contracts.ts";
 
 const observationRow = z.object({
   id: brandIdSchema,
@@ -131,6 +133,7 @@ const overviewContextSchema = z.object({
   slots: sqlCount,
   slotAt: sqlText,
   slotStamp: sqlCount,
+  linkedRuns: sqlCount,
   citations: sqlCount,
   citationAt: sqlText,
   capabilityAt: sqlText,
@@ -176,14 +179,8 @@ const adoptedPromptSchema = z.object({
 
 export const evidenceIdChunk = 100;
 
-export type ScopedObservationInput = {
+export type ScopedObservationInput = OverviewUrlScope & {
   ownerId: string;
-  brandId: string;
-  sourceMode: "model_api" | "consumer_ui";
-  region?: string;
-  requestedNetworkMode?: "on" | "off" | "unknown";
-  from?: string;
-  to?: string;
 };
 
 const scopedColumns = `o.id, o.brand_id AS "brandId", o.owner_id AS "ownerId", o.slot_id AS "slotId", o.attempt_id AS "attemptId",
@@ -193,7 +190,9 @@ const scopedColumns = `o.id, o.brand_id AS "brandId", o.owner_id AS "ownerId", o
   o.locator_ref AS "locatorRef", o.collector_id AS "collectorId", o.missing_reason AS "missingReason", o.created_at AS "createdAt",
   o.target_region AS "targetRegion", o.observed_region AS "observedRegion", o.new_session AS "newSession",
   o.product_mode AS "productMode", o.network_trigger AS "networkTrigger",
-  s.run_id AS "runId", s.channel_id AS "channelId", s.channel_version AS "channelVersion"`;
+  r.id AS "runId",
+  CASE WHEN r.id IS NOT NULL THEN s.channel_id END AS "channelId",
+  CASE WHEN r.id IS NOT NULL THEN s.channel_version END AS "channelVersion"`;
 
 function chunkIds(ids: string[]) {
   const unique = [...new Set(ids)];
@@ -204,13 +203,14 @@ function chunkIds(ids: string[]) {
   return chunks;
 }
 
-export function scopedObservationQuery(input: ScopedObservationInput) {
-  const values: QueryValue[] = [input.ownerId, input.brandId, input.sourceMode];
+function observationScope(input: ScopedObservationInput) {
+  const values: QueryValue[] = [input.ownerId, input.brandId, input.sourceMode, functionalMockMarker];
   const filters = [
     `o.owner_id = ?`,
     `o.brand_id = ?`,
     `o.source_mode = ?`,
     `o.evidence_state IN ('complete', 'incomplete', 'contested', 'draft_evidence')`,
+    `REPLACE(o.answer_text, ?, '') = o.answer_text`,
   ];
   if (input.region) {
     filters.push(`o.target_region = ?`);
@@ -219,6 +219,13 @@ export function scopedObservationQuery(input: ScopedObservationInput) {
   if (input.requestedNetworkMode) {
     filters.push(`o.requested_network_mode = ?`);
     values.push(input.requestedNetworkMode);
+  }
+  if (input.channel === unknownOfficialChannel) {
+    filters.push("r.id IS NULL");
+  } else if (input.channel) {
+    const [channelId, version] = input.channel.split("@");
+    filters.push("s.channel_id = ?", "s.channel_version = ?", "r.id IS NOT NULL");
+    values.push(channelId, Number(version));
   }
   if (input.from) {
     filters.push(`o.captured_at >= ?`);
@@ -229,24 +236,49 @@ export function scopedObservationQuery(input: ScopedObservationInput) {
     values.push(input.to);
   }
   return {
+    sql: `FROM answer_observation o
+       LEFT JOIN monitoring_slot s ON s.id = o.slot_id AND s.brand_id = o.brand_id
+       LEFT JOIN monitoring_run r ON r.id = s.run_id AND r.brand_id = o.brand_id
+         AND r.owner_id = o.owner_id AND r.track = o.source_mode`,
+    filters,
+    values,
+  };
+}
+
+export function scopedObservationQuery(input: ScopedObservationInput) {
+  const { sql, filters, values } = observationScope(input);
+  return {
     sql: `SELECT ${scopedColumns}
-         , s.question_id AS "questionId"
+         , CASE WHEN r.id IS NOT NULL THEN s.question_id END AS "questionId"
          , r.prompt_set_id AS "promptSetId"
-         , s.natural_question AS "naturalQuestion"
+         , CASE WHEN r.id IS NOT NULL THEN s.natural_question END AS "naturalQuestion"
+         , p.search_required AS "searchRequired"
+         , p.new_session_required AS "newSessionRequired"
          , a.mentioned AS "mentioned"
          , a.recommended AS "recommended"
          , a.official_site_cited AS "officialSiteCited"
          , a.version AS "analysisVersion"
-       FROM answer_observation o
-       LEFT JOIN monitoring_slot s ON s.id = o.slot_id
-       LEFT JOIN monitoring_run r ON r.id = s.run_id
-         AND s.brand_id = o.brand_id AND r.brand_id = o.brand_id AND r.owner_id = o.owner_id
+       ${sql}
+       LEFT JOIN run_protocol_pin pin ON pin.run_id = r.id
+       LEFT JOIN sampling_protocol p ON p.protocol_id = pin.protocol_id AND p.version = pin.version
        LEFT JOIN answer_analysis_version a ON a.observation_id = o.id
          AND a.version = (
            SELECT MAX(a2.version) FROM answer_analysis_version a2 WHERE a2.observation_id = o.id
          )
        WHERE ${filters.join(" AND ")}
        ORDER BY o.captured_at DESC, o.id DESC`,
+    values,
+  };
+}
+
+export function scopedOfficialChannelsQuery(input: ScopedObservationInput) {
+  const { sql, filters, values } = observationScope({ ...input, channel: undefined });
+  return {
+    sql: `SELECT DISTINCT CASE WHEN r.id IS NOT NULL THEN s.channel_id END AS "channelId",
+              CASE WHEN r.id IS NOT NULL THEN s.channel_version END AS "channelVersion"
+       ${sql}
+       WHERE ${filters.join(" AND ")}
+       ORDER BY "channelId", "channelVersion"`,
     values,
   };
 }
@@ -287,13 +319,15 @@ export function answerListContextQuery(ownerId: string, brandId: string, observa
 
 export function overviewPlanLinkQuery(ownerId: string, brandId: string) {
   return {
-    sql: `SELECT d.slot_id AS "planSlotId", d.monitoring_run_id AS "runId",
+    sql: `SELECT d.slot_id AS "planSlotId", r.id AS "runId", d.channel_id AS "channelId",
             r.region AS "region", r.requested_network_mode AS "requestedNetworkMode",
-            p.search_required AS "searchRequired", p.new_session_required AS "newSessionRequired"
+            (SELECT CASE WHEN MIN(s.channel_version) = MAX(s.channel_version) THEN MIN(s.channel_version) END
+             FROM monitoring_slot s
+             WHERE s.run_id = r.id AND s.brand_id = d.brand_id AND s.channel_id = d.channel_id
+               AND r.track = 'model_api') AS "channelVersion"
           FROM sampling_due_run d
-          LEFT JOIN monitoring_run r ON r.id = d.monitoring_run_id AND r.owner_id = d.owner_id
-          LEFT JOIN run_protocol_pin pin ON pin.run_id = r.id
-          LEFT JOIN sampling_protocol p ON p.protocol_id = pin.protocol_id AND p.version = pin.version
+          LEFT JOIN monitoring_run r ON r.id = d.monitoring_run_id
+            AND r.owner_id = d.owner_id AND r.brand_id = d.brand_id
           WHERE d.owner_id = ? AND d.brand_id = ?
           ORDER BY d.slot_id ASC, d.id ASC`,
     values: [ownerId, brandId] as QueryValue[],
@@ -323,7 +357,7 @@ export function channelKindQuery(channelIds: readonly string[]) {
 
 export function capabilityExpiryQuery(channelIds: readonly string[]) {
   return {
-    sql: `SELECT channel_id AS "channelId", version, expires_at AS "expiresAt"
+    sql: `SELECT channel_id AS "channelId", version, expires_at AS "expiresAt", display_name AS "displayName"
           FROM capability_version
           WHERE channel_id IN (${channelIds.map(() => "?").join(", ")})
           ORDER BY channel_id ASC, version ASC`,
@@ -607,6 +641,8 @@ export class EvidenceDao {
               (SELECT COALESCE(SUM(CASE s.status
                  WHEN 'scheduled' THEN 1 WHEN 'completed' THEN 2 WHEN 'failed' THEN 4 WHEN 'paused' THEN 8 ELSE 16 END), 0)
                  FROM sampling_slot s WHERE s.brand_id = b.id AND s.owner_id = b.owner_id) AS "slotStamp",
+              (SELECT COUNT(*) FROM sampling_due_run d WHERE d.brand_id = b.id AND d.owner_id = b.owner_id
+                 AND d.status = 'accepted') AS "linkedRuns",
               (SELECT COUNT(*) FROM answer_citation c WHERE c.brand_id = b.id) AS "citations",
               (SELECT COALESCE(MAX(c.created_at), '') FROM answer_citation c WHERE c.brand_id = b.id) AS "citationAt",
               (SELECT COALESCE(MAX(v.changed_at), '') FROM capability_version v) AS "capabilityAt",
@@ -641,6 +677,7 @@ export class EvidenceDao {
       parsed.slots,
       parsed.slotAt,
       parsed.slotStamp,
+      parsed.linkedRuns,
       parsed.citations,
       parsed.citationAt,
       parsed.capabilityAt,
@@ -661,10 +698,10 @@ export class EvidenceDao {
     return z.array(z.object({
       planSlotId: brandIdSchema,
       runId: brandIdSchema.nullable(),
+      channelId: z.string(),
+      channelVersion: z.coerce.number().int().positive().nullable(),
       region: z.string().nullable(),
       requestedNetworkMode: z.enum(networkModes).nullable(),
-      searchRequired: z.union([z.coerce.number(), z.null()]).transform((value) => value === 1),
-      newSessionRequired: z.union([z.coerce.number(), z.null()]).transform((value) => value === 1),
     })).parse(rows);
   }
 
@@ -699,19 +736,22 @@ export class EvidenceDao {
     return kinds;
   }
 
-  async capabilityExpiries(channelIds: readonly string[]) {
-    const expiry = new Map<string, string | null>();
-    if (channelIds.length === 0) return expiry;
+  async overviewCapabilities(channelIds: readonly string[]) {
+    const capabilities = new Map<string, { expiresAt: string | null; displayName: string }>();
+    if (channelIds.length === 0) return capabilities;
     const built = capabilityExpiryQuery(channelIds);
     const rows = await this.query(built.sql, built.values);
     for (const row of z.array(z.object({
       channelId: z.string().min(1).max(64),
       version: z.coerce.number().int().positive(),
       expiresAt: z.string().nullable(),
+      displayName: z.string(),
     })).parse(rows)) {
-      expiry.set(row.channelId, row.expiresAt);
+      const metadata = { expiresAt: row.expiresAt, displayName: row.displayName };
+      capabilities.set(row.channelId, metadata);
+      capabilities.set(officialChannelKey(row.channelId, row.version), metadata);
     }
-    return expiry;
+    return capabilities;
   }
 
   async adoptedPromptRefs(ownerId: string, brandId: string, slotIds: string[]) {
@@ -740,9 +780,19 @@ export class EvidenceDao {
       officialSiteCited: row.officialSiteCited == null ? null : triStateSchema.parse(row.officialSiteCited),
       analysisVersion: row.analysisVersion == null ? null : z.coerce.number().int().positive().parse(row.analysisVersion),
       runId: row.runId == null ? null : brandIdSchema.parse(row.runId),
+      searchRequired: Number(row.searchRequired) === 1,
+      newSessionRequired: Number(row.newSessionRequired) === 1,
       channelId: typeof row.channelId === "string" && row.channelId.length > 0 ? row.channelId : null,
       channelVersion: row.channelVersion == null ? null : z.coerce.number().int().positive().parse(row.channelVersion),
     }));
+  }
+
+  async listScopedOfficialChannels(input: ScopedObservationInput) {
+    const built = scopedOfficialChannelsQuery(input);
+    return z.array(z.object({
+      channelId: z.string().nullable(),
+      channelVersion: z.coerce.number().int().positive().nullable(),
+    })).parse(await this.query(built.sql, built.values));
   }
 
   async listAnswerContexts(ownerId: string, brandId: string, observationIds: readonly string[]) {

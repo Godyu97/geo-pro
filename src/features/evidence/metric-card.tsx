@@ -20,6 +20,7 @@ export function MetricCard({
   metricNa,
   officialNa,
   ownedNa,
+  citationNa,
 }: {
   title: string;
   metric: RateBreakdown;
@@ -32,13 +33,15 @@ export function MetricCard({
   metricNa: string;
   officialNa: string;
   ownedNa: string;
+  citationNa: string;
 }) {
   const value = metric.status === "na" ? "N/A" : formatRate(locale, metric.equalWeight);
-  const na = metric.reason === "official-website-not-applicable"
-    ? officialNa
-    : metric.reason === "no-judgable-owned-citations"
-      ? ownedNa
-      : metricNa;
+  const reasons: Record<string, string> = {
+    "official-website-not-applicable": officialNa,
+    "no-judgable-owned-citations": ownedNa,
+    "no-complete-citations": citationNa,
+  };
+  const na = reasons[metric.reason ?? ""] ?? metricNa;
   return (
     <section className="min-w-0 rounded-2xl border bg-card p-5 shadow-none">
       <h3 className="break-words text-sm font-medium">{title}</h3>

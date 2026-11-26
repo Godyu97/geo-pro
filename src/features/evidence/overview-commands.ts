@@ -5,7 +5,6 @@ import type { CacheStore } from "../../lib/cache/store.ts";
 import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { listPrioritizedTasks } from "../optimization/commands.ts";
-import { functionalMockMarker } from "../functional-mock/mode.ts";
 import { SamplingPlanDao } from "../sampling-plans/dao.ts";
 import { clusterForAnswer, type AnswerCluster } from "./answer-list.ts";
 import { readAnswerClusterSources } from "./answer-list-context.ts";
@@ -13,6 +12,7 @@ import type { EvidenceError } from "./contracts.ts";
 import { EvidenceDao } from "./dao.ts";
 import {
   aggregateOverviewMetrics,
+  answerQuality,
   capabilityIsExpired,
   latestCompleteCapture,
   ownedPageJudgement,
@@ -30,7 +30,7 @@ import {
   storeOverviewCache,
   type OverviewPayload,
 } from "./overview-cache.ts";
-import { overviewScopePath, type OverviewScope } from "./overview-contracts.ts";
+import { officialChannelKey, overviewScopePath, unknownOfficialChannel, type OverviewScope } from "./overview-contracts.ts";
 import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 
 type Failure = { error: EvidenceError };
@@ -42,6 +42,20 @@ function denied(error: EvidenceError): Failure {
 function questionKeyOf(questionId: string | null, questionText: string) {
   if (questionId) return questionId;
   return createHash("sha256").update(questionText.trim(), "utf8").digest("hex").slice(0, 32);
+}
+
+type PlanLink = Awaited<ReturnType<EvidenceDao["overviewPlanLinks"]>>[number];
+
+function planChannel(channelId: string, links: readonly PlanLink[]) {
+  const keys = new Set(links
+    .filter((link) => link.runId && link.channelId === channelId)
+    .map((link) => officialChannelKey(link.channelId, link.channelVersion)));
+  return keys.size === 1 ? [...keys][0] : unknownOfficialChannel;
+}
+
+function linkInScope(link: PlanLink, scope: OverviewScope) {
+  return (!scope.region || scope.region === link.region)
+    && (!scope.requestedNetworkMode || scope.requestedNetworkMode === link.requestedNetworkMode);
 }
 
 export async function readEvidenceOverview(
@@ -70,26 +84,16 @@ export async function readEvidenceOverview(
   const cached = await readOverviewCache(cache, identity, {
     brandId: scope.brandId,
     sourceMode: scope.sourceMode,
+    channel: scope.channel,
     hasOfficialWebsite,
   });
   if (cached) return cached;
 
-  const rows = await dao.listScopedObservations({
-    ownerId,
-    brandId: scope.brandId,
-    sourceMode: scope.sourceMode,
-    region: scope.region,
-    requestedNetworkMode: scope.requestedNetworkMode,
-    from: scope.from,
-    to: scope.to,
-  });
-
-  const slotIds = rows.flatMap((row) => row.questionId && row.observation.slotId ? [row.observation.slotId] : []);
-  const observationIds = rows.map((row) => row.observation.id);
+  const observationScope = { ...scope, ownerId };
   const plans = new SamplingPlanDao(db);
-  const [refs, ownership, planRows, links] = await Promise.all([
-    slotIds.length ? dao.adoptedPromptRefs(ownerId, scope.brandId, slotIds) : new Map(),
-    observationIds.length ? dao.citationOwnership(scope.brandId, observationIds) : new Map<string, string[]>(),
+  const [scopedRows, optionRows, planRows, links] = await Promise.all([
+    dao.listScopedObservations(observationScope),
+    scope.channel ? dao.listScopedOfficialChannels(observationScope) : null,
     plans.plansForBrand(scope.brandId, ownerId),
     dao.overviewPlanLinks(ownerId, scope.brandId),
   ]);
@@ -100,22 +104,43 @@ export async function readEvidenceOverview(
   }
   const planIds = [...latestPlan.entries()].filter(([, plan]) => plan.phase !== "draft").map(([id]) => id);
   const planSlots = planIds.length ? await plans.slotsForPlans(ownerId, planIds) : [];
-  const channelIds = [...new Set([
-    ...planSlots.map((slot) => slot.channelId),
-    ...rows.flatMap((row) => row.channelId ? [row.channelId] : []),
-  ])];
-  const [channelKinds, expiries] = await Promise.all([
-    dao.channelKinds(channelIds),
-    dao.capabilityExpiries(channelIds),
-  ]);
-  const linksByRun = new Map<string, (typeof links)[number]>();
-  const linksBySlot = new Map<string, (typeof links)[number][]>();
+  const linksByRunChannel = new Map<string, PlanLink>();
+  const linksBySlot = new Map<string, PlanLink[]>();
   for (const link of links) {
-    if (link.runId && !linksByRun.has(link.runId)) linksByRun.set(link.runId, link);
+    if (link.runId) {
+      const key = `${link.runId}:${link.channelId}`;
+      if (!linksByRunChannel.has(key)) linksByRunChannel.set(key, link);
+    }
     const list = linksBySlot.get(link.planSlotId) ?? [];
     list.push(link);
     linksBySlot.set(link.planSlotId, list);
   }
+  const channelKeys = new Set<string>();
+  const availableRows = optionRows ?? scopedRows;
+  const planChannelIds = [...new Set(planSlots.map((slot) => slot.channelId))];
+  const channelIds = [...new Set([
+    ...planChannelIds,
+    ...availableRows.flatMap((row) => row.channelId ? [row.channelId] : []),
+  ])];
+  if (scope.sourceMode === "model_api") {
+    for (const row of availableRows) channelKeys.add(officialChannelKey(row.channelId, row.channelVersion));
+    for (const slot of planSlots) {
+      if ((scope.from && slot.at < scope.from) || (scope.to && slot.at > scope.to)) continue;
+      const related = (linksBySlot.get(slot.id) ?? []).filter((link) => link.channelId === slot.channelId);
+      const key = planChannel(slot.channelId, related);
+      if (key !== unknownOfficialChannel && related.some((link) => linkInScope(link, scope))) channelKeys.add(key);
+    }
+  }
+  const channelSelectionRequired = !scope.channel && channelKeys.size > 1;
+  const rows = channelSelectionRequired ? [] : scopedRows;
+  const slotIds = rows.flatMap((row) => row.questionId && row.observation.slotId ? [row.observation.slotId] : []);
+  const observationIds = rows.map((row) => row.observation.id);
+  const [refs, ownership, channelKinds, capabilities] = await Promise.all([
+    slotIds.length ? dao.adoptedPromptRefs(ownerId, scope.brandId, slotIds) : new Map(),
+    observationIds.length ? dao.citationOwnership(scope.brandId, observationIds) : new Map<string, string[]>(),
+    dao.channelKinds(planChannelIds),
+    dao.overviewCapabilities(channelIds),
+  ]);
   const sources = await readAnswerClusterSources(db, scope.brandId, [
     ...rows.map((row) => row.promptSetId),
     ...Array.from(refs.values(), (ref) => ref.promptSetId),
@@ -126,7 +151,6 @@ export async function readEvidenceOverview(
   const captured: Array<{ capturedAt: string; evidenceState: string }> = [];
 
   for (const row of rows) {
-    if (row.observation.answerText.includes(functionalMockMarker)) continue;
     if (row.naturalQuestion === 0) continue;
     let type: QuestionType = "unknown";
     if (row.questionId && row.observation.slotId) {
@@ -148,22 +172,25 @@ export async function readEvidenceOverview(
     if (type === "exploration") continue;
     if (type === "unknown") type = "discovery";
 
-    const link = row.runId ? linksByRun.get(row.runId) : undefined;
+    const link = row.runId && row.channelId ? linksByRunChannel.get(`${row.runId}:${row.channelId}`) : undefined;
+    const frozenOfficial = scope.sourceMode === "model_api" && row.channelVersion !== null;
     const ownedPageCited = ownedPageJudgement(
       row.observation.citationSetState,
       ownership.get(row.observation.id) ?? [],
     );
     captured.push({ capturedAt: row.observation.capturedAt, evidenceState: row.observation.evidenceState });
-    coverageAnswers.push({
+    const coverageAnswer: CoverageAnswer = {
       planSlotId: link?.planSlotId ?? null,
       evidenceState: row.observation.evidenceState,
       citationSetState: row.observation.citationSetState,
       requestedNetworkMode: row.observation.requestedNetworkMode,
       networkTrigger: row.observation.networkTrigger,
       newSession: row.observation.newSession,
-      searchRequired: link?.searchRequired ?? false,
-      newSessionRequired: link?.newSessionRequired ?? false,
-    });
+      searchRequired: (frozenOfficial || Boolean(link)) && row.searchRequired,
+      newSessionRequired: (frozenOfficial || Boolean(link)) && row.newSessionRequired,
+      frozenOfficial,
+    };
+    coverageAnswers.push(coverageAnswer);
     samples.push({
       observationId: row.observation.id,
       questionKey: questionKeyOf(row.questionId, row.observation.questionText),
@@ -174,6 +201,7 @@ export async function readEvidenceOverview(
       requestedNetworkMode: row.observation.requestedNetworkMode,
       capturedAt: row.observation.capturedAt,
       evidenceState: row.observation.evidenceState,
+      protocolQualified: frozenOfficial ? answerQuality(coverageAnswer).qualified : undefined,
       citationSetState: row.observation.citationSetState,
       mentioned: row.mentioned ?? "unknown",
       recommended: row.recommended ?? "unknown",
@@ -185,11 +213,15 @@ export async function readEvidenceOverview(
 
   const coverageSlots: CoveragePlanSlot[] = [];
   const watchedChannels: string[] = [];
-  for (const slot of planSlots) {
+  for (const slot of channelSelectionRequired ? [] : planSlots) {
     const kind = channelKinds.get(slot.channelId);
     if (kind !== "model_api" && kind !== "consumer_ui") continue;
+    const allLinks = linksBySlot.get(slot.id) ?? [];
+    if (scope.channel && planChannel(slot.channelId, allLinks) !== scope.channel) continue;
+    const related = scope.channel
+      ? allLinks.filter((link) => link.channelId === slot.channelId && linkInScope(link, scope))
+      : allLinks;
     if (kind === scope.sourceMode) watchedChannels.push(slot.channelId);
-    const related = linksBySlot.get(slot.id) ?? [];
     coverageSlots.push({
       id: slot.id,
       at: slot.at,
@@ -215,14 +247,18 @@ export async function readEvidenceOverview(
     },
     now: capturedNow,
   });
+  if (channelSelectionRequired) coverage.reason = "channel-selection-required";
+  const watchedVersion = scope.channel ?? (channelKeys.size === 1 ? [...channelKeys][0] : undefined);
   const collection = {
     lastCapturedAt: latestCompleteCapture(captured),
     capabilityExpired: capabilityIsExpired(
-      [...new Set(watchedChannels)].map((channelId) => expiries.get(channelId) ?? null),
+      watchedVersion
+        ? [capabilities.get(watchedVersion)?.expiresAt ?? null]
+        : [...new Set(watchedChannels)].map((channelId) => capabilities.get(channelId)?.expiresAt ?? null),
       capturedNow,
     ),
   };
-  const metrics = aggregateOverviewMetrics(samples);
+  const metrics = aggregateOverviewMetrics(samples, hasOfficialWebsite);
   const primaryIds = new Set(metrics.sampleIds);
   const clusters = new Map<string, AnswerCluster | null>();
   for (const row of rows) {
@@ -251,7 +287,7 @@ export async function readEvidenceOverview(
   const answerHref = overviewScopePath("/dashboard/monitoring/answers", scope);
   const tasksHref = `/dashboard/optimization?brandId=${scope.brandId}`;
   const nextActions: Array<{ id: string; kind: "start_monitoring" | "view_answers" | "view_tasks"; href: string }> = [];
-  if (metrics.viewStatus === "empty") {
+  if (metrics.viewStatus === "empty" && !channelSelectionRequired && answers.length === 0) {
     nextActions.push({ id: "start", kind: "start_monitoring", href: "/dashboard/monitoring/new" });
   }
   nextActions.push({ id: "answers", kind: "view_answers", href: answerHref });
@@ -278,6 +314,7 @@ export async function readEvidenceOverview(
       brandId: scope.brandId,
       brandName,
       sourceMode: scope.sourceMode,
+      channel: scope.channel ?? null,
       region: scope.region ?? null,
       requestedNetworkMode: scope.requestedNetworkMode ?? null,
       from: scope.from ?? null,
@@ -285,6 +322,11 @@ export async function readEvidenceOverview(
       hasOfficialWebsite,
     },
     ...metrics,
+    channelSelectionRequired,
+    channelOptions: [...channelKeys].sort().map((value) => ({
+      value,
+      displayName: capabilities.get(value)?.displayName ?? null,
+    })),
     questionClusters: summarizeQuestionClusters(metrics.metrics, clusters),
     coverage,
     collection,

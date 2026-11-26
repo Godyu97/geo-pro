@@ -25,7 +25,7 @@ async function failure(code: EvidenceError, traceId?: string) {
   );
 }
 
-export async function evidenceOverviewResponse(request: Request) {
+export async function evidenceOverviewResponse(request: Request, view: "overview" | "answers" = "overview") {
   const session = await getSessionState();
   if (session.status !== "authenticated") {
     return failure(session.status === "anonymous" ? "SESSION_REQUIRED" : "SERVICE_UNAVAILABLE");
@@ -46,7 +46,13 @@ export async function evidenceOverviewResponse(request: Request) {
       ...(hasOfficialWebsite === undefined ? {} : { hasOfficialWebsite }),
     });
     if ("error" in result) return failure(result.error);
-    return Response.json(result, { headers: privateHeaders });
+    const payload = view === "answers" ? {
+      scope: result.scope,
+      channelOptions: result.channelOptions,
+      channelSelectionRequired: result.channelSelectionRequired,
+      answers: result.answers,
+    } : result;
+    return Response.json(payload, { headers: privateHeaders });
   } catch {
     const traceId = randomUUID();
     console.error("evidence-overview-unavailable", { traceId });
