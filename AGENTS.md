@@ -16,6 +16,7 @@ GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、P
 4. **禁止越界修改**：不得以为通过检查为由修改无关代码；保护现有文件与未提交改动；不得修改或删除既有产品文档来适配代码；历史 `docs/archive/` 与既有 `openspec/` 不自动成为当前任务范围。
 5. **禁止伪造结果与数据**：不得将未执行的验证标记为通过，不得把构建成功当作业务验收通过；严禁伪造监测记录、趋势、客户评价、排名或提升比例。
 6. **禁止高危与擅自提交**：不得硬编码或向客户端泄露密钥/连接串（`NEXT_PUBLIC_*` 严禁放密钥）；不得静默改动生产数据、用 `push` 替代迁移或执行破坏性操作；未经明确授权不得 `commit`、`push` 或部署。
+7. **禁止在产品代码中写非产品逻辑**：严禁在 `src/app/`、`src/features/` 等产品代码中编写测试页面、试点专用页面、临时页面、调试路由或产品不需要的模拟/旁路逻辑；产品页面与接口只承载真实用户需求，自动化测试与隔离回归仅留在 `tests/` 或 `scripts/`。
 
 ## 任务执行原则
 
@@ -27,7 +28,7 @@ GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、P
 - **显式服务配置**：开发和应用启动须指定数据库、Redis、S3 兼容文件存储与认证配置。复用可用的开发服务，`pnpm env:check` 核对实际连通与权限。仅双库隔离验证使用显式设置的 `GEO_DUAL_DB_URL`。 [环境准备](README.md#local-development)
 - **AI 接入规范（已就绪）**：所有 AI 模型接入均须支持 OpenAI **Responses API** 标准（`POST ${OPENAI_BASE_URL}/responses`），统一使用服务端模块 [src/lib/ai/responses.ts](src/lib/ai/responses.ts)；本地开发连接参数与模型名在 gitignored 的 `.env.local` 中通过 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`（及官方采样联调配置 `GEO_OFFICIAL_SAMPLING_*`）提供，可直接推进 AI 相关功能开发；严禁将真实密钥写入源码、`.env.example`、文档或 `NEXT_PUBLIC_*`，自动化单测须使用回环 mock。
 - **邮件功能长期 Mock（永远成功，暂不接入）**：项目已约定所有邮件发送与邮箱验证功能长期采用 Mock 永远成功策略，暂不接入真实邮件网关，**任何需求开发与 Issue 推进不得因缺少邮件网关或真实发信而阻塞**。本地与开发联调保持 `.env.local` 中 `GEO_AUTH_MAIL_MOCK=true`（跳过外发邮件网关与限流，直接 202 `accepted` 并记录安全 mock 日志）与 `GEO_AUTH_EMAIL_VERIFIED_MOCK=true`（已登录/存在的账号邮箱校验按已验证放行）；隔离安全测试脚本（如 `verify:account-email`、`verify:brands`、`test:monitoring`、`test:brands`）在显式设为 `false` 时继续验证严格契约。
-- **开发环境验收**。Agent 从用户入口使用现有开发账号、真实品牌、数据库和已配置服务完成操作、回读结果，直接作为该功能的正式业务验收。费用仅在实际调用前核对；外部发布按对应授权执行。缺少的外部条件只影响具体动作。自动化回归和破坏性测试沿用隔离环境，开发邮箱沿用长期 Mock。 [Issue 生命周期](.agents/workflows/issue-lifecycle.md)
+- **开发环境验收与持久化测试账号**：本机开发环境已在开发库持久化预置各权限级别（`admin`、`owner`、`member`、`reviewer`、`readonly`、`outsider` 等）的真实账号与联调数据，完整凭据与资源 ID 存放于 gitignored 的 `./tmp/dev/`（`./tmp/dev/accounts.json`、`./tmp/dev/README.md`）。后续需求迭代与业务验收时，Agent 直接读取并使用 `./tmp/dev/` 中对应级别的真实账号和持久化数据，从正常用户入口完成操作、回读结果并直接作为正式业务验收；不再每次重复注册临时测试账号或写入一次性脏数据。费用仅在实际调用前核对；外部发布按对应授权执行；缺少的外部条件只影响具体动作。自动化回归和破坏性测试沿用隔离环境，开发邮箱沿用长期 Mock。 [Issue 生命周期](.agents/workflows/issue-lifecycle.md)
 
 ## 治理与上下文路由（渐进式披露）
 

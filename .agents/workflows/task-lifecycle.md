@@ -25,13 +25,14 @@
 ## Step 4：Implement（最小实现）
 
 - 按计划实施最小必要改动，遵守 [architecture.md](../governance/architecture.md)、[coding.md](../governance/coding.md) 与 [security.md](../governance/security.md)。
+- 严禁在产品代码（`src/app/`、`src/features/` 等）中新增测试页、试点页、临时页面或产品不需要的旁路逻辑。
 - 不做无关重构；若实施过程中发现未预见的约束或文档冲突，先暂停扩大改动并更新计划。
 
 ## Step 5：Verify（质量验证）
 
 - 按 [quality-gates.md](../governance/quality-gates.md) 执行实际可运行的检查（至少覆盖 `pnpm lint`、`pnpm typecheck`、`pnpm build`；认证/Schema 变更在条件允许时运行 `pnpm verify:auth`）。
-- 品牌管理和 AI 监测增量用获准真实输入及开发服务走查，记录数据来源、版本、运行范围与实际结果。自动化仍用隔离数据库和回环 mock。 [真实联调方法](../../docs/tasks/brand-monitoring-next.md#dev-live-data)
-- Agent 使用已明确的开发库自行准备和清理本轮测试账号与数据，必要时在隔离库演练迁移、恢复和清除。验收按实际证据填写，生产操作按单独的发布授权执行。 [验收流程](issue-lifecycle.md)
+- 品牌管理和 AI 监测增量直接复用 `./tmp/dev/`（`./tmp/dev/accounts.json`、`./tmp/dev/README.md`）中持久化的各级别真实账号与品牌数据走查，记录数据来源、版本、运行范围与实际结果；不再每次重复注册一次性临时测试账号。自动化仍用隔离数据库和回环 mock。 [真实联调方法](../../docs/tasks/brand-monitoring-next.md#dev-live-data)
+- 正常业务联调与验收优先直接复用 `./tmp/dev/` 中的持久化账号与数据完成操作和回读；仅在隔离库演练破坏性测试、迁移、恢复和清除，避免在开发库残留临时脏数据。验收按实际证据填写，生产操作按单独的发布授权执行。 [验收流程](issue-lifecycle.md)
 - 严格区分**检查通过**、**检查失败**、**未配置**与**环境受阻**，禁止虚报结果或修改无关代码凑过检查。
 
 ## Step 6：Review（变更自审）
