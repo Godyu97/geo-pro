@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, useTransition, type ComponentProps, type FormEvent, type ReactNode } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ type Slot = { action: string; fact: string };
 const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center aria-disabled:opacity-60";
 const wrapBadgeClass = "h-auto max-w-full whitespace-normal rounded-xl px-3 py-1 text-left leading-5 [overflow-wrap:anywhere]";
 const textClass = "min-h-28 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const selectClass = "h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60";
 const checkboxClass = "mt-0.5 size-4 shrink-0 rounded border border-input accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 const emptySurfaceClass = "rounded-xl border border-dashed bg-card px-4 py-5 text-sm leading-6 text-muted-foreground";
 
@@ -78,12 +80,14 @@ export function PlansWorkspace({
   brandId,
   locale,
   initialPlans,
+  factOptions,
   messages,
   initialError,
 }: {
   brandId: string;
   locale: Locale;
   initialPlans: AssistantPlanView[];
+  factOptions: { id: string; title: string; version: number }[];
   messages: Copy;
   initialError: AssistantError | null;
 }) {
@@ -170,7 +174,7 @@ export function PlansWorkspace({
       successes: Number(successes),
       items,
     });
-    if (!command.success) {
+    if (!command.success || items.some(({ factVersionId }) => !factOptions.some(({ id }) => id === factVersionId))) {
       setNotice({ kind: "alert", text: t("INVALID_INPUT") });
       return;
     }
@@ -271,6 +275,14 @@ export function PlansWorkspace({
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {factOptions.length === 0 ? (
+            <div className="mb-4 space-y-2">
+              <p className="text-sm leading-6 text-muted-foreground">{t("noApprovedFacts")}</p>
+              <Button asChild variant="outline" className={actionClass}>
+                <Link href={`/dashboard/brands/${brandId}/facts`}>{t("openFacts")}</Link>
+              </Button>
+            </div>
+          ) : null}
           <form onSubmit={handleCreate} className="grid min-w-0 gap-4 sm:grid-cols-2">
             <input type="hidden" name="brandId" value={brandId} />
             <div className="flex min-w-0 flex-col gap-2 sm:col-span-2">
@@ -324,15 +336,22 @@ export function PlansWorkspace({
                   </div>
                   <div className="flex min-w-0 flex-col gap-2">
                     <Label htmlFor={`${formId}-fact-${position}`}>{t("factVersion", { index: position })}</Label>
-                    <Input
+                    <select
                       id={`${formId}-fact-${position}`}
                       value={slot.fact}
-                      maxLength={36}
+                      disabled={factOptions.length === 0}
                       onChange={(event) => setSlots((current) => current.map((item, itemIndex) => (
                         itemIndex === index ? { ...item, fact: event.target.value } : item
                       )))}
-                      className="h-10 bg-background"
-                    />
+                      className={selectClass}
+                    >
+                      <option value="">{t("chooseFact")}</option>
+                      {factOptions.map(({ id, title, version }) => (
+                        <option key={id} value={id} disabled={slot.fact !== id && slots.some(({ fact }) => fact === id)}>
+                          {t("factOption", { title, version: formatNumber(locale, version), id: id.slice(0, 8) })}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               );

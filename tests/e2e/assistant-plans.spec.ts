@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import postgres from "postgres";
+import { emptyFields } from "../../src/features/brand-facts/rules";
 import { registerTestAccount } from "./auth-helpers";
 import { publishedRetentionVersion } from "./retention-version";
 
@@ -15,6 +16,8 @@ const stamp = "2026-11-25T10:00:00.000Z";
 const brandName = `合成行动品牌-${"LongSegment_".repeat(4)}end`;
 const actionText = `合成核对已批准事实-${"LongAction_".repeat(12)}end`;
 const keptMaterial = "保留这段合成材料";
+const factTitle = "本品牌可核验事实";
+const factContent = JSON.stringify({ ...emptyFields, title: factTitle, validity: "longTerm" });
 
 const copy = {
   "zh-CN": {
@@ -29,6 +32,10 @@ const copy = {
     viewPlans: "查看草案",
     related: "相关入口",
     material: "材料",
+    firstFact: "事实版本 1",
+    secondFact: "事实版本 2",
+    chooseFact: "选择已批准事实",
+    openFacts: "打开事实与材料",
     create: "生成草案",
     invalid: "草案无效。请检查动作、事实版本和数字。",
     heading: "本周草案 1 条",
@@ -68,6 +75,10 @@ const copy = {
     viewPlans: "View the draft",
     related: "Related entries",
     material: "Material",
+    firstFact: "Fact version 1",
+    secondFact: "Fact version 2",
+    chooseFact: "Choose an approved fact",
+    openFacts: "Open facts and materials",
     create: "Create draft",
     invalid: "The draft is invalid. Check the actions, fact versions, and numbers.",
     heading: "Weekly draft, 1 items",
@@ -234,6 +245,8 @@ test("weekly action drafts keep the next action, confirmation, isolation, and re
         await expect(main.getByText(t.createTask, { exact: true })).toBeVisible();
         await expect(main.getByText(brandName, { exact: true })).toBeVisible();
         await expect(main.getByText(t.noBrand, { exact: true })).toHaveCount(0);
+        await expect(main.getByRole("combobox", { name: t.firstFact, exact: true })).toBeDisabled();
+        await expect(main.getByRole("link", { name: t.openFacts, exact: true })).toHaveAttribute("href", `/dashboard/brands/${brandId}/facts`);
         const fill = main.getByRole("link", { name: t.fillDraft, exact: true });
         await expect(fill).toBeVisible();
         await expect(main.getByRole("navigation", { name: t.related })).toBeVisible();
@@ -269,7 +282,10 @@ test("weekly action drafts keep the next action, confirmation, isolation, and re
     await sql`
       INSERT INTO brand_fact_version
         (brand_id, id, fact_id, version, entity_version, paste_id, revision, state, content, created_at, confirmed_by, confirmed_at, revoked_at)
-      VALUES (${brandId}, ${factId}, ${factId}, 1, 1, NULL, 1, 'approved', 'fixture', ${stamp}, ${ownerId}, ${stamp}, NULL)
+      VALUES
+        (${brandId}, ${factId}, ${factId}, 1, 1, NULL, 1, 'approved', ${factContent}, ${stamp}, ${ownerId}, ${stamp}, NULL),
+        (${brandId}, ${randomUUID()}, ${factId}, 2, 1, NULL, 1, 'draft', ${JSON.stringify({ ...emptyFields, title: "待审批改版" })}, ${stamp}, NULL, NULL, NULL),
+        (${brandId}, ${randomUUID()}, ${randomUUID()}, 1, 1, NULL, 1, 'approved', ${JSON.stringify({ ...emptyFields, title: "已过期事实", validity: "dated", validThrough: "2025-01-01" })}, ${stamp}, ${ownerId}, ${stamp}, NULL)
     `;
     await sql`
       INSERT INTO assistant_plan (
@@ -306,6 +322,11 @@ test("weekly action drafts keep the next action, confirmation, isolation, and re
         await expect(main.getByText(t.budget, { exact: true })).toBeVisible();
         await expect(main.getByText(t.successes, { exact: true })).toBeVisible();
         await expect(main.getByText(t.notGuaranteed, { exact: true })).toBeVisible();
+        const firstFact = main.getByRole("combobox", { name: t.firstFact, exact: true });
+        await expect(firstFact).toBeEnabled();
+        await expect(firstFact.getByRole("option")).toHaveCount(2);
+        await expect(firstFact.getByRole("option", { name: t.chooseFact, exact: true })).toHaveJSProperty("selected", true);
+        await expect(firstFact.getByRole("option", { name: new RegExp(factTitle) })).toHaveAttribute("value", factId);
         const view = main.getByRole("link", { name: t.viewPlans, exact: true });
         await expect(view).toBeVisible();
         await expectNoOverflow(page);
@@ -314,6 +335,11 @@ test("weekly action drafts keep the next action, confirmation, isolation, and re
           await activateFromKeyboard(page, view);
           await expect(page.locator("#main-content #assistant-plans")).toBeFocused();
           await capture(page, screenshotDir, `populated-${locale}-375.png`);
+          await firstFact.focus();
+          await page.keyboard.press("ArrowDown");
+          await expect(firstFact).toHaveValue(factId);
+          const secondFact = main.getByRole("combobox", { name: t.secondFact, exact: true });
+          await expect(secondFact.getByRole("option", { name: new RegExp(factTitle) })).toBeDisabled();
         }
       }
     }
@@ -398,6 +424,7 @@ test("weekly action drafts keep the next action, confirmation, isolation, and re
     await expect(stranger.getByRole("main").getByText(copy.en.noBrand, { exact: true })).toBeVisible();
     await expect(stranger.getByText(brandName, { exact: true })).toHaveCount(0);
     await expect(stranger.getByText(actionText)).toHaveCount(0);
+    await expect(stranger.getByRole("option", { name: new RegExp(factTitle) })).toHaveCount(0);
     await expectNoOverflow(stranger);
     await stranger.close();
 
@@ -464,8 +491,8 @@ test("settled plans keep one owner-confirmed review in either language", async (
       INSERT INTO brand_fact_version
         (brand_id, id, fact_id, version, entity_version, paste_id, revision, state, content, created_at, confirmed_by, confirmed_at, revoked_at)
       VALUES
-        (${brandId}, ${currentFact}, ${currentFact}, 1, 1, NULL, 1, 'approved', 'fixture', ${stamp}, ${ownerId}, ${stamp}, NULL),
-        (${brandId}, ${staleFact}, ${staleFact}, 1, 1, NULL, 1, 'revoked', 'fixture', ${stamp}, ${ownerId}, ${stamp}, ${stamp})
+        (${brandId}, ${currentFact}, ${currentFact}, 1, 1, NULL, 1, 'approved', ${factContent}, ${stamp}, ${ownerId}, ${stamp}, NULL),
+        (${brandId}, ${staleFact}, ${staleFact}, 1, 1, NULL, 1, 'revoked', ${factContent}, ${stamp}, ${ownerId}, ${stamp}, ${stamp})
     `;
     for (const planId of planIds) {
       await sql`

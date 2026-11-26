@@ -11,10 +11,12 @@ import {
   listAssistantPlans,
   readAssistantPlan,
   readAssistantPlanReview,
+  readAssistantWorkspace,
   saveAssistantPlanReview,
 } from "../../src/features/assistant/commands.ts";
 import { createAssistantPlanSchema } from "../../src/features/assistant/contracts.ts";
 import { assistantPlanListQuery, assistantPlanReviewsQuery } from "../../src/features/assistant/dao.ts";
+import { emptyFields } from "../../src/features/brand-facts/rules.ts";
 import { initialBrandFields } from "../../src/features/brands/contracts.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
@@ -86,12 +88,13 @@ async function account(db) {
 }
 
 async function fact(db, brandId, ownerId, factId) {
+  const content = JSON.stringify({ ...emptyFields, title: "核对已批准事实", validity: "longTerm" });
   await queryWithParameters(
     db,
     `INSERT INTO brand_fact_version
       (brand_id, id, fact_id, version, entity_version, paste_id, revision, state, content, created_at, confirmed_by, confirmed_at, revoked_at)
-     VALUES (?, ?, ?, 1, 1, NULL, 1, 'approved', 'fixture', ?, ?, ?, NULL)`,
-    [brandId, factId, factId, time, ownerId, time],
+     VALUES (?, ?, ?, 1, 1, NULL, 1, 'approved', ?, ?, ?, ?, NULL)`,
+    [brandId, factId, factId, content, time, ownerId, time],
   );
 }
 
@@ -311,6 +314,19 @@ for (const kind of ["sqlite", "postgresql"]) {
       execFileSync("pnpm", ["db:migrate"], { env: { ...process.env, ...fixture.env }, stdio: "inherit" });
       assert.deepEqual(await structure(db), await structure(ddl.connection));
       assert.deepEqual(await readAssistantPlan(db, owner, partial.plan.id), partialResult);
+      const workspaceDb = watch(db);
+      const workspaceStart = performance.now();
+      const workspace = await readAssistantWorkspace(workspaceDb.connection, owner);
+      const workspaceElapsed = performance.now() - workspaceStart;
+      assert.deepEqual(new Set(workspace.factOptions.map(({ id }) => id)), new Set([facts[0], facts[2], facts[3]]));
+      assert.equal(workspace.factOptions.every(({ title }) => title === "核对已批准事实"), true);
+      assert.deepEqual(await readAssistantWorkspace(db, outsider), { kind: "no-brand" });
+      const factReads = workspaceDb.captured.filter(({ sql }) => /FROM brand_fact_version/.test(sql));
+      assert.equal(factReads.length, 1);
+      const explainFacts = kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN ";
+      const factPlan = JSON.stringify(await db.query(explainFacts + factReads[0].sql, factReads[0].values));
+      assert.match(factPlan, /fact_version_number_uidx/);
+      console.log(`${kind} workspace: ${workspace.factOptions.length} facts / 1 fact query / ${workspaceElapsed.toFixed(1)} ms; version lookup uses fact_version_number_uidx`);
       const nextStep = "下周先补证对应事实。";
       const reviewCount = async () => Number((await db.query("SELECT COUNT(*) AS count FROM assistant_plan_review"))[0].count);
       const planRowsBefore = await db.query("SELECT * FROM assistant_plan ORDER BY id");

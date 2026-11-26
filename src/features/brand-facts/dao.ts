@@ -64,10 +64,14 @@ export class FactDao {
     return row ? version(row) : null;
   }
 
-  async latestVersions() {
+  async latestVersions(state?: "approved") {
+    const stateFilter = state ? "AND f.state = ?" : "";
+    const versionStateFilter = state ? "AND v.state = ?" : "";
+    const order = state ? "ORDER BY f.created_at DESC, f.id DESC" : "";
     const rows = await this.read(versionColumns, "brand_fact_version",
-      `AND f.version = (SELECT MAX(v.version) FROM brand_fact_version v
-        WHERE v.brand_id = f.brand_id AND v.fact_id = f.fact_id)`);
+      `${stateFilter} AND f.version = (SELECT MAX(v.version) FROM brand_fact_version v
+        WHERE v.brand_id = f.brand_id AND v.fact_id = f.fact_id ${versionStateFilter})
+        ${order}`, state ? [state, state] : []);
     return rows.map(version);
   }
 

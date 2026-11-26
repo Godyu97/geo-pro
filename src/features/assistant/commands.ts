@@ -4,6 +4,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AiResponseError, createAiResponse, isAiConfigured } from "../../lib/ai/responses.ts";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
+import { FactDao } from "../brand-facts/dao.ts";
+import { factStatus } from "../brand-facts/rules.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import {
@@ -133,13 +135,20 @@ export function assistantWorkspaceUnavailable(error: unknown) {
 export async function readAssistantWorkspace(db: DatabaseConnection, ownerId: string) {
   const active = await new BrandDao(db).active(ownerId);
   if (!active) return { kind: "no-brand" as const };
-  const listed = await listAssistantPlans(db, ownerId, active.id);
+  const [listed, facts] = await Promise.all([
+    listAssistantPlans(db, ownerId, active.id),
+    new FactDao(db, { ownerId, brandId: active.id }).latestVersions("approved"),
+  ]);
   if ("error" in listed) throw new Error("assistant-plans-unavailable");
+  const today = new Date().toISOString().slice(0, 10);
   return {
     kind: "ready" as const,
     brandId: active.id,
     brandName: active.name,
     plans: listed.plans,
+    factOptions: facts
+      .filter((fact) => factStatus(fact, today) === "approved")
+      .map(({ id, version, fields }) => ({ id, version, title: fields.title })),
   };
 }
 

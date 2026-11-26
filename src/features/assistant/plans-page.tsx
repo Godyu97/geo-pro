@@ -111,6 +111,7 @@ export default async function AssistantPlansPage({
         brandId={result.brandId}
         locale={locale}
         initialPlans={result.plans}
+        factOptions={result.factOptions}
         messages={messages}
         initialError={errorCode}
       />
