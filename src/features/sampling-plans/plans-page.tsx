@@ -7,6 +7,7 @@ import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "../brands/dao";
+import { PromptDao } from "../prompts/dao";
 import {
   arriveSamplingPlanAction,
   createSamplingPlanAction,
@@ -86,6 +87,9 @@ export default async function SamplingPlansPage({
     : await listSamplingDueWindows(connection, session.user.id, plans.map((plan) => plan.id));
   const sheets = await manualSheetsForBrand(connection, active.id, due.runs);
   const sheetByRun = new Map(sheets.map((sheet) => [sheet.runId, sheet]));
+  const promptVersions = plans.some((plan) => plan.phase === "active")
+    ? (await new PromptDao(connection, active.id).versions()).slice(0, 20)
+    : [];
 
   return (
     <div className="min-w-0 space-y-6">
@@ -149,16 +153,29 @@ export default async function SamplingPlansPage({
             ))}
           </ul>
           <p className="text-sm">{t("coverageLine", { count: plan.coverageSlotIds.length })}</p>
-          {due.runs.filter((run) => run.planId === plan.id).map((run) => (
-            run.kind === "manual" ? (
+          {due.runs.filter((run) => run.planId === plan.id).map((run) => {
+            const sheet = run.kind === "manual" ? sheetByRun.get(run.id) : undefined;
+            return run.kind === "manual" ? (
               <div key={run.id} className="space-y-2 rounded-xl border p-3 text-sm">
                 <p className="font-medium [overflow-wrap:anywhere]">{t("dueSheet", { slot: run.slotId })}</p>
+                <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                  {sheet?.versionVerified && sheet.promptSetId && sheet.promptSetVersion !== null
+                    ? t("dueSheetFrozenVersion", {
+                      version: formatNumber(locale, sheet.promptSetVersion),
+                      id: sheet.promptSetId,
+                    })
+                    : t("dueSheetVersionUnverified")}
+                </p>
                 <ul className="space-y-2">
-                  {(sheetByRun.get(run.id)?.lines ?? []).map((line, index) => (
+                  {(sheet?.lines ?? []).map((line, index) => (
                     <li key={`${run.id}-${index}`} className="rounded-xl border px-3 py-2">
                       <p>{t("dueSheetManual")}</p>
                       <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{line.id}</p>
-                      <p className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{line.missing ? t("duePromptMissing") : line.text}</p>
+                      <p className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                        {line.missing
+                          ? (sheet?.versionVerified ? t("duePromptMissing") : t("duePromptUnverified"))
+                          : line.text}
+                      </p>
                     </li>
                   ))}
                 </ul>
@@ -176,8 +193,8 @@ export default async function SamplingPlansPage({
                   </>
                 ) : <p>{t("dueReserved", { slot: run.slotId })}</p>}
               </div>
-            )
-          ))}
+            );
+          })}
           {due.readings.filter((reading) => reading.planId === plan.id).map((reading) => (
             <div key={reading.windowId} className="space-y-1 text-sm">
               <p>{t("readingLine", {
@@ -212,6 +229,20 @@ export default async function SamplingPlansPage({
                   <span className="mb-1 block text-muted-foreground">{t("promptIds")}</span>
                   <input name="promptIds" className={fieldClass} />
                 </label>
+                {promptVersions.length > 0 ? (
+                  <label className="text-sm sm:col-span-2">
+                    <span className="mb-1 block text-muted-foreground">{t("promptSetVersion")}</span>
+                    <select key={promptVersions[0]?.id} name="promptSetId" defaultValue={promptVersions[0]?.id} className={fieldClass}>
+                      {promptVersions.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {t("promptSetOption", { version: formatNumber(locale, item.version), id: item.id })}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <p className="text-sm text-muted-foreground sm:col-span-2">{t("noPromptSet")}</p>
+                )}
               </div>
               <Button type="submit" variant="outline">{t("driveWindow")}</Button>
             </form>

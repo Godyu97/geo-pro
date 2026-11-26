@@ -40,6 +40,8 @@ export type DueWindowRunView = {
   status: SamplingDueRunRecord["status"];
   monitoringRunId: string | null;
   chargedMinor: number;
+  promptSetId: string | null;
+  promptSetVersion: number | null;
   promptIds: string[];
   replayed: boolean;
 };
@@ -92,6 +94,8 @@ function toRunView(row: SamplingDueRunRecord, replayed: boolean): DueWindowRunVi
     status: row.status,
     monitoringRunId: row.monitoringRunId,
     chargedMinor: row.chargedMinor,
+    promptSetId: row.promptSetId,
+    promptSetVersion: row.promptSetVersion,
     promptIds: promptList(row.promptIdsJson),
     replayed,
   };
@@ -154,10 +158,26 @@ async function rememberDueRows(
       allowOfficialStart,
     });
     if (decision.invalid) return { error: "INVALID_INPUT" as const };
+    const prompts = new PromptDao(tx, current.brandId);
+    const requestedSet = input.promptSetId ? await prompts.version(input.promptSetId) : null;
+    if (input.promptSetId && !requestedSet) return { error: "INVALID_INPUT" as const };
+    let frozenSet = requestedSet;
+    if (decision.manuals.length > 0) {
+      if (new Set(input.promptIds).size !== input.promptIds.length) return { error: "INVALID_INPUT" as const };
+      frozenSet ??= await prompts.latestVersion();
+      if (!frozenSet) return { error: "INVALID_INPUT" as const };
+      const allowed = new Set(
+        frozenSet.content.questions
+          .filter((question) => question.status === "confirmed")
+          .map((question) => question.id),
+      );
+      if (input.promptIds.some((id) => !allowed.has(id))) return { error: "INVALID_INPUT" as const };
+    }
     const pauseIds = decision.pauses.map((pause) => pause.id);
     if (pauseIds.length > 0) await plans.pauseSlots(ownerId, input.planId, pauseIds);
     const knownIds = new Set(existing.map((row) => row.id));
     for (const sheet of decision.manuals) {
+      if (!frozenSet) return { error: "INVALID_INPUT" as const };
       const row: SamplingDueRunRecord = {
         id: randomUUID(),
         planId: current.id,
@@ -172,6 +192,8 @@ async function rememberDueRows(
         status: "sheet",
         monitoringRunId: null,
         chargedMinor: 0,
+        promptSetId: frozenSet.id,
+        promptSetVersion: frozenSet.version,
         promptIdsJson: JSON.stringify(sheet.promptIds),
         createdAt: input.now,
       };
@@ -193,6 +215,8 @@ async function rememberDueRows(
         status: "reserved",
         monitoringRunId: null,
         chargedMinor: 0,
+        promptSetId: null,
+        promptSetVersion: null,
         promptIdsJson: null,
         createdAt: input.now,
       };
@@ -296,24 +320,36 @@ async function loadFacts(
   return { facts, monitorSlots, accepted };
 }
 
-/** Resolve a saved manual sheet against this brand's latest frozen questions. Other brands are not read. */
+/** Resolve each saved manual sheet against the frozen question set it was created with. */
 export async function manualSheetsForBrand(
   db: DatabaseConnection,
   brandId: string,
   runs: readonly DueWindowRunView[],
 ) {
   const manuals = runs.filter((run) => run.kind === "manual");
-  const saved = new Map<string, string>();
-  if (manuals.some((run) => run.promptIds.length > 0)) {
-    const source = await new PromptDao(db, brandId).latestClusterSource();
-    for (const question of source?.questions ?? []) saved.set(question.id, question.text);
-  }
-  return manuals.map((run) => ({
-    runId: run.id,
-    planId: run.planId,
-    slotId: run.slotId,
-    ...manualSheetLines(run.promptIds, saved),
-  }));
+  const promptSetIds = [...new Set(manuals.map((run) => run.promptSetId).filter((id): id is string => Boolean(id)))];
+  const sources = promptSetIds.length > 0
+    ? await new PromptDao(db, brandId).clusterSources(promptSetIds)
+    : new Map();
+  return manuals.map((run) => {
+    const source = run.promptSetId ? sources.get(run.promptSetId) ?? null : null;
+    const versionVerified = Boolean(
+      source && run.promptSetId && run.promptSetVersion !== null && source.version === run.promptSetVersion,
+    );
+    const saved = new Map<string, string>();
+    if (versionVerified && source) {
+      for (const question of source.questions) saved.set(question.id, question.text);
+    }
+    return {
+      runId: run.id,
+      planId: run.planId,
+      slotId: run.slotId,
+      promptSetId: versionVerified && source ? source.id : run.promptSetId,
+      promptSetVersion: versionVerified && source ? source.version : run.promptSetVersion,
+      versionVerified,
+      ...manualSheetLines(run.promptIds, saved),
+    };
+  });
 }
 
 export async function listSamplingDueWindows(db: DatabaseConnection, ownerId: string, planIds: readonly string[]) {

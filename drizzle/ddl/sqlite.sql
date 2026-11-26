@@ -1753,6 +1753,8 @@ CREATE TABLE `sampling_due_run` (
 	`charged_minor` integer NOT NULL,
 	`prompt_ids_json` text,
 	`created_at` text NOT NULL,
+	`prompt_set_id` text,
+	`prompt_set_version` integer,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`slot_id`) REFERENCES `sampling_slot`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`monitoring_run_id`) REFERENCES `monitoring_run`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -1768,11 +1770,17 @@ CREATE TABLE `sampling_due_run` (
     and (
       ("sampling_due_run"."kind" = 'manual' and "sampling_due_run"."status" = 'sheet'
         and "sampling_due_run"."monitoring_run_id" is null and "sampling_due_run"."charged_minor" = 0
-        and "sampling_due_run"."prompt_ids_json" is not null and length("sampling_due_run"."prompt_ids_json") between 38 and 2000)
+        and "sampling_due_run"."prompt_ids_json" is not null and length("sampling_due_run"."prompt_ids_json") between 38 and 2000
+        and (
+          ("sampling_due_run"."prompt_set_id" is null and "sampling_due_run"."prompt_set_version" is null)
+          or (length("sampling_due_run"."prompt_set_id") = 36 and "sampling_due_run"."prompt_set_version" > 0)
+        ))
       or ("sampling_due_run"."kind" = 'official' and "sampling_due_run"."status" = 'reserved'
-        and "sampling_due_run"."monitoring_run_id" is null and "sampling_due_run"."charged_minor" = 0 and "sampling_due_run"."prompt_ids_json" is null)
+        and "sampling_due_run"."monitoring_run_id" is null and "sampling_due_run"."charged_minor" = 0
+        and "sampling_due_run"."prompt_ids_json" is null and "sampling_due_run"."prompt_set_id" is null and "sampling_due_run"."prompt_set_version" is null)
       or ("sampling_due_run"."kind" = 'official' and "sampling_due_run"."status" = 'accepted'
-        and "sampling_due_run"."monitoring_run_id" is not null and "sampling_due_run"."prompt_ids_json" is null)
+        and "sampling_due_run"."monitoring_run_id" is not null
+        and "sampling_due_run"."prompt_ids_json" is null and "sampling_due_run"."prompt_set_id" is null and "sampling_due_run"."prompt_set_version" is null)
     ))
 );
 

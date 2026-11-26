@@ -20,6 +20,8 @@ const dueRow = z.object({
   status: dueStatusSchema,
   monitoringRunId: brandIdSchema.nullable(),
   chargedMinor: z.int().min(0),
+  promptSetId: brandIdSchema.nullable(),
+  promptSetVersion: z.int().positive().nullable(),
   promptIdsJson: z.string().nullable(),
   createdAt: z.iso.datetime({ precision: 3 }),
 });
@@ -70,6 +72,7 @@ export type SamplingWindowReadingRecord = z.infer<typeof readingRow>;
 const dueColumns = `id, plan_id AS "planId", plan_version AS "planVersion", brand_id AS "brandId",
   owner_id AS "ownerId", channel_id AS "channelId", window_id AS "windowId", slot_id AS "slotId",
   timezone, kind, status, monitoring_run_id AS "monitoringRunId", charged_minor AS "chargedMinor",
+  prompt_set_id AS "promptSetId", prompt_set_version AS "promptSetVersion",
   prompt_ids_json AS "promptIdsJson", created_at AS "createdAt"`;
 
 const readingColumns = `id, plan_id AS "planId", brand_id AS "brandId", owner_id AS "ownerId", window_id AS "windowId", timezone,
@@ -117,12 +120,12 @@ export class SamplingDueDao {
       this.db,
       `INSERT INTO sampling_due_run (
         id, plan_id, plan_version, brand_id, owner_id, channel_id, window_id, slot_id, timezone,
-        kind, status, monitoring_run_id, charged_minor, prompt_ids_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        kind, status, monitoring_run_id, charged_minor, prompt_set_id, prompt_set_version, prompt_ids_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.id, row.planId, row.planVersion, row.brandId, row.ownerId, row.channelId, row.windowId,
         row.slotId, row.timezone, row.kind, row.status, row.monitoringRunId, row.chargedMinor,
-        row.promptIdsJson, row.createdAt,
+        row.promptSetId, row.promptSetVersion, row.promptIdsJson, row.createdAt,
       ],
     );
   }

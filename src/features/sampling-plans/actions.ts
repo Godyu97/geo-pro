@@ -159,6 +159,7 @@ export async function driveDueSamplingWindowAction(formData: FormData) {
   const channelIds = [...new Set(formData.getAll("channelId").map((value) => String(value).trim()).filter(Boolean))];
   const degrade = String(formData.get("degradeChannelId") ?? "").trim();
   const promptIds = String(formData.get("promptIds") ?? "").split(/[\s,]+/).filter(Boolean);
+  const promptSetId = String(formData.get("promptSetId") ?? "").trim();
   const parsed = driveDueWindowSchema.safeParse({
     planId: String(formData.get("planId") ?? ""),
     timezone: String(formData.get("timezone") ?? "").trim(),
@@ -168,6 +169,7 @@ export async function driveDueSamplingWindowAction(formData: FormData) {
       state: channelId === degrade ? "degraded" as const : "eligible" as const,
     })),
     promptIds,
+    ...(promptSetId ? { promptSetId } : {}),
   });
   if (!parsed.success) finish("INVALID_INPUT");
   const result = await driveDueSamplingWindow(getConnection(), session.user.id, parsed.data);

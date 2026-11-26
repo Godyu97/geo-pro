@@ -84,6 +84,7 @@ export const driveDueWindowSchema = z.strictObject({
     state: dueChannelStateSchema,
   })).max(32),
   promptIds: z.array(brandIdSchema).max(10),
+  promptSetId: brandIdSchema.optional(),
 });
 
 export const samplingPlanErrors = {

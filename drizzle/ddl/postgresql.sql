@@ -1498,6 +1498,8 @@ CREATE TABLE "sampling_due_run" (
 	"charged_minor" integer NOT NULL,
 	"prompt_ids_json" text,
 	"created_at" text NOT NULL,
+	"prompt_set_id" text,
+	"prompt_set_version" integer,
 	CONSTRAINT "sampling_due_run_state_check" CHECK ("sampling_due_run"."plan_version" > 0
     and "sampling_due_run"."kind" in ('official', 'manual')
     and "sampling_due_run"."status" in ('reserved', 'accepted', 'sheet')
@@ -1510,11 +1512,17 @@ CREATE TABLE "sampling_due_run" (
     and (
       ("sampling_due_run"."kind" = 'manual' and "sampling_due_run"."status" = 'sheet'
         and "sampling_due_run"."monitoring_run_id" is null and "sampling_due_run"."charged_minor" = 0
-        and "sampling_due_run"."prompt_ids_json" is not null and length("sampling_due_run"."prompt_ids_json") between 38 and 2000)
+        and "sampling_due_run"."prompt_ids_json" is not null and length("sampling_due_run"."prompt_ids_json") between 38 and 2000
+        and (
+          ("sampling_due_run"."prompt_set_id" is null and "sampling_due_run"."prompt_set_version" is null)
+          or (length("sampling_due_run"."prompt_set_id") = 36 and "sampling_due_run"."prompt_set_version" > 0)
+        ))
       or ("sampling_due_run"."kind" = 'official' and "sampling_due_run"."status" = 'reserved'
-        and "sampling_due_run"."monitoring_run_id" is null and "sampling_due_run"."charged_minor" = 0 and "sampling_due_run"."prompt_ids_json" is null)
+        and "sampling_due_run"."monitoring_run_id" is null and "sampling_due_run"."charged_minor" = 0
+        and "sampling_due_run"."prompt_ids_json" is null and "sampling_due_run"."prompt_set_id" is null and "sampling_due_run"."prompt_set_version" is null)
       or ("sampling_due_run"."kind" = 'official' and "sampling_due_run"."status" = 'accepted'
-        and "sampling_due_run"."monitoring_run_id" is not null and "sampling_due_run"."prompt_ids_json" is null)
+        and "sampling_due_run"."monitoring_run_id" is not null
+        and "sampling_due_run"."prompt_ids_json" is null and "sampling_due_run"."prompt_set_id" is null and "sampling_due_run"."prompt_set_version" is null)
     ))
 );
 

@@ -659,6 +659,13 @@
       "when": 1795662191430,
       "tag": "0093_fixed_donald_blake",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "6",
+      "when": 1795664645327,
+      "tag": "0094_stiff_lady_deathstrike",
+      "breakpoints": true
     }
   ]
 }

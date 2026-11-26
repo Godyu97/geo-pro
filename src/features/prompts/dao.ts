@@ -73,6 +73,15 @@ export class PromptDao {
     return { ...parsed, content: parseContent(parsed.content) };
   }
 
+  async latestVersion() {
+    const [row] = await this.query(`SELECT id, set_id AS "setId", version, entity_version AS "entityVersion",
+      region, language, content, created_at AS "createdAt"
+      FROM prompt_set WHERE brand_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`, [this.brandId]);
+    if (!row) return null;
+    const parsed = setRow.parse(row);
+    return { ...parsed, content: parseContent(parsed.content) };
+  }
+
   async versionNumber(setId: string, version: number) {
     const [row] = await this.query(`SELECT id, set_id AS "setId", version, entity_version AS "entityVersion",
       region, language, content, created_at AS "createdAt"
@@ -172,11 +181,9 @@ export class PromptDao {
     for (let index = 0; index < unique.length; index += 100) {
       const part = unique.slice(index, index + 100);
       if (!part.length) continue;
-      const rows = await this.query(
-        `SELECT id, content FROM prompt_set WHERE brand_id = ? AND id IN (${part.map(() => "?").join(", ")})`,
-        [this.brandId, ...part],
-      );
-      for (const row of z.array(z.object({ id: brandIdSchema, content: z.string() })).parse(rows)) {
+      const query = promptSetBatchQuery(this.brandId, part);
+      const rows = await this.query(query.sql, query.values);
+      for (const row of z.array(z.object({ id: brandIdSchema, version: revision, content: z.string() })).parse(rows)) {
         const source = parseClusterSource(row);
         if (source) found.set(row.id, source);
       }
@@ -188,7 +195,7 @@ export class PromptDao {
     const query = latestPromptSetQuery(this.brandId);
     const [row] = await this.query(query.sql, query.values);
     if (!row) return null;
-    return parseClusterSource(z.object({ id: brandIdSchema, content: z.string() }).parse(row));
+    return parseClusterSource(z.object({ id: brandIdSchema, version: revision, content: z.string() }).parse(row));
   }
 
   async markSuggestion(ownerId: string, id: string, status: "accepted" | "dismissed") {
@@ -201,23 +208,32 @@ export class PromptDao {
 
 export function latestPromptSetQuery(brandId: string) {
   return {
-    sql: `SELECT id, content FROM prompt_set WHERE brand_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
+    sql: `SELECT id, version, content FROM prompt_set WHERE brand_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
     values: [brandId] as QueryValue[],
+  };
+}
+
+export function promptSetBatchQuery(brandId: string, ids: readonly string[]) {
+  return {
+    sql: `SELECT id, version, content FROM prompt_set WHERE brand_id = ? AND id IN (${ids.map(() => "?").join(", ")})`,
+    values: [brandId, ...ids] as QueryValue[],
   };
 }
 
 export type PromptClusterSource = {
   id: string;
+  version: number;
   questions: Array<Pick<DraftContent["questions"][number], "id" | "text" | "clusterId" | "type">>;
   clusters: Array<{ id: string; audience: string; intent: string }>;
 };
 
-function parseClusterSource(row: { id: string; content: string }): PromptClusterSource | null {
+function parseClusterSource(row: { id: string; version: number; content: string }): PromptClusterSource | null {
   try {
     const content = draftContent.safeParse(JSON.parse(row.content));
     if (!content.success) return null;
     return {
       id: row.id,
+      version: row.version,
       questions: content.data.questions.map((question) => ({
         id: question.id,
         text: question.text,

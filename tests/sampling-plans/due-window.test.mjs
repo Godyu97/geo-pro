@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
-import { latestPromptSetQuery, PromptDao } from "../../src/features/prompts/dao.ts";
+import { latestPromptSetQuery, PromptDao, promptSetBatchQuery } from "../../src/features/prompts/dao.ts";
 import { acknowledgeQualityAlert } from "../../src/features/quality-alerts/commands.ts";
 import { saveSamplingPlan, transitionSamplingPlan } from "../../src/features/sampling-plans/commands.ts";
 import { driveDueWindowSchema } from "../../src/features/sampling-plans/contracts.ts";
@@ -126,12 +126,18 @@ test("a manual sheet lists frozen text and does not invent a replacement", async
   const zhT = createTranslator("zh-CN", zh.samplingPlans);
   const enT = createTranslator("en", en.samplingPlans);
   assert.match(zhT("dueSheet", { slot: "slot" }), /不会记成自动采集/);
+  assert.equal(zhT("dueSheetFrozenVersion", { version: "2", id: "set-2" }), "冻结题集版本 2（set-2）");
+  assert.equal(zhT("dueSheetVersionUnverified"), "缺少可验证的冻结题集版本，无法核对版本或题目正文。");
   assert.equal(zhT("dueSheetManual"), "人工，非自动采集");
   assert.equal(zhT("duePromptMissing"), "题目缺失");
+  assert.equal(zhT("duePromptUnverified"), "版本或正文无法核对");
   assert.match(enT("dueSheet", { slot: "slot" }), /Manual/);
   assert.match(enT("dueSheet", { slot: "slot" }), /not automatic collection/);
+  assert.equal(enT("dueSheetFrozenVersion", { version: "2", id: "set-2" }), "Frozen question set version 2 (set-2)");
+  assert.equal(enT("dueSheetVersionUnverified"), "No verifiable frozen question set version; version or question text cannot be verified.");
   assert.equal(enT("dueSheetManual"), "Manual, not automatic collection");
   assert.equal(enT("duePromptMissing"), "Question missing");
+  assert.equal(enT("duePromptUnverified"), "Version or text cannot be verified");
   assert.equal(sheet.lines[0].text, "门店如何安排设备巡检");
 });
 
@@ -157,8 +163,19 @@ for (const kind of ["sqlite", "postgresql"]) {
         assert.deepEqual(await structure(db), await structure(ddl.connection));
         const [owner, outsider] = await Promise.all([account(db), account(db)]);
         const brand = randomUUID();
-        await new BrandDao(db).insertBrand(owner, brand, time);
+        const brands = new BrandDao(db);
+        await brands.insertBrand(owner, brand, time);
+        await brands.insertVersion(brand, 1, brandFields, time);
         const promptId = randomUUID();
+        const clusterId = randomUUID();
+        await new PromptDao(db, brand).insertSet({
+          id: randomUUID(), setId: randomUUID(), version: 1, entityVersion: 1, region: "CN", language: "zh-CN",
+          content: {
+            clusters: [cluster(clusterId)],
+            questions: [question(promptId, clusterId, "门店如何安排设备巡检")],
+          },
+          createdAt: time,
+        });
         const eligible = [
           { channelId: "official-api", state: "eligible" },
           { channelId: "consumer-sheet", state: "eligible" },
@@ -389,7 +406,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     }
   });
 
-  test(`${kind}: a manual sheet lists this brand's frozen questions and a replay adds no run`, async () => {
+  test(`${kind}: a manual sheet freezes its prompt set version, rejects foreign prompts, and marks legacy sheets unverified`, async () => {
     const fixture = await testDatabase(kind);
     try {
       const db = fixture.connection;
@@ -404,33 +421,39 @@ for (const kind of ["sqlite", "postgresql"]) {
 
       const setId = randomUUID();
       const clusterId = randomUUID();
-      const currentA = randomUUID();
-      const currentB = randomUUID();
-      const deletedId = randomUUID();
+      const questionA = randomUUID();
+      const questionB = randomUUID();
+      const questionC = randomUUID();
       const foreignId = randomUUID();
-      const latestText = "门店如何安排设备巡检";
-      const secondText = "离线巡检的产品怎么比较";
-      const oldText = "旧版门店巡检题目不该显示";
-      const deletedText = "已从最新题集删除的题目";
+      const setV1Id = randomUUID();
+      const setV2Id = randomUUID();
+      const setV3Id = randomUUID();
+      const foreignSetId = randomUUID();
+      const v1TextA = "v1 旧版巡检问题";
+      const v2TextA = "v2 门店如何安排设备巡检";
+      const v2TextB = "v2 离线巡检的产品怎么比较";
+      const v3TextA = "v3 修改后的设备巡检问题";
+      const v3TextC = "v3 新增的维保对比问题";
       const foreignText = "另一品牌的巡检题目";
-      await new PromptDao(db, brand).insertSet({
-        id: randomUUID(), setId, version: 1, entityVersion: 1, region: "CN", language: "zh-CN",
+      const prompts = new PromptDao(db, brand);
+      await prompts.insertSet({
+        id: setV1Id, setId, version: 1, entityVersion: 1, region: "CN", language: "zh-CN",
         content: {
           clusters: [cluster(clusterId)],
-          questions: [question(currentA, clusterId, oldText), question(deletedId, clusterId, deletedText)],
+          questions: [question(questionA, clusterId, v1TextA)],
         },
         createdAt: "2026-11-01T00:00:00.000Z",
       });
-      await new PromptDao(db, brand).insertSet({
-        id: randomUUID(), setId, version: 2, entityVersion: 1, region: "CN", language: "zh-CN",
+      await prompts.insertSet({
+        id: setV2Id, setId, version: 2, entityVersion: 1, region: "CN", language: "zh-CN",
         content: {
           clusters: [cluster(clusterId)],
-          questions: [question(currentA, clusterId, latestText), question(currentB, clusterId, secondText)],
+          questions: [question(questionA, clusterId, v2TextA), question(questionB, clusterId, v2TextB)],
         },
-        createdAt: time,
+        createdAt: "2026-11-10T00:00:00.000Z",
       });
       await new PromptDao(db, otherBrand).insertSet({
-        id: randomUUID(), setId: randomUUID(), version: 1, entityVersion: 1, region: "CN", language: "zh-CN",
+        id: foreignSetId, setId: randomUUID(), version: 1, entityVersion: 1, region: "CN", language: "zh-CN",
         content: {
           clusters: [cluster(randomUUID())],
           questions: [question(foreignId, randomUUID(), foreignText)],
@@ -438,8 +461,37 @@ for (const kind of ["sqlite", "postgresql"]) {
         createdAt: time,
       });
 
+      const rejectedSlotId = randomUUID();
+      const rejectedPlan = await saveSamplingPlan(db, owner, {
+        action: "create",
+        brandId: brand,
+        phase: "active",
+        currency: "CNY",
+        budgetMinor: 100,
+        spentMinor: 0,
+        pendingMinor: 0,
+        nextAt: time,
+        slots: [slot(rejectedSlotId, "consumer-sheet", runAt, "scheduled", true, 0)],
+      }, () => time);
+      const foreignPromptAttempt = await driveDueSamplingWindow(
+        db,
+        owner,
+        { ...drive(rejectedPlan.plan.id, [{ channelId: "consumer-sheet", state: "eligible" }], [questionA, foreignId]), promptSetId: setV2Id },
+      );
+      assert.deepEqual(foreignPromptAttempt, { error: "INVALID_INPUT" });
+      assert.equal(JSON.stringify(foreignPromptAttempt).includes(foreignText), false);
+      const foreignSetAttempt = await driveDueSamplingWindow(
+        db,
+        owner,
+        { ...drive(rejectedPlan.plan.id, [{ channelId: "consumer-sheet", state: "eligible" }], [foreignId]), promptSetId: foreignSetId },
+      );
+      assert.deepEqual(foreignSetAttempt, { error: "INVALID_INPUT" });
+      assert.equal(JSON.stringify(foreignSetAttempt).includes(foreignText), false);
+      const [rejectedCount] = await queryWithParameters(db, "SELECT COUNT(*) AS count FROM sampling_due_run WHERE plan_id = ?", [rejectedPlan.plan.id]);
+      assert.equal(Number(rejectedCount.count), 0);
+
       const officialId = randomUUID();
-      const consumerId = randomUUID();
+      const consumerV2Id = randomUUID();
       const opened = await saveSamplingPlan(db, owner, {
         action: "create",
         brandId: brand,
@@ -451,7 +503,7 @@ for (const kind of ["sqlite", "postgresql"]) {
         nextAt: time,
         slots: [
           slot(officialId, "official-api", runAt, "scheduled", false, 10),
-          slot(consumerId, "consumer-sheet", runAt, "scheduled", true, 0),
+          slot(consumerV2Id, "consumer-sheet", runAt, "scheduled", true, 0),
         ],
       }, () => time);
       const calls = [];
@@ -463,16 +515,44 @@ for (const kind of ["sqlite", "postgresql"]) {
         { channelId: "official-api", state: "eligible" },
         { channelId: "consumer-sheet", state: "eligible" },
       ];
-      const promptIds = [currentA, currentB, deletedId, foreignId];
-      const first = await driveDueSamplingWindow(db, owner, drive(opened.plan.id, eligible, promptIds), executor);
+      const v2PromptOrder = [questionB, questionA];
+      const first = await driveDueSamplingWindow(
+        db,
+        owner,
+        { ...drive(opened.plan.id, eligible, v2PromptOrder), promptSetId: setV2Id },
+        executor,
+      );
       assert.equal(first.error, undefined);
       assert.deepEqual(calls, [officialId]);
-      const sheetRun = first.runs.find((run) => run.slotId === consumerId);
+      const sheetRun = first.runs.find((run) => run.slotId === consumerV2Id);
       assert.equal(sheetRun.kind, "manual");
-      assert.deepEqual(sheetRun.promptIds, promptIds);
-      const second = await driveDueSamplingWindow(db, owner, drive(opened.plan.id, eligible, [randomUUID()]), executor);
+      assert.equal(sheetRun.promptSetId, setV2Id);
+      assert.equal(sheetRun.promptSetVersion, 2);
+      assert.deepEqual(sheetRun.promptIds, v2PromptOrder);
+
+      // Freeze v3: modify questionA and remove questionB, add questionC.
+      await prompts.insertSet({
+        id: setV3Id, setId, version: 3, entityVersion: 1, region: "CN", language: "zh-CN",
+        content: {
+          clusters: [cluster(clusterId)],
+          questions: [question(questionA, clusterId, v3TextA), question(questionC, clusterId, v3TextC)],
+        },
+        createdAt: "2026-11-24T02:00:00.000Z",
+      });
+
+      const removedInV3Attempt = await driveDueSamplingWindow(
+        db,
+        owner,
+        { ...drive(rejectedPlan.plan.id, [{ channelId: "consumer-sheet", state: "eligible" }], [questionB]), promptSetId: setV3Id },
+      );
+      assert.deepEqual(removedInV3Attempt, { error: "INVALID_INPUT" });
+
+      // Re-running the old v2 slot adds no new sheet and calls the executor 0 more times.
+      const second = await driveDueSamplingWindow(db, owner, drive(opened.plan.id, eligible, [questionC]), executor);
       assert.deepEqual(calls, [officialId]);
-      assert.deepEqual(second.runs.find((run) => run.slotId === consumerId).promptIds, promptIds);
+      assert.equal(second.runs.find((run) => run.slotId === consumerV2Id).promptSetId, setV2Id);
+      assert.equal(second.runs.find((run) => run.slotId === consumerV2Id).promptSetVersion, 2);
+      assert.deepEqual(second.runs.find((run) => run.slotId === consumerV2Id).promptIds, v2PromptOrder);
       assert.equal(second.runs.find((run) => run.slotId === officialId).chargedMinor, 4);
       const counts = await queryWithParameters(
         db,
@@ -481,7 +561,40 @@ for (const kind of ["sqlite", "postgresql"]) {
       );
       assert.deepEqual(counts.map((row) => [row.kind, Number(row.count)]), [["manual", 1], ["official", 1]]);
 
-      const listed = await listSamplingDueWindows(db, owner, [opened.plan.id]);
+      // New sheet created on v3 uses v3 texts.
+      const consumerV3Id = randomUUID();
+      const planV3 = await saveSamplingPlan(db, owner, {
+        action: "create",
+        brandId: brand,
+        phase: "active",
+        currency: "CNY",
+        budgetMinor: 100,
+        spentMinor: 0,
+        pendingMinor: 0,
+        nextAt: time,
+        slots: [slot(consumerV3Id, "consumer-sheet", runAt, "scheduled", true, 0)],
+      }, () => time);
+      const v3Drive = await driveDueSamplingWindow(
+        db,
+        owner,
+        { ...drive(planV3.plan.id, [{ channelId: "consumer-sheet", state: "eligible" }], [questionC, questionA]), promptSetId: setV3Id },
+      );
+      assert.equal(v3Drive.error, undefined);
+      assert.equal(v3Drive.runs[0].promptSetId, setV3Id);
+      assert.equal(v3Drive.runs[0].promptSetVersion, 3);
+
+      // Legacy sheet without prompt_set_id / prompt_set_version preserves IDs and marks version/text unverified.
+      const legacyRunId = randomUUID();
+      await queryWithParameters(
+        db,
+        `INSERT INTO sampling_due_run (
+          id, plan_id, plan_version, brand_id, owner_id, channel_id, window_id, slot_id, timezone,
+          kind, status, monitoring_run_id, charged_minor, prompt_set_id, prompt_set_version, prompt_ids_json, created_at
+        ) VALUES (?, ?, 1, ?, ?, 'consumer-sheet', '2026-11-20', ?, 'Asia/Shanghai', 'manual', 'sheet', NULL, 0, NULL, NULL, ?, ?)`,
+        [legacyRunId, rejectedPlan.plan.id, brand, owner, rejectedSlotId, JSON.stringify([questionA, questionB]), time],
+      );
+
+      const listed = await listSamplingDueWindows(db, owner, [opened.plan.id, planV3.plan.id, rejectedPlan.plan.id]);
       const captured = [];
       const watched = {
         kind: db.kind,
@@ -493,23 +606,43 @@ for (const kind of ["sqlite", "postgresql"]) {
       const sheets = await manualSheetsForBrand(watched, brand, listed.runs);
       assert.equal(captured.length, 1);
       assert.match(captured[0].sql, /FROM prompt_set/);
-      assert.deepEqual(captured[0].values, [brand]);
-      const sheet = sheets.find((item) => item.slotId === consumerId);
-      assert.equal(sheet.execution, "manual");
-      assert.equal(sheet.automaticCollection, false);
-      assert.deepEqual(sheet.lines, [
-        { id: currentA, text: latestText, missing: false },
-        { id: currentB, text: secondText, missing: false },
-        { id: deletedId, text: null, missing: true },
-        { id: foreignId, text: null, missing: true },
+      assert.equal(captured[0].values[0], brand);
+
+      const v2Sheet = sheets.find((item) => item.slotId === consumerV2Id);
+      assert.equal(v2Sheet.execution, "manual");
+      assert.equal(v2Sheet.automaticCollection, false);
+      assert.equal(v2Sheet.versionVerified, true);
+      assert.equal(v2Sheet.promptSetId, setV2Id);
+      assert.equal(v2Sheet.promptSetVersion, 2);
+      assert.deepEqual(v2Sheet.lines, [
+        { id: questionB, text: v2TextB, missing: false },
+        { id: questionA, text: v2TextA, missing: false },
       ]);
-      const rendered = JSON.stringify(sheet.lines);
-      assert.equal(rendered.includes(oldText), false);
-      assert.equal(rendered.includes(deletedText), false);
-      assert.equal(rendered.includes(foreignText), false);
+      assert.equal(JSON.stringify(v2Sheet.lines).includes(v3TextA), false);
+      assert.equal(JSON.stringify(v2Sheet.lines).includes(v1TextA), false);
+
+      const v3Sheet = sheets.find((item) => item.slotId === consumerV3Id);
+      assert.equal(v3Sheet.versionVerified, true);
+      assert.equal(v3Sheet.promptSetId, setV3Id);
+      assert.equal(v3Sheet.promptSetVersion, 3);
+      assert.deepEqual(v3Sheet.lines, [
+        { id: questionC, text: v3TextC, missing: false },
+        { id: questionA, text: v3TextA, missing: false },
+      ]);
+
+      const legacySheet = sheets.find((item) => item.runId === legacyRunId);
+      assert.equal(legacySheet.versionVerified, false);
+      assert.equal(legacySheet.promptSetId, null);
+      assert.equal(legacySheet.promptSetVersion, null);
+      assert.deepEqual(legacySheet.lines, [
+        { id: questionA, text: null, missing: true },
+        { id: questionB, text: null, missing: true },
+      ]);
+
       const outsider = await manualSheetsForBrand(db, otherBrand, listed.runs);
-      assert.equal(outsider[0].lines.every((line) => line.missing || line.text === foreignText), true);
-      assert.equal(JSON.stringify(outsider).includes(latestText), false);
+      assert.equal(outsider.every((item) => !item.versionVerified && item.lines.every((line) => line.missing && line.text === null)), true);
+      assert.equal(JSON.stringify(outsider).includes(v2TextA), false);
+      assert.equal(JSON.stringify(outsider).includes(v3TextA), false);
 
       const filler = Array.from({ length: 500 }, () => randomUUID());
       await queryWithParameters(
@@ -517,15 +650,20 @@ for (const kind of ["sqlite", "postgresql"]) {
         `INSERT INTO prompt_set (
           brand_id, id, set_id, version, entity_version, region, language, content, created_at
         ) VALUES ${filler.map(() => "(?, ?, ?, ?, 1, 'CN', 'zh-CN', ?, ?)").join(", ")}`,
-        filler.flatMap((id, index) => [brand, id, setId, index + 3, JSON.stringify({ clusters: [], questions: [] }), "2026-11-01T00:00:00.000Z"]),
+        filler.flatMap((id, index) => [brand, id, setId, index + 4, JSON.stringify({ clusters: [], questions: [] }), "2026-11-01T00:00:00.000Z"]),
       );
       if (db.kind === "postgresql") await db.query("ANALYZE prompt_set");
-      const lookup = latestPromptSetQuery(brand);
       const explain = db.kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN ";
+      const batchLookup = promptSetBatchQuery(brand, [setV2Id, setV3Id]);
+      const batchPlan = JSON.stringify(await queryWithParameters(db, explain + batchLookup.sql, batchLookup.values));
+      assert.match(batchPlan, /prompt_set_brand_id_id_pk|sqlite_autoindex_prompt_set_1/);
+      const lookup = latestPromptSetQuery(brand);
       const planText = JSON.stringify(await queryWithParameters(db, explain + lookup.sql, lookup.values));
       assert.match(planText, /prompt_set_recent_idx/);
       captured.length = 0;
       await manualSheetsForBrand(watched, brand, listed.runs.filter((run) => run.kind === "official"));
+      assert.equal(captured.length, 0);
+      await manualSheetsForBrand(watched, brand, listed.runs.filter((run) => run.runId === legacyRunId || run.id === legacyRunId));
       assert.equal(captured.length, 0);
     } finally {
       await fixture.cleanup();

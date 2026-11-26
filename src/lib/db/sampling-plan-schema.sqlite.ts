@@ -63,6 +63,8 @@ export const samplingDueRun = sqliteTable("sampling_due_run", {
   chargedMinor: integer("charged_minor").notNull(),
   promptIdsJson: text("prompt_ids_json"),
   createdAt: text("created_at").notNull(),
+  promptSetId: text("prompt_set_id"),
+  promptSetVersion: integer("prompt_set_version"),
 }, (table) => [
   uniqueIndex("sampling_due_run_slot_uidx").on(table.planId, table.channelId, table.windowId, table.slotId),
   index("sampling_due_run_owner_idx").on(table.ownerId, table.planId, table.windowId, table.id),
@@ -78,11 +80,17 @@ export const samplingDueRun = sqliteTable("sampling_due_run", {
     and (
       (${table.kind} = 'manual' and ${table.status} = 'sheet'
         and ${table.monitoringRunId} is null and ${table.chargedMinor} = 0
-        and ${table.promptIdsJson} is not null and length(${table.promptIdsJson}) between 38 and 2000)
+        and ${table.promptIdsJson} is not null and length(${table.promptIdsJson}) between 38 and 2000
+        and (
+          (${table.promptSetId} is null and ${table.promptSetVersion} is null)
+          or (length(${table.promptSetId}) = 36 and ${table.promptSetVersion} > 0)
+        ))
       or (${table.kind} = 'official' and ${table.status} = 'reserved'
-        and ${table.monitoringRunId} is null and ${table.chargedMinor} = 0 and ${table.promptIdsJson} is null)
+        and ${table.monitoringRunId} is null and ${table.chargedMinor} = 0
+        and ${table.promptIdsJson} is null and ${table.promptSetId} is null and ${table.promptSetVersion} is null)
       or (${table.kind} = 'official' and ${table.status} = 'accepted'
-        and ${table.monitoringRunId} is not null and ${table.promptIdsJson} is null)
+        and ${table.monitoringRunId} is not null
+        and ${table.promptIdsJson} is null and ${table.promptSetId} is null and ${table.promptSetVersion} is null)
     )`),
 ]);
 
