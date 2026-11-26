@@ -102,6 +102,12 @@ export function brandIntakeOrigin(headers: HeaderSource, env: NodeJS.ProcessEnv 
   return null;
 }
 
+/** Brand-scoped personal exports are enabled for development and isolated acceptance. */
+export function brandExportAllowed(headers: HeaderSource, env: NodeJS.ProcessEnv = process.env) {
+  const mode = brandIntakeOrigin(headers, env)?.mode;
+  return mode === "dev" || mode === "fixture";
+}
+
 export function brandIntakeDecision(headers: HeaderSource, email: string, env: NodeJS.ProcessEnv = process.env): BrandIntakeDecision {
   void email;
   const intake = brandIntakeOrigin(headers, env);

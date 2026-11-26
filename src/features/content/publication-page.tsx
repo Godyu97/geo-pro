@@ -248,6 +248,10 @@ export default async function ContentPublicationPage({
     { href: `/dashboard/content/versions/${version.id}`, label: t("backToVersion") },
     ...back,
     { href: `/dashboard/brands/${publication.brandId}/facts`, label: t("brandFactsLink") },
+    ...(status === "verified_public" || status === "verified_manual" ? [
+      { href: `/dashboard/monitoring/new?brandId=${encodeURIComponent(publication.brandId)}`, label: t("startRetestMonitoring") },
+      { href: `/dashboard/reports?brandId=${encodeURIComponent(publication.brandId)}&publicationId=${encodeURIComponent(publication.id)}#comparison-heading`, label: t("openReportsLink") },
+    ] : []),
   ];
   const checkForm = (
     <PublicCheckForm publication={publication} t={t} liveFetchEnabled={liveFetchEnabled} />

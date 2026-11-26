@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { checkPages, generateFromEvidence, updateTask } from "./commands";
@@ -22,9 +23,11 @@ export async function generateOptimizationAction(formData: FormData): Promise<vo
     businessImportance: Number(formData.get("businessImportance") ?? 2),
   });
   if (!parsed.success) return;
-  await generateFromEvidence(getConnection(), session.user.id, parsed.data);
+  const result = await generateFromEvidence(getConnection(), session.user.id, parsed.data);
   revalidatePath("/dashboard/optimization");
   revalidatePath("/dashboard/monitoring/overview");
+  const task = "tasks" in result ? result.tasks[0] : undefined;
+  if (task) redirect(`/dashboard/optimization/${task.taskId}`);
 }
 
 export async function checkPagesAction(formData: FormData): Promise<void> {

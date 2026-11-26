@@ -11,7 +11,7 @@ import { workspaceBrand } from "../team-access/brand-scope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { exportConfirmAction, exportPreflightAction, generateBatchAction, saveBriefAction } from "./actions";
-import { listBriefs, listContentVersions, readExportJob, type ContentVersionFilter } from "./commands";
+import { listApprovedBriefFacts, listBriefs, listContentVersions, readExportJob, type ContentVersionFilter } from "./commands";
 import { exportUiError, type ContentGapCode, type ExportUiError } from "./contracts";
 import type { ClusterPlanView, PageEvidenceBasis } from "./rules";
 
@@ -94,7 +94,7 @@ function ClusterPlanCard({
                             <span className="break-words">{evidenceBasisLabel(t, basis)}</span>
                             <Link
                               href={basis.kind === "citation_ownership"
-                                ? `/dashboard/monitoring/answers/${basis.observationId}`
+                                ? `/dashboard/monitoring/evidence/${basis.observationId}`
                                 : `/dashboard/content/publications/${basis.publicationId}`}
                               prefetch={false}
                               className={inlineLinkClass}
@@ -364,7 +364,10 @@ export default async function ContentListPage({
   const filter: ContentVersionFilter | undefined = params.filter === "pending_review" || params.filter === "deliverable"
     ? params.filter
     : undefined;
-  const versionList = await listContentVersions(connection, session.user.id, brandId, 50, filter);
+  const [versionList, approvedFacts] = await Promise.all([
+    listContentVersions(connection, session.user.id, brandId, 50, filter),
+    listApprovedBriefFacts(connection, session.user.id, brandId),
+  ]);
   const versions = "versions" in versionList ? versionList.versions : [];
   const filters = [
     { key: undefined, label: t("filterAll") },
@@ -381,6 +384,7 @@ export default async function ContentListPage({
   const operationId = typeof params.op === "string" ? params.op : "";
   const prefillCluster = typeof params.cluster === "string" ? params.cluster : "";
   const prefillPrimaryPage = typeof params.primaryPage === "string" ? params.primaryPage : "";
+  const prefillTaskId = typeof params.taskId === "string" ? params.taskId : "";
   const exportError = exportUiError(params.exportError);
   const exported = operationId ? await readExportJob(connection, session.user.id, brandId, operationId) : null;
   const job: ExportJob | null = exported && !("error" in exported) ? exported : null;
@@ -415,8 +419,9 @@ export default async function ContentListPage({
 
       <section className={panelClass} aria-labelledby="new-brief-heading">
         <h2 id="new-brief-heading" className="text-lg font-semibold">{t("newBrief")}</h2>
-        <form key={`${prefillCluster}::${prefillPrimaryPage}`} action={saveBriefAction} className="grid min-w-0 gap-3 sm:grid-cols-2">
+        <form key={`${prefillCluster}::${prefillPrimaryPage}::${prefillTaskId}`} action={saveBriefAction} className="grid min-w-0 gap-3 sm:grid-cols-2">
           <input type="hidden" name="brandId" value={brandId} />
+          {prefillTaskId ? <input type="hidden" name="optimizationTaskId" value={prefillTaskId} /> : null}
           <label className="block min-w-0 text-sm break-words sm:col-span-2">
             <span className="mb-1 block text-muted-foreground">{t("questionCluster")}</span>
             <input name="questionCluster" required defaultValue={prefillCluster} className={fieldClass} />
@@ -453,6 +458,27 @@ export default async function ContentListPage({
             <span className="mb-1 block text-muted-foreground">{t("titles")}</span>
             <textarea name="titleCandidates" rows={2} className={areaClass} />
           </label>
+          <fieldset className="min-w-0 space-y-2 text-sm sm:col-span-2">
+            <legend className="text-muted-foreground">{t("selectApprovedFacts")}</legend>
+            {approvedFacts.length === 0 ? (
+              <p className="text-muted-foreground">{t("noApprovedFacts")}</p>
+            ) : (
+              <ul className="space-y-2">
+                {approvedFacts.map((fact) => (
+                  <li key={fact.id}>
+                    <label className="flex min-w-0 items-start gap-2.5 break-words">
+                      <input type="checkbox" name="factVersionId" value={fact.id} className={checkClass} />
+                      <span className="min-w-0">
+                        <span className="font-medium">{fact.title}</span>
+                        {" — "}
+                        <span className="text-muted-foreground">{fact.claim}</span>
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </fieldset>
           <label className="block min-w-0 text-sm break-words sm:col-span-2">
             <span className="mb-1 block text-muted-foreground">{t("factIds")}</span>
             <textarea name="factVersionIds" rows={2} className={areaClass} />

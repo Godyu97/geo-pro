@@ -4,13 +4,13 @@ import { headers } from "next/headers";
 import { getConnection } from "@/lib/db/connection";
 import type { Locale } from "@/lib/i18n/locale";
 import { getMessages } from "@/lib/i18n/server";
-import { brandFixtureOrigin } from "@/features/brands/intake";
+import { brandExportAllowed } from "@/features/brands/intake";
 import { DataExportForm } from "./export-form";
 import { getExportSummary } from "./service";
 
 export async function DataExportPanel({ userId, locale }: { userId: string; locale: Locale }) {
   const messages = getMessages(locale).dataExports;
-  const brandsAllowed = Boolean(brandFixtureOrigin(await headers()));
+  const brandsAllowed = brandExportAllowed(await headers());
   let summary;
   try {
     summary = await getExportSummary(getConnection(), userId);

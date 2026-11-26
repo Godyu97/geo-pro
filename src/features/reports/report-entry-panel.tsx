@@ -21,6 +21,7 @@ function PublicationSelect({
   label,
   none,
   publications,
+  publicationId,
   noEffective,
   option,
 }: {
@@ -28,13 +29,14 @@ function PublicationSelect({
   label: string;
   none: string;
   publications: readonly ReportPublicationOption[];
+  publicationId?: string;
   noEffective: string;
   option: (status: string, effective: string) => string;
 }) {
   return (
     <label className="grid min-w-0 gap-1 text-sm sm:col-span-2" htmlFor={id}>
       <span>{label}</span>
-      <select id={id} name="publicationId" defaultValue="" className={fieldClass}>
+      <select id={id} name="publicationId" defaultValue={publicationId ?? ""} className={fieldClass}>
         <option value="">{none}</option>
         {publications.map((item) => (
           <option key={item.id} value={item.id}>
@@ -49,12 +51,14 @@ function PublicationSelect({
 export function ReportEntryPanel({
   brandId,
   publications,
+  publicationId,
   error,
   downgraded,
   t,
 }: {
   brandId: string;
   publications: readonly ReportPublicationOption[];
+  publicationId?: string;
   error: string | null;
   downgraded: boolean;
   t: ReportsTranslator;
@@ -107,6 +111,7 @@ export function ReportEntryPanel({
             label={t("publicationLabel")}
             none={t("publicationNone")}
             publications={publications}
+            publicationId={publicationId}
             noEffective={t("publicationNoEffective")}
             option={(status, effective) => t("publicationOption", { status, effective })}
           />
@@ -134,6 +139,7 @@ export function ReportEntryPanel({
             label={t("publicationLabel")}
             none={t("publicationNone")}
             publications={publications}
+            publicationId={publicationId}
             noEffective={t("publicationNoEffective")}
             option={(status, effective) => t("publicationOption", { status, effective })}
           />

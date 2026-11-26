@@ -7,6 +7,7 @@ import { getConnection } from "@/lib/db/connection";
 import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { workspaceBrand } from "@/features/team-access/brand-scope";
+import { brandIdSchema } from "@/features/brands/contracts";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockRetestButton } from "@/features/functional-mock/run-buttons";
 import { Button } from "@/components/ui/button";
@@ -35,8 +36,9 @@ export async function generateMetadata() {
   return { title: t("title"), robots: { index: false, follow: false } };
 }
 
-function relatedLinks(t: Awaited<ReturnType<typeof getTranslator<"reports">>>) {
+function relatedLinks(t: Awaited<ReturnType<typeof getTranslator<"reports">>>, brandId?: string) {
   return [
+    ...(brandId ? [{ href: `/dashboard/monitoring/new?brandId=${encodeURIComponent(brandId)}`, label: t("openMonitoringNew") }] : []),
     { href: "/dashboard/reports/observations", label: t("openObservations") },
     { href: "/dashboard/reports/interventions", label: t("openInterventions") },
     { href: "/dashboard/reports/leads", label: t("openLeads") },
@@ -332,7 +334,7 @@ function ReportCanvas({
 export default async function ReportsListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ brandId?: string; error?: string; notice?: string }>;
+  searchParams: Promise<{ brandId?: string; publicationId?: string; error?: string; notice?: string }>;
 }) {
   const session = await requireSession();
   const t = await getTranslator("reports");
@@ -416,11 +418,18 @@ export default async function ReportsListPage({
 
   let publications: ReportPublicationOption[] = [];
   try {
-    publications = (await new ContentDao(connection).listPublicationsForBrand(session.user.id, brandId, 20))
-      .map((item) => ({ id: item.id, status: item.status, effectiveAt: item.effectiveAt }));
+    const dao = new ContentDao(connection);
+    const rows = await dao.listPublicationsForBrand(session.user.id, brandId, 20);
+    const requestedPublication = brandIdSchema.safeParse(params.publicationId);
+    if (requestedPublication.success && !rows.some((item) => item.id === requestedPublication.data)) {
+      const row = await dao.getPublication(session.user.id, requestedPublication.data);
+      if (row?.brandId === brandId) rows.unshift(row);
+    }
+    publications = rows.map((item) => ({ id: item.id, status: item.status, effectiveAt: item.effectiveAt }));
   } catch {
     console.error("reports-publication-read-failed", { brandId });
   }
+  const publicationId = publications.find((item) => item.id === params.publicationId)?.id;
   const ownerView = scope?.role === "owner";
   let decisionRows: ReportDecisionView[] = [];
   if (ownerView) {
@@ -466,11 +475,13 @@ export default async function ReportsListPage({
       )}
       primary={primary}
       relatedLabel={t("relatedEntries")}
-      related={relatedLinks(t).filter((item) => next.snapshot || item.href !== observationsHref)}
+      related={relatedLinks(t, brandId).filter((item) => next.snapshot || item.href !== observationsHref)}
     >
       <ReportEntryPanel
+        key={publicationId ?? brandId}
         brandId={brandId}
         publications={publications}
+        publicationId={publicationId}
         error={actionError ? t(actionError) : null}
         downgraded={params.notice === "diagnostic-downgrade"}
         t={t}

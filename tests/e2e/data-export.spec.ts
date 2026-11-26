@@ -41,6 +41,7 @@ const test = base.extend<{
 const copy = {
   "zh-CN": {
     management: "数据管理", language: "界面语言", profile: "个人资料", brands: "品牌数据",
+    brandScope: "你的活跃及归档品牌、已保存版本和草稿。",
     facts: "事实与材料", monitoring: "监测与证据", content: "内容", reports: "报告", usage: "用量与费用",
     prepare: "生成导出文件", preparing: "正在生成导出文件…", download: "下载 JSON", empty: "尚未生成导出文件",
     ready: "导出文件已就绪", partial: "导出部分完成", failed: "导出文件生成失败",
@@ -49,6 +50,7 @@ const copy = {
   },
   en: {
     management: "Data management", language: "Interface language", profile: "Personal profile", brands: "Brand data",
+    brandScope: "Your active and archived brand profiles, saved versions and drafts.",
     facts: "Facts and materials", monitoring: "Monitoring and evidence", content: "Content", reports: "Reports", usage: "Usage and costs",
     prepare: "Prepare export", preparing: "Preparing your export…", download: "Download JSON", empty: "No export prepared yet",
     ready: "Export ready", partial: "Export partially ready", failed: "Export could not be prepared",
@@ -97,7 +99,7 @@ for (const locale of ["zh-CN", "en"] as const) {
       const profile = region.getByRole("checkbox", { name: current.profile, exact: true });
       const brands = region.getByRole("checkbox", { name: current.brands, exact: true });
       await expect(profile).toBeChecked();
-      await expect(brands).toHaveAccessibleDescription(/合成资料|synthetic data/);
+      await expect(brands).toHaveAccessibleDescription(current.brandScope);
       for (const label of [current.facts, current.monitoring, current.content, current.reports, current.usage]) {
         await expect(region.getByRole("checkbox", { name: label, exact: true })).toBeEnabled();
       }

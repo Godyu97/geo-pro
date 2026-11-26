@@ -413,8 +413,8 @@
     "profile": "Personal profile",
     "profileScope": "Your display name and sign-in email.",
     "brands": "Brand data",
-    "brandScope": "Your active and archived profiles, saved versions and drafts. Local testing uses synthetic data.",
-    "brandsClosed": "Brand data export is currently limited to local testing.",
+    "brandScope": "Your active and archived brand profiles, saved versions and drafts.",
+    "brandsClosed": "Brand data export is unavailable in this workspace.",
     "factsAndMaterials": "Facts and materials",
     "factsScope": "Your fact pastes, fact versions and content references. Original text stays unchanged.",
     "monitoringAndEvidence": "Monitoring and evidence",
@@ -1353,7 +1353,8 @@
     "pageStatus_not_applicable": "Not applicable",
     "citationSave": "Save ownership & status",
     "citationSaving": "Saving…",
-    "citationSaved": "Saved citation ownership and page status."
+    "citationSaved": "Saved citation ownership and page status.",
+    "openOptimizationTasks": "View optimization tasks"
   },
   "evidenceOverview": {
     "title": "Explainable overview",
@@ -1530,7 +1531,8 @@
     "AI_UNAVAILABLE": "The model is unavailable.",
     "INVALID_MODEL_OUTPUT": "The model output failed validation. No draft was saved.",
     "AI_FAILED": "The model request failed. No draft was saved.",
-    "DRAFT_CONFLICT": "The draft changed. Refresh and try again."
+    "DRAFT_CONFLICT": "The draft changed. Refresh and try again.",
+    "createBrief": "Create content brief"
   },
   "content": {
     "title": "Content plans and drafts",
@@ -1891,11 +1893,16 @@
     "pageMarker": "Page marker",
     "observedAt": "Observed at",
     "bodyExcerpt": "Relevant body excerpt",
-    "submitManualEvidence": "Submit manual evidence"
+    "submitManualEvidence": "Submit manual evidence",
+    "selectApprovedFacts": "Select approved facts",
+    "noApprovedFacts": "No approved facts yet. Confirm a brand fact first.",
+    "startRetestMonitoring": "Set up monitoring for a retest",
+    "openReportsLink": "Open retests & reports"
   },
   "reports": {
     "title": "Retest & reports",
     "description": "Compare before/after windows on a shared scope and download immutable HTML/JSON snapshots. Exploratory conclusions do not claim causality.",
+    "openMonitoringNew": "Set up monitoring for a retest",
     "openObservations": "Open the observation plan",
     "openInterventions": "Open intervention batches",
     "openLeads": "Open de-identified leads",

@@ -30,6 +30,13 @@ export function isAllowedApiOrigin(request: Request, sameOrigin: string): boolea
   return origin !== null && (origin === sameOrigin || getWebCorsConfig().origins.has(origin));
 }
 
-export function allowsOptionalApiOrigin(request: Request, sameOrigin = new URL(request.url).origin): boolean {
+function defaultSameOrigin(request: Request) {
+  const configured = URL.parse(process.env.BETTER_AUTH_URL ?? "");
+  return configured?.protocol === "http:" || configured?.protocol === "https:"
+    ? configured.origin
+    : new URL(request.url).origin;
+}
+
+export function allowsOptionalApiOrigin(request: Request, sameOrigin = defaultSameOrigin(request)): boolean {
   return !request.headers.has("origin") || isAllowedApiOrigin(request, sameOrigin);
 }

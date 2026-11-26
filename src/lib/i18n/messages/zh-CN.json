@@ -413,8 +413,8 @@
     "profile": "个人资料",
     "profileScope": "你的称呼和登录邮箱。",
     "brands": "品牌数据",
-    "brandScope": "你的活跃及归档品牌、已保存版本和草稿。本地验收使用合成资料。",
-    "brandsClosed": "品牌数据导出目前仅在本地验收环境开放。",
+    "brandScope": "你的活跃及归档品牌、已保存版本和草稿。",
+    "brandsClosed": "当前工作台未开放品牌数据导出。",
     "factsAndMaterials": "事实与材料",
     "factsScope": "你的事实粘贴、事实版本和内容引用。原文保持原样。",
     "monitoringAndEvidence": "监测与证据",
@@ -1353,7 +1353,8 @@
     "pageStatus_not_applicable": "不适用",
     "citationSave": "保存归属与状态",
     "citationSaving": "正在保存…",
-    "citationSaved": "已保存引用归属与页面状态。"
+    "citationSaved": "已保存引用归属与页面状态。",
+    "openOptimizationTasks": "查看优化任务"
   },
   "evidenceOverview": {
     "title": "可解释概览",
@@ -1530,7 +1531,8 @@
     "AI_UNAVAILABLE": "模型暂不可用。",
     "INVALID_MODEL_OUTPUT": "模型输出无法通过校验，未保存草案。",
     "AI_FAILED": "模型请求失败，未保存草案。",
-    "DRAFT_CONFLICT": "草案状态已变化，请刷新后再试。"
+    "DRAFT_CONFLICT": "草案状态已变化，请刷新后再试。",
+    "createBrief": "从此任务创建内容 Brief"
   },
   "content": {
     "title": "内容计划与草稿",
@@ -1891,11 +1893,16 @@
     "pageMarker": "页面标识",
     "observedAt": "观察时间",
     "bodyExcerpt": "关键正文摘录",
-    "submitManualEvidence": "提交人工证据"
+    "submitManualEvidence": "提交人工证据",
+    "selectApprovedFacts": "勾选已批准事实（可多选）",
+    "noApprovedFacts": "当前没有已批准事实，请先前往品牌事实页确认。",
+    "startRetestMonitoring": "设置复测监测范围",
+    "openReportsLink": "打开复测与报告"
   },
   "reports": {
     "title": "复测与报告",
     "description": "按同口径比较前后窗口，下载不可变 HTML/JSON 快照。探索结论不声称因果。",
+    "openMonitoringNew": "设置复测监测范围",
     "openObservations": "打开观察计划",
     "openInterventions": "打开干预批次",
     "openLeads": "打开脱敏线索",

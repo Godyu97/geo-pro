@@ -7,7 +7,7 @@ import { getTranslator } from "@/lib/i18n/server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { confirmBriefAction, saveBriefAction } from "./actions";
-import { readBriefDetail } from "./commands";
+import { listApprovedBriefFacts, readBriefDetail } from "./commands";
 import type { ContentGapCode } from "./contracts";
 import { FactDraftButton } from "./fact-draft-button";
 
@@ -107,6 +107,9 @@ export default async function ContentBriefPage({
   }
 
   const { brief, version, gaps, fields } = detail;
+  const approvedFacts = await listApprovedBriefFacts(getConnection(), session.user.id, brief.brandId);
+  const approvedFactIds = new Set(approvedFacts.map((fact) => fact.id));
+  const otherFactIds = fields?.factVersionIds.filter((id) => !approvedFactIds.has(id)) ?? [];
   const heading = fields?.titleCandidates.find((item) => item.trim()) || t("briefDetail");
   const task = gaps.length > 0
     ? t("briefTaskGaps")
@@ -208,13 +211,40 @@ export default async function ContentBriefPage({
               className={`${areaClass} scroll-mt-28`}
             />
           </label>
-          <label className="block min-w-0 text-sm break-words sm:col-span-2" htmlFor="brief-facts">
+          <fieldset id="brief-facts" className="min-w-0 space-y-2 text-sm scroll-mt-28 sm:col-span-2">
+            <legend className="text-muted-foreground">{t("selectApprovedFacts")}</legend>
+            {approvedFacts.length === 0 ? (
+              <p className="text-muted-foreground">{t("noApprovedFacts")}</p>
+            ) : (
+              <ul className="space-y-2">
+                {approvedFacts.map((fact) => (
+                  <li key={fact.id}>
+                    <label className="flex min-w-0 items-start gap-2.5 break-words">
+                      <input
+                        type="checkbox"
+                        name="factVersionId"
+                        value={fact.id}
+                        defaultChecked={fields?.factVersionIds.includes(fact.id) ?? false}
+                        className="mt-1 size-4 shrink-0 accent-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+                      />
+                      <span className="min-w-0">
+                        <span className="font-medium">{fact.title}</span>
+                        {" — "}
+                        <span className="text-muted-foreground">{fact.claim}</span>
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </fieldset>
+          <label className="block min-w-0 text-sm break-words sm:col-span-2" htmlFor="brief-fact-ids">
             <span className="mb-1 block text-muted-foreground">{t("factIds")}</span>
             <textarea
-              id="brief-facts"
+              id="brief-fact-ids"
               name="factVersionIds"
               rows={2}
-              defaultValue={(fields?.factVersionIds ?? []).join("\n")}
+              defaultValue={otherFactIds.join("\n")}
               className={`${areaClass} scroll-mt-28 [overflow-wrap:anywhere]`}
             />
           </label>

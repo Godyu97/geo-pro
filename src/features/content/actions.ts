@@ -61,16 +61,17 @@ export async function saveBriefAction(formData: FormData): Promise<void> {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 3);
-  const factVersionIds = String(formData.get("factVersionIds") ?? "")
-    .split(/[\s,]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const factVersionIds = uniqueIds([
+    ...formData.getAll("factVersionId"),
+    ...splitIds(formData.get("factVersionIds")),
+  ]);
   const templateKind = templateKindSchema.catch("fact_faq").parse(String(formData.get("templateKind") ?? "fact_faq"));
   const parsed = saveBriefDraftSchema.safeParse({
     action: "save-brief-draft",
     brandId: String(formData.get("brandId") ?? ""),
     operationId: randomUUID(),
     briefId: String(formData.get("briefId") ?? "") || undefined,
+    optimizationTaskId: String(formData.get("optimizationTaskId") ?? "") || undefined,
     questionCluster: String(formData.get("questionCluster") ?? "") || undefined,
     fields: {
       audience: String(formData.get("audience") ?? ""),

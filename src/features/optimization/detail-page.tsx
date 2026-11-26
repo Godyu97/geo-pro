@@ -58,9 +58,19 @@ export default async function OptimizationDetailPage({
           <Badge variant="outline">{labels.priority}</Badge>
           <Badge variant="secondary">{labels.status}</Badge>
         </div>
-        <Button asChild className={actionClass}>
-          <a href="#update-status">{t("updateTitle")}</a>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild className={actionClass}>
+            <a href="#update-status">{t("updateTitle")}</a>
+          </Button>
+          <Button asChild variant="outline" className={actionClass}>
+            <Link
+              href={`/dashboard/content?brandId=${encodeURIComponent(task.brandId)}&taskId=${encodeURIComponent(task.id)}&cluster=${encodeURIComponent(task.questionCluster)}&primaryPage=${encodeURIComponent(task.targetPage)}#new-brief-heading`}
+              prefetch={false}
+            >
+              {t("createBrief")}
+            </Link>
+          </Button>
+        </div>
         <dl className="wrap-anywhere max-w-2xl space-y-1 text-sm">
           <dt className="font-medium">{t("targetPage")}</dt>
           <dd className="text-muted-foreground">{task.targetPage}</dd>

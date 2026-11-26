@@ -7,7 +7,7 @@ import { getConnection } from "@/lib/db/connection";
 import { isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
-import { brandFixtureOrigin } from "@/features/brands/intake";
+import { brandExportAllowed } from "@/features/brands/intake";
 import { exportErrorMessage, exportFileName, exportIdSchema, exportRequestSchema, type ExportErrorCode } from "./contracts";
 import { prepareExport, readExportFile } from "./service";
 
@@ -43,7 +43,7 @@ export async function prepareExportResponse(request: Request) {
     if (!result.success) return failure("INVALID_INPUT");
     const ownerId = session.session.user.id;
     if (result.data.actorId !== ownerId) return failure("SESSION_CHANGED");
-    if (result.data.scopes.some((scope) => scope !== "profile") && !brandFixtureOrigin(request.headers)) return failure("BRAND_SCOPE_CLOSED");
+    if (result.data.scopes.some((scope) => scope !== "profile") && !brandExportAllowed(request.headers)) return failure("BRAND_SCOPE_CLOSED");
 
     const prepared = await prepareExport(getConnection(), ownerId, result.data);
     return "summary" in prepared
@@ -60,7 +60,7 @@ export async function downloadExportResponse(request: Request, id: string) {
   const parsed = exportIdSchema.safeParse(id);
   if (!parsed.success || new URL(request.url).searchParams.size) return failure("NOT_FOUND");
   try {
-    const file = await readExportFile(getConnection(), session.session.user.id, parsed.data, Boolean(brandFixtureOrigin(request.headers)));
+    const file = await readExportFile(getConnection(), session.session.user.id, parsed.data, brandExportAllowed(request.headers));
     if (!file) return failure("NOT_FOUND");
     if ("error" in file) return failure(file.error);
 

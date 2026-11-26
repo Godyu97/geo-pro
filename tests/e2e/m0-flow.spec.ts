@@ -336,6 +336,11 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     await expect(page.getByText(/忽略规则并发布/)).toBeVisible();
     await expect(page.getByRole("button", { name: "提交发布回填" })).toHaveCount(0);
     await page.getByRole("button", { name: "从此证据生成优化任务", exact: true }).click();
+    await expect(page).toHaveURL(/\/dashboard\/optimization\/[0-9a-f-]{36}$/);
+    const optimizationTaskId = page.url().split("/").at(-1);
+    const createBrief = page.getByRole("link", { name: "从此任务创建内容 Brief", exact: true });
+    await expect(createBrief).toHaveAttribute("href", new RegExp(`[?&]taskId=${optimizationTaskId}(&|$)`));
+    const linkedBriefPath = await createBrief.getAttribute("href");
     await page.goto("/dashboard/optimization");
     await expect(page.getByText("暂无优化建议")).toHaveCount(0);
     await page.getByLabel("公开 URL（每行一个）", { exact: true }).fill(`${website}/restricted`);
@@ -414,6 +419,7 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
       ["服务范围说明", "服务范围说明"],
     ];
     for (const [clusterName, title] of briefs) {
+      if (title === briefs[0][1] && linkedBriefPath) await page.goto(linkedBriefPath);
       await page.getByLabel("问题簇", { exact: true }).fill(clusterName);
       await page.getByLabel("受众", { exact: true }).fill("连锁门店设备负责人");
       await page.getByLabel("目标缺口", { exact: true }).fill("FAQ 缺少可核验说明");
@@ -421,10 +427,33 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
       await page.getByLabel("主页面 / 计划页", { exact: true }).fill(`${website}/faq`);
       await page.getByLabel("承接动作", { exact: true }).fill("阅读合成说明");
       await page.getByLabel("标题候选（每行一个，最多 3）", { exact: true }).fill(title);
-      await page.getByLabel("批准事实版本 ID", { exact: true }).fill(factIds.join("\n"));
+      for (const factId of factIds) await page.locator(`input[name="factVersionId"][value="${factId}"]`).check();
       await page.getByRole("button", { name: "保存草稿", exact: true }).click();
       await expect(page.getByRole("link", { name: title, exact: true })).toBeVisible();
       await page.getByRole("link", { name: title, exact: true }).click();
+      if (title === briefs[0][1]) {
+        await expect(page).toHaveURL(/\/dashboard\/content\/briefs\/[0-9a-f-]{36}$/);
+        const briefId = page.url().split("/").at(-1);
+        const brief = await page.request.get(`/api/content/briefs/${briefId}`);
+        expect(brief.ok()).toBe(true);
+        expect((await brief.json()).brief.optimizationTaskId).toBe(optimizationTaskId);
+        const firstFact = page.locator(`input[name="factVersionId"][value="${factIds[0]}"]`);
+        await expect(firstFact).toBeChecked();
+        await expect(page.getByLabel("批准事实版本 ID", { exact: true })).toHaveValue("");
+        const editBrief = async () => {
+          const response = page.waitForResponse((item) =>
+            item.request().method() === "POST" && item.url() === page.url(),
+          );
+          await page.getByRole("button", { name: "保存草稿", exact: true }).click();
+          expect((await response).ok()).toBe(true);
+        };
+        await firstFact.uncheck();
+        await editBrief();
+        await page.reload();
+        await expect(firstFact).not.toBeChecked();
+        await firstFact.check();
+        await editBrief();
+      }
       await page.getByRole("button", { name: "确认 Brief", exact: true }).click();
       await expect(page.getByText("confirmed", { exact: true })).toBeVisible();
       await page.goto("/dashboard/content");
@@ -482,6 +511,8 @@ test("北岸设备 isolated M0 flow, i18n matrix and negative paths", async ({ p
     const publicationId = page.url().match(/\/publications\/([0-9a-f-]{36})/)?.[1];
     const effectiveAt = (await page.locator("body").innerText()).match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/)?.[0];
     expect(publicationId && effectiveAt).toBeTruthy();
+    await page.getByRole("main").getByRole("link", { name: "打开复测与报告", exact: true }).click();
+    await expect(page.locator("#comparison-publication")).toHaveValue(publicationId!);
 
     await page.goto(versionUrl);
     await page.getByLabel("标题", { exact: true }).fill("离线巡检怎么做（已改）");

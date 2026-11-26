@@ -231,7 +231,7 @@ async function verify(kind, enabled, storage) {
     phase = `${kind}: standard runtime scope`;
     await assertError(await request(exportsPath, { actor: owner, data: input(owner, ["brands"]) }), 403, "BRAND_SCOPE_CLOSED");
     await assertError(await request(exportsPath, { actor: owner, data: input(owner, ["factsAndMaterials"]) }), 403, "BRAND_SCOPE_CLOSED");
-    for (const [locale, notice] of [["zh-CN", "品牌数据导出目前仅在本地验收环境开放"], ["en", "Brand data export is currently limited to local testing"]]) {
+    for (const [locale, notice] of [["zh-CN", "当前工作台未开放品牌数据导出"], ["en", "Brand data export is unavailable in this workspace"]]) {
       const page = await request("/dashboard/settings", { actor: owner, locale });
       assert.match(await page.text(), new RegExp(notice));
     }

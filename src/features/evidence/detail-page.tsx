@@ -292,12 +292,19 @@ export default async function EvidenceDetailPage({
           messages={getMessages(locale).evidence}
         />
       )}
-      {observation.evidenceState !== "draft_evidence" ? (
-        <form action={generateOptimizationAction} className="rounded-2xl border px-4 py-4">
-          <input type="hidden" name="brandId" value={observation.brandId} />
-          <input type="hidden" name="observationId" value={observation.id} />
-          <Button type="submit" className="h-auto max-w-full text-left whitespace-normal">{t("generateOptimization")}</Button>
-        </form>
+      {canWrite && writeScope?.ownerId === session.user.id && observation.evidenceState !== "draft_evidence" ? (
+        <section className="space-y-3 rounded-2xl border px-4 py-4">
+          <form action={generateOptimizationAction} className="flex flex-wrap items-center gap-3">
+            <input type="hidden" name="brandId" value={observation.brandId} />
+            <input type="hidden" name="observationId" value={observation.id} />
+            <Button type="submit" className="h-auto max-w-full text-left whitespace-normal">{t("generateOptimization")}</Button>
+            <Button asChild variant="outline" className="h-auto max-w-full text-left whitespace-normal">
+              <Link href={`/dashboard/optimization?brandId=${encodeURIComponent(observation.brandId)}`} prefetch={false}>
+                {t("openOptimizationTasks")}
+              </Link>
+            </Button>
+          </form>
+        </section>
       ) : null}
     </div>
   );

@@ -15,6 +15,7 @@ import type { BrandAccessAction } from "../team-access/rules.ts";
 import { FactDao } from "../brand-facts/dao.ts";
 import { factGaps, factStatus } from "../brand-facts/rules.ts";
 import { withEligibleFacts } from "../brand-facts/service.ts";
+import { OptimizationDao } from "../optimization/dao.ts";
 import { applyQuotaLedger, grantState } from "../quotas/ledger.ts";
 import { QuotaDao } from "../quotas/dao.ts";
 import {
@@ -295,6 +296,9 @@ export async function saveBriefDraft(
       return { briefId, versionId, planId, gaps: contentBriefGaps(input.fields) };
     }
 
+    if (input.optimizationTaskId && !await new OptimizationDao(tx).getTask(effectiveOwnerId, input.brandId, input.optimizationTaskId)) {
+      return denied("NOT_FOUND");
+    }
     if (input.questionCluster) {
       const plan = await ensureClusterPlan(dao, effectiveOwnerId, input.brandId, input.questionCluster, now);
       planId = plan.id;
@@ -1023,6 +1027,22 @@ export async function listBriefs(
     publications,
   });
   return { briefs: withVersions, plans, clusterPlans };
+}
+
+/** List latest approved, gap-free brand facts available for content brief binding. */
+export async function listApprovedBriefFacts(
+  db: DatabaseConnection,
+  actorId: string,
+  brandId: string,
+  now = new Date().toISOString(),
+) {
+  const adopted = await adoptOwner(db, actorId, brandId, "read", now);
+  if (!adopted) return [] as Array<{ id: string; title: string; claim: string }>;
+  const today = now.slice(0, 10);
+  const versions = await new FactDao(db, { ownerId: adopted, brandId }).latestVersions();
+  return versions
+    .filter((fact) => factStatus(fact, today) === "approved" && factGaps(fact.fields, today).length === 0)
+    .map((fact) => ({ id: fact.id, title: fact.fields.title, claim: fact.fields.claim }));
 }
 
 export async function readBatch(
