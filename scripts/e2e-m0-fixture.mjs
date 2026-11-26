@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { PurgeDao } from "../src/features/brands/purge-dao.ts";
 import { recordCapability } from "../src/features/capabilities/commands.ts";
 import { changeMaintenanceGrant } from "../src/features/maintenance/core.ts";
 import { executeMonitoringRun } from "../src/features/monitoring/execution.ts";
@@ -203,7 +204,17 @@ try {
         }
       }
       await queryWithParameters(db, `DELETE FROM stored_object WHERE owner_id = ?`, [payload.userId]);
-      await queryWithParameters(db, `DELETE FROM "user" WHERE id = ? AND email = ?`, [payload.userId, payload.email]);
+      await db.transaction(async (transaction) => {
+        if (payload.brandId) {
+          const [brand] = await queryWithParameters(transaction,
+            `SELECT b.created_at AS "createdAt" FROM brand b JOIN "user" u ON u.id = b.owner_id
+             WHERE b.id = ? AND u.id = ? AND u.email = ?`, [payload.brandId, payload.userId, payload.email]);
+          if (brand) {
+            await new PurgeDao(transaction).clearContents({ brandId: payload.brandId, ownerId: payload.userId }, String(brand.createdAt));
+          }
+        }
+        await queryWithParameters(transaction, `DELETE FROM "user" WHERE id = ? AND email = ?`, [payload.userId, payload.email]);
+      });
     }
     process.stdout.write(JSON.stringify({ cleaned: true }));
   } else {

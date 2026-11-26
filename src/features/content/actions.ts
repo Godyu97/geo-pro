@@ -323,6 +323,7 @@ function publicationPath(publicationId: string) {
 export async function submitPublicationAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   const versionId = String(formData.get("versionId") ?? "");
+  const predecessorId = String(formData.get("predecessorId") ?? "").trim();
   const accessClass = String(formData.get("accessClass") ?? "");
   const fixturePage = accessClass
     ? {
@@ -336,8 +337,9 @@ export async function submitPublicationAction(formData: FormData): Promise<void>
   const parsed = submitPublicationSchema.safeParse({
     action: "submit-publication",
     brandId: String(formData.get("brandId") ?? ""),
-    operationId: randomUUID(),
+    operationId: String(formData.get("operationId") ?? ""),
     versionId,
+    ...(predecessorId ? { predecessorId } : {}),
     targetAccount: String(formData.get("targetAccount") ?? ""),
     pageUrl: String(formData.get("pageUrl") ?? ""),
     publisherId: String(formData.get("publisherId") ?? session.user.id),
@@ -345,9 +347,14 @@ export async function submitPublicationAction(formData: FormData): Promise<void>
     channelDeclaration: String(formData.get("channelDeclaration") ?? ""),
     ...(fixturePage ? { fixturePage } : {}),
   });
-  if (!parsed.success) return;
+  if (!parsed.success) {
+    if (submitPublicationSchema.shape.versionId.safeParse(versionId).success) {
+      redirect(`${versionPath(versionId)}?publicationError=INVALID_INPUT#publication-backfill`);
+    }
+    return;
+  }
   const result = await submitPublication(getConnection(), session.user.id, parsed.data);
-  if ("error" in result) return;
+  if ("error" in result) redirect(`${versionPath(versionId)}?publicationError=${result.error}#publication-backfill`);
   revalidatePath(versionPath(versionId));
   redirect(publicationPath(result.publicationId));
 }
@@ -372,8 +379,11 @@ export async function verifyPublicationAction(formData: FormData): Promise<void>
     }),
   });
   if (!parsed.success) return;
-  await verifyPublication(getConnection(), session.user.id, parsed.data);
+  const result = await verifyPublication(getConnection(), session.user.id, parsed.data);
   revalidatePath(publicationPath(publicationId));
+  redirect("error" in result
+    ? `${publicationPath(publicationId)}?verificationError=${result.error}`
+    : publicationPath(publicationId));
 }
 
 export async function submitManualEvidenceAction(formData: FormData): Promise<void> {

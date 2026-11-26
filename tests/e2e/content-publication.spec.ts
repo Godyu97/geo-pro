@@ -25,6 +25,11 @@ const copy = {
     unavailable: "暂时无法读取这条发布记录。请稍后重试。",
     reload: "重新载入",
     missing: "找不到这个页面",
+    predecessorField: "前一条发布记录（选填）",
+    predecessorPending: "查看选定的前版发布（待核验后替代）",
+    predecessor: "查看已核验的前版发布",
+    successor: "查看已登记的替代记录",
+    submitBackfill: "提交发布回填",
   },
   en: {
     title: "Publication verification",
@@ -40,6 +45,11 @@ const copy = {
     unavailable: "This publication record could not be loaded. Try again shortly.",
     reload: "Reload",
     missing: "Page not found",
+    predecessorField: "Previous publication (optional)",
+    predecessorPending: "View the selected previous publication (replacement pending)",
+    predecessor: "View the previous verified publication",
+    successor: "View the recorded replacement",
+    submitBackfill: "Submit publication backfill",
   },
 } as const;
 
@@ -72,13 +82,16 @@ async function expectNoOverflow(page: Page) {
 test("publication backfill keeps the next check readable and recoverable", async ({ page, context, browser }) => {
   test.setTimeout(180_000);
   const shots = ".cache/issue-135/content-publication";
+  const replacementShots = `.cache/issue-171/content-publication/${process.env.DATABASE_PROVIDER ?? "postgresql"}`;
   mkdirSync(shots, { recursive: true });
+  mkdirSync(replacementShots, { recursive: true });
   const ownerEmail = `content-publication-${randomUUID()}@example.invalid`;
   const outsiderEmail = `content-publication-other-${randomUUID()}@example.invalid`;
   const outsider = await browser.newContext({ baseURL: origin, viewport: { width: 375, height: 800 } });
-  const accounts: Array<{ userId: string; email: string }> = [];
+  const accounts: Array<{ userId: string; email: string; brandId?: string }> = [];
   try {
-    accounts.push({ userId: await register(context, ownerEmail), email: ownerEmail });
+    const ownerAccount: typeof accounts[number] = { userId: await register(context, ownerEmail), email: ownerEmail };
+    accounts.push(ownerAccount);
     accounts.push({ userId: await register(outsider, outsiderEmail), email: outsiderEmail });
     await context.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
     const savedBrand = await context.request.post("/api/brands", {
@@ -95,6 +108,7 @@ test("publication backfill keeps the next check readable and recoverable", async
     });
     expect(savedBrand.ok(), savedBrand.ok() ? "" : await savedBrand.text()).toBeTruthy();
     const brandId = (await savedBrand.json()).id as string;
+    ownerAccount.brandId = brandId;
     const factId = randomUUID();
     const factFields = {
       category: "price", title: "合成报价", claim: "合成说明售价 100 CNY",
@@ -261,12 +275,106 @@ test("publication backfill keeps the next check readable and recoverable", async
     await expect(stranger.getByText(publicationId)).toHaveCount(0);
     await expectNoOverflow(stranger);
     await stranger.screenshot({ path: `${shots}/content-publication-hidden-en-375.png`, fullPage: false });
+
+    const contentCommand = (data: object) => context.request.post("/api/content", { headers: { Origin: origin }, data });
+    const checkPublic = (id: string) => contentCommand({
+      action: "verify-publication", brandId, publicationId: id, operationId: randomUUID(),
+      fixturePage: { accessClass: "public", httpStatus: 200, title: "合成报价", bodyText: factFields.claim },
+    });
+    const readRecord = async (id: string) => {
+      const result = await context.request.get(`/api/content/publications/${id}`);
+      expect(result.ok(), result.ok() ? "" : await result.text()).toBeTruthy();
+      return (await result.json()).publication;
+    };
+    const verified = await checkPublic(publicationId);
+    expect(verified.ok(), verified.ok() ? "" : await verified.text()).toBeTruthy();
+    const original = await readRecord(publicationId);
+    expect(original).toMatchObject({ status: "verified_public", evidenceGrade: "public", supersededBy: null });
+    expect(original.effectiveAt).toEqual(expect.any(String));
+    const versionHref = `/dashboard/content/versions/${versionId}`;
+    for (const locale of ["zh-CN", "en"] as const) {
+      await context.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+      for (const width of [375, 768, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(versionHref);
+        const predecessor = page.getByRole("combobox", { name: copy[locale].predecessorField });
+        await expect(predecessor).toBeVisible();
+        await expect(predecessor).toHaveValue("");
+        await expect(page.locator(`#publication-predecessors option[value="${publicationId}"]`)).toHaveAttribute("label", new RegExp("合成账号"));
+        await expectNoOverflow(page);
+      }
+    }
+    await page.setViewportSize({ width: 375, height: 800 });
+    const backfill = page.locator("#publication-backfill");
+    await backfill.getByLabel(copy.en.url, { exact: true }).fill(longUrl);
+    await backfill.getByLabel("Target account / page ownership").fill("合成账号");
+    await backfill.getByLabel("User-claimed publish time").fill(claimedAt);
+    await backfill.getByLabel("Channel declaration").fill("合成渠道，仅隔离验收");
+    const predecessor = backfill.getByRole("combobox", { name: copy.en.predecessorField });
+    await predecessor.focus();
+    await page.keyboard.insertText(publicationId);
+    await expect(predecessor).toHaveValue(publicationId);
+    await activateFromKeyboard(page, backfill.getByRole("button", { name: copy.en.submitBackfill, exact: true }));
+    await expect(page).toHaveURL(/\/dashboard\/content\/publications\/[0-9a-f-]{36}$/);
+    const updateId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
+    expect(updateId).not.toBe(publicationId);
+    const updateHref = `/dashboard/content/publications/${updateId}`;
+    await expect(page.getByRole("link", { name: copy.en.predecessorPending })).toHaveAttribute("href", href);
+    expect(await readRecord(updateId)).toMatchObject({ predecessorId: publicationId, status: "submitted", effectiveAt: null });
+    expect(await readRecord(publicationId)).toMatchObject({ supersededBy: null, effectiveAt: original.effectiveAt });
+
+    const restricted = await contentCommand({
+      action: "verify-publication", brandId, publicationId: updateId, operationId: randomUUID(),
+      fixturePage: { accessClass: "login_wall", httpStatus: 200, title: "合成报价", bodyText: factFields.claim },
+    });
+    expect(restricted.ok(), restricted.ok() ? "" : await restricted.text()).toBeTruthy();
+    expect(await readRecord(updateId)).toMatchObject({ status: "access_limited", effectiveAt: null });
+    expect(await readRecord(publicationId)).toMatchObject({ supersededBy: null, effectiveAt: original.effectiveAt });
+    const manual = await contentCommand({
+      action: "submit-manual-evidence", brandId, publicationId: updateId, operationId: randomUUID(),
+      screenshotRef: "isolated-evidence", pageMarker: longUrl, observedAt: claimedAt, bodyExcerpt: factFields.claim,
+    });
+    expect(manual.ok(), manual.ok() ? "" : await manual.text()).toBeTruthy();
+    const replacement = await readRecord(updateId);
+    expect(replacement).toMatchObject({ predecessorId: publicationId, status: "verified_manual", evidenceGrade: "manual" });
+    expect(replacement.effectiveAt).toEqual(expect.any(String));
+    expect(replacement.approvalId).toBe(original.approvalId);
+    expect(await readRecord(publicationId)).toMatchObject({ supersededBy: updateId, effectiveAt: original.effectiveAt, evidenceGrade: "public" });
+    for (const locale of ["zh-CN", "en"] as const) {
+      await context.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+      for (const width of [375, 768, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(updateHref);
+        await expect(page.getByText("verified_manual", { exact: true })).toBeVisible();
+        await expect(page.getByText(replacement.effectiveAt, { exact: true })).toBeVisible();
+        await expect(page.getByText(replacement.approvalId, { exact: true })).toBeVisible();
+        const previous = page.getByRole("link", { name: copy[locale].predecessor, exact: true });
+        await expect(previous).toHaveAttribute("href", href);
+        await expectNoOverflow(page);
+        if (width === 375) {
+          await expect(previous).toBeInViewport();
+          await page.screenshot({ path: `${replacementShots}/successor-${locale}-375.png` });
+          await activateFromKeyboard(page, previous);
+          await expect(page).toHaveURL(href);
+          const next = page.getByRole("link", { name: copy[locale].successor, exact: true });
+          await expect(next).toHaveAttribute("href", updateHref);
+          await expect(next).toBeInViewport();
+          await expect(page.getByText(original.effectiveAt, { exact: true })).toBeVisible();
+          await page.screenshot({ path: `${replacementShots}/predecessor-${locale}-375.png` });
+        }
+      }
+    }
+    console.log("#171 browser/API fixture", JSON.stringify({
+      previous: publicationId.slice(0, 8), successor: updateId.slice(0, 8), approval: original.approvalId.slice(0, 8),
+      before: { supersededBy: null, successorStatus: "submitted", successorEffectiveAt: null },
+      after: { previousEffectiveAt: original.effectiveAt, successorEffectiveAt: replacement.effectiveAt, grades: ["public", "manual"] },
+    }));
   } finally {
     await outsider.close();
-    for (const { userId, email } of accounts) {
+    for (const account of accounts) {
       execFileSync(process.execPath, [
         "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", "cleanup",
-        JSON.stringify({ userId, email }),
+        JSON.stringify(account),
       ], { stdio: "inherit" });
     }
   }

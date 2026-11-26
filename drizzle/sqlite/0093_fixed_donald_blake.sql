@@ -1,0 +1,1 @@
+ALTER TABLE `content_publication` ADD `predecessor_id` text;

@@ -1072,6 +1072,7 @@ CREATE TABLE "content_publication" (
 	"operation_id" text NOT NULL,
 	"created_at" text NOT NULL,
 	"updated_at" text NOT NULL,
+	"predecessor_id" text,
 	CONSTRAINT "content_publication_state_check" CHECK ("content_publication"."status" in (
       'prepared', 'submitted', 'draft_only', 'pending_check', 'verified_public',
       'verified_manual', 'mismatch', 'access_limited', 'removed')

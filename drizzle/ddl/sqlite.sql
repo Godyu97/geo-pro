@@ -1250,6 +1250,7 @@ CREATE TABLE `content_publication` (
 	`operation_id` text NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
+	`predecessor_id` text,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`content_version_id`) REFERENCES `content_version`(`id`) ON UPDATE no action ON DELETE restrict,
 	FOREIGN KEY (`approval_id`) REFERENCES `content_approval`(`id`) ON UPDATE no action ON DELETE restrict,

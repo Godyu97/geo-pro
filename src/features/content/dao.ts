@@ -192,6 +192,7 @@ const publicationRow = z.object({
   effectiveAt: z.iso.datetime({ precision: 3 }).nullable(),
   evidenceGrade: publicationEvidenceGradeSchema.nullable(),
   supersededBy: brandIdSchema.nullable(),
+  predecessorId: brandIdSchema.nullable(),
   operationId: brandIdSchema,
   createdAt: z.iso.datetime({ precision: 3 }),
   updatedAt: z.iso.datetime({ precision: 3 }),
@@ -381,7 +382,7 @@ const publicationColumns = `id, brand_id AS "brandId", owner_id AS "ownerId", co
   target_account AS "targetAccount", page_url AS "pageUrl", publisher_id AS "publisherId",
   claimed_published_at AS "claimedPublishedAt", channel_declaration AS "channelDeclaration",
   status, effective_at AS "effectiveAt", evidence_grade AS "evidenceGrade",
-  superseded_by AS "supersededBy", operation_id AS "operationId",
+  superseded_by AS "supersededBy", predecessor_id AS "predecessorId", operation_id AS "operationId",
   created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 const publicationCheckColumns = `id, publication_id AS "publicationId", brand_id AS "brandId", owner_id AS "ownerId",
@@ -763,6 +764,16 @@ export class ContentDao {
     return rows.map((row) => approvalRow.parse(row));
   }
 
+  async hasPinnedPublicationApproval(publication: PublicationRow) {
+    const [row] = await this.query(
+      `SELECT id FROM content_approval WHERE id = ? AND owner_id = ? AND brand_id = ?
+         AND content_version_id = ? AND content_fingerprint = ? AND decision = 'approved'`,
+      [publication.approvalId, publication.ownerId, publication.brandId,
+        publication.contentVersionId, publication.contentFingerprint],
+    );
+    return Boolean(row);
+  }
+
   async listApprovalsForVersions(ownerId: string, versionIds: string[]) {
     if (versionIds.length === 0) return [];
     const rows = await this.query(
@@ -928,17 +939,17 @@ export class ContentDao {
     );
   }
 
-  async insertPublication(row: PublicationRow) {
+  async insertPublication(row: Omit<PublicationRow, "predecessorId"> & { predecessorId?: PublicationRow["predecessorId"] }) {
     await this.query(
       `INSERT INTO content_publication (
         id, brand_id, owner_id, content_version_id, approval_id, content_fingerprint,
         target_account, page_url, publisher_id, claimed_published_at, channel_declaration,
-        status, effective_at, evidence_grade, superseded_by, operation_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        status, effective_at, evidence_grade, superseded_by, predecessor_id, operation_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.id, row.brandId, row.ownerId, row.contentVersionId, row.approvalId, row.contentFingerprint,
         row.targetAccount, row.pageUrl, row.publisherId, row.claimedPublishedAt, row.channelDeclaration,
-        row.status, row.effectiveAt, row.evidenceGrade, row.supersededBy, row.operationId,
+        row.status, row.effectiveAt, row.evidenceGrade, row.supersededBy, row.predecessorId ?? null, row.operationId,
         row.createdAt, row.updatedAt,
       ],
     );
@@ -989,6 +1000,17 @@ export class ContentDao {
     return z.array(publicationRow).parse(rows);
   }
 
+  async listPublicationPredecessors(ownerId: string, brandId: string, limit: number) {
+    const rows = await this.query(
+      `SELECT id, target_account AS "targetAccount", page_url AS "pageUrl", effective_at AS "effectiveAt"
+       FROM content_publication WHERE owner_id = ? AND brand_id = ?
+         AND effective_at IS NOT NULL AND superseded_by IS NULL
+       ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      [ownerId, brandId, limit],
+    );
+    return z.array(publicationRow.pick({ id: true, targetAccount: true, pageUrl: true, effectiveAt: true })).parse(rows);
+  }
+
   async updatePublicationOutcome(
     row: Pick<PublicationRow, "id" | "status" | "effectiveAt" | "evidenceGrade" | "updatedAt">,
   ) {
@@ -1000,12 +1022,16 @@ export class ContentDao {
     );
   }
 
-  async markPublicationsSuperseded(ownerId: string, versionId: string, successorId: string, updatedAt: string) {
-    await this.query(
+  async markPublicationSuperseded(publication: PublicationRow, predecessorId: string, updatedAt: string) {
+    const [row] = await this.query(
       `UPDATE content_publication SET superseded_by = ?, updated_at = ?
-       WHERE owner_id = ? AND content_version_id = ? AND id <> ? AND superseded_by IS NULL`,
-      [successorId, updatedAt, ownerId, versionId, successorId],
+       WHERE owner_id = ? AND brand_id = ? AND id = ? AND target_account = ? AND page_url = ?
+         AND effective_at IS NOT NULL AND superseded_by IS NULL
+       RETURNING id`,
+      [publication.id, updatedAt, publication.ownerId, publication.brandId, predecessorId,
+        publication.targetAccount, publication.pageUrl],
     );
+    if (!row) throw new Error("Publication predecessor changed within the owner transaction");
   }
 
   async insertPublicationCheck(row: PublicationCheckRow) {

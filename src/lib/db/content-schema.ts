@@ -297,6 +297,7 @@ export const contentPublication = pgTable("content_publication", {
   operationId: text("operation_id").notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  predecessorId: text("predecessor_id"),
 }, (table) => [
   foreignKey({
     name: "content_publication_version_fk",

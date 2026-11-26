@@ -31,6 +31,7 @@ const evidenceErrorCodes = [
   "NOT_FOUND",
   "SERVICE_UNAVAILABLE",
   "PUBLICATION_CONFLICT",
+  "PUBLICATION_PREDECESSOR_CONFLICT",
   "APPROVAL_REQUIRED",
   "APPROVAL_INVALID",
   "SEPARATION",
@@ -200,7 +201,9 @@ export default async function ContentPublicationPage({
 }) {
   const session = await requireSession();
   const { publicationId } = await params;
-  const evidenceError = evidenceErrorCode((await searchParams).evidenceError);
+  const query = await searchParams;
+  const evidenceError = evidenceErrorCode(query.evidenceError);
+  const verificationError = evidenceErrorCode(query.verificationError);
   const t = await getTranslator("content");
   const liveFetchEnabled = isPublicPageFetchEnabled();
   const href = `/dashboard/content/publications/${publicationId}`;
@@ -234,6 +237,14 @@ export default async function ContentPublicationPage({
   const status = publication.status;
   const action = headerAction(status, readOnly);
   const links = [
+    ...(publication.predecessorId ? [{
+      href: `/dashboard/content/publications/${publication.predecessorId}`,
+      label: t(publication.effectiveAt ? "publicationPredecessor" : "publicationPredecessorPending"),
+    }] : []),
+    ...(publication.supersededBy ? [{
+      href: `/dashboard/content/publications/${publication.supersededBy}`,
+      label: t("publicationSuccessor"),
+    }] : []),
     { href: `/dashboard/content/versions/${version.id}`, label: t("backToVersion") },
     ...back,
     { href: `/dashboard/brands/${publication.brandId}/facts`, label: t("brandFactsLink") },
@@ -260,6 +271,7 @@ export default async function ContentPublicationPage({
       relatedLabel={t("relatedEntries")}
       related={links}
     >
+      {verificationError ? <p role="alert" className="break-words text-sm text-destructive">{t(verificationError)}</p> : null}
       <section className="min-w-0 space-y-2 rounded-2xl border bg-card p-5 text-sm">
         <p>{t("pageUrl")}: <span className="[overflow-wrap:anywhere]">{publication.pageUrl}</span></p>
         <p>{t("targetAccount")}: <span className="[overflow-wrap:anywhere]">{publication.targetAccount}</span></p>
@@ -268,6 +280,7 @@ export default async function ContentPublicationPage({
         <p>{t("evidenceGrade")}: <span>{publication.evidenceGrade ?? t("none")}</span></p>
         <p>{t("channelDeclaration")}: <span className="[overflow-wrap:anywhere]">{publication.channelDeclaration}</span></p>
         <p>{t("contentVersion")}: <span className="[overflow-wrap:anywhere]">{version.title}</span></p>
+        <p>{t("publicationApproval")}: <span className="[overflow-wrap:anywhere]">{publication.approvalId}</span></p>
       </section>
 
       <section className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">

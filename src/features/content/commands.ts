@@ -45,7 +45,7 @@ import {
   type UpdateVariantInput,
   type VerifyPublicationInput,
 } from "./contracts.ts";
-import { ContentDao, type AssetRow, type BriefVersionRow, type ChannelVariantRow, type ContentVersionRow, type PackageRow, type UnitRow } from "./dao.ts";
+import { ContentDao, type AssetRow, type BriefVersionRow, type ChannelVariantRow, type ContentVersionRow, type PackageRow, type PublicationRow, type UnitRow } from "./dao.ts";
 import { ContentMaintenanceAbort, openLinkedPublicationMaintenance } from "./maintenance.ts";
 import { ChannelProfileDao } from "../channel-variants/dao.ts";
 import {
@@ -941,11 +941,14 @@ export async function readContentVersion(
   // Frozen or foreign brands never expose approvals or package metadata.
   const brand = await new BrandDao(db).owned(ownerId, version.brandId);
   if (!brand) return denied("NOT_FOUND");
-  const [approvals, packageRows, assets, publications] = await Promise.all([
+  const [approvals, packageRows, assets, publications, publicationPredecessors] = await Promise.all([
     dao.listApprovals(ownerId, version.id),
     dao.listPackagesForVersion(ownerId, version.id),
     dao.getAssetsByIds(ownerId, version.brandId, parseIds(version.imageAssetIdsJson)),
     dao.listPublicationsForVersion(ownerId, version.id),
+    actorId === ownerId && brand.status === "active" && version.status === "approved"
+      ? dao.listPublicationPredecessors(ownerId, version.brandId, 30)
+      : [],
   ]);
   const currentFingerprint = versionFingerprint(version);
   return {
@@ -954,6 +957,7 @@ export async function readContentVersion(
     packages: packageRows.map(summarizePackage),
     assets,
     publications,
+    publicationPredecessors,
     currentFingerprint,
     approvalCurrent: version.status === "approved"
       && approvals.some((item) => item.decision === "approved" && item.contentFingerprint === currentFingerprint),
@@ -1946,21 +1950,34 @@ async function observePublicationPage(
   }
 }
 
+async function eligiblePublicationPredecessor(
+  dao: ContentDao,
+  ownerId: string,
+  predecessorId: string,
+  target: Pick<PublicationRow, "brandId" | "targetAccount" | "pageUrl">,
+) {
+  const previous = await dao.getPublication(ownerId, predecessorId);
+  return Boolean(previous?.effectiveAt && previous.supersededBy === null
+    && previous.brandId === target.brandId && previous.targetAccount === target.targetAccount
+    && previous.pageUrl === target.pageUrl);
+}
+
+async function publicationApprovalCurrent(dao: ContentDao, publication: PublicationRow, version: ContentVersionRow) {
+  return versionFingerprint(version) === publication.contentFingerprint
+    && await dao.hasPinnedPublicationApproval(publication);
+}
+
 async function applyPublicCheck(
   dao: ContentDao,
   db: TransactionConnection,
-  ownerId: string,
-  publicationId: string,
-  brandId: string,
+  publication: PublicationRow,
   version: ContentVersionRow,
   fixture: FixturePage | undefined,
-  pageUrl: string,
   checkedAt: string,
   fetchPage: PublicPageFetcher,
 ) {
-  const publication = await dao.getPublication(ownerId, publicationId);
-  if (!publication) return null;
-  const observed = await observePublicationPage(fixture, pageUrl, fetchPage);
+  const { id: publicationId, brandId, ownerId } = publication;
+  const observed = await observePublicationPage(fixture, publication.pageUrl, fetchPage);
   const checkId = randomUUID();
   if (!observed.ok) {
     const keep = preservedOnFetchFailure.has(publication.status);
@@ -2042,6 +2059,9 @@ async function applyPublicCheck(
     evidenceGrade,
     updatedAt: checkedAt,
   });
+  if (result.setsEffectiveAt && publication.predecessorId) {
+    await dao.markPublicationSuperseded(publication, publication.predecessorId, checkedAt);
+  }
   if (result.status === "mismatch") {
     await dao.insertPublicationAction({
       id: randomUUID(),
@@ -2079,7 +2099,9 @@ export async function submitPublication(
     if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
     const dao = new ContentDao(transaction);
     const existing = await dao.getPublicationByOperation(ownerId, input.brandId, input.operationId);
+    const predecessorId = input.predecessorId ?? null;
     if (existing) {
+      if (existing.predecessorId !== predecessorId) return denied("OPERATION_CONFLICT");
       return {
         publicationId: existing.id,
         status: existing.status,
@@ -2098,10 +2120,13 @@ export async function submitPublication(
     const approval = (await dao.listApprovals(ownerId, version.id))
       .find((item) => item.decision === "approved" && item.contentFingerprint === fingerprint);
     if (!approval) return denied("APPROVAL_INVALID");
+    if (predecessorId && !await eligiblePublicationPredecessor(dao, ownerId, predecessorId, input)) {
+      return denied("PUBLICATION_PREDECESSOR_CONFLICT");
+    }
 
     const now = clock();
     const publicationId = randomUUID();
-    await dao.insertPublication({
+    const publication: PublicationRow = {
       id: publicationId,
       brandId: input.brandId,
       ownerId,
@@ -2117,11 +2142,12 @@ export async function submitPublication(
       effectiveAt: null,
       evidenceGrade: null,
       supersededBy: null,
+      predecessorId,
       operationId: input.operationId,
       createdAt: now,
       updatedAt: now,
-    });
-    await dao.markPublicationsSuperseded(ownerId, version.id, publicationId, now);
+    };
+    await dao.insertPublication(publication);
 
     if (!input.fixturePage) {
       return {
@@ -2135,10 +2161,8 @@ export async function submitPublication(
     }
 
     const checked = await applyPublicCheck(
-      dao, transaction, ownerId, publicationId, input.brandId, version, input.fixturePage, input.pageUrl, now,
-      fetchPublicPage,
+      dao, transaction, publication, version, input.fixturePage, now, fetchPublicPage,
     );
-    if (!checked) return denied("NOT_FOUND");
     return { ...checked, replayed: false };
   }));
 }
@@ -2159,13 +2183,15 @@ export async function verifyPublication(
     const version = await ownedVersion(dao, ownerId, input.brandId, publication.contentVersionId);
     if (!version) return denied("NOT_FOUND");
     if (version.status !== "approved") return denied("APPROVAL_REQUIRED");
-    if (versionFingerprint(version) !== publication.contentFingerprint) return denied("APPROVAL_INVALID");
+    if (!await publicationApprovalCurrent(dao, publication, version)) return denied("APPROVAL_INVALID");
+    if (!publication.effectiveAt && publication.predecessorId
+      && !await eligiblePublicationPredecessor(dao, ownerId, publication.predecessorId, publication)) {
+      return denied("PUBLICATION_PREDECESSOR_CONFLICT");
+    }
 
     const checked = await applyPublicCheck(
-      dao, transaction, ownerId, publication.id, input.brandId, version, input.fixturePage, publication.pageUrl, clock(),
-      fetchPage,
+      dao, transaction, publication, version, input.fixturePage, clock(), fetchPage,
     );
-    if (!checked) return denied("NOT_FOUND");
     return { ...checked, replayed: false };
   }));
 }
@@ -2199,7 +2225,11 @@ export async function submitManualEvidence(
     const version = await ownedVersion(dao, ownerId, input.brandId, publication.contentVersionId);
     if (!version) return denied("NOT_FOUND");
     if (version.status !== "approved") return denied("APPROVAL_REQUIRED");
-    if (versionFingerprint(version) !== publication.contentFingerprint) return denied("APPROVAL_INVALID");
+    if (!await publicationApprovalCurrent(dao, publication, version)) return denied("APPROVAL_INVALID");
+    if (!publication.effectiveAt && publication.predecessorId
+      && !await eligiblePublicationPredecessor(dao, ownerId, publication.predecessorId, publication)) {
+      return denied("PUBLICATION_PREDECESSOR_CONFLICT");
+    }
 
     const now = clock();
     const separated = await rejectIfSeparated(transaction, {
@@ -2315,6 +2345,9 @@ export async function submitManualEvidence(
       evidenceGrade: result.evidenceGrade,
       updatedAt: now,
     });
+    if (result.setsEffectiveAt && publication.predecessorId) {
+      await dao.markPublicationSuperseded(publication, publication.predecessorId, now);
+    }
     if (result.status === "mismatch") {
       await dao.insertPublicationAction({
         id: randomUUID(),

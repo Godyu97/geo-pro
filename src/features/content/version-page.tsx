@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -24,6 +25,9 @@ export async function generateMetadata() {
 
 const assetErrorCodes = ["ASSET_TYPE_REJECTED", "ASSET_TOO_LARGE", "ASSET_UNREVIEWED", "INVALID_INPUT", "NOT_FOUND", "SERVICE_UNAVAILABLE"] as const;
 const reviewErrorCodes = ["SEPARATION", "DUTY", "FACT_INVALID", "INVALID_INPUT", "OPERATION_CONFLICT", "NOT_FOUND"] as const;
+const publicationErrorCodes = [
+  "INVALID_INPUT", "NOT_FOUND", "APPROVAL_REQUIRED", "APPROVAL_INVALID", "OPERATION_CONFLICT", "PUBLICATION_PREDECESSOR_CONFLICT",
+] as const;
 
 function assetErrorCode(value: string | string[] | undefined) {
   const code = Array.isArray(value) ? value[0] : value;
@@ -169,7 +173,7 @@ export default async function ContentVersionPage({
   }
 
   const db = getConnection();
-  const { version, approvals, packages, assets, publications, approvalCurrent, readOnly } = detail;
+  const { version, approvals, packages, assets, publications, publicationPredecessors, approvalCurrent, readOnly } = detail;
   const operationId = typeof query.op === "string" ? query.op : null;
   const exportError = exportUiError(query.exportError);
   const exported = operationId
@@ -179,6 +183,7 @@ export default async function ContentVersionPage({
   const canEdit = !readOnly;
   const assetError = assetErrorCode(query.assetError);
   const reviewError = reviewErrorCode(query.reviewError);
+  const publicationError = publicationErrorCodes.find((code) => code === query.publicationError);
   const status = version.status;
   const headerPreflight = canEdit && status === "approved" && approvalCurrent;
   const links = [
@@ -460,10 +465,14 @@ export default async function ContentVersionPage({
             ))}
           </ul>
         )}
-        {canEdit && version.status === "approved" && approvalCurrent ? (
-          <form action={submitPublicationAction} className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2">
+        {canEdit && version.ownerId === session.user.id && version.status === "approved" && approvalCurrent ? (
+          <form id="publication-backfill" action={submitPublicationAction} className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2">
             <input type="hidden" name="brandId" value={version.brandId} />
             <input type="hidden" name="versionId" value={version.id} />
+            <input type="hidden" name="operationId" value={randomUUID()} />
+            {publicationError ? (
+              <p role="alert" className="break-words text-sm text-destructive sm:col-span-2">{t(publicationError)}</p>
+            ) : null}
             <label className="block min-w-0 text-sm sm:col-span-2">
               <span className="mb-1 block text-muted-foreground">{t("pageUrl")}</span>
               <input name="pageUrl" required placeholder="https://example.com/published" className={inputClass} />
@@ -476,6 +485,23 @@ export default async function ContentVersionPage({
               <span className="mb-1 block text-muted-foreground">{t("claimedPublishedAt")}</span>
               <input name="claimedPublishedAt" required placeholder="2026-11-20T10:00:00.000Z" className={inputClass} />
             </label>
+            <div className="min-w-0 space-y-1 text-sm sm:col-span-2">
+              <label htmlFor="publication-predecessor" className="block text-muted-foreground">{t("publicationPredecessorField")}</label>
+              <input
+                id="publication-predecessor"
+                name="predecessorId"
+                list="publication-predecessors"
+                maxLength={36}
+                aria-describedby="publication-predecessor-hint"
+                className={inputClass}
+              />
+              <datalist id="publication-predecessors">
+                {publicationPredecessors.map((item) => (
+                  <option key={item.id} value={item.id} label={`${item.targetAccount} · ${item.pageUrl} · ${item.effectiveAt}`} />
+                ))}
+              </datalist>
+              <p id="publication-predecessor-hint" className="break-words text-muted-foreground">{t("publicationPredecessorHint")}</p>
+            </div>
             <label className="block min-w-0 text-sm sm:col-span-2">
               <span className="mb-1 block text-muted-foreground">{t("channelDeclaration")}</span>
               <input name="channelDeclaration" required className={inputClass} />
