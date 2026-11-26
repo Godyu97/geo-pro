@@ -5,7 +5,7 @@
 ## Step 1：Understand（理解需求）
 
 - 阅读用户任务书或指定的 Issue，明确目标、边界、非目标（Out-of-Scope）与验收标准。
-- 核对 [交付进度](../../docs/tasks/delivery-progress.md) 和目标阶段任务。Agent 在开发环境执行软件验收与正式试点，阶段结果按对应门禁登记。
+- 核对 [交付进度](../../docs/tasks/delivery-progress.md) 和目标阶段任务。先选[二期模块计划](../../docs/tasks/phase-2.md)中用户尚不能完成的动作，覆盖一个模块首版后转向下一模块。开发环境实测结果直接登记为业务验收。
 
 ## Step 2：Discover（按需发现）
 

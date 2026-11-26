@@ -1,5 +1,7 @@
 # GeoPro Agent 统一开发约定
 
+二期按[用户路径与模块首版计划](docs/tasks/phase-2.md)开发。每个模块先让用户完成一件事并进入下一步，优先补全尚不能使用的模块。账号采用 `admin` / `user`，用户按 group 和品牌动作授权。权限细则以 [PRD](docs/02-产品需求文档-PRD.md) 为准。
+
 GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、PostgreSQL / SQLite3、Drizzle ORM 与 Better Auth 的 AI GEO 监测与优化平台。Phase 0 已完成，M0 已有从品牌工作台到证据、内容交付和复测快照的软件路径，M1/M2 也已交付多项软件切片。正式品牌入口及 M0–M2 真实阶段验收仍待核验。按授权和软件依赖推进，当前状态以 [交付进度](docs/tasks/delivery-progress.md) 与阶段任务记录为准。
 
 已交付的业务 DAO 按任务适配 SQLite3/PostgreSQL，证据概览和支持定位使用 Redis 或隔离测试的 memory 缓存。查询优先批量执行，按查询路径审查索引并随 Schema/migration 更新全量 DDL。 [数据访问与缓存工程约束](docs/architecture/data-access.md) · [数据库部署说明](docs/architecture/database-deployment.md)
@@ -25,8 +27,7 @@ GeoPro（`geo-pro`）是基于 Next.js App Router、TypeScript（`strict`）、P
 - **显式服务配置**：开发和应用启动须指定数据库、Redis、S3 兼容文件存储与认证配置。复用可用的开发服务，`pnpm env:check` 核对实际连通与权限。仅双库隔离验证使用显式设置的 `GEO_DUAL_DB_URL`。 [环境准备](README.md#local-development)
 - **AI 接入规范（已就绪）**：所有 AI 模型接入均须支持 OpenAI **Responses API** 标准（`POST ${OPENAI_BASE_URL}/responses`），统一使用服务端模块 [src/lib/ai/responses.ts](src/lib/ai/responses.ts)；本地开发连接参数与模型名在 gitignored 的 `.env.local` 中通过 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`（及官方采样联调配置 `GEO_OFFICIAL_SAMPLING_*`）提供，可直接推进 AI 相关功能开发；严禁将真实密钥写入源码、`.env.example`、文档或 `NEXT_PUBLIC_*`，自动化单测须使用回环 mock。
 - **邮件功能长期 Mock（永远成功，暂不接入）**：项目已约定所有邮件发送与邮箱验证功能长期采用 Mock 永远成功策略，暂不接入真实邮件网关，**任何需求开发与 Issue 推进不得因缺少邮件网关或真实发信而阻塞**。本地与开发联调保持 `.env.local` 中 `GEO_AUTH_MAIL_MOCK=true`（跳过外发邮件网关与限流，直接 202 `accepted` 并记录安全 mock 日志）与 `GEO_AUTH_EMAIL_VERIFIED_MOCK=true`（已登录/存在的账号邮箱校验按已验证放行）；隔离安全测试脚本（如 `verify:account-email`、`verify:brands`、`test:monitoring`、`test:brands`）在显式设为 `false` 时继续验证严格契约。
-- **Agent 负责验收与正式试点**。所有 Issue 由 Agent 自行在已配置的开发环境运行检查、操作开发数据库并记录实际证据。具备授权数据与服务时，由 Agent 执行正式试点并核验 `T-M0-GATE` / `T-M1-GATE` / `T-M2-GATE`。缺少软件前置、授权数据、可用通道、可信费用上限或未到观察窗口时，记录影响的验收项，继续可独立完成的软件工作。生产开放按现有权限与发布约定执行。 [Issue 生命周期](.agents/workflows/issue-lifecycle.md)
-- **品牌与 AI 监测真实联调**：相关增量在开发环境用已授权的真实品牌输入、开发库和真实服务验证，单测仍用隔离库与回环 mock。记录运行条件、脱敏证据和实际结果。 [下一阶段计划](docs/tasks/brand-monitoring-next.md#dev-live-data)
+- **开发环境验收**。Agent 从用户入口使用现有开发账号、真实品牌、数据库和已配置服务完成操作、回读结果，直接作为该功能的正式业务验收。费用仅在实际调用前核对；外部发布按对应授权执行。缺少的外部条件只影响具体动作。自动化回归和破坏性测试沿用隔离环境，开发邮箱沿用长期 Mock。 [Issue 生命周期](.agents/workflows/issue-lifecycle.md)
 
 ## 治理与上下文路由（渐进式披露）
 

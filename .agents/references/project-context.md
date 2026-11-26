@@ -1,6 +1,8 @@
 # 项目事实
 
-2026-11-23。技术栈以 [package.json](../../package.json)、[锁文件](../../pnpm-lock.yaml) 与实际源码为准。产品范围和验收进度见 [交付进度](../../docs/tasks/delivery-progress.md)。
+2026-11-26。技术栈以 [package.json](../../package.json)、[锁文件](../../pnpm-lock.yaml) 与实际源码为准。产品范围和验收进度见 [交付进度](../../docs/tasks/delivery-progress.md)。
+
+二期开发顺序与 GitHub 工单以[模块首版计划](../../docs/tasks/phase-2.md)为准。当前代码通过 `src/features/team-access/brand-scope.ts` 核对品牌负责人和成员授权。目标平台角色是 admin 和 user，group 聚合用户、品牌和操作权限。现有维护授权保持独立，新的跨组管理员及普通用户数据迁移由 #188 和 #191 交付。
 
 ## 技术栈
 
@@ -22,7 +24,7 @@
 
 - 公开路由在 `src/app/`，首页 `/` 根据服务端会话分流，`/login` 提供邮箱/密码入口，`/account-access` 处理验证和找回。`GET /api/health` 仅返回存活状态。
 - 工作台布局和各敏感页、Route Handler 分别验证会话。账号设置、本人导出和维护授权各自核对权限。维护支持只读脱敏故障元信息。 [维护说明](../../docs/architecture/maintenance-access.md)
-- `brands` 管理建档、实体版本、归档、冻结和恢复。`brand-facts` 与 `prompts` 使用现有隔离入口。正式建档使用试点准入证明。 [品牌联调计划](../../docs/tasks/brand-monitoring-next.md)
+- `brands` 管理建档、实体版本、归档、冻结和恢复。`brand-facts` 与 `prompts` 已有开发品牌的资料及冻结题集入口。一期正式建档使用试点准入证明，#189 跟踪普通用户自助建档。 [品牌联调计划](../../docs/tasks/brand-monitoring-next.md)
 - `monitoring` 与 `evidence` 管理台账、协议、预算与运行、官方端口、双轨证据和下钻。运行控制已接功能 mock，正式开发执行和证据联动见下一阶段计划。周期计划、站内告警、竞品与来源使用各自工作台页。
 - `content`、`optimization`、`reports` 分别管理诊断、独立审核、发布核验与报告。团队授权、外部连接、商业和助理采用各领域服务与独立授权校验。各已交付切片及验证缺口由 [交付进度](../../docs/tasks/delivery-progress.md) 维护。
 - `src/lib/` 封装数据库、Auth、AI、缓存、私有存储、公开页只读抓取与多语言。`drizzle/` 包含各方言 Schema 生成结果及 DDL。 [数据访问约束](../../docs/architecture/data-access.md) · [数据库部署](../../docs/architecture/database-deployment.md) · [多语言](../../docs/architecture/i18n.md)
@@ -42,4 +44,4 @@
 | `pnpm check:i18n`、`pnpm test:i18n`、`pnpm test:e2e` | 消息、基础多语言与隔离浏览器检查 |
 | `python docs/tools/validate_docs.py` | 文档链接、产品映射、验收 ID 和指标样例验证 |
 
-精确命令与执行条件见 [质量门禁](../governance/quality-gates.md)。开发环境真实品牌与采样依 [联调计划](../../docs/tasks/brand-monitoring-next.md#dev-live-data) 留证。正式开放、真实通道和试点验收使用 [运行手册](../../docs/operations/m0-runbook.md) 与对应阶段记录。
+精确命令与执行条件见 [质量门禁](../governance/quality-gates.md)。开发环境真实品牌与采样依 [联调计划](../../docs/tasks/brand-monitoring-next.md#dev-live-data) 留证。开发环境业务验收见[二期计划](../../docs/tasks/phase-2.md)。生产开放参考 [运行手册](../../docs/operations/m0-runbook.md) 与对应阶段记录。
