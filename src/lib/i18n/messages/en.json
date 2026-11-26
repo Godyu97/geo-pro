@@ -2913,6 +2913,7 @@
     "syncHeading": "Sync cursor",
     "syncCursorEmpty": "Not advanced",
     "coverageIncomplete": "This sync range is incomplete. Saved inquiries keep their count, and missing events are not invented.",
+    "missingHistoricalReceipts": "Historical sync receipts before this check was enabled are missing, so earlier cursor boundaries cannot be verified. Sync can continue from the current cursor.",
     "syncStoppedNotice": "Sync is stopped. Saved events and leads remain available, and later pulls do not write new rows.",
     "sourcesHeading": "Sources",
     "sourcesEmpty": "No cross-source labels yet.",
@@ -3374,6 +3375,7 @@
     "syncCursor": "Sync cursor",
     "syncCursorEmpty": "Not advanced",
     "coverageIncomplete": "This sync range is incomplete. Saved events keep their count, and missing events are not invented.",
+    "missingHistoricalReceipts": "Historical sync receipts before this check was enabled are missing, so earlier cursors cannot be verified. You can continue from the current cursor.",
     "syncStoppedNotice": "Sync is stopped. Saved events and leads remain available, and later pulls do not write new rows.",
     "sourcesHeading": "Cross-source labels",
     "sourcesEmpty": "No cross-source labels yet.",
@@ -3397,7 +3399,7 @@
     "NOT_FOUND": "That brand or data connection was not found.",
     "INVALID_INPUT": "Check the display name and field names. Names stay in submission order and cannot contain a password or access token.",
     "PULL_BLOCKED": "The connection is still in preview, so the pull was refused.",
-    "CONFLICT": "This approval or pull was not saved. Reload and try again.",
+    "CONFLICT": "This connection state or sync cursor changed, or the payload conflicts with a processed batch, so nothing was saved. Reload or check the current cursor and try again.",
     "SERVICE_UNAVAILABLE": "Data connections are temporarily unavailable. Try again shortly."
   },
   "syncAuthorizations": {
@@ -3735,6 +3737,7 @@
     "syncHeading": "Sync cursor",
     "syncCursorEmpty": "Not advanced",
     "coverageIncomplete": "This sync range is incomplete. Saved events keep their count, and missing events are not invented.",
+    "missingHistoricalReceipts": "Historical sync receipts before this check was enabled are missing, so earlier cursor boundaries cannot be verified. Sync can continue from the current cursor.",
     "syncStoppedNotice": "Sync is stopped. Saved events and leads remain available, and later pulls do not write new rows.",
     "sourcesHeading": "Cross-source labels",
     "sourcesEmpty": "No cross-source labels yet.",

@@ -8,7 +8,7 @@ import { writeBusinessLeads } from "../business-feedback/commands.ts";
 import { ConnectorEventDao } from "./event-dao.ts";
 import { writeConnectorEvents } from "./event-commands.ts";
 import { SyncAuthorizationDao } from "./revocation-dao.ts";
-import { previewSync } from "./sync.ts";
+import { previewSync, syncBatchPayloadDigest } from "./sync.ts";
 import {
   syncDataConnectionSchema,
   type DataConnectionList,
@@ -16,7 +16,7 @@ import {
   type DataConnectionView,
   type RegisterDataConnectionInput,
 } from "./contracts.ts";
-import { DataConnectionDao, type DataConnectionRecord } from "./dao.ts";
+import { DataConnectionDao, isMissingHistoricalReceipts, type DataConnectionRecord } from "./dao.ts";
 
 type Clock = () => string;
 type CommandResult = { connection: DataConnectionView } | { error: "NOT_FOUND" | "PULL_BLOCKED" | "CONFLICT" };
@@ -29,7 +29,11 @@ function sameFields(left: readonly string[], right: readonly string[]) {
   return left.length === right.length && left.every((name, index) => name === right[index]);
 }
 
-function toView(row: DataConnectionRecord, sources: readonly { source: DataConnectionSourceName }[] = []): DataConnectionView {
+function toView(
+  row: DataConnectionRecord,
+  sources: readonly { source: DataConnectionSourceName }[] = [],
+  missingHistoricalReceipts = false,
+): DataConnectionView {
   const preview = previewSync({ approved: row.status === "approved", fieldNames: row.fieldNames });
   return {
     id: row.id,
@@ -42,6 +46,7 @@ function toView(row: DataConnectionRecord, sources: readonly { source: DataConne
     syncCursor: row.syncCursor,
     coverageComplete: row.coverageComplete === null ? null : row.coverageComplete === 1,
     syncStopped: row.syncStopped === 1,
+    missingHistoricalReceipts,
     sources: sources.map((source) => ({ source: source.source })),
     preview,
     createdAt: row.createdAt,
@@ -70,6 +75,7 @@ export async function listDataConnections(db: DatabaseConnection, ownerId: strin
     const dao = new DataConnectionDao(tx);
     const brands = await dao.activeBrandIds(ownerId);
     const connections = await dao.connectionsForOwner(ownerId);
+    const receiptStates = await dao.receiptStatesForConnections(ownerId, connections);
     const sourceRows = await new ConnectorEventDao(tx).sourcesByBrand(ownerId, [...new Set(connections.map((row) => row.brandId))]);
     const sourcesByBrand = new Map<string, { source: DataConnectionSourceName }[]>();
     for (const row of sourceRows) {
@@ -77,7 +83,14 @@ export async function listDataConnections(db: DatabaseConnection, ownerId: strin
       list.push({ source: row.source });
       sourcesByBrand.set(row.brandId, list);
     }
-    return { brands, connections: connections.map((row) => toView(row, sourcesByBrand.get(row.brandId) ?? [])) };
+    return {
+      brands,
+      connections: connections.map((row) => toView(
+        row,
+        sourcesByBrand.get(row.brandId) ?? [],
+        isMissingHistoricalReceipts(row.syncCursor, receiptStates.get(row.id)),
+      )),
+    };
   });
 }
 
@@ -157,11 +170,27 @@ export async function pullDataConnection(
     if (!preview.pull || current.status !== "approved" || !sameFields(preview.fields, current.fieldNames)) {
       return { error: "PULL_BLOCKED" as const };
     }
-    if (current.pullAttemptedAt) return { connection: toView(current) };
+    if (current.pullAttemptedAt) {
+      const receiptStates = await dao.receiptStatesForConnections(ownerId, [current]);
+      return {
+        connection: toView(
+          current,
+          await sourceLabels(tx, ownerId, current.brandId),
+          isMissingHistoricalReceipts(current.syncCursor, receiptStates.get(current.id)),
+        ),
+      };
+    }
     const now = clock();
     const saved = await dao.recordPull(ownerId, current.id, now);
     if (!saved) return { error: "CONFLICT" as const };
-    return { connection: toView({ ...current, pullAttemptedAt: now, updatedAt: now }) };
+    const receiptStates = await dao.receiptStatesForConnections(ownerId, [current]);
+    return {
+      connection: toView(
+        { ...current, pullAttemptedAt: now, updatedAt: now },
+        await sourceLabels(tx, ownerId, current.brandId),
+        isMissingHistoricalReceipts(current.syncCursor, receiptStates.get(current.id)),
+      ),
+    };
   });
 }
 
@@ -179,6 +208,7 @@ export async function readBrandSyncSurface(
   return db.transaction(async (tx) => {
     const dao = new DataConnectionDao(tx);
     const rows = await dao.syncRowsForBrand(ownerId, brandId);
+    const receiptStates = await dao.receiptStatesForConnections(ownerId, rows);
     const sources = await new ConnectorEventDao(tx).sourcesForEvents(ownerId, brandId, eventIds);
     return {
       connections: rows.map((row) => ({
@@ -187,6 +217,7 @@ export async function readBrandSyncSurface(
         syncCursor: row.syncCursor,
         coverageComplete: row.coverageComplete === null ? null : row.coverageComplete === 1,
         syncStopped: row.syncStopped === 1,
+        missingHistoricalReceipts: isMissingHistoricalReceipts(row.syncCursor, receiptStates.get(row.id)),
       })),
       sources,
     };
@@ -225,7 +256,7 @@ export async function syncDataConnection(
     );
     if (!authorization) return { error: "SYNC_BLOCKED" as const };
     const now = clock();
-    if (authorization.revoked === 1) {
+    if (authorization.revoked === 1 || current.syncStopped === 1) {
       await new SyncAuthorizationDao(tx).insertAttempts([{
         id: randomUUID(),
         authorizationId: authorization.id,
@@ -234,12 +265,39 @@ export async function syncDataConnection(
         result: "stopped",
         attemptedAt: now,
       }]);
-      const stopped = await dao.markSyncStopped(ownerId, current.id, now);
-      if (!stopped) throw new Error("data-connection-sync-stopped");
+      if (current.syncStopped === 0) {
+        const stopped = await dao.markSyncStopped(ownerId, current.id, now);
+        if (!stopped) throw new Error("data-connection-sync-stopped");
+      }
       return { error: "SYNC_STOPPED" as const };
     }
+    const payloadDigest = syncBatchPayloadDigest(input);
+    const existingBatch = await dao.findSyncBatchByCursor(ownerId, current.id, input.cursor);
+    const receiptStates = await dao.receiptStatesForConnections(ownerId, [current]);
+    const missingReceipts = isMissingHistoricalReceipts(current.syncCursor, receiptStates.get(current.id));
     const sources = await sourceLabels(tx, ownerId, current.brandId);
-    if (current.syncCursor === input.cursor) return { connection: toView(current, sources), replayed: true };
+
+    if (current.syncCursor === input.cursor) {
+      if (
+        input.expectedCursor !== undefined
+        && input.expectedCursor !== current.syncCursor
+        && existingBatch
+        && existingBatch.payloadDigest !== payloadDigest
+      ) {
+        return { error: "CONFLICT" as const };
+      }
+      return { connection: toView(current, sources, missingReceipts), replayed: true };
+    }
+    if (existingBatch) {
+      if (existingBatch.payloadDigest === payloadDigest) {
+        return { connection: toView(current, sources, missingReceipts), replayed: true };
+      }
+      return { error: "CONFLICT" as const };
+    }
+    if (input.expectedCursor !== undefined && input.expectedCursor !== current.syncCursor) {
+      return { error: "CONFLICT" as const };
+    }
+
     if (input.events.length > 0) {
       await writeConnectorEvents(tx, ownerId, {
         brandId: current.brandId,
@@ -262,11 +320,23 @@ export async function syncDataConnection(
     const advanced = await dao.advanceCursor(
       ownerId,
       current.id,
+      current.syncCursor,
       input.cursor,
       input.coverageComplete ? 1 : 0,
       now,
     );
     if (!advanced) throw new Error("data-connection-cursor");
+    await dao.insertSyncBatch({
+      id: randomUUID(),
+      connectionId: current.id,
+      brandId: current.brandId,
+      ownerId,
+      cursor: input.cursor,
+      previousCursor: current.syncCursor,
+      payloadDigest,
+      coverageComplete: input.coverageComplete ? 1 : 0,
+      syncedAt: now,
+    });
     await new SyncAuthorizationDao(tx).insertAttempts([{
       id: randomUUID(),
       authorizationId: authorization.id,
@@ -277,8 +347,13 @@ export async function syncDataConnection(
     }]);
     const saved = await dao.connectionForOwner(ownerId, current.id, false);
     if (!saved || saved.syncCursor !== input.cursor) throw new Error("data-connection-cursor");
+    const nextReceiptStates = await dao.receiptStatesForConnections(ownerId, [saved]);
     return {
-      connection: toView({ ...current, ...saved, fieldNames: current.fieldNames }, await sourceLabels(tx, ownerId, current.brandId)),
+      connection: toView(
+        { ...current, ...saved, fieldNames: current.fieldNames },
+        await sourceLabels(tx, ownerId, current.brandId),
+        isMissingHistoricalReceipts(saved.syncCursor, nextReceiptStates.get(current.id)),
+      ),
       replayed: false,
     };
   });

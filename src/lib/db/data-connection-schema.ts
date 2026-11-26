@@ -69,3 +69,35 @@ export const dataConnectionField = pgTable("data_connection_field", {
     and length(${table.brandId}) = 36
     and length(${table.ownerId}) between 1 and 128`),
 ]);
+
+// Processed incremental sync batch receipts. Cursors are opaque connector tokens, not ordered strings.
+// Pre-existing connections with sync_cursor set before this table existed have no prior receipts and
+// remain continuable from their current cursor while exposing an unverifiable historical boundary.
+export const dataConnectionSyncBatch = pgTable("data_connection_sync_batch", {
+  id: text("id").primaryKey(),
+  connectionId: text("connection_id").notNull(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  cursor: text("cursor").notNull(),
+  previousCursor: text("previous_cursor"),
+  payloadDigest: text("payload_digest").notNull(),
+  coverageComplete: integer("coverage_complete").notNull(),
+  syncedAt: text("synced_at").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "data_connection_sync_batch_connection_fk",
+    columns: [table.connectionId],
+    foreignColumns: [dataConnection.id],
+  }).onDelete("cascade"),
+  uniqueIndex("data_connection_sync_batch_cursor_uidx").on(table.connectionId, table.cursor),
+  index("data_connection_sync_batch_owner_idx").on(table.ownerId, table.connectionId, table.syncedAt, table.id),
+  check("data_connection_sync_batch_state_check", sql`length(${table.id}) = 36
+    and length(${table.connectionId}) = 36
+    and length(${table.brandId}) = 36
+    and length(${table.ownerId}) between 1 and 128
+    and ${table.cursor} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$'
+    and (${table.previousCursor} is null or (${table.previousCursor} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$' and ${table.previousCursor} <> ${table.cursor}))
+    and ${table.payloadDigest} ~ '^[a-f0-9]{64}$'
+    and ${table.coverageComplete} in (0, 1)
+    and length(${table.syncedAt}) between 20 and 40`),
+]);

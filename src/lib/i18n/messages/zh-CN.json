@@ -2913,6 +2913,7 @@
     "syncHeading": "同步游标",
     "syncCursorEmpty": "尚未推进",
     "coverageIncomplete": "这一段同步范围不完整。已保存的咨询仍按原计数，不会补造缺失事件。",
+    "missingHistoricalReceipts": "缺少启用前的历史同步回执，更早游标边界无法核对；可从当前游标继续同步。",
     "syncStoppedNotice": "同步已停止。已保存的事件和线索仍可查看，后续拉取不再写入。",
     "sourcesHeading": "来源",
     "sourcesEmpty": "还没有跨源来源。",
@@ -3374,6 +3375,7 @@
     "syncCursor": "同步游标",
     "syncCursorEmpty": "尚未推进",
     "coverageIncomplete": "这一段同步范围不完整。已保存的事件仍按原计数，不会补造缺失事件。",
+    "missingHistoricalReceipts": "缺少启用前的历史同步回执，更早的游标无法核对；可从当前游标继续推进。",
     "syncStoppedNotice": "同步已停止。已保存的事件和线索仍可查看，后续拉取不再写入。",
     "sourcesHeading": "跨源来源",
     "sourcesEmpty": "还没有跨源来源。",
@@ -3397,7 +3399,7 @@
     "NOT_FOUND": "找不到该品牌或数据连接。",
     "INVALID_INPUT": "请检查显示名称和字段名。字段名按提交顺序保存，不能包含口令或访问令牌。",
     "PULL_BLOCKED": "连接仍是预览状态，拉取已被拒绝。",
-    "CONFLICT": "这次批准或拉取没有写入。请重新加载后再试。",
+    "CONFLICT": "这次连接状态或同步游标已变化，或与历史批次荷载冲突，没有写入。请重新载入或核对当前游标后再试。",
     "SERVICE_UNAVAILABLE": "数据连接暂时不可用，请稍后重试。"
   },
   "syncAuthorizations": {
@@ -3735,6 +3737,7 @@
     "syncHeading": "同步游标",
     "syncCursorEmpty": "尚未推进",
     "coverageIncomplete": "这一段同步范围不完整。已保存的事件仍按原计数，不会补造缺失事件。",
+    "missingHistoricalReceipts": "缺少启用前的历史同步回执，更早的游标无法核对；可从当前游标继续推进。",
     "syncStoppedNotice": "同步已停止。已保存的事件和线索仍可查看，后续拉取不再写入。",
     "sourcesHeading": "跨源来源",
     "sourcesEmpty": "还没有跨源来源。",

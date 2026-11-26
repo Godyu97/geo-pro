@@ -71,3 +71,41 @@ export const dataConnectionField = sqliteTable("data_connection_field", {
     and length(${table.brandId}) = 36
     and length(${table.ownerId}) between 1 and 128`),
 ]);
+
+// Processed incremental sync batch receipts. Cursors are opaque connector tokens, not ordered strings.
+export const dataConnectionSyncBatch = sqliteTable("data_connection_sync_batch", {
+  id: text("id").primaryKey(),
+  connectionId: text("connection_id").notNull(),
+  brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  cursor: text("cursor").notNull(),
+  previousCursor: text("previous_cursor"),
+  payloadDigest: text("payload_digest").notNull(),
+  coverageComplete: integer("coverage_complete").notNull(),
+  syncedAt: text("synced_at").notNull(),
+}, (table) => [
+  foreignKey({
+    name: "data_connection_sync_batch_connection_fk",
+    columns: [table.connectionId],
+    foreignColumns: [dataConnection.id],
+  }).onDelete("cascade"),
+  uniqueIndex("data_connection_sync_batch_cursor_uidx").on(table.connectionId, table.cursor),
+  index("data_connection_sync_batch_owner_idx").on(table.ownerId, table.connectionId, table.syncedAt, table.id),
+  check("data_connection_sync_batch_state_check", sql`length(${table.id}) = 36
+    and length(${table.connectionId}) = 36
+    and length(${table.brandId}) = 36
+    and length(${table.ownerId}) between 1 and 128
+    and length(${table.cursor}) between 1 and 64
+    and substr(${table.cursor}, 1, 1) glob '[A-Za-z0-9]'
+    and ${table.cursor} not glob '*[^A-Za-z0-9._:-]*'
+    and (${table.previousCursor} is null or (
+      length(${table.previousCursor}) between 1 and 64
+      and substr(${table.previousCursor}, 1, 1) glob '[A-Za-z0-9]'
+      and ${table.previousCursor} not glob '*[^A-Za-z0-9._:-]*'
+      and ${table.previousCursor} <> ${table.cursor}
+    ))
+    and length(${table.payloadDigest}) = 64
+    and ${table.payloadDigest} not glob '*[^a-f0-9]*'
+    and ${table.coverageComplete} in (0, 1)
+    and length(${table.syncedAt}) between 20 and 40`),
+]);

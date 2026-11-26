@@ -36,6 +36,7 @@ const syncEventSchema = z.strictObject({
 });
 
 export const syncDataConnectionSchema = z.strictObject({
+  expectedCursor: syncCursorSchema.nullable().optional(),
   cursor: syncCursorSchema,
   coverageComplete: z.boolean(),
   events: z.array(syncEventSchema).max(40),
@@ -75,6 +76,7 @@ export type DataConnectionView = {
   syncCursor: string | null;
   coverageComplete: boolean | null;
   syncStopped: boolean;
+  missingHistoricalReceipts: boolean;
   sources: { source: DataConnectionSourceName }[];
   preview: DataConnectionPreview;
   createdAt: string;

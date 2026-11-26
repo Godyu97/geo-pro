@@ -233,6 +233,7 @@ function ConnectionCard({ connection, label, locale, t }: {
         </div>
       </dl>
       {connection.coverageComplete === false ? <p className="text-sm leading-6">{t("coverageIncomplete")}</p> : null}
+      {connection.missingHistoricalReceipts ? <p className="text-sm leading-6">{t("missingHistoricalReceipts")}</p> : null}
       {connection.syncStopped ? <p className="text-sm leading-6">{t("syncStoppedNotice")}</p> : null}
       <div className="min-w-0">
         <h4 className="text-sm font-medium">{t("fields")}</h4>
@@ -256,14 +257,22 @@ function ConnectionCard({ connection, label, locale, t }: {
       </div>
       <OperationNotice notice={notice} t={t} />
       {!needsApproval && !connection.syncStopped ? (
-        <SyncForm connectionId={connection.id} pending={pending} setPending={setPending} setNotice={setNotice} t={t} />
+        <SyncForm
+          connectionId={connection.id}
+          expectedCursor={connection.syncCursor}
+          pending={pending}
+          setPending={setPending}
+          setNotice={setNotice}
+          t={t}
+        />
       ) : null}
     </article>
   );
 }
 
-function SyncForm({ connectionId, pending, setPending, setNotice, t }: {
+function SyncForm({ connectionId, expectedCursor, pending, setPending, setNotice, t }: {
   connectionId: string;
+  expectedCursor: string | null;
   pending: boolean;
   setPending: (pending: boolean) => void;
   setNotice: (notice: Notice | null) => void;
@@ -288,6 +297,7 @@ function SyncForm({ connectionId, pending, setPending, setNotice, t }: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          expectedCursor,
           cursor: String(data.get("cursor") ?? "").trim(),
           coverageComplete: data.get("coverageComplete") === "on",
           events: parsed.events,
@@ -298,7 +308,9 @@ function SyncForm({ connectionId, pending, setPending, setNotice, t }: {
           window.location.replace(loginPath(returnPath, "session-required"));
           return;
         }
-        setNotice(errorFrom(await response.json()));
+        const code = errorFrom(await response.json());
+        setNotice(code);
+        if (code === "CONFLICT" || code === "SYNC_STOPPED") router.refresh();
         return;
       }
       const payload: unknown = await response.json();

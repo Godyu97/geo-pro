@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { registerTestAccount } from "./auth-helpers";
@@ -304,6 +304,245 @@ test("connection preview, approval and pull have a keyboard path and preserve fi
                  exists (select 1 from data_connection where owner_id = ${userId}) as connection,
                  exists (select 1 from data_connection_field where owner_id = ${userId}) as field`;
         expect(remaining).toEqual({ account: false, brand: false, connection: false, field: false });
+      }
+      for (const brandId of brandIds) {
+        expect(await sql`select 1 from brand_version where brand_id = ${brandId}`).toHaveLength(0);
+      }
+    } finally {
+      await sql.end();
+    }
+  }
+});
+
+test("incremental sync preserves current cursor on historical replay, enforces conflict, and shows receipt boundaries", async ({ page, context, browser }) => {
+  test.setTimeout(180_000);
+  const databaseURL = process.env.DATABASE_URL;
+  if (!databaseURL || !["localhost", "127.0.0.1", "[::1]"].includes(new URL(databaseURL).hostname)) {
+    throw new Error("Browser flow tests require a local PostgreSQL database");
+  }
+  const sql = postgres(databaseURL, { max: 1 });
+  const outsider = await browser.newContext({ baseURL: origin });
+  const accounts: Awaited<ReturnType<typeof register>>[] = [];
+  const brandIds: string[] = [];
+  const syncCopy = {
+    "zh-CN": {
+      cursorField: "下一段游标",
+      coverage: "这一段覆盖完整",
+      eventsField: "事件行",
+      syncAction: "同步这一段",
+      syncSaved: "已按游标保存。相同事件仍只计 1 条咨询。",
+      syncReplayed: "这一段游标已经同步过，咨询计数没有增加。",
+      conflict: "这次连接状态或同步游标已变化，或与历史批次荷载冲突，没有写入。请重新载入或核对当前游标后再试。",
+      incomplete: "这一段同步范围不完整。已保存的事件仍按原计数，不会补造缺失事件。",
+      missingReceipts: "缺少启用前的历史同步回执，更早的游标无法核对；可从当前游标继续推进。",
+      stopped: "同步已停止。已保存的事件和线索仍可查看，后续拉取不再写入。",
+      leadsTitle: "脱敏线索",
+      leadsCount: "这条咨询计 1 次。",
+      leadsSources: "连接器 · CSV",
+      leadsMissingReceipts: "缺少启用前的历史同步回执，更早游标边界无法核对；可从当前游标继续同步。",
+    },
+    en: {
+      cursorField: "Next cursor",
+      coverage: "This range is complete",
+      eventsField: "Event rows",
+      syncAction: "Sync this range",
+      syncSaved: "Saved for this cursor. The same event still counts as one inquiry.",
+      syncReplayed: "This cursor was already synced, so the inquiry count did not increase.",
+      conflict: "This connection state or sync cursor changed, or the payload conflicts with a processed batch, so nothing was saved. Reload or check the current cursor and try again.",
+      incomplete: "This sync range is incomplete. Saved events keep their count, and missing events are not invented.",
+      missingReceipts: "Historical sync receipts before this check was enabled are missing, so earlier cursors cannot be verified. You can continue from the current cursor.",
+      stopped: "Sync is stopped. Saved events and leads remain available, and later pulls do not write new rows.",
+      leadsTitle: "De-identified leads",
+      leadsCount: "This inquiry counts as 1.",
+      leadsSources: "Connector · CSV",
+      leadsMissingReceipts: "Historical sync receipts before this check was enabled are missing, so earlier cursor boundaries cannot be verified. Sync can continue from the current cursor.",
+    },
+  } as const;
+
+  try {
+    const owner = await register(context);
+    accounts.push(owner);
+    accounts.push(await register(outsider));
+    const syncBrandName = `SyncFlow-${randomUUID().slice(0, 8)}`;
+    const sourceName = `SyncSource-${randomUUID().slice(0, 8)}`;
+    const legacyName = `LegacySource-${randomUUID().slice(0, 8)}`;
+    const brandRes = await context.request.post("/api/brands", {
+      headers,
+      data: {
+        action: "submit", actorId: owner.userId, operationId: randomUUID(), target: null, expectedDraft: null,
+        acceptedPolicyVersion: publishedRetentionVersion(),
+        fields: {
+          name: syncBrandName, description: "Synthetic brand for cursor replay e2e.",
+          website: "https://sync-e2e.example.com", aliases: [],
+          region: "CN", language: "zh-CN", competitors: [], questions: [],
+        },
+      },
+    });
+    expect(brandRes.status()).toBe(200);
+    const brandId: string = (await brandRes.json()).id;
+    brandIds.push(brandId);
+
+    // Authorize both connections, create & approve them.
+    const authRes = await context.request.post("/api/settings/sync-authorizations", {
+      headers,
+      data: { brandId, sourceName, retainedRows: 3 },
+    });
+    expect(authRes.status()).toBe(200);
+    const authorizationId: string = (await authRes.json()).authorization.id;
+
+    const legacyAuthRes = await context.request.post("/api/settings/sync-authorizations", {
+      headers,
+      data: { brandId, sourceName: legacyName, retainedRows: 1 },
+    });
+    expect(legacyAuthRes.status()).toBe(200);
+
+    const connRes = await context.request.post(api, {
+      headers,
+      data: { brandId, displayName: sourceName, fieldNames: ["event_id", "page_path"] },
+    });
+    expect(connRes.status()).toBe(200);
+    const connectionId: string = (await connRes.json()).connection.id;
+    expect((await context.request.post(`${api}/${connectionId}/approve`, { headers, data: {} })).status()).toBe(200);
+
+    const legacyConnRes = await context.request.post(api, {
+      headers,
+      data: { brandId, displayName: legacyName, fieldNames: ["event_id"] },
+    });
+    expect(legacyConnRes.status()).toBe(200);
+    const legacyConnectionId: string = (await legacyConnRes.json()).connection.id;
+    expect((await context.request.post(`${api}/${legacyConnectionId}/approve`, { headers, data: {} })).status()).toBe(200);
+
+    // Simulate a pre-existing connection that already had a cursor before batch receipts existed.
+    await sql`update data_connection set sync_cursor = 'legacy-cur-1', coverage_complete = 1 where id = ${legacyConnectionId}`;
+
+    // Import one CSV lead first so we can verify cross-source dedup on sync.
+    const csvEventKey = "evt-e2e-csv-1";
+    const connectorDigest = createHash("sha256").update(`connector:${csvEventKey}`).digest("hex");
+    const csvRes = await context.request.post("/api/reports/leads", {
+      headers,
+      data: { brandId, rows: [{ eventId: csvEventKey, evidence: "self_report", directIdentifier: false }] },
+    });
+    expect(csvRes.status()).toBe(200);
+
+    // Use keyboard on /dashboard/settings/data-connections to sync batch-1 (incomplete), then batch-2 (complete + late CSV event).
+    const main = await visit(page, "zh-CN", 375);
+    const card = main.getByRole("article", { name: sourceName });
+    const legacyCard = main.getByRole("article", { name: legacyName });
+    await expect(legacyCard.getByText(syncCopy["zh-CN"].missingReceipts, { exact: true })).toBeVisible();
+
+    const syncForm = card.getByRole("form", { name: "增量同步" });
+    const cursorInput = syncForm.getByRole("textbox", { name: syncCopy["zh-CN"].cursorField });
+    const coverageCheckbox = syncForm.getByRole("checkbox", { name: syncCopy["zh-CN"].coverage });
+    const eventsInput = syncForm.getByRole("textbox", { name: syncCopy["zh-CN"].eventsField });
+    const syncButton = syncForm.getByRole("button", { name: syncCopy["zh-CN"].syncAction });
+
+    await cursorInput.fill("batch-1");
+    await coverageCheckbox.uncheck();
+    await eventsInput.fill(`${csvEventKey},${connectorDigest},referral`);
+    const batch1Res = page.waitForResponse(`${origin}${api}/${connectionId}/sync`, { timeout: 10_000 });
+    await activate(page, syncButton);
+    expect((await batch1Res).status()).toBe(200);
+    await expect(card.getByRole("status")).toHaveText(syncCopy["zh-CN"].syncSaved);
+    await expect(card.getByText("batch-1", { exact: true })).toBeVisible();
+    await expect(card.getByText(syncCopy["zh-CN"].incomplete, { exact: true })).toBeVisible();
+
+    await cursorInput.fill("batch-2");
+    await coverageCheckbox.check();
+    await eventsInput.fill("");
+    const batch2Res = page.waitForResponse(`${origin}${api}/${connectionId}/sync`, { timeout: 10_000 });
+    await activate(page, syncButton);
+    expect((await batch2Res).status()).toBe(200);
+    await expect(card.getByRole("status")).toHaveText(syncCopy["zh-CN"].syncSaved);
+    await expect(card.getByText("batch-2", { exact: true })).toBeVisible();
+
+    // Delayed replay of historical batch-1 via UI form keeps batch-2 and coverageComplete=true.
+    await cursorInput.fill("batch-1");
+    await coverageCheckbox.uncheck();
+    await eventsInput.fill(`${csvEventKey},${connectorDigest},referral`);
+    const replayRes = page.waitForResponse(`${origin}${api}/${connectionId}/sync`, { timeout: 10_000 });
+    await activate(page, syncButton);
+    expect((await replayRes).status()).toBe(200);
+    await expect(card.getByRole("status")).toHaveText(syncCopy["zh-CN"].syncReplayed);
+    await expect(card.getByText("batch-2", { exact: true })).toBeVisible();
+    await expect(card.getByText(syncCopy["zh-CN"].incomplete, { exact: true })).toHaveCount(0);
+
+    // Submitting historical batch-1 with a different payload returns 409 CONFLICT and preserves batch-2.
+    await coverageCheckbox.check();
+    const conflictRes = page.waitForResponse(`${origin}${api}/${connectionId}/sync`, { timeout: 10_000 });
+    await activate(page, syncButton);
+    expect((await conflictRes).status()).toBe(409);
+    await expect(card.getByRole("status")).toHaveText(syncCopy["zh-CN"].conflict);
+    await expect(card.getByText("batch-2", { exact: true })).toBeVisible();
+
+    // Verify responsive layout in zh-CN & en across 375/768/1440 on /dashboard/settings/data-connections and /dashboard/reports/leads.
+    for (const locale of locales) {
+      for (const width of widths) {
+        const settingsMain = await visit(page, locale, width);
+        await expect(settingsMain.getByRole("article", { name: sourceName }).getByText("batch-2", { exact: true })).toBeVisible();
+        await expect(settingsMain.getByRole("article", { name: legacyName }).getByText(syncCopy[locale].missingReceipts, { exact: true })).toBeVisible();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+
+        await page.goto("/dashboard/reports/leads");
+        const leadsMain = page.getByRole("main");
+        await expect(leadsMain.getByRole("heading", { level: 1, name: syncCopy[locale].leadsTitle, exact: true })).toBeVisible();
+        await expect(leadsMain.getByText("batch-2", { exact: true })).toBeVisible();
+        await expect(leadsMain.getByText(syncCopy[locale].leadsCount, { exact: true })).toBeVisible();
+        await expect(leadsMain.getByText(syncCopy[locale].leadsSources).first()).toBeVisible();
+        await expect(leadsMain.getByText(syncCopy[locale].leadsMissingReceipts, { exact: true })).toBeVisible();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      }
+    }
+
+    // Concurrent API calls with same expectedCursor ("batch-2"): one 200, one 409 CONFLICT, no partial writes.
+    const [race1, race2] = await Promise.all([
+      context.request.post(`${api}/${connectionId}/sync`, {
+        headers,
+        data: {
+          expectedCursor: "batch-2",
+          cursor: "batch-3a",
+          coverageComplete: true,
+          events: [{ eventKey: "evt-e2e-race-a", payloadDigest: connectorDigest, evidence: "referral" }],
+        },
+      }),
+      context.request.post(`${api}/${connectionId}/sync`, {
+        headers,
+        data: {
+          expectedCursor: "batch-2",
+          cursor: "batch-3b",
+          coverageComplete: true,
+          events: [{ eventKey: "evt-e2e-race-b", payloadDigest: connectorDigest, evidence: "referral" }],
+        },
+      }),
+    ]);
+    expect([race1.status(), race2.status()].sort()).toEqual([200, 409]);
+
+    // Revoke authorization, confirm SYNC_STOPPED (409) and cross-account 404 without cursor leak.
+    const revokeRes = await context.request.post(`/api/settings/sync-authorizations/${authorizationId}/revoke`, {
+      headers,
+      data: {},
+    });
+    expect(revokeRes.status()).toBe(200);
+    const stoppedRes = await context.request.post(`${api}/${connectionId}/sync`, {
+      headers,
+      data: { cursor: "batch-after-revoke", coverageComplete: true, events: [] },
+    });
+    expect(stoppedRes.status()).toBe(409);
+    const outsiderRes = await outsider.request.post(`${api}/${connectionId}/sync`, {
+      headers,
+      data: { cursor: "batch-outsider", coverageComplete: true, events: [] },
+    });
+    expect(outsiderRes.status()).toBe(404);
+    expect(await outsiderRes.text()).not.toContain("batch-");
+
+    await visit(page, "zh-CN", 375);
+    await expect(page.getByRole("article", { name: sourceName }).getByText(syncCopy["zh-CN"].stopped, { exact: true })).toBeVisible();
+  } finally {
+    await outsider.close();
+    try {
+      for (const account of accounts) {
+        execFileSync(process.execPath, [
+          "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", "cleanup", JSON.stringify(account),
+        ], { stdio: "inherit" });
       }
       for (const brandId of brandIds) {
         expect(await sql`select 1 from brand_version where brand_id = ${brandId}`).toHaveLength(0);

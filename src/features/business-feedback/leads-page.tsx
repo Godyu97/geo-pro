@@ -111,6 +111,7 @@ export default async function BusinessLeadsPage({
                 {connection ? <h3 className="font-medium [overflow-wrap:anywhere]">{connection.displayName}</h3> : null}
                 <p className="[overflow-wrap:anywhere]">{connection?.syncCursor ?? t("syncCursorEmpty")}</p>
                 {connection?.coverageComplete === false ? <p>{t("coverageIncomplete")}</p> : null}
+                {connection?.missingHistoricalReceipts ? <p>{t("missingHistoricalReceipts")}</p> : null}
                 {connection?.syncStopped ? <p>{t("syncStoppedNotice")}</p> : null}
                 <p className="font-medium">{t("sourcesHeading")}</p>
                 <p>{syncSources.length === 0 ? t("sourcesEmpty") : syncSources.map((source) => t(source === "csv" ? "sourceCsv" : "sourceConnector")).join(" · ")}</p>

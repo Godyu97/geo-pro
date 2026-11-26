@@ -666,6 +666,13 @@
       "when": 1795664645327,
       "tag": "0094_stiff_lady_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "6",
+      "when": 1795666737842,
+      "tag": "0095_young_shriek",
+      "breakpoints": true
     }
   ]
 }

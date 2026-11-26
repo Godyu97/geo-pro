@@ -22,3 +22,16 @@ export function previewSync(input: { approved: boolean; fieldNames: readonly str
   if (!input.approved) return { pull: false, fields: [...input.fieldNames] };
   return { pull: true, fields: [...input.fieldNames] };
 }
+
+/** Deterministic payload digest for replay vs conflict detection on processed sync cursors. */
+export function syncBatchPayloadDigest(input: {
+  coverageComplete: boolean;
+  events: readonly { eventKey: string; payloadDigest: string; evidence: string }[];
+}) {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      coverageComplete: input.coverageComplete,
+      events: input.events.map((event) => [event.eventKey, event.payloadDigest, event.evidence]),
+    }))
+    .digest("hex");
+}
