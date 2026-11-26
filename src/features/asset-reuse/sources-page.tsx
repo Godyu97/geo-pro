@@ -7,7 +7,7 @@ import { getConnection } from "@/lib/db/connection";
 import { formatNumber } from "@/lib/i18n/format";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts.ts";
-import { BrandDao } from "../brands/dao.ts";
+import { workspaceBrand } from "../team-access/brand-scope.ts";
 import { importSourcesAction, setSourceRightsAction } from "./actions.ts";
 import { listImportedOriginals } from "./commands.ts";
 import type { SourceReason, SourceRights, SourceStatus } from "./contracts.ts";
@@ -55,7 +55,7 @@ async function loadSources(userId: string, requestedBrandId: string | string[] |
   let brandId = requested.data;
   try {
     const connection = getConnection();
-    brandId ??= (await new BrandDao(connection).active(userId))?.id;
+    brandId ??= (await workspaceBrand(connection, userId, undefined, "read"))?.brandId;
     if (!brandId) return { state: "noBrand" } as const;
     const listed = await listImportedOriginals(connection, userId, brandId);
     if ("error" in listed) return { state: "notFound" } as const;

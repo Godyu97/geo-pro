@@ -75,7 +75,7 @@ export const teamInvitation = pgTable("team_invitation", {
   uniqueIndex("team_invitation_token_uidx").on(table.tokenHash),
   index("team_invitation_invitee_idx").on(table.inviteeUserId, table.createdAt, table.id),
   index("team_invitation_brand_idx").on(table.brandId, table.createdAt, table.id),
-  check("team_invitation_state_check", sql`${table.role} = 'member'
+  check("team_invitation_state_check", sql`${table.role} in ('member', 'read_only')
     and ${table.status} in ('open', 'accepted', 'expired', 'revoked')
     and ${table.inviteeUserId} <> ${table.createdBy}
     and length(${table.inviteeUserId}) between 1 and 128

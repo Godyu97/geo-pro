@@ -673,6 +673,20 @@
       "when": 1795666737842,
       "tag": "0095_young_shriek",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "6",
+      "when": 1795681755057,
+      "tag": "0096_jittery_scarlet_spider",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "6",
+      "when": 1795682055020,
+      "tag": "0097_tranquil_toxin",
+      "breakpoints": true
     }
   ]
 }

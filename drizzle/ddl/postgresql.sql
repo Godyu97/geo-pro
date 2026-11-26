@@ -163,6 +163,63 @@ CREATE TABLE "retention_policy" (
     and length("retention_policy"."summary_en") between 1 and 2000)
 );
 
+CREATE TABLE "brand_group" (
+	"brand_id" text PRIMARY KEY NOT NULL,
+	"group_id" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "brand_group_state_check" CHECK (length("brand_group"."created_at") between 20 and 40)
+);
+
+CREATE TABLE "platform_account_role" (
+	"user_id" text PRIMARY KEY NOT NULL,
+	"role" text NOT NULL,
+	"updated_at" text NOT NULL,
+	CONSTRAINT "platform_account_role_state_check" CHECK ("platform_account_role"."role" in ('admin', 'user')
+    and length("platform_account_role"."user_id") between 1 and 128
+    and length("platform_account_role"."updated_at") between 20 and 40)
+);
+
+CREATE TABLE "platform_role_audit" (
+	"id" text PRIMARY KEY NOT NULL,
+	"actor_id" text,
+	"subject_id" text,
+	"role" text,
+	"action" text NOT NULL,
+	"result" text NOT NULL,
+	"reason" text NOT NULL,
+	"occurred_at" text NOT NULL,
+	CONSTRAINT "platform_role_audit_state_check" CHECK ("platform_role_audit"."action" in ('grant', 'revoke')
+    and "platform_role_audit"."result" in ('allowed', 'denied', 'failed')
+    and ("platform_role_audit"."role" is null or "platform_role_audit"."role" in ('admin', 'user'))
+    and length("platform_role_audit"."occurred_at") between 20 and 40)
+);
+
+CREATE TABLE "team_group" (
+	"id" text PRIMARY KEY NOT NULL,
+	"owner_user_id" text NOT NULL,
+	"kind" text NOT NULL,
+	"name" text NOT NULL,
+	"created_at" text NOT NULL,
+	CONSTRAINT "team_group_state_check" CHECK ("team_group"."kind" in ('personal', 'team')
+    and length("team_group"."owner_user_id") between 1 and 128
+    and length("team_group"."name") between 1 and 120
+    and length("team_group"."created_at") between 20 and 40)
+);
+
+CREATE TABLE "team_group_member" (
+	"id" text PRIMARY KEY NOT NULL,
+	"group_id" text NOT NULL,
+	"user_id" text NOT NULL,
+	"active" integer NOT NULL,
+	"created_at" text NOT NULL,
+	"revoked_at" text,
+	CONSTRAINT "team_group_member_state_check" CHECK ("team_group_member"."active" in (0, 1)
+    and length("team_group_member"."user_id") between 1 and 128
+    and length("team_group_member"."created_at") between 20 and 40
+    and (("team_group_member"."active" = 1 and "team_group_member"."revoked_at" is null)
+      or ("team_group_member"."active" = 0 and length("team_group_member"."revoked_at") between 20 and 40)))
+);
+
 CREATE TABLE "user_data_export" (
 	"owner_id" text PRIMARY KEY NOT NULL,
 	"id" text NOT NULL,
@@ -2029,7 +2086,7 @@ CREATE TABLE "team_invitation" (
 	"status" text NOT NULL,
 	"created_at" text NOT NULL,
 	"replaced_by" text,
-	CONSTRAINT "team_invitation_state_check" CHECK ("team_invitation"."role" = 'member'
+	CONSTRAINT "team_invitation_state_check" CHECK ("team_invitation"."role" in ('member', 'read_only')
     and "team_invitation"."status" in ('open', 'accepted', 'expired', 'revoked')
     and "team_invitation"."invitee_user_id" <> "team_invitation"."created_by"
     and length("team_invitation"."invitee_user_id") between 1 and 128
@@ -2796,6 +2853,12 @@ ALTER TABLE "brand_purged_cost" ADD CONSTRAINT "brand_purged_cost_brand_id_brand
 ALTER TABLE "brand_retention_acceptance" ADD CONSTRAINT "brand_retention_acceptance_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "brand_retention_acceptance" ADD CONSTRAINT "brand_retention_acceptance_policy_version_retention_policy_version_fk" FOREIGN KEY ("policy_version") REFERENCES "public"."retention_policy"("version") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "brand_version" ADD CONSTRAINT "brand_version_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand_group" ADD CONSTRAINT "brand_group_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "brand_group" ADD CONSTRAINT "brand_group_group_id_team_group_id_fk" FOREIGN KEY ("group_id") REFERENCES "public"."team_group"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "platform_account_role" ADD CONSTRAINT "platform_account_role_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "team_group" ADD CONSTRAINT "team_group_owner_user_id_user_id_fk" FOREIGN KEY ("owner_user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "team_group_member" ADD CONSTRAINT "team_group_member_group_id_team_group_id_fk" FOREIGN KEY ("group_id") REFERENCES "public"."team_group"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "team_group_member" ADD CONSTRAINT "team_group_member_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "user_data_export" ADD CONSTRAINT "user_data_export_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "quota_attempt" ADD CONSTRAINT "quota_attempt_reservation_fk" FOREIGN KEY ("brand_id","kind","reservation_id") REFERENCES "public"."quota_reservation"("brand_id","kind","id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "quota_grant" ADD CONSTRAINT "quota_grant_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
@@ -3027,6 +3090,11 @@ CREATE UNIQUE INDEX "brand_active_owner_uidx" ON "brand" USING btree ("owner_id"
 CREATE INDEX "brand_due_purge_idx" ON "brand" USING btree ("restore_until","id") WHERE "brand"."restore_until" is not null;
 CREATE INDEX "brand_owner_frozen_idx" ON "brand" USING btree ("owner_id","frozen_at","id") WHERE "brand"."frozen_at" is not null;
 CREATE INDEX "brand_owner_status_created_idx" ON "brand" USING btree ("owner_id","status","created_at","id");
+CREATE INDEX "brand_group_group_idx" ON "brand_group" USING btree ("group_id","brand_id");
+CREATE INDEX "platform_role_audit_actor_time_idx" ON "platform_role_audit" USING btree ("actor_id","occurred_at","id");
+CREATE UNIQUE INDEX "team_group_personal_uidx" ON "team_group" USING btree ("owner_user_id") WHERE "team_group"."kind" = 'personal';
+CREATE UNIQUE INDEX "team_group_member_pair_uidx" ON "team_group_member" USING btree ("group_id","user_id");
+CREATE INDEX "team_group_member_user_idx" ON "team_group_member" USING btree ("user_id","group_id") WHERE "team_group_member"."active" = 1;
 CREATE UNIQUE INDEX "user_data_export_object_uidx" ON "user_data_export" USING btree ("object_id") WHERE "user_data_export"."object_id" is not null;
 CREATE INDEX "quota_reservation_brand_recent_idx" ON "quota_reservation" USING btree ("brand_id","created_at","id");
 CREATE INDEX "auth_mail_rate_expiry_idx" ON "auth_mail_rate" USING btree ("expires_at");

@@ -5,6 +5,7 @@ import type { DatabaseConnection, QueryConnection } from "../../lib/db/connectio
 import { factFields } from "../brand-facts/contracts.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 import {
   presignStoredObject,
   readStoredObject,
@@ -272,7 +273,11 @@ export async function listImportedOriginals(db: DatabaseConnection, userId: stri
   const files = viewer === "owner"
     ? await listSourceOriginals(db, userId, parsed.data, listLimit)
     : await listBrandSourceOriginals(db, parsed.data, listLimit);
-  return { viewer, canManage: canManageOriginals(owned), files: await withFragments(db, parsed.data, files) };
+  return {
+    viewer,
+    canManage: canManageOriginals(owned),
+    files: await withFragments(db, parsed.data, files),
+  };
 }
 
 export async function setSourceOriginalRights(
@@ -291,11 +296,12 @@ export async function setSourceOriginalRights(
   });
 }
 
-async function linkedOriginal(db: DatabaseConnection, ownerId: string, brandId: string, id: string) {
-  if (!canManageOriginals(await brandOwnedBy(db, ownerId, brandId))) return null;
-  const row = await loadSourceOriginal(db, ownerId, brandId, id);
+async function linkedOriginal(db: DatabaseConnection, actorId: string, brandId: string, id: string) {
+  const scope = await authorizeBrandActor(db, actorId, brandId, "download");
+  if (!scope) return null;
+  const row = await loadSourceOriginal(db, scope.ownerId, brandId, id);
   if (!row?.storedObjectId) return null;
-  return row;
+  return { row, ownerId: scope.ownerId };
 }
 
 export async function readSourceOriginal(
@@ -306,9 +312,11 @@ export async function readSourceOriginal(
 ) {
   const parsed = readSourceOriginalSchema.safeParse(input);
   if (!parsed.success) return denied("INVALID_INPUT");
-  const row = await linkedOriginal(db, ownerId, parsed.data.brandId, parsed.data.id);
-  if (!row?.storedObjectId) return denied("NOT_FOUND");
-  const loaded = await readStoredObject(db, { actorId: ownerId, objectId: row.storedObjectId }, storageOptions(options));
+  const found = await linkedOriginal(db, ownerId, parsed.data.brandId, parsed.data.id);
+  if (!found) return denied("NOT_FOUND");
+  const { row, ownerId: brandOwnerId } = found;
+  if (!row.storedObjectId) return denied("NOT_FOUND");
+  const loaded = await readStoredObject(db, { actorId: brandOwnerId === ownerId ? ownerId : ownerId, objectId: row.storedObjectId }, storageOptions(options));
   if (!loaded.ok) return denied(loaded.code === "failed" ? "SERVICE_UNAVAILABLE" : "NOT_FOUND");
   return {
     id: row.id,
@@ -328,8 +336,10 @@ export async function presignSourceOriginal(
 ) {
   const parsed = readSourceOriginalSchema.safeParse(input);
   if (!parsed.success) return denied("INVALID_INPUT");
-  const row = await linkedOriginal(db, ownerId, parsed.data.brandId, parsed.data.id);
-  if (!row?.storedObjectId) return denied("NOT_FOUND");
+  const found = await linkedOriginal(db, ownerId, parsed.data.brandId, parsed.data.id);
+  if (!found) return denied("NOT_FOUND");
+  const { row } = found;
+  if (!row.storedObjectId) return denied("NOT_FOUND");
   const signed = await presignStoredObject(db, { actorId: ownerId, objectId: row.storedObjectId }, storageOptions(options));
   if (!signed.ok) return denied(signed.code === "failed" ? "SERVICE_UNAVAILABLE" : "NOT_FOUND");
   return { id: row.id, url: signed.url, expiresInSeconds: signed.expiresInSeconds };

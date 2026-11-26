@@ -5,6 +5,7 @@ import { z } from "zod";
 import { delegatedOwnerId, openApprovalScope, rejectIfSeparated } from "../approval-policy/enforce.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 import type { DatabaseConnection, QueryConnection, TransactionConnection } from "../../lib/db/connection.ts";
 import {
   factCommand, factIdsSchema, factScope, factStage,
@@ -31,12 +32,20 @@ function page<T extends { id: string; createdAt: string }>(items: T[]) {
 
 export async function readFactWorkspace(db: QueryConnection, scope: FactScope, query: WorkspaceQuery, clock = clockNow) {
   let effective = scope;
+  let readOnlyMember = false;
   let brand = await new BrandDao(db).ownedSummary(scope.ownerId, scope.brandId);
   if (!brand) {
-    const delegated = await delegatedOwnerId(db, scope.ownerId, scope.brandId, "fact");
-    if (!delegated) return null;
-    effective = { ownerId: delegated, brandId: scope.brandId };
-    brand = await new BrandDao(db).ownedSummary(delegated, scope.brandId);
+    const memberScope = await authorizeBrandActor(db, scope.ownerId, scope.brandId, "read", clock().toISOString());
+    if (memberScope) {
+      effective = { ownerId: memberScope.ownerId, brandId: scope.brandId };
+      readOnlyMember = memberScope.role === "read_only";
+      brand = await new BrandDao(db).ownedSummary(memberScope.ownerId, scope.brandId);
+    } else {
+      const delegated = await delegatedOwnerId(db, scope.ownerId, scope.brandId, "fact");
+      if (!delegated) return null;
+      effective = { ownerId: delegated, brandId: scope.brandId };
+      brand = await new BrandDao(db).ownedSummary(delegated, scope.brandId);
+    }
     if (!brand) return null;
   }
   const dao = new FactDao(db, effective);
@@ -59,7 +68,7 @@ export async function readFactWorkspace(db: QueryConnection, scope: FactScope, q
     versions: page(versions.map((item) => ({
       id: item.id, createdAt: item.createdAt, version: item.version, title: item.fields.title, status: factStatus(item, today),
     }))),
-    readOnly: brand.status !== "active",
+    readOnly: brand.status !== "active" || readOnlyMember,
     pastes: page(pastes), fact, paste, successor, latestId: latest?.id ?? null, today,
     conflict: conflict ? { id: conflict.id, version: conflict.version, claim: conflict.fields.claim } : null,
     dependencies,
@@ -184,10 +193,20 @@ export async function executeFactCommand(db: DatabaseConnection, inputScope: unk
       }
     }
     if (!await brands.lockOwner(scope.ownerId)) return fail("notFound");
-    const brand = await brands.owned(scope.ownerId, scope.brandId);
+    let effectiveOwnerId = scope.ownerId;
+    let brand = await brands.owned(scope.ownerId, scope.brandId);
+    if (!brand) {
+      const writeScope = await authorizeBrandActor(transaction, scope.ownerId, scope.brandId, "write", now);
+      if (!writeScope) {
+        const readScope = await authorizeBrandActor(transaction, scope.ownerId, scope.brandId, "read", now);
+        return readScope ? fail("readOnly") : fail("notFound");
+      }
+      effectiveOwnerId = writeScope.ownerId;
+      brand = await brands.owned(effectiveOwnerId, scope.brandId);
+    }
     if (!brand) return fail("notFound");
     if (brand.status !== "active") return fail("readOnly");
-    const dao = new FactDao(transaction, scope);
+    const dao = new FactDao(transaction, { ownerId: effectiveOwnerId, brandId: scope.brandId });
     switch (operation.action) {
       case "savePaste": return saveOriginal(dao, operation, now);
       case "create": return createVersion(dao, operation, brand.entityVersion, now);
@@ -208,12 +227,12 @@ export async function executeFactCommand(db: DatabaseConnection, inputScope: unk
         break;
       case "approve":
         return approveFact(dao, current, operation, scope.ownerId, now, {
-          db: transaction, ownerId: scope.ownerId, brandId: scope.brandId,
+          db: transaction, ownerId: effectiveOwnerId, brandId: scope.brandId,
         });
       case "revoke":
         if (current.state !== "approved") return fail("conflict");
         await dao.transition(current, "revoked", now);
-        await openRevokedFactMaintenance(transaction, scope.ownerId, scope.brandId, current.id, now);
+        await openRevokedFactMaintenance(transaction, effectiveOwnerId, scope.brandId, current.id, now);
         break;
     }
     return done(current.id);

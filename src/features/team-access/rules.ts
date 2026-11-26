@@ -59,6 +59,22 @@ export function brandDutyAllows(role: "owner" | "member" | "read_only", action: 
   return role === "owner" || role === "member";
 }
 
+export function brandActionFlags(
+  role: "owner" | "member" | "read_only",
+  duties?: { dualControl: boolean; factApprover: boolean; contentApprover: boolean },
+) {
+  const canEdit = role === "owner" || role === "member";
+  const dual = duties?.dualControl ?? false;
+  return {
+    view: true,
+    edit: canEdit,
+    factApprove: role === "owner" || (role === "member" && (!dual || Boolean(duties?.factApprover))),
+    contentApprove: role === "owner" || (role === "member" && (!dual || Boolean(duties?.contentApprover))),
+    export: role === "owner" || role === "member",
+    manageMembers: role === "owner",
+  };
+}
+
 export function batchExport(input: { grantedBrandIds: readonly string[]; requestedBrandIds: readonly string[] }) {
   const allowed = new Set(input.grantedBrandIds);
   const denied = input.requestedBrandIds.filter((brandId) => !allowed.has(brandId));

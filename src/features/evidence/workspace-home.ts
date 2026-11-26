@@ -3,7 +3,7 @@ import "server-only";
 import type { CacheStore } from "../../lib/cache/store.ts";
 import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
-import { BrandDao } from "../brands/dao.ts";
+import { workspaceBrand } from "../team-access/brand-scope.ts";
 import type { EvidenceError } from "./contracts.ts";
 import { readEvidenceOverview } from "./overview-commands.ts";
 import type { OverviewPayload } from "./overview-cache.ts";
@@ -18,11 +18,11 @@ export async function readWorkspaceHome(
   ownerId: string,
   cache: CacheStore = openCache(),
 ): Promise<WorkspaceHome> {
-  const active = await new BrandDao(db).active(ownerId);
-  if (!active) return { state: "no-brand" };
+  const scope = await workspaceBrand(db, ownerId, undefined, "read");
+  if (!scope) return { state: "no-brand" };
 
   const overview = await readEvidenceOverview(db, ownerId, {
-    brandId: active.id,
+    brandId: scope.brandId,
     sourceMode: "model_api",
   }, cache);
   if ("error" in overview) return { state: "unavailable", error: overview.error };

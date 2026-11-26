@@ -3,7 +3,15 @@ import "server-only";
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
-import { teamActionStatuses, teamInviteStatuses, teamListLimit, teamRoles, type TeamRole } from "./contracts.ts";
+import {
+  teamActionStatuses,
+  teamInviteRoles,
+  teamInviteStatuses,
+  teamListLimit,
+  teamRoles,
+  type TeamRole,
+} from "./contracts.ts";
+import { platformRoleSchema } from "./platform-role.ts";
 
 const grantRow = z.object({
   id: brandIdSchema,
@@ -28,6 +36,7 @@ const actionRow = z.object({
 
 const brandGateRow = z.object({
   ownerId: z.string().min(1).max(128),
+  groupId: brandIdSchema.nullable(),
   status: z.enum(["active", "archived"]),
   frozenAt: z.string().nullable(),
 });
@@ -35,6 +44,33 @@ const brandGateRow = z.object({
 const labelRow = z.object({
   brandId: brandIdSchema,
   name: z.string().min(1),
+});
+
+const brandScopeRow = z.object({
+  brandId: brandIdSchema,
+  groupId: brandIdSchema.nullable(),
+  name: z.string().min(1),
+});
+
+const groupRow = z.object({
+  id: brandIdSchema,
+  ownerUserId: z.string().min(1).max(128),
+  kind: z.enum(["personal", "team"]),
+  name: z.string().min(1).max(120),
+  createdAt: z.string().min(20).max(40),
+});
+
+const userSummaryRow = z.object({
+  id: z.string().min(1).max(128),
+  name: z.string(),
+  email: z.string(),
+  platformRole: platformRoleSchema,
+});
+
+const memberIdentityRow = z.object({
+  id: z.string().min(1).max(128),
+  name: z.string(),
+  email: z.string(),
 });
 
 const countRow = z.object({
@@ -55,7 +91,7 @@ const invitationListRow = z.object({
   id: brandIdSchema,
   brandId: brandIdSchema,
   inviteeUserId: z.string().min(1).max(128),
-  role: z.literal("member"),
+  role: z.enum(teamInviteRoles),
   expiresAt: z.string().min(20).max(40),
   status: z.enum(teamInviteStatuses),
   createdAt: z.string().min(20).max(40),
@@ -81,13 +117,15 @@ const grantColumns = `id, user_id AS "userId", brand_id AS "brandId", role, acti
 
 export function brandActorQuery(actorId: string, brandId: string) {
   return {
-    sql: `SELECT b.owner_id AS "ownerId", b.status, b.frozen_at AS "frozenAt",
+    sql: `SELECT b.owner_id AS "ownerId", bg.group_id AS "groupId", b.status, b.frozen_at AS "frozenAt",
         g.role AS "role", g.active AS "active", g.expires_at AS "expiresAt",
-        (SELECT 1 FROM brand_member_grant x WHERE x.brand_id = b.id LIMIT 1) AS "hasGrant"
+        (SELECT 1 FROM brand_member_grant x WHERE x.brand_id = b.id LIMIT 1) AS "hasGrant",
+        (SELECT gm.active FROM team_group_member gm WHERE gm.group_id = bg.group_id AND gm.user_id = ? LIMIT 1) AS "groupActive"
       FROM brand b
+      LEFT JOIN brand_group bg ON bg.brand_id = b.id
       LEFT JOIN brand_member_grant g ON g.user_id = ? AND g.brand_id = b.id
       WHERE b.id = ?`,
-    values: [actorId, brandId] as QueryValue[],
+    values: [actorId, actorId, brandId] as QueryValue[],
   };
 }
 
@@ -95,17 +133,21 @@ export function accessibleBrandQuery(actorId: string, now: string) {
   return {
     sql: `SELECT b.id AS "brandId", b.owner_id AS "ownerId", 'owner' AS "role"
       FROM brand b
+      LEFT JOIN brand_group bg ON bg.brand_id = b.id
       WHERE b.owner_id = ? AND b.status = 'active' AND b.frozen_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM brand_member_grant g WHERE g.brand_id = b.id)
+        AND (bg.group_id IS NULL OR NOT EXISTS (SELECT 1 FROM team_group_member gm WHERE gm.group_id = bg.group_id AND gm.user_id = ? AND gm.active = 0))
       UNION ALL
       SELECT b.id, b.owner_id, g.role
       FROM brand_member_grant g
       JOIN brand b ON b.id = g.brand_id
+      LEFT JOIN brand_group bg ON bg.brand_id = b.id
       WHERE g.user_id = ? AND g.active = 1 AND (g.expires_at IS NULL OR g.expires_at > ?)
         AND b.status = 'active' AND b.frozen_at IS NULL
+        AND (bg.group_id IS NULL OR NOT EXISTS (SELECT 1 FROM team_group_member gm WHERE gm.group_id = bg.group_id AND gm.user_id = g.user_id AND gm.active = 0))
       ORDER BY 1
       LIMIT ?`,
-    values: [actorId, actorId, now, teamListLimit] as QueryValue[],
+    values: [actorId, actorId, actorId, now, teamListLimit] as QueryValue[],
   };
 }
 
@@ -115,12 +157,19 @@ export function validGrantQuery(userId: string, now: string) {
         g.expires_at AS "expiresAt", g.revoked_at AS "revokedAt", 'grant' AS "source"
       FROM brand_member_grant g
       WHERE g.user_id = ? AND g.active = 1 AND (g.expires_at IS NULL OR g.expires_at > ?)
+        AND NOT EXISTS (
+          SELECT 1 FROM brand_group bg
+          JOIN team_group_member gm ON gm.group_id = bg.group_id
+          WHERE bg.brand_id = g.brand_id AND gm.user_id = g.user_id AND gm.active = 0
+        )
       UNION ALL
       SELECT NULL, b.owner_id, b.id, 'owner', 1, NULL, NULL, 'implicit'
       FROM brand b
+      LEFT JOIN brand_group bg ON bg.brand_id = b.id
       WHERE b.owner_id = ? AND b.status = 'active' AND b.frozen_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM brand_member_grant g WHERE g.brand_id = b.id)`,
-    values: [userId, now, userId] as QueryValue[],
+        AND NOT EXISTS (SELECT 1 FROM brand_member_grant g WHERE g.brand_id = b.id)
+        AND (bg.group_id IS NULL OR NOT EXISTS (SELECT 1 FROM team_group_member gm WHERE gm.group_id = bg.group_id AND gm.user_id = ? AND gm.active = 0))`,
+    values: [userId, now, userId, userId] as QueryValue[],
   };
 }
 
@@ -202,12 +251,14 @@ export class TeamAccessDao {
     };
     return z.object({
       ownerId: z.string().min(1).max(128),
+      groupId: brandIdSchema.nullable(),
       status: z.enum(["active", "archived"]),
       frozenAt: z.string().nullable(),
       role: z.enum(teamRoles).nullable(),
       active: z.preprocess(activeFlag, z.union([z.literal(0), z.literal(1), z.null()])),
       expiresAt: z.string().nullable(),
       hasGrant: z.preprocess(flag, z.union([z.literal(1), z.null()])),
+      groupActive: z.preprocess(activeFlag, z.union([z.literal(0), z.literal(1), z.null()])),
     }).parse(row);
   }
 
@@ -273,9 +324,77 @@ export class TeamAccessDao {
     return Boolean(row);
   }
 
+  async resolveUserId(input: { userId?: string; email?: string }) {
+    if (input.userId) {
+      const [row] = await this.query('SELECT id FROM "user" WHERE id = ?', [input.userId]);
+      return row ? String(row.id) : null;
+    }
+    if (input.email) {
+      const [row] = await this.query('SELECT id FROM "user" WHERE lower(email) = lower(?)', [input.email.trim()]);
+      return row ? String(row.id) : null;
+    }
+    return null;
+  }
+
+  async userSummary(userId: string) {
+    const [row] = await this.query(
+      `SELECT u.id, u.name, u.email, COALESCE(r.role, 'user') AS "platformRole"
+       FROM "user" u
+       LEFT JOIN platform_account_role r ON r.user_id = u.id
+       WHERE u.id = ?`,
+      [userId],
+    );
+    return row ? userSummaryRow.parse(row) : null;
+  }
+
+  async userIdentities(userIds: readonly string[]) {
+    const unique = [...new Set(userIds)];
+    if (!unique.length) return new Map<string, { id: string; name: string; email: string }>();
+    const rows = await this.query(
+      `SELECT id, name, email FROM "user" WHERE id IN (${unique.map(() => "?").join(", ")})`,
+      unique,
+    );
+    const map = new Map<string, { id: string; name: string; email: string }>();
+    for (const row of rows) {
+      const parsed = memberIdentityRow.parse(row);
+      map.set(parsed.id, parsed);
+    }
+    return map;
+  }
+
+  async userGroups(userId: string) {
+    const rows = await this.query(
+      `SELECT g.id, g.owner_user_id AS "ownerUserId", g.kind, g.name, g.created_at AS "createdAt"
+       FROM team_group g
+       JOIN team_group_member gm ON gm.group_id = g.id
+       WHERE gm.user_id = ? AND gm.active = 1
+       ORDER BY CASE WHEN g.kind = 'personal' AND g.owner_user_id = ? THEN 0 ELSE 1 END, g.created_at, g.id
+       LIMIT ?`,
+      [userId, userId, teamListLimit],
+    );
+    return rows.map((row) => groupRow.parse(row));
+  }
+
+  async brandScopes(brandIds: readonly string[]) {
+    if (!brandIds.length) return [];
+    const rows = await this.query(
+      `SELECT b.id AS "brandId", bg.group_id AS "groupId", v.name AS "name"
+       FROM brand b
+       JOIN brand_version v ON v.brand_id = b.id AND v.version = b.entity_version
+       LEFT JOIN brand_group bg ON bg.brand_id = b.id
+       WHERE b.id IN (${brandIds.map(() => "?").join(", ")})
+       ORDER BY b.id`,
+      [...brandIds],
+    );
+    return rows.map((row) => brandScopeRow.parse(row));
+  }
+
   async brandGate(brandId: string) {
     const [row] = await this.query(
-      `SELECT owner_id AS "ownerId", status, frozen_at AS "frozenAt" FROM brand WHERE id = ?`,
+      `SELECT b.owner_id AS "ownerId", bg.group_id AS "groupId", b.status, b.frozen_at AS "frozenAt"
+       FROM brand b
+       LEFT JOIN brand_group bg ON bg.brand_id = b.id
+       WHERE b.id = ?`,
       [brandId],
     );
     return row ? brandGateRow.parse(row) : null;
@@ -437,6 +556,7 @@ export class TeamAccessDao {
     brandId: string;
     inviteeUserId: string;
     createdBy: string;
+    role: "member" | "read_only";
     tokenHash: string;
     expiresAt: string;
     createdAt: string;
@@ -444,8 +564,8 @@ export class TeamAccessDao {
     await this.query(
       `INSERT INTO team_invitation
         (id, brand_id, invitee_user_id, created_by, role, token_hash, expires_at, status, created_at, replaced_by)
-       VALUES (?, ?, ?, ?, 'member', ?, ?, 'open', ?, NULL)`,
-      [row.id, row.brandId, row.inviteeUserId, row.createdBy, row.tokenHash, row.expiresAt, row.createdAt],
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, NULL)`,
+      [row.id, row.brandId, row.inviteeUserId, row.createdBy, row.role, row.tokenHash, row.expiresAt, row.createdAt],
     );
   }
 

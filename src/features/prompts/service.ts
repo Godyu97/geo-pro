@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { BrandDao } from "../brands/dao.ts";
+import { authorizeBrandActor, workspaceBrand } from "../team-access/brand-scope.ts";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { promptCommand, promptScope, type DraftContent, type PromptCursor, type PromptScope } from "./contracts.ts";
 import { PromptDao, pageSize } from "./dao.ts";
@@ -16,7 +17,16 @@ const fail = <T extends string>(error: T) => ({ error });
 type ReadQuery = { version?: string; after?: PromptCursor };
 
 export async function readPromptWorkspace(db: QueryConnection, scope: PromptScope, query: ReadQuery) {
-  const brand = await new BrandDao(db).version(scope.ownerId, scope.brandId);
+  let effectiveOwnerId = scope.ownerId;
+  let readOnlyMember = false;
+  let brand = await new BrandDao(db).version(scope.ownerId, scope.brandId);
+  if (!brand) {
+    const memberScope = await authorizeBrandActor(db, scope.ownerId, scope.brandId, "read");
+    if (!memberScope) return null;
+    effectiveOwnerId = memberScope.ownerId;
+    readOnlyMember = memberScope.role === "read_only";
+    brand = await new BrandDao(db).version(effectiveOwnerId, scope.brandId);
+  }
   if (!brand) return null;
   const dao = new PromptDao(db, scope.brandId);
   const [draft, versions, selected, referenced, family, suggestions] = await Promise.all([
@@ -25,7 +35,7 @@ export async function readPromptWorkspace(db: QueryConnection, scope: PromptScop
     query.version ? dao.version(query.version) : Promise.resolve(null),
     dao.referencedIds(),
     dao.familyId(),
-    dao.suggestions(scope.ownerId),
+    dao.suggestions(effectiveOwnerId),
   ]);
   if (query.version && !selected) return null;
   const base = draft?.baseSetId ? await dao.version(draft.baseSetId) : null;
@@ -39,7 +49,7 @@ export async function readPromptWorkspace(db: QueryConnection, scope: PromptScop
     const last = versions[pageSize - 1];
     return {
     brandName: brand.fields.name,
-    readOnly: brand.status !== "active",
+    readOnly: brand.status !== "active" || readOnlyMember,
     brand: fallback,
     terms,
     onboarding: brand.fields.questions.filter((text) => !editor.questions.some((question) => question.text === text)),
@@ -118,7 +128,17 @@ export async function executePromptCommand(db: DatabaseConnection, inputScope: u
   return db.transaction(async (transaction) => {
     const brands = new BrandDao(transaction);
     if (!await brands.lockOwner(scope.ownerId)) return fail("notFound");
-    const brand = await brands.version(scope.ownerId, scope.brandId);
+    let effectiveOwnerId = scope.ownerId;
+    let brand = await brands.version(scope.ownerId, scope.brandId);
+    if (!brand) {
+      const writeScope = await authorizeBrandActor(transaction, scope.ownerId, scope.brandId, "write");
+      if (!writeScope) {
+        const readScope = await authorizeBrandActor(transaction, scope.ownerId, scope.brandId, "read");
+        return readScope ? fail("readOnly") : fail("notFound");
+      }
+      effectiveOwnerId = writeScope.ownerId;
+      brand = await brands.version(effectiveOwnerId, scope.brandId);
+    }
     if (!brand) return fail("notFound");
     if (brand.status !== "active") return fail("readOnly");
     const dao = new PromptDao(transaction, scope.brandId);
@@ -185,9 +205,9 @@ export function promptUnavailable() {
 }
 
 export async function readQuestionEntry(db: QueryConnection, ownerId: string) {
-  const active = await new BrandDao(db).active(ownerId);
-  if (!active) return { kind: "no-brand" as const };
-  return { kind: "active" as const, brandId: active.id };
+  const scope = await workspaceBrand(db, ownerId, undefined, "read");
+  if (!scope) return { kind: "no-brand" as const };
+  return { kind: "active" as const, brandId: scope.brandId };
 }
 
 export type PromptWorkspace = NonNullable<Awaited<ReturnType<typeof readPromptWorkspace>>>;

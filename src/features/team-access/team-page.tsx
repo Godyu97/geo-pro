@@ -2,10 +2,11 @@ import Link from "next/link";
 import { WorkspaceJump } from "@/components/layout/workspace-jump";
 import { WorkspaceReadError, workspaceActionClass } from "@/components/layout/workspace-read-error";
 import { Button } from "@/components/ui/button";
+import { brandIdSchema } from "@/features/brands/contracts";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
-import { listTeamGrants, loadOwnedLabels } from "./commands.ts";
+import { loadTeamGroupWorkspace } from "./commands.ts";
 import { TeamPanel } from "./team-panel";
 
 const entry = "/dashboard/settings/team";
@@ -16,23 +17,60 @@ export async function generateMetadata() {
   return { title: t("title"), robots: { index: false, follow: false } };
 }
 
-export default async function TeamAccessPage() {
+export default async function TeamAccessPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { user } = await requireSession();
   const locale = await getLocale();
   const messages = getMessages(locale).teamAccess;
+  const params = searchParams ? await searchParams : {};
+  const rawGroupId = typeof params.groupId === "string" ? params.groupId.trim() : undefined;
+  if (rawGroupId !== undefined && rawGroupId !== "" && !brandIdSchema.safeParse(rawGroupId).success) {
+    return (
+      <WorkspaceReadError
+        title={messages.title}
+        message={messages.FORBIDDEN}
+        reloadHref={entry}
+        backHref={settingsHref}
+        backLabel={messages.backSettings}
+        logEvent="team-access-invalid-group"
+      />
+    );
+  }
+
   let loaded;
   try {
     const db = getConnection();
-    const result = await listTeamGrants(db, user.id);
-    const labels = await loadOwnedLabels(db, result.ownerBrandIds);
-    loaded = { result, labels };
+    loaded = await loadTeamGroupWorkspace(db, user.id, rawGroupId || undefined);
   } catch {
-    return <WorkspaceReadError title={messages.title} message={messages.SERVICE_UNAVAILABLE} reloadHref={entry}
-      backHref={settingsHref} backLabel={messages.backSettings} logEvent="team-access-page-unavailable" />;
+    return (
+      <WorkspaceReadError
+        title={messages.title}
+        message={messages.SERVICE_UNAVAILABLE}
+        reloadHref={entry}
+        backHref={settingsHref}
+        backLabel={messages.backSettings}
+        logEvent="team-access-page-unavailable"
+      />
+    );
   }
 
-  const { result, labels } = loaded;
-  const primary = labels.length > 0
+  if ("error" in loaded) {
+    return (
+      <WorkspaceReadError
+        title={messages.title}
+        message={messages[loaded.error]}
+        reloadHref={entry}
+        backHref={settingsHref}
+        backLabel={messages.backSettings}
+        logEvent="team-access-group-denied"
+      />
+    );
+  }
+
+  const primary = loaded.ownerLabels.length > 0
     ? <WorkspaceJump href="#team-invite-user">{messages.invite}</WorkspaceJump>
     : <WorkspaceJump href="#invitations-heading">{messages.invitations}</WorkspaceJump>;
   return (
@@ -48,7 +86,7 @@ export default async function TeamAccessPage() {
         </div>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{messages.fixtureNote}</p>
       </header>
-      <TeamPanel labels={labels} workspace={result} messages={messages} />
+      <TeamPanel view={loaded} messages={messages} />
     </div>
   );
 }

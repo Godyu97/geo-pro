@@ -4,6 +4,7 @@ import { getConnection } from "@/lib/db/connection";
 import { requireSession } from "@/lib/auth/session";
 import { allowsOptionalApiOrigin } from "@/lib/http/web-cors";
 import { getTranslator } from "@/lib/i18n/server";
+import { authorizeBrandActor } from "../team-access/brand-scope";
 import {
   generateReport,
   listReports,
@@ -80,8 +81,11 @@ export async function reportSnapshotResponse(request: Request, snapshotId: strin
   const session = await requireSession().catch(() => null);
   if (!session) return errorResponse("SESSION_REQUIRED");
 
-  const result = await readSnapshot(getConnection(), session.user.id, snapshotId);
+  const connection = getConnection();
+  const result = await readSnapshot(connection, session.user.id, snapshotId);
   if ("error" in result) return reportSnapshotFileResponse(null, reportErrors[result.error]);
+  const downloadable = await authorizeBrandActor(connection, session.user.id, result.snapshot.brandId, "download");
+  if (!downloadable) return reportSnapshotFileResponse(null, reportErrors.NOT_FOUND);
   const filename = format === "html" ? `report-${result.snapshot.id}.html` : `report-${result.snapshot.id}.json`;
   return reportSnapshotFileResponse(format === "html" ? result.html : result.json, 200, {
     "Content-Type": format === "html" ? "text/html; charset=utf-8" : "application/json; charset=utf-8",

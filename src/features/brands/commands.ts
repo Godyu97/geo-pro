@@ -7,6 +7,7 @@ import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { invalidateEvidenceOverview } from "../evidence/overview-cache.ts";
 import { hasVerifiedEmail } from "../../lib/auth/verified-email.ts";
 import { MaintenanceDao } from "../maintenance/dao.ts";
+import { ensurePersonalGroup } from "../team-access/platform-role.ts";
 import { brandDeadlineSchema, type BrandCommand, type BrandErrorCode, type BrandMutation } from "./contracts.ts";
 import { BrandDao, type BrandRecord } from "./dao.ts";
 import { PurgeDao } from "./purge-dao.ts";
@@ -107,7 +108,8 @@ async function applyCommand(
 
   if (acceptedPolicyVersion === null) return { error: "RETENTION_UNPUBLISHED" };
   const brandId = randomUUID();
-  await dao.insertBrand(ownerId, brandId, time);
+  const groupId = await ensurePersonalGroup(dao.connectionForWrite(), ownerId, undefined, time);
+  await dao.insertBrand(ownerId, brandId, time, groupId);
   await dao.insertVersion(brandId, 1, command.fields, time);
   await dao.insertRetentionAcceptance(brandId, acceptedPolicyVersion, time);
   if (draft) await dao.deleteDraft(ownerId, scope);

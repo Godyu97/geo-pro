@@ -680,6 +680,20 @@
       "when": 1795666737038,
       "tag": "0096_narrow_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1795681754307,
+      "tag": "0097_clean_quasar",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1795682054178,
+      "tag": "0098_safe_sabretooth",
+      "breakpoints": true
     }
   ]
 }

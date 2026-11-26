@@ -181,6 +181,74 @@ CREATE TABLE `retention_policy` (
     and length("retention_policy"."summary_en") between 1 and 2000)
 );
 
+CREATE TABLE `brand_group` (
+	`brand_id` text PRIMARY KEY NOT NULL,
+	`group_id` text NOT NULL,
+	`created_at` text NOT NULL,
+	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`group_id`) REFERENCES `team_group`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "brand_group_state_check" CHECK(length("brand_group"."created_at") between 20 and 40)
+);
+
+CREATE INDEX `brand_group_group_idx` ON `brand_group` (`group_id`,`brand_id`);
+CREATE TABLE `platform_account_role` (
+	`user_id` text PRIMARY KEY NOT NULL,
+	`role` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "platform_account_role_state_check" CHECK("platform_account_role"."role" in ('admin', 'user')
+    and length("platform_account_role"."user_id") between 1 and 128
+    and length("platform_account_role"."updated_at") between 20 and 40)
+);
+
+CREATE TABLE `platform_role_audit` (
+	`id` text PRIMARY KEY NOT NULL,
+	`actor_id` text,
+	`subject_id` text,
+	`role` text,
+	`action` text NOT NULL,
+	`result` text NOT NULL,
+	`reason` text NOT NULL,
+	`occurred_at` text NOT NULL,
+	CONSTRAINT "platform_role_audit_state_check" CHECK("platform_role_audit"."action" in ('grant', 'revoke')
+    and "platform_role_audit"."result" in ('allowed', 'denied', 'failed')
+    and ("platform_role_audit"."role" is null or "platform_role_audit"."role" in ('admin', 'user'))
+    and length("platform_role_audit"."occurred_at") between 20 and 40)
+);
+
+CREATE INDEX `platform_role_audit_actor_time_idx` ON `platform_role_audit` (`actor_id`,`occurred_at`,`id`);
+CREATE TABLE `team_group` (
+	`id` text PRIMARY KEY NOT NULL,
+	`owner_user_id` text NOT NULL,
+	`kind` text NOT NULL,
+	`name` text NOT NULL,
+	`created_at` text NOT NULL,
+	FOREIGN KEY (`owner_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "team_group_state_check" CHECK("team_group"."kind" in ('personal', 'team')
+    and length("team_group"."owner_user_id") between 1 and 128
+    and length("team_group"."name") between 1 and 120
+    and length("team_group"."created_at") between 20 and 40)
+);
+
+CREATE UNIQUE INDEX `team_group_personal_uidx` ON `team_group` (`owner_user_id`) WHERE "team_group"."kind" = 'personal';
+CREATE TABLE `team_group_member` (
+	`id` text PRIMARY KEY NOT NULL,
+	`group_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	`active` integer NOT NULL,
+	`created_at` text NOT NULL,
+	`revoked_at` text,
+	FOREIGN KEY (`group_id`) REFERENCES `team_group`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "team_group_member_state_check" CHECK("team_group_member"."active" in (0, 1)
+    and length("team_group_member"."user_id") between 1 and 128
+    and length("team_group_member"."created_at") between 20 and 40
+    and (("team_group_member"."active" = 1 and "team_group_member"."revoked_at" is null)
+      or ("team_group_member"."active" = 0 and length("team_group_member"."revoked_at") between 20 and 40)))
+);
+
+CREATE UNIQUE INDEX `team_group_member_pair_uidx` ON `team_group_member` (`group_id`,`user_id`);
+CREATE INDEX `team_group_member_user_idx` ON `team_group_member` (`user_id`,`group_id`) WHERE "team_group_member"."active" = 1;
 CREATE TABLE `user_data_export` (
 	`owner_id` text PRIMARY KEY NOT NULL,
 	`id` text NOT NULL,
@@ -2374,7 +2442,7 @@ CREATE TABLE `team_invitation` (
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`invitee_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`created_by`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "team_invitation_state_check" CHECK("team_invitation"."role" = 'member'
+	CONSTRAINT "team_invitation_state_check" CHECK("team_invitation"."role" in ('member', 'read_only')
     and "team_invitation"."status" in ('open', 'accepted', 'expired', 'revoked')
     and "team_invitation"."invitee_user_id" <> "team_invitation"."created_by"
     and length("team_invitation"."invitee_user_id") between 1 and 128

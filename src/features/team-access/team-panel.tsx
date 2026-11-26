@@ -1,18 +1,31 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { loginPath } from "@/lib/auth/return-to";
 import { useLocale } from "@/lib/i18n/client";
 import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
-import { teamErrors, type TeamError, type TeamInviteStatus, type TeamLabel, type TeamListView } from "./contracts.ts";
+import {
+  teamErrors,
+  type BrandActionFlags,
+  type TeamError,
+  type TeamGroupWorkspaceView,
+  type TeamInviteStatus,
+  type TeamRole,
+} from "./contracts.ts";
 
-export function TeamPanel({ labels, workspace, messages }: {
-  labels: TeamLabel[];
-  workspace: TeamListView;
+function accountPayload(raw: string) {
+  const value = raw.trim();
+  return value.includes("@") ? { email: value } : { userId: value };
+}
+
+export function TeamPanel({ view, messages }: {
+  view: TeamGroupWorkspaceView;
   messages: Messages["teamAccess"];
 }) {
   const { locale } = useLocale();
@@ -20,7 +33,19 @@ export function TeamPanel({ labels, workspace, messages }: {
   const router = useRouter();
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const labelFor = (brandId: string) => labels.find((label) => label.brandId === brandId)?.name ?? t("grantedBrand");
+  const { account, groups, activeGroup, groupBrands, groupMembers, ownerLabels: labels, workspace } = view;
+  const roleLabel = (role: TeamRole) =>
+    role === "owner" ? t("roleOwner") : role === "read_only" ? t("roleReadOnly") : t("roleMember");
+  const actionLabels = (flags: BrandActionFlags) => {
+    const items: string[] = [];
+    if (flags.view) items.push(t("actionView"));
+    if (flags.edit) items.push(t("actionEdit"));
+    if (flags.factApprove) items.push(t("actionFactApprove"));
+    if (flags.contentApprove) items.push(t("actionContentApprove"));
+    if (flags.export) items.push(t("actionExport"));
+    if (flags.manageMembers) items.push(t("actionManageMembers"));
+    return items;
+  };
   const inviteStatus: Record<TeamInviteStatus, "inviteStatusOpen" | "inviteStatusAccepted" | "inviteStatusExpired" | "inviteStatusRevoked"> = {
     open: "inviteStatusOpen",
     accepted: "inviteStatusAccepted",
@@ -59,6 +84,8 @@ export function TeamPanel({ labels, workspace, messages }: {
     const form = event.currentTarget;
     const fields = new FormData(form);
     const expiresAt = String(fields.get("expiresAt") ?? "").trim();
+    const accountInput = String(fields.get("userId") ?? "");
+    const role = String(fields.get("role") ?? "member");
     if (pending) return;
     setPending("invite");
     setNotice(null);
@@ -67,8 +94,10 @@ export function TeamPanel({ labels, workspace, messages }: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: String(fields.get("userId") ?? ""),
+          ...accountPayload(accountInput),
           brandId: String(fields.get("brandId") ?? ""),
+          groupId: activeGroup.id,
+          role,
           ...(expiresAt ? { expiresAt } : {}),
         }),
       });
@@ -109,11 +138,13 @@ export function TeamPanel({ labels, workspace, messages }: {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const expiresAt = String(form.get("expiresAt") ?? "").trim();
+    const accountInput = String(form.get("userId") ?? "");
     await send("grant", "/api/settings/team/grants", {
       method: "POST",
       body: JSON.stringify({
-        userId: String(form.get("userId") ?? ""),
+        ...accountPayload(accountInput),
         brandId: String(form.get("brandId") ?? ""),
+        groupId: activeGroup.id,
         role: String(form.get("role") ?? ""),
         expiresAt: expiresAt ? expiresAt : null,
       }),
@@ -163,12 +194,84 @@ export function TeamPanel({ labels, workspace, messages }: {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <p className="text-sm leading-6 text-muted-foreground">{t("inviteHidden")}</p>
       {notice && <p role="status" className="text-sm leading-6">{notice}</p>}
 
+      <section aria-labelledby="group-heading" className="min-w-0 space-y-4 rounded-xl border bg-card p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 id="group-heading" className="font-medium">{t("groupSection")}</h2>
+          <Badge variant="outline">
+            {t("platformRoleLabel")}: {account.platformRole === "admin" ? t("platformRoleAdmin") : t("platformRoleUser")}
+          </Badge>
+        </div>
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <div className="min-w-0 space-y-1">
+            <dt className="font-medium">{t("currentAccount")}</dt>
+            <dd className="break-all text-muted-foreground">{account.name} ({account.email})</dd>
+            <dd className="break-all text-xs text-muted-foreground">{t("accountId")}: {account.userId}</dd>
+          </div>
+          <div className="min-w-0 space-y-1">
+            <dt className="font-medium">{t("currentGroup")}</dt>
+            <dd className="wrap-anywhere text-muted-foreground">
+              {activeGroup.name} · {activeGroup.isPersonal ? t("personalGroup") : t("sharedGroup")}
+            </dd>
+            <dd className="break-all text-xs text-muted-foreground">{t("groupIdLabel")}: {activeGroup.id}</dd>
+          </div>
+        </dl>
+        <div className="space-y-2">
+          <p className="text-sm font-medium">{t("switchGroup")}</p>
+          <nav aria-label={t("switchGroup")} className="flex flex-wrap gap-2">
+            {groups.map((group) => {
+              const current = group.id === activeGroup.id;
+              const href = group.isPersonal ? "/dashboard/settings/team" : `/dashboard/settings/team?groupId=${encodeURIComponent(group.id)}`;
+              return (
+                <Link
+                  key={group.id}
+                  href={href}
+                  prefetch={false}
+                  aria-current={current ? "page" : undefined}
+                  className={`inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 ${
+                    current ? "border-primary bg-secondary font-medium" : "bg-background hover:bg-muted/50"
+                  }`}
+                >
+                  <span className="wrap-anywhere">{group.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {group.isPersonal ? t("personalGroup") : t("sharedGroup")}
+                  </span>
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+      </section>
+
+      <section aria-labelledby="group-brands-heading" className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
+        <h2 id="group-brands-heading" className="font-medium">{t("groupBrands")}</h2>
+        {groupBrands.length === 0 ? (
+          <p className="rounded-xl border border-dashed bg-card p-4 text-sm leading-6 text-muted-foreground">{t("noGroupBrands")}</p>
+        ) : (
+          <ul className="space-y-3 text-sm">
+            {groupBrands.map((brand) => (
+              <li key={brand.brandId} className="space-y-2 rounded-lg border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Link href={`/dashboard/brands/${brand.brandId}`} prefetch={false} className="font-medium underline-offset-4 hover:underline">
+                    {brand.name}
+                  </Link>
+                  <Badge variant="outline">{roleLabel(brand.role)}</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("allowedActions")}: {actionLabels(brand.actions).join(" · ")}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <section aria-labelledby="grant-heading" className="space-y-3 rounded-xl border bg-card p-5">
         <h2 id="grant-heading" className="font-medium">{t("ownerBrands")}</h2>
+        <p className="text-sm leading-6 text-muted-foreground">{t("groupManageScopeHint")}</p>
         {labels.length === 0 ? <p className="rounded-xl border border-dashed bg-card p-4 text-sm leading-6 text-muted-foreground">{t("noBrands")}</p> : (
           <form onSubmit={grant} className="grid gap-3 sm:grid-cols-[repeat(2,minmax(0,1fr))]">
             <label className="space-y-1 text-sm">
@@ -179,7 +282,7 @@ export function TeamPanel({ labels, workspace, messages }: {
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium">{t("memberUser")}</span>
-              <Input name="userId" required autoComplete="off" spellCheck={false} maxLength={128} />
+              <Input name="userId" required autoComplete="off" spellCheck={false} maxLength={320} placeholder={t("memberAccountPlaceholder")} />
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium">{t("role")}</span>
@@ -214,7 +317,14 @@ export function TeamPanel({ labels, workspace, messages }: {
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium">{t("memberUser")}</span>
-              <Input id="team-invite-user" className="scroll-mt-5" name="userId" required autoComplete="off" spellCheck={false} maxLength={128} />
+              <Input id="team-invite-user" className="scroll-mt-5" name="userId" required autoComplete="off" spellCheck={false} maxLength={320} placeholder={t("memberAccountPlaceholder")} />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">{t("role")}</span>
+              <select name="role" required className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" defaultValue="read_only">
+                <option value="read_only">{t("roleReadOnly")}</option>
+                <option value="member">{t("roleMember")}</option>
+              </select>
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium">{t("expiresAt")}</span>
@@ -234,6 +344,7 @@ export function TeamPanel({ labels, workspace, messages }: {
                   <span>{t(invitation.labelKey)}</span>
                   <span className="text-muted-foreground">{t("inviteBrandId")}</span>
                   <span className="break-all text-muted-foreground">{invitation.brandId}</span>
+                  <span>{roleLabel(invitation.role)}</span>
                   <span>{t(inviteStatus[invitation.status])}</span>
                   <span className="text-muted-foreground">{t("inviteAccount")}</span>
                   <span className="break-all text-muted-foreground">{invitation.inviteeUserId}</span>
@@ -270,28 +381,40 @@ export function TeamPanel({ labels, workspace, messages }: {
 
       <section aria-labelledby="members-heading" className="space-y-3 rounded-xl border bg-card p-5">
         <h2 id="members-heading" className="font-medium">{t("members")}</h2>
-        {workspace.members.length === 0 ? <p className="text-sm text-muted-foreground">{t("empty")}</p> : (
-          <ul className="space-y-2 text-sm">
-            {workspace.members.map((member) => {
-              const owners = workspace.members.filter((row) => row.brandId === member.brandId && row.role === "owner" && row.active === 1);
-              const canRevoke = !(member.role === "owner" && member.active === 1 && owners.length < 2);
+        {groupMembers.length === 0 ? <p className="text-sm text-muted-foreground">{t("empty")}</p> : (
+          <ul className="space-y-3 text-sm">
+            {groupMembers.map((member) => {
+              const isOwnedBrand = workspace.ownerBrandIds.includes(member.brandId);
+              const owners = groupMembers.filter((row) => row.brandId === member.brandId && row.role === "owner" && row.active === 1 && !row.expired);
+              const canRevoke = isOwnedBrand && !(member.role === "owner" && member.active === 1 && owners.length < 2);
+              const statusText = member.active === 1 ? (member.expired ? t("inviteStatusExpired") : t("active")) : t("inactive");
               return (
-                <li key={member.id} className="flex flex-wrap items-center gap-2">
-                  <span>{labelFor(member.brandId)}</span>
-                  <span className="text-muted-foreground">{member.role === "owner" ? t("roleOwner") : member.role === "read_only" ? t("roleReadOnly") : t("roleMember")}</span>
-                  <span className="text-muted-foreground">{member.active === 1 ? t("active") : t("inactive")}</span>
-                  {member.role === "member" && member.active === 1 && (
-                    <Button type="button" variant="outline" disabled={pending !== null}
-                      onClick={() => send(`promote:${member.id}`, `/api/settings/team/grants/${member.id}/promote`, { method: "POST", body: "{}" }, t("promoted"))}>
-                      {pending === `promote:${member.id}` ? t("promoting") : t("promote")}
-                    </Button>
-                  )}
-                  {canRevoke && member.active === 1 && (
-                    <Button type="button" variant="outline" disabled={pending !== null}
-                      onClick={() => send(member.id, `/api/settings/team/grants/${member.id}/revoke`, { method: "POST", body: "{}" }, t("revoked"))}>
-                      {pending === member.id ? t("revoking") : t("revoke")}
-                    </Button>
-                  )}
+                <li key={member.grantId} className="space-y-2 rounded-lg border p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{member.brandName}</span>
+                    <span className="wrap-anywhere text-muted-foreground">
+                      {member.userName}{member.userEmail ? ` (${member.userEmail})` : ""}
+                    </span>
+                    <Badge variant="outline">{roleLabel(member.role)}</Badge>
+                    <span className="text-muted-foreground">{statusText}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("allowedActions")}: {actionLabels(member.actions).join(" · ")}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {isOwnedBrand && member.role === "member" && member.active === 1 && !member.expired && (
+                      <Button type="button" variant="outline" disabled={pending !== null}
+                        onClick={() => send(`promote:${member.grantId}`, `/api/settings/team/grants/${member.grantId}/promote`, { method: "POST", body: "{}" }, t("promoted"))}>
+                        {pending === `promote:${member.grantId}` ? t("promoting") : t("promote")}
+                      </Button>
+                    )}
+                    {canRevoke && member.active === 1 && (
+                      <Button type="button" variant="outline" disabled={pending !== null}
+                        onClick={() => send(member.grantId, `/api/settings/team/grants/${member.grantId}/revoke`, { method: "POST", body: "{}" }, t("revoked"))}>
+                        {pending === member.grantId ? t("revoking") : t("revoke")}
+                      </Button>
+                    )}
+                  </div>
                 </li>
               );
             })}
@@ -320,10 +443,10 @@ export function TeamPanel({ labels, workspace, messages }: {
       <section aria-labelledby="export-heading" className="space-y-3 rounded-xl border bg-card p-5">
         <h2 id="export-heading" className="font-medium">{t("selectBrands")}</h2>
         <form onSubmit={exportBrands} className="space-y-3 text-sm">
-          {workspace.accessibleBrandIds.map((brandId) => (
-            <label key={brandId} className="flex items-center gap-2">
-              <input type="checkbox" name="brandId" value={brandId} />
-              <span>{labelFor(brandId)}</span>
+          {groupBrands.map((brand) => (
+            <label key={brand.brandId} className="flex items-center gap-2">
+              <input type="checkbox" name="brandId" value={brand.brandId} />
+              <span>{brand.name}</span>
             </label>
           ))}
           <label className="block space-y-1">

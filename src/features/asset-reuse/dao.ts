@@ -271,16 +271,10 @@ export async function listSourceFragmentConflicts(db: QueryConnection, brandId: 
 
 export async function sourceAccessFor(db: QueryConnection, userId: string, brandId: string, now: string) {
   const owned = await brandOwnedBy(db, userId, brandId);
-  if (owned) return { viewer: "owner", owned } as const;
-  const rows = await queryWithParameters(
-    db,
-    `SELECT id FROM brand_member_grant
-     WHERE user_id = ? AND brand_id = ? AND active = 1
-       AND (expires_at IS NULL OR expires_at > ?)
-     LIMIT 1`,
-    [userId, brandId, now],
-  );
-  return rows.length === 1 ? { viewer: "member", owned: null } as const : null;
+  if (owned) return { viewer: "owner", owned, role: "owner" as const } as const;
+  const scope = await authorizeBrandActor(db, userId, brandId, "read", now);
+  if (!scope) return null;
+  return { viewer: "member", owned: null, role: scope.role } as const;
 }
 
 export async function brandOwnedBy(db: QueryConnection, ownerId: string, brandId: string) {

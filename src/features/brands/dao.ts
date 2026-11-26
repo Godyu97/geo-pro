@@ -96,6 +96,10 @@ export class BrandDao {
     return queryWithParameters(this.connection, sql, values);
   }
 
+  connectionForWrite() {
+    return this.connection;
+  }
+
   async lockOwner(ownerId: string) {
     const lock = this.connection.kind === "postgresql" ? " FOR NO KEY UPDATE" : "";
     const rows = await this.query('SELECT id FROM "user" WHERE id = ?' + lock, [ownerId]);
@@ -233,9 +237,13 @@ export class BrandDao {
     await this.query("DELETE FROM brand_draft WHERE owner_id = ? AND scope = ?", [ownerId, scope]);
   }
 
-  async insertBrand(ownerId: string, id: string, time: string) {
+  async insertBrand(ownerId: string, id: string, time: string, groupId: string | null = null) {
     await this.query(`INSERT INTO brand (id, owner_id, status, revision, entity_version, created_at)
       VALUES (?, ?, 'active', 1, 1, ?)`, [id, ownerId, time]);
+    if (groupId) {
+      await this.query(`INSERT INTO brand_group (brand_id, group_id, created_at)
+        VALUES (?, ?, ?) ON CONFLICT (brand_id) DO NOTHING`, [id, groupId, time]);
+    }
   }
 
   async updateBrand(ownerId: string, current: BrandRecord, status: BrandRecord["status"], entityVersion: number) {

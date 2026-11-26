@@ -10,6 +10,7 @@ import { executeBrandCommand } from "./commands";
 import { brandCommandSchema, brandFieldNameSchema, brandIdSchema, brandVersionParam, type BrandErrorCode, type BrandFieldName } from "./contracts";
 import { brandErrorMessage } from "./error-messages";
 import { brandIntakeDecision } from "./intake";
+import { authorizeBrandActor } from "../team-access/brand-scope";
 import { brandUnavailable, readBrandData } from "./service";
 
 const responseHeaders = { "Cache-Control": "private, no-store", Vary: "Cookie, Accept-Language" };
@@ -56,7 +57,9 @@ export async function readBrandResponse(request: Request) {
   const query = readQuery.safeParse(Object.fromEntries(params));
   if (!query.success || params.size !== new Set(params.keys()).size) return fail("INVALID_INPUT");
   const { id, version } = query.data;
-  const result = await readBrandData((dao) => dao.version(session.session.user.id, id, version));
+  const scope = await authorizeBrandActor(getConnection(), session.session.user.id, id, "read").catch(() => null);
+  if (!scope) return fail("NOT_FOUND");
+  const result = await readBrandData((dao) => dao.version(scope.ownerId, id, version));
   if ("unavailable" in result) return fail("SERVICE_UNAVAILABLE", result.traceId);
   return result.data ? json(result.data) : fail("NOT_FOUND");
 }

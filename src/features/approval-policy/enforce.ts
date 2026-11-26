@@ -2,6 +2,8 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { QueryConnection } from "../../lib/db/connection.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
+import { TeamAccessDao } from "../team-access/dao.ts";
 import { approveSeparated } from "../team-access/rules.ts";
 import type { ApprovalKind } from "./contracts.ts";
 import { ApprovalPolicyDao } from "./dao.ts";
@@ -22,12 +24,18 @@ export async function openApprovalScope(
   const dao = new ApprovalPolicyDao(db);
   const brand = await dao.brandGate(brandId);
   if (!brand || brand.status !== "active" || brand.frozenAt) return { error: "NOT_FOUND" };
-  const policy = await dao.policy(brandId);
+  const [policy, actorRow, writeScope] = await Promise.all([
+    dao.policy(brandId),
+    new TeamAccessDao(db).brandActor(actorId, brandId),
+    authorizeBrandActor(db, actorId, brandId, "write"),
+  ]);
   const dual = policy?.dualControl === 1;
-  if (brand.ownerId === actorId) {
+  if (writeScope?.role === "owner") {
     return { brandOwnerId: brand.ownerId, dual, actorIsOwner: true, matchingDuty: true };
   }
   if (!dual) return { error: "NOT_FOUND" };
+  // If an explicit team grant exists for this actor, it must be active, unexpired, and writable.
+  if (actorRow?.role !== null && !writeScope) return { error: "NOT_FOUND" };
   const duty = await dao.duty(brandId, actorId);
   if (!duty) return { error: "NOT_FOUND" };
   const matchingDuty = kind === "fact" ? duty.factApprover === 1 : duty.contentApprover === 1;

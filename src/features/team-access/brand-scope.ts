@@ -24,6 +24,7 @@ export async function authorizeBrandActor(
 ): Promise<BrandScope | null> {
   const row = await new TeamAccessDao(db).brandActor(actorId, brandId);
   if (!row || row.frozenAt) return null;
+  if (row.groupId !== null && row.groupActive === 0) return null;
   const grantOpen = row.role !== null && row.active === 1 && !expired(row.expiresAt, now);
   let role: TeamRole | null = null;
   if (grantOpen && row.role) role = row.role;

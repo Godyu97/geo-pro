@@ -11,6 +11,7 @@ import { accountAccessPath } from "@/features/account/email/contracts";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { authorizeBrandActor } from "@/features/team-access/brand-scope";
+import { TeamAccessDao } from "@/features/team-access/dao";
 import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { BrandForm, BrandIntakeJump } from "./brand-form";
@@ -274,8 +275,21 @@ export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Q
   const cursor = archiveCursorSchema.safeParse({ at: query.before, id: query.id });
   const frozenCursor = archiveCursorSchema.safeParse({ at: query.frozenBefore, id: query.frozenId });
   const result = await readBrandData(async (dao) => {
-    const [active, archive, frozen] = await Promise.all([dao.active(user.id), dao.archived(user.id, cursor.data), dao.frozen(user.id, frozenCursor.data)]);
-    return { active, archive, frozen };
+    const [active, archive, frozen, accessible] = await Promise.all([
+      dao.active(user.id),
+      dao.archived(user.id, cursor.data),
+      dao.frozen(user.id, frozenCursor.data),
+      new TeamAccessDao(getConnection()).accessibleBrands(user.id, new Date().toISOString()),
+    ]);
+    const extraIds = accessible.filter((row) => row.brandId !== active?.id).map((row) => row.brandId);
+    const extraScopes = extraIds.length > 0 ? await new TeamAccessDao(getConnection()).brandScopes(extraIds) : [];
+    const roleByBrand = new Map(accessible.map((row) => [row.brandId, row.role]));
+    const teamBrands = extraScopes.map((scope) => ({
+      id: scope.brandId,
+      name: scope.name,
+      role: roleByBrand.get(scope.brandId) ?? "read_only",
+    }));
+    return { active, archive, frozen, teamBrands };
   });
   const title = t("title");
   const relatedLabel = t("relatedEntries");
@@ -293,6 +307,10 @@ export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Q
     );
   }
   const active = result.data.active;
+  const teamBrands = result.data.teamBrands;
+  const teamT = await getTranslator("teamAccess");
+  const roleLabel = (role: "owner" | "member" | "read_only") =>
+    role === "owner" ? teamT("roleOwner") : role === "member" ? teamT("roleMember") : teamT("roleReadOnly");
   return (
     <BrandCanvas
       title={title}
@@ -320,6 +338,21 @@ export async function BrandIndexPage({ searchParams }: { searchParams: Promise<Q
         {active ? (
           <p className="min-w-0 break-words text-lg">{active.name}</p>
         ) : <p className={brandEmptyClass}>{t("noActiveBrand")}</p>}
+      </section>
+      <section aria-labelledby="brand-team" className="min-w-0 space-y-3">
+        <h2 id="brand-team" className="break-words font-semibold">{t("teamBrands")}</h2>
+        {teamBrands.length === 0 ? <p className={brandEmptyClass}>{t("noTeamBrands")}</p> : (
+          <ul className="min-w-0 space-y-3">
+            {teamBrands.map((brand) => (
+              <li key={brand.id}>
+                <Link href={"/dashboard/brands/" + brand.id} prefetch={false} className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-2xl border bg-card p-4 text-sm break-words wrap-anywhere underline-offset-4 outline-none hover:underline focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
+                  <span>{brand.name}</span>
+                  <Badge variant="outline">{roleLabel(brand.role)}</Badge>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
       <section aria-labelledby="brand-archived" className="min-w-0 space-y-3">
         <h2 id="brand-archived" className="break-words font-semibold">{t("archivedBrands")}</h2>
@@ -457,6 +490,7 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
   const scope = await authorizeBrandActor(getConnection(), user.id, id, "read");
   if (!scope) notFound();
   const canManage = scope.role === "owner";
+  const canWrite = scope.role !== "read_only";
   const result = await readBrandData(async (dao) => {
     const brand = await dao.version(scope.ownerId, id, version.data);
     if (!brand) return null;
@@ -517,17 +551,17 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
     <Button asChild className={brandActionClass}>
       <Link href={href} prefetch={false}>{t("currentVersion")}</Link>
     </Button>
-  ) : action.kind === "confirm" ? (
+  ) : canWrite && action.kind === "confirm" ? (
     <Button asChild className={brandActionClass}>
       <Link href={"/dashboard/monitoring/new?brandId=" + id} prefetch={false}>{t("readinessConfirm")}</Link>
     </Button>
-  ) : action.kind === "next" ? (
+  ) : canWrite && action.kind === "next" ? (
     <Button asChild className={brandActionClass}>
       <Link href={readinessStepHref(id, action.step)} prefetch={false}>{t(readinessStepLabel(action.step))}</Link>
     </Button>
-  ) : (
+  ) : action.kind === "retry" ? (
     <CapabilityRetryButton label={monitoring("retry")} />
-  );
+  ) : null;
   const related = [
     { href: "/dashboard/brands", label: t("allBrands") },
     ...(!snapshot ? [

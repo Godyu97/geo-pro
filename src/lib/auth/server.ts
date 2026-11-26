@@ -7,9 +7,11 @@ import { sql } from "drizzle-orm";
 
 import { sendResetMail } from "@/features/account/email/delivery";
 import { beforeProfileUpdate } from "@/features/account/profile-update";
+import { ensurePersonalGroup, ensureUserPlatformRole } from "@/features/team-access/platform-role";
 import { getAuthEnvironment } from "@/lib/auth/env";
 import { authOptions } from "@/lib/auth/options";
 import { trustedAppOrigins } from "@/lib/auth/origin";
+import { getConnection } from "@/lib/db/connection";
 import { getDatabase, withAuthDatabaseTransaction } from "@/lib/db";
 import { getWebCorsConfig } from "@/lib/http/web-cors";
 
@@ -27,6 +29,21 @@ function createAuth(scopedDatabase?: ReturnType<typeof getDatabase>, lockUser?: 
     verification: { ...authOptions.verification, disableCleanup: Boolean(scopedDatabase) },
     disabledPaths: ["/send-verification-email", "/verify-email", "/request-password-reset", "/reset-password"],
     hooks: { before: beforeProfileUpdate },
+    databaseHooks: {
+      user: {
+        create: {
+          after: async (created) => {
+            try {
+              const connection = getConnection();
+              await ensureUserPlatformRole(connection, created.id);
+              await ensurePersonalGroup(connection, created.id, created.name);
+            } catch {
+              console.error("personal-group-provision-failed");
+            }
+          },
+        },
+      },
+    },
     plugins: lockUser ? [{
       id: "lock-password-sign-in",
       hooks: {
