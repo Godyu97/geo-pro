@@ -4,11 +4,23 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { latestPromptSetQuery, PromptDao, promptSetBatchQuery } from "../../src/features/prompts/dao.ts";
-import { acknowledgeQualityAlert } from "../../src/features/quality-alerts/commands.ts";
+import { acknowledgeQualityAlert, recordQualityAlert } from "../../src/features/quality-alerts/commands.ts";
 import { saveSamplingPlan, transitionSamplingPlan } from "../../src/features/sampling-plans/commands.ts";
 import { driveDueWindowSchema } from "../../src/features/sampling-plans/contracts.ts";
-import { samplingDueRunLookupQuery } from "../../src/features/sampling-plans/due-dao.ts";
-import { driveDueSamplingWindow, listSamplingDueWindows, manualSheetsForBrand } from "../../src/features/sampling-plans/due-commands.ts";
+import {
+  samplingDueRunLookupQuery,
+  samplingDueRunsForWindowQuery,
+  samplingDueRunsForWindowsQuery,
+  samplingWindowReadingLookupQuery,
+  samplingWindowReadingsForAlertsQuery,
+} from "../../src/features/sampling-plans/due-dao.ts";
+import {
+  driveDueSamplingWindow,
+  listAlertWindowSources,
+  listSamplingDueWindows,
+  manualSheetsForBrand,
+  readSamplingWindowDetail,
+} from "../../src/features/sampling-plans/due-commands.ts";
 import { localWindowId } from "../../src/features/sampling-plans/due-window.ts";
 import { manualSheetLines } from "../../src/features/sampling-plans/rules.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
@@ -665,6 +677,256 @@ for (const kind of ["sqlite", "postgresql"]) {
       assert.equal(captured.length, 0);
       await manualSheetsForBrand(watched, brand, listed.runs.filter((run) => run.runId === legacyRunId || run.id === legacyRunId));
       assert.equal(captured.length, 0);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test(`${kind}: alerts resolve only their bound plan window and accepted runs, keep failed slots in P, and isolate legacy or foreign links`, async () => {
+    const fixture = await testDatabase(kind);
+    try {
+      const ddl = await testDatabase(kind, { ddl: true });
+      try {
+        const db = fixture.connection;
+        assert.deepEqual(await structure(db), await structure(ddl.connection));
+        const [owner, outsider] = await Promise.all([account(db), account(db)]);
+        const brand = randomUUID();
+        const brands = new BrandDao(db);
+        await brands.insertBrand(owner, brand, time);
+        await brands.insertVersion(brand, 1, brandFields, time);
+
+        const runA22 = await stubRun(db, brand, owner);
+        const runA23 = await stubRun(db, brand, owner);
+        const runB22 = await stubRun(db, brand, owner);
+        const slotRun22 = randomUUID();
+        const slotRun23 = randomUUID();
+        const slotRunB22 = randomUUID();
+        const obs22 = randomUUID();
+        const obsB22 = randomUUID();
+        for (const [monSlotId, monRunId, slotStatus, obsId, atTime] of [
+          [slotRun22, runA22, "succeeded", obs22, earlierAt],
+          [slotRun23, runA23, "failed", null, dueAt],
+          [slotRunB22, runB22, "succeeded", obsB22, earlierAt],
+        ]) {
+          await queryWithParameters(
+            db,
+            `INSERT INTO monitoring_slot (
+              id, run_id, brand_id, question_id, natural_question, channel_id, channel_version,
+              repeat_index, reservation_id, status, created_at, adopted_attempt_id, late
+            ) VALUES (?, ?, ?, ?, 1, 'official-api', 1, 1, NULL, ?, ?, ?, 0)`,
+            [monSlotId, monRunId, brand, randomUUID(), slotStatus, atTime, slotStatus === "succeeded" ? randomUUID() : null],
+          );
+          if (obsId) {
+            await queryWithParameters(
+              db,
+              `INSERT INTO answer_observation (
+                id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method, question_text, answer_text,
+                fingerprint, captured_at, region, language, requested_network_mode, entity_version, citation_set_state,
+                evidence_state, locator_ref, collector_id, missing_reason, created_at, target_region, observed_region,
+                new_session, product_mode, network_trigger
+              ) VALUES (?, ?, ?, ?, NULL, 'model_api', 'official_api', 'question', 'answer text', ?, ?, 'CN', 'zh-CN',
+                'off', 1, 'complete', 'complete', NULL, NULL, NULL, ?, 'CN', 'unknown', 'unknown', 'unknown', 'not_triggered')`,
+              [obsId, brand, owner, monSlotId, "b".repeat(64), atTime, atTime],
+            );
+            await queryWithParameters(
+              db,
+              `INSERT INTO answer_analysis_version (
+                id, observation_id, brand_id, version, entity_version, rule_version, mentioned, recommended,
+                official_site_cited, evidence_span, status, revised_from, reason, reviewer_id, created_at
+              ) VALUES (?, ?, ?, 1, 1, 'metrics-v3', 'true', 'true', 'unknown', NULL, 'classified', NULL, NULL, NULL, ?)`,
+              [randomUUID(), obsId, brand, atTime],
+            );
+          }
+        }
+
+        const slotA22 = randomUUID();
+        const failedA23 = randomUUID();
+        const slotA23 = randomUUID();
+        const slotB22 = randomUUID();
+        const planA = await saveSamplingPlan(db, owner, {
+          action: "create",
+          brandId: brand,
+          phase: "active",
+          currency: "CNY",
+          budgetMinor: 100,
+          spentMinor: 0,
+          pendingMinor: 0,
+          nextAt: time,
+          slots: [
+            slot(slotA22, "official-api", earlierAt, "scheduled", false, 5),
+            slot(failedA23, "official-api", dueAt, "failed", false, 5),
+            slot(slotA23, "official-api", dueAt, "scheduled", false, 5),
+          ],
+        }, () => time);
+        const planB = await saveSamplingPlan(db, owner, {
+          action: "create",
+          brandId: brand,
+          phase: "active",
+          currency: "CNY",
+          budgetMinor: 100,
+          spentMinor: 0,
+          pendingMinor: 0,
+          nextAt: time,
+          slots: [
+            slot(slotB22, "official-api", earlierAt, "scheduled", false, 5),
+          ],
+        }, () => time);
+
+        const runBySlot = new Map([
+          [slotA22, runA22],
+          [slotA23, runA23],
+          [slotB22, runB22],
+        ]);
+        const eligible = [{ channelId: "official-api", state: "eligible" }];
+        const driveA = await driveDueSamplingWindow(
+          db,
+          owner,
+          drive(planA.plan.id, eligible, []),
+          async (start) => ({ runId: runBySlot.get(start.slotId), chargedMinor: 5 }),
+        );
+        const driveB = await driveDueSamplingWindow(
+          db,
+          owner,
+          drive(planB.plan.id, eligible, []),
+          async (start) => ({ runId: runBySlot.get(start.slotId), chargedMinor: 5 }),
+        );
+        assert.equal(driveA.alert.kind, "data_quality");
+        assert.equal(driveA.alert.claimBrandDecline, false);
+        assert.equal(driveB.alert, null);
+
+        // Zero-run coverage-insufficient plan window in a separate plan.
+        const zeroSlotId = randomUUID();
+        const planZero = await saveSamplingPlan(db, owner, {
+          action: "create",
+          brandId: brand,
+          phase: "active",
+          currency: "CNY",
+          budgetMinor: 100,
+          spentMinor: 0,
+          pendingMinor: 0,
+          nextAt: time,
+          slots: [slot(zeroSlotId, "official-api", "2026-11-21T02:00:00.000Z", "failed", false, 5)],
+        }, () => time);
+        const driveZero = await driveDueSamplingWindow(db, owner, drive(planZero.plan.id, eligible, []));
+        assert.equal(driveZero.alert.kind, "data_quality");
+
+        // Legacy unbound alert on the same brand.
+        const legacy = await recordQualityAlert(db, owner, {
+          action: "record",
+          brandId: brand,
+          windows: [
+            { windowId: "legacy-w", completed: true, coverageSufficient: false, citationFieldChanged: false, modeChanged: false, recommendationRate: null },
+          ],
+        }, () => time);
+        assert.equal(legacy.recorded, true);
+
+        const sourced = await listAlertWindowSources(db, owner, brand, [driveA.alert.id, driveZero.alert.id, legacy.alert.id]);
+        assert.equal("error" in sourced, false);
+        const sourcesA = sourced.sourcesByAlertId.get(driveA.alert.id);
+        assert.equal(sourcesA.length, 1);
+        assert.equal(sourcesA[0].planId, planA.plan.id);
+        assert.equal(sourcesA[0].windowId, "2026-11-23");
+        assert.equal(sourcesA[0].timezone, "Asia/Shanghai");
+        assert.equal(sourcesA[0].plannedCount, 2);
+        assert.equal(sourcesA[0].eligibleCount, 0);
+        assert.equal(sourcesA[0].judgedCount, 0);
+        assert.deepEqual(sourcesA[0].acceptedRuns.map((run) => run.monitoringRunId), [runA23]);
+        assert.equal(sourced.sourcesByAlertId.get(legacy.alert.id), undefined);
+        const sourcesZero = sourced.sourcesByAlertId.get(driveZero.alert.id);
+        assert.equal(sourcesZero.length, 1);
+        assert.deepEqual(sourcesZero[0].acceptedRuns, []);
+
+        const detail = await readSamplingWindowDetail(db, owner, planA.plan.id, "2026-11-23");
+        assert.equal("error" in detail, false);
+        assert.equal(detail.detail.plan.id, planA.plan.id);
+        assert.equal(detail.detail.reading.windowId, "2026-11-23");
+        assert.equal(detail.detail.reading.timezone, "Asia/Shanghai");
+        assert.equal(detail.detail.reading.plannedCount, 2);
+        assert.equal(detail.detail.reading.eligibleCount, 0);
+        assert.equal(detail.detail.reading.judgedCount, 0);
+        assert.equal(detail.detail.alert.claimBrandDecline, false);
+        assert.deepEqual(
+          detail.detail.slots.map((s) => [s.id, s.status]).sort(([a], [b]) => a.localeCompare(b)),
+          [[failedA23, "failed"], [slotA23, "completed"]].sort(([a], [b]) => a.localeCompare(b)),
+        );
+        assert.equal(detail.detail.acceptedRuns.length, 1);
+        assert.equal(detail.detail.acceptedRuns[0].monitoringRunId, runA23);
+        assert.equal(detail.detail.acceptedRuns[0].observationCount, 0);
+        assert.equal(detail.detail.acceptedRuns[0].failedSlotCount, 1);
+
+        const zeroDetail = await readSamplingWindowDetail(db, owner, planZero.plan.id, "2026-11-21");
+        assert.equal(zeroDetail.detail.acceptedRuns.length, 0);
+        assert.deepEqual(zeroDetail.detail.slots.map((s) => [s.id, s.status]), [[zeroSlotId, "failed"]]);
+
+        // Outsider isolation.
+        assert.deepEqual(await listAlertWindowSources(db, outsider, brand, [driveA.alert.id]), { error: "NOT_FOUND" });
+        assert.deepEqual(await readSamplingWindowDetail(db, outsider, planA.plan.id, "2026-11-23"), { error: "NOT_FOUND" });
+
+        // Repeat trigger and acknowledge preserve window link & runs.
+        await acknowledgeQualityAlert(db, owner, driveA.alert.id, () => time);
+        await driveDueSamplingWindow(db, owner, drive(planA.plan.id, eligible, []));
+        const afterAck = await listAlertWindowSources(db, owner, brand, [driveA.alert.id]);
+        assert.equal(afterAck.sourcesByAlertId.get(driveA.alert.id)?.[0]?.planId, planA.plan.id);
+        assert.deepEqual(afterAck.sourcesByAlertId.get(driveA.alert.id)?.[0]?.acceptedRuns.map((r) => r.monitoringRunId), [runA23]);
+        const detailAfterAck = await readSamplingWindowDetail(db, owner, planA.plan.id, "2026-11-23");
+        assert.equal(detailAfterAck.detail.alert.status, "acknowledged");
+
+        // Batch query count & index plan verification at scale.
+        const extra = Array.from({ length: 500 }, () => randomUUID());
+        await queryWithParameters(
+          db,
+          `INSERT INTO brand (id, owner_id, status, revision, entity_version, created_at)
+           VALUES ${extra.map(() => "(?, ?, 'archived', 1, 1, ?)").join(", ")}`,
+          extra.flatMap((id) => [id, outsider, time]),
+        );
+        await queryWithParameters(
+          db,
+          `INSERT INTO sampling_plan (
+            id, version, brand_id, owner_id, phase, currency, budget_minor, spent_minor, pending_minor, created_at
+          ) VALUES ${extra.map(() => "(?, 1, ?, ?, 'active', 'CNY', 10, 0, 0, ?)").join(", ")}`,
+          extra.flatMap((id) => [id, id, outsider, time]),
+        );
+        const fillerSlots = extra.map(() => randomUUID());
+        await queryWithParameters(
+          db,
+          `INSERT INTO sampling_slot (
+            id, plan_id, brand_id, owner_id, channel_id, at, status, manual, cost_minor
+          ) VALUES ${extra.map(() => "(?, ?, ?, ?, 'bulk-channel', ?, 'scheduled', 1, 1)").join(", ")}`,
+          extra.flatMap((id, index) => [fillerSlots[index], id, id, outsider, dueAt]),
+        );
+        await queryWithParameters(
+          db,
+          `INSERT INTO sampling_due_run (
+            id, plan_id, plan_version, brand_id, owner_id, channel_id, window_id, slot_id, timezone,
+            kind, status, monitoring_run_id, charged_minor, prompt_ids_json, created_at
+          ) VALUES ${extra.map(() => "(?, ?, 1, ?, ?, 'bulk-channel', '2026-11-23', ?, 'Asia/Shanghai', 'manual', 'sheet', NULL, 0, ?, ?)").join(", ")}`,
+          extra.flatMap((id, index) => [randomUUID(), id, id, outsider, fillerSlots[index], JSON.stringify([randomUUID()]), time]),
+        );
+        await queryWithParameters(
+          db,
+          `INSERT INTO sampling_window_reading (
+            id, plan_id, brand_id, owner_id, window_id, timezone, planned_count, eligible_count,
+            recommended_count, judged_count, coverage_sufficient, comparable_windows, waiting_for_trend,
+            alert_id, created_at, updated_at
+          ) VALUES ${extra.map(() => "(?, ?, ?, ?, '2026-11-23', 'Asia/Shanghai', 1, 0, 0, 0, 0, 0, 1, ?, ?, ?)").join(", ")}`,
+          extra.flatMap((id) => [randomUUID(), id, id, outsider, randomUUID(), time, time]),
+        );
+        if (db.kind === "postgresql") {
+          await db.query("ANALYZE sampling_window_reading");
+          await db.query("ANALYZE sampling_due_run");
+        }
+        const explain = db.kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN ";
+        const readingsQuery = samplingWindowReadingsForAlertsQuery(owner, brand, [driveA.alert.id]);
+        const readingOneQuery = samplingWindowReadingLookupQuery(owner, planA.plan.id, "2026-11-23");
+        const runsWinQuery = samplingDueRunsForWindowQuery(owner, planA.plan.id, "2026-11-23");
+        const runsBatchQuery = samplingDueRunsForWindowsQuery(owner, [planA.plan.id], ["2026-11-23"]);
+        assert.match(JSON.stringify(await queryWithParameters(db, explain + readingsQuery.sql, readingsQuery.values)), /sampling_window_reading_owner_idx/);
+        assert.match(JSON.stringify(await queryWithParameters(db, explain + readingOneQuery.sql, readingOneQuery.values)), /sampling_window_reading_window_uidx/);
+        assert.match(JSON.stringify(await queryWithParameters(db, explain + runsWinQuery.sql, runsWinQuery.values)), /sampling_due_run_owner_idx/);
+        assert.match(JSON.stringify(await queryWithParameters(db, explain + runsBatchQuery.sql, runsBatchQuery.values)), /sampling_due_run_owner_idx/);
+      } finally {
+        await ddl.cleanup();
+      }
     } finally {
       await fixture.cleanup();
     }

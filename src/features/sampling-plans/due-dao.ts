@@ -66,8 +66,28 @@ const runSlotRow = z.object({
   runId: brandIdSchema,
 });
 
+const runSlotSummaryRow = z.object({
+  id: brandIdSchema,
+  runId: brandIdSchema,
+  status: z.string(),
+});
+
+const monitoringRunSummaryRow = z.object({
+  id: brandIdSchema,
+  status: z.string(),
+  slotCount: z.int().positive(),
+  createdAt: z.iso.datetime({ precision: 3 }),
+});
+
+const observationLinkRow = z.object({
+  id: brandIdSchema,
+  slotId: brandIdSchema.nullable(),
+});
+
 export type SamplingDueRunRecord = z.infer<typeof dueRow>;
 export type SamplingWindowReadingRecord = z.infer<typeof readingRow>;
+export type MonitoringRunSummaryRecord = z.infer<typeof monitoringRunSummaryRow>;
+export type RunSlotSummaryRecord = z.infer<typeof runSlotSummaryRow>;
 
 const dueColumns = `id, plan_id AS "planId", plan_version AS "planVersion", brand_id AS "brandId",
   owner_id AS "ownerId", channel_id AS "channelId", window_id AS "windowId", slot_id AS "slotId",
@@ -87,6 +107,48 @@ export function samplingDueRunLookupQuery(ownerId: string, planId: string) {
       WHERE owner_id = ? AND plan_id = ?
       ORDER BY window_id ASC, id ASC`,
     values: [ownerId, planId] as QueryValue[],
+  };
+}
+
+export function samplingWindowReadingsForAlertsQuery(ownerId: string, brandId: string, alertIds: readonly string[]) {
+  if (alertIds.length === 0) return null;
+  return {
+    sql: `SELECT ${readingColumns} FROM sampling_window_reading
+      WHERE owner_id = ? AND brand_id = ? AND alert_id IN (${alertIds.map(() => "?").join(", ")})
+      ORDER BY window_id DESC, updated_at DESC, plan_id ASC`,
+    values: [ownerId, brandId, ...alertIds] as QueryValue[],
+  };
+}
+
+export function samplingWindowReadingLookupQuery(ownerId: string, planId: string, windowId: string) {
+  return {
+    sql: `SELECT ${readingColumns} FROM sampling_window_reading
+      WHERE owner_id = ? AND plan_id = ? AND window_id = ?
+      LIMIT 1`,
+    values: [ownerId, planId, windowId] as QueryValue[],
+  };
+}
+
+export function samplingDueRunsForWindowQuery(ownerId: string, planId: string, windowId: string) {
+  return {
+    sql: `SELECT ${dueColumns} FROM sampling_due_run
+      WHERE owner_id = ? AND plan_id = ? AND window_id = ?
+      ORDER BY id ASC`,
+    values: [ownerId, planId, windowId] as QueryValue[],
+  };
+}
+
+export function samplingDueRunsForWindowsQuery(
+  ownerId: string,
+  planIds: readonly string[],
+  windowIds: readonly string[],
+) {
+  if (planIds.length === 0 || windowIds.length === 0) return null;
+  return {
+    sql: `SELECT ${dueColumns} FROM sampling_due_run
+      WHERE owner_id = ? AND plan_id IN (${planIds.map(() => "?").join(", ")}) AND window_id IN (${windowIds.map(() => "?").join(", ")})
+      ORDER BY plan_id ASC, window_id ASC, id ASC`,
+    values: [ownerId, ...planIds, ...windowIds] as QueryValue[],
   };
 }
 
@@ -112,6 +174,19 @@ export class SamplingDueDao {
        ORDER BY plan_id ASC, window_id ASC, id ASC`,
       [ownerId, ...planIds],
     );
+    return z.array(dueRow).parse(rows);
+  }
+
+  async runsForWindow(ownerId: string, planId: string, windowId: string) {
+    const query = samplingDueRunsForWindowQuery(ownerId, planId, windowId);
+    const rows = await queryWithParameters(this.db, query.sql, query.values);
+    return z.array(dueRow).parse(rows);
+  }
+
+  async runsForWindows(ownerId: string, planIds: readonly string[], windowIds: readonly string[]) {
+    const query = samplingDueRunsForWindowsQuery(ownerId, planIds, windowIds);
+    if (!query) return [];
+    const rows = await queryWithParameters(this.db, query.sql, query.values);
     return z.array(dueRow).parse(rows);
   }
 
@@ -152,6 +227,19 @@ export class SamplingDueDao {
       [ownerId, ...planIds],
     );
     return z.array(readingRow).parse(rows);
+  }
+
+  async readingsForAlerts(ownerId: string, brandId: string, alertIds: readonly string[]) {
+    const query = samplingWindowReadingsForAlertsQuery(ownerId, brandId, alertIds);
+    if (!query) return [];
+    const rows = await queryWithParameters(this.db, query.sql, query.values);
+    return z.array(readingRow).parse(rows);
+  }
+
+  async readingForWindow(ownerId: string, planId: string, windowId: string) {
+    const query = samplingWindowReadingLookupQuery(ownerId, planId, windowId);
+    const [row] = await queryWithParameters(this.db, query.sql, query.values);
+    return row ? readingRow.parse(row) : null;
   }
 
   async upsertReading(row: SamplingWindowReadingRecord) {
@@ -199,6 +287,47 @@ export class SamplingDueDao {
       [brandId, ...runIds],
     );
     return z.array(runSlotRow).parse(rows);
+  }
+
+  async monitoringRunsByIds(ownerId: string, brandId: string, runIds: readonly string[]) {
+    if (runIds.length === 0) return [];
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT id, status, slot_count AS "slotCount", created_at AS "createdAt" FROM monitoring_run
+       WHERE owner_id = ? AND brand_id = ? AND id IN (${runIds.map(() => "?").join(", ")})
+       ORDER BY id ASC`,
+      [ownerId, brandId, ...runIds],
+    );
+    return z.array(monitoringRunSummaryRow).parse(rows);
+  }
+
+  async runSlotSummaries(brandId: string, runIds: readonly string[]) {
+    if (runIds.length === 0) return [];
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT id, run_id AS "runId", status FROM monitoring_slot
+       WHERE brand_id = ? AND run_id IN (${runIds.map(() => "?").join(", ")})
+       ORDER BY run_id ASC, id ASC`,
+      [brandId, ...runIds],
+    );
+    return z.array(runSlotSummaryRow).parse(rows);
+  }
+
+  async observationLinksForSlots(ownerId: string, brandId: string, slotIds: readonly string[]) {
+    if (slotIds.length === 0) return [];
+    const results: z.infer<typeof observationLinkRow>[] = [];
+    for (let index = 0; index < slotIds.length; index += 200) {
+      const chunk = slotIds.slice(index, index + 200);
+      const rows = await queryWithParameters(
+        this.db,
+        `SELECT id, slot_id AS "slotId" FROM answer_observation
+         WHERE owner_id = ? AND brand_id = ? AND slot_id IN (${chunk.map(() => "?").join(", ")})
+         ORDER BY id ASC`,
+        [ownerId, brandId, ...chunk],
+      );
+      results.push(...z.array(observationLinkRow).parse(rows));
+    }
+    return results;
   }
 
   async observationsForSlots(ownerId: string, brandId: string, slotIds: readonly string[]) {

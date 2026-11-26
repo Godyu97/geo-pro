@@ -12,6 +12,7 @@ export const slotStatuses = ["scheduled", "completed", "failed", "paused"] as co
 export const planPhaseSchema = z.enum(planPhases);
 export const slotStatusSchema = z.enum(slotStatuses);
 export const channelIdSchema = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+export const windowIdSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const instantSchema = z.iso.datetime({ precision: 3 });
 
 export const samplingSlotInputSchema = z.strictObject({

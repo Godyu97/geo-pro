@@ -229,6 +229,112 @@ try {
       );
     }
     process.stdout.write(JSON.stringify({ observationId: obsId, citationId: citId }));
+  } else if (command === "alert-window-fixture") {
+    const { ownerId, brandId } = payload;
+    const now = "2026-11-24T01:00:00.000Z";
+    const earlierAt = "2026-11-22T02:00:00.000Z";
+    const dueAt = "2026-11-23T02:00:00.000Z";
+    const fp = Buffer.from(randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "")).toString("hex").slice(0, 64);
+    const makeRun = async (slotStatus, withObservation, atTime) => {
+      const runId = randomUUID();
+      const monSlotId = randomUUID();
+      await queryWithParameters(
+        db,
+        `INSERT INTO monitoring_run (
+          id, brand_id, owner_id, operation_id, fingerprint, track, prompt_set_id, prompt_set_version,
+          repeat_count, question_count, natural_count, channel_count, slot_count, region, language,
+          requested_network_mode, currency, upper_minor, estimate_high_minor, customer_payable_minor,
+          status, sampling_complete, created_at
+        ) VALUES (?, ?, ?, ?, ?, 'model_api', ?, 1, 1, 1, 1, 1, 1, 'CN', 'zh-CN', 'off', 'CNY', 10, 10, 0, ?, 1, ?)`,
+        [runId, brandId, ownerId, randomUUID(), fp, randomUUID(), slotStatus === "succeeded" ? "succeeded" : "failed", atTime],
+      );
+      await queryWithParameters(
+        db,
+        `INSERT INTO monitoring_slot (
+          id, run_id, brand_id, question_id, natural_question, channel_id, channel_version,
+          repeat_index, reservation_id, status, created_at, adopted_attempt_id, late
+        ) VALUES (?, ?, ?, ?, 1, ?, 1, 1, NULL, ?, ?, ?, 0)`,
+        [monSlotId, runId, brandId, randomUUID(), randomUUID(), slotStatus, atTime, slotStatus === "succeeded" ? randomUUID() : null],
+      );
+      if (withObservation) {
+        const obsId = randomUUID();
+        await queryWithParameters(
+          db,
+          `INSERT INTO answer_observation (
+            id, brand_id, owner_id, slot_id, attempt_id, source_mode, capture_method, question_text, answer_text,
+            fingerprint, captured_at, region, language, requested_network_mode, entity_version, citation_set_state,
+            evidence_state, locator_ref, collector_id, missing_reason, created_at, target_region, observed_region,
+            new_session, product_mode, network_trigger
+          ) VALUES (?, ?, ?, ?, NULL, 'model_api', 'official_api', '合成自然问题', '合成回答正文', ?, ?, 'CN', 'zh-CN',
+            'off', 1, 'complete', 'complete', NULL, NULL, NULL, ?, 'CN', 'unknown', 'unknown', 'unknown', 'not_triggered')`,
+          [obsId, brandId, ownerId, monSlotId, fp, atTime, atTime],
+        );
+        await queryWithParameters(
+          db,
+          `INSERT INTO answer_analysis_version (
+            id, observation_id, brand_id, version, entity_version, rule_version, mentioned, recommended,
+            official_site_cited, evidence_span, status, revised_from, reason, reviewer_id, created_at
+          ) VALUES (?, ?, ?, 1, 1, 'metrics-v3', 'true', 'true', 'unknown', NULL, 'classified', NULL, NULL, NULL, ?)`,
+          [randomUUID(), obsId, brandId, atTime],
+        );
+      }
+      return runId;
+    };
+    const runA22Id = await makeRun("succeeded", true, earlierAt);
+    const runA23Id = await makeRun("failed", false, dueAt);
+    const runB22Id = await makeRun("succeeded", true, earlierAt);
+    const slotA22Id = randomUUID();
+    const failedA23Id = randomUUID();
+    const slotA23Id = randomUUID();
+    const slotB22Id = randomUUID();
+    const planA = await saveSamplingPlan(db, ownerId, {
+      action: "create", brandId, phase: "active", currency: "CNY",
+      budgetMinor: 100, spentMinor: 0, pendingMinor: 0, nextAt: now,
+      slots: [
+        { id: slotA22Id, channelId: "official-api", at: earlierAt, status: "scheduled", manual: false, costMinor: 5 },
+        { id: failedA23Id, channelId: "official-api", at: dueAt, status: "failed", manual: false, costMinor: 5 },
+        { id: slotA23Id, channelId: "official-api", at: dueAt, status: "scheduled", manual: false, costMinor: 5 },
+      ],
+    }, () => now);
+    const planB = await saveSamplingPlan(db, ownerId, {
+      action: "create", brandId, phase: "active", currency: "CNY",
+      budgetMinor: 100, spentMinor: 0, pendingMinor: 0, nextAt: now,
+      slots: [
+        { id: slotB22Id, channelId: "official-api", at: earlierAt, status: "scheduled", manual: false, costMinor: 5 },
+      ],
+    }, () => now);
+    if (planA.error || planB.error) throw new Error("Failed to create alert window fixture plans");
+    const runMap = new Map([[slotA22Id, runA22Id], [slotA23Id, runA23Id], [slotB22Id, runB22Id]]);
+    const driveA = await driveDueSamplingWindow(db, ownerId, {
+      planId: planA.plan.id, timezone: "Asia/Shanghai", now,
+      channels: [{ channelId: "official-api", state: "eligible" }], promptIds: [],
+    }, async (start) => ({ runId: runMap.get(start.slotId), chargedMinor: 5 }));
+    const driveB = await driveDueSamplingWindow(db, ownerId, {
+      planId: planB.plan.id, timezone: "Asia/Shanghai", now,
+      channels: [{ channelId: "official-api", state: "eligible" }], promptIds: [],
+    }, async (start) => ({ runId: runMap.get(start.slotId), chargedMinor: 5 }));
+    if (driveA.error || driveB.error || !driveA.alert) throw new Error("Failed to drive alert window fixture");
+    process.stdout.write(JSON.stringify({
+      planAId: planA.plan.id,
+      planBId: planB.plan.id,
+      runA22Id,
+      runA23Id,
+      runB22Id,
+      alertId: driveA.alert.id,
+      windowId: "2026-11-23",
+      timezone: "Asia/Shanghai",
+      plannedCount: 2,
+      eligibleCount: 0,
+      judgedCount: 0,
+    }));
+  } else if (command === "alert-window-repeat") {
+    const { ownerId, planId } = payload;
+    const due = await driveDueSamplingWindow(db, ownerId, {
+      planId, timezone: "Asia/Shanghai", now: "2026-11-24T02:00:00.000Z",
+      channels: [{ channelId: "official-api", state: "eligible" }], promptIds: [],
+    });
+    if (due.error || !due.alert) throw new Error("Failed to repeat alert window fixture");
+    process.stdout.write(JSON.stringify({ alertId: due.alert.id }));
   } else if (command === "cleanup") {
     for (const channelId of payload.channelIds ?? []) {
       await queryWithParameters(db, `DELETE FROM sampling_answer_network WHERE channel_id = ?`, [channelId]);

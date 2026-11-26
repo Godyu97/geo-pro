@@ -8,6 +8,7 @@ import {
   recordQualityAlert,
   snoozeQualityAlert,
 } from "../../src/features/quality-alerts/commands.ts";
+import { listAlertWindowSources } from "../../src/features/sampling-plans/due-commands.ts";
 import { qualityAlertErrors, recordQualityAlertSchema } from "../../src/features/quality-alerts/contracts.ts";
 import { qualityAlertEventQuery, qualityAlertListQuery } from "../../src/features/quality-alerts/dao.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
@@ -270,6 +271,9 @@ for (const kind of ["sqlite", "postgresql"]) {
         assert.equal(scaledList.alerts.length, 4);
         assert.equal(scaled.captured.filter((item) => item.sql.includes("FROM quality_alert_event")).length, 1);
         assert.equal(scaled.captured.filter((item) => /FROM quality_alert\b/.test(item.sql)).length, 1);
+        const unbound = await listAlertWindowSources(db, owner, brand, scaledList.alerts.map((item) => item.id));
+        assert.equal(unbound.sourcesByAlertId.size, 0);
+        assert.deepEqual(await listAlertWindowSources(db, outsider, brand, [first.alert.id]), { error: "NOT_FOUND" });
       } finally {
         await ddl.cleanup();
       }

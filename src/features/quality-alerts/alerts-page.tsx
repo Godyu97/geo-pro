@@ -6,6 +6,7 @@ import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { BrandDao } from "../brands/dao";
+import { listAlertWindowSources, type AlertWindowSource } from "../sampling-plans/due-commands";
 import { acknowledgeQualityAlertAction, snoozeQualityAlertAction } from "./actions";
 import { listQualityAlerts } from "./commands";
 import type { QualityAlertView } from "./commands";
@@ -80,6 +81,12 @@ export default async function QualityAlertsPage({
   const listed = await listQualityAlerts(connection, session.user.id, active.id);
   const failed = "error" in listed ? listed.error : undefined;
   const alerts: QualityAlertView[] = "error" in listed ? [] : listed.alerts;
+  const sourced = !failed && alerts.length > 0
+    ? await listAlertWindowSources(connection, session.user.id, active.id, alerts.map((alert) => alert.id))
+    : null;
+  const sourcesByAlertId = sourced && "sourcesByAlertId" in sourced
+    ? sourced.sourcesByAlertId
+    : new Map<string, AlertWindowSource[]>();
 
   return (
     <div className="min-w-0 space-y-6">
@@ -114,6 +121,62 @@ export default async function QualityAlertsPage({
               <li key={event.id} className="[overflow-wrap:anywhere]">{t("occurredAt", { time: showTime(locale, event.occurredAt) })}</li>
             ))}
           </ul>
+          {(() => {
+            const sources = sourcesByAlertId.get(alert.id) ?? [];
+            return (
+              <div className="min-w-0 space-y-2 rounded-xl border bg-muted/30 p-3 text-sm">
+                <p className="font-medium wrap-anywhere">{t("sourceTitle")}</p>
+                {sources.length === 0 ? (
+                  <p className="text-muted-foreground wrap-anywhere">{t("sourceMissing")}</p>
+                ) : sources.map((source) => (
+                  <div key={`${source.planId}-${source.windowId}`} className="min-w-0 space-y-2">
+                    <p className="font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                      {t("sourcePlan", { id: source.planId })}
+                    </p>
+                    <p className="wrap-anywhere">
+                      {t("sourceWindowTimezone", { window: source.windowId, timezone: source.timezone })}
+                    </p>
+                    <p className="tabular-nums wrap-anywhere">
+                      {t("sourceReading", {
+                        planned: formatNumber(locale, source.plannedCount),
+                        eligible: formatNumber(locale, source.eligibleCount),
+                        judged: formatNumber(locale, source.judgedCount),
+                      })}
+                    </p>
+                    <div className="flex min-w-0 flex-wrap gap-2">
+                      <Button asChild variant="outline" className={actionClass}>
+                        <Link
+                          href={`/dashboard/monitoring/plans?planId=${encodeURIComponent(source.planId)}&windowId=${encodeURIComponent(source.windowId)}`}
+                          prefetch={false}
+                        >
+                          {t("openWindow")}
+                        </Link>
+                      </Button>
+                    </div>
+                    {source.acceptedRuns.length > 0 ? (
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-xs font-medium text-muted-foreground">{t("associatedRuns")}</p>
+                        <div className="flex min-w-0 flex-wrap gap-2">
+                          {source.acceptedRuns.map((run) => (
+                            <Link
+                              key={run.dueRunId}
+                              href={`/dashboard/monitoring/runs/${encodeURIComponent(run.monitoringRunId)}`}
+                              prefetch={false}
+                              className={linkClass}
+                            >
+                              {t("openRun", { id: run.monitoringRunId })}
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground wrap-anywhere">{t("noAssociatedRuns")}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
           <div className="flex flex-wrap gap-2">
             {alert.status === "open" ? (
               <form action={acknowledgeQualityAlertAction}>

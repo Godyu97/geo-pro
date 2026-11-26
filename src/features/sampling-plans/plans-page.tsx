@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireSession } from "@/lib/auth/session";
@@ -6,8 +7,10 @@ import { getConnection } from "@/lib/db/connection";
 import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
+import { brandIdSchema } from "../brands/contracts";
 import { BrandDao } from "../brands/dao";
 import { PromptDao } from "../prompts/dao";
+import { windowIdSchema } from "./contracts";
 import {
   arriveSamplingPlanAction,
   createSamplingPlanAction,
@@ -19,7 +22,7 @@ import {
 } from "./actions";
 import { listSamplingPlans } from "./commands";
 import type { SamplingPlanView } from "./commands";
-import { listSamplingDueWindows, manualSheetsForBrand } from "./due-commands";
+import { listSamplingDueWindows, manualSheetsForBrand, readSamplingWindowDetail } from "./due-commands";
 
 const fieldClass = "h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const knownErrors = ["PLAN_PHASE_CONFLICT", "NOT_FOUND", "INVALID_INPUT", "VERSION_CONFLICT"] as const;
@@ -69,6 +72,214 @@ export default async function SamplingPlansPage({
     currency,
     amount: formatNumber(locale, minor),
   });
+
+  if (params.planId !== undefined || params.windowId !== undefined) {
+    if (typeof params.planId !== "string" || typeof params.windowId !== "string") notFound();
+    const parsedPlan = brandIdSchema.safeParse(params.planId);
+    const parsedWindow = windowIdSchema.safeParse(params.windowId);
+    if (!parsedPlan.success || !parsedWindow.success) notFound();
+    const focused = await readSamplingWindowDetail(connection, session.user.id, parsedPlan.data, parsedWindow.data);
+    if ("error" in focused) notFound();
+    const { detail } = focused;
+    const alertsT = await getTranslator("qualityAlerts");
+    const runStatusLabel = {
+      queued: "statusQueued",
+      running: "statusRunning",
+      paused: "statusPaused",
+      succeeded: "statusSucceeded",
+      partial: "statusPartial",
+      failed: "statusFailed",
+      cancelled: "statusCancelled",
+    } as const;
+    const alertKindLabel = { data_quality: alertsT("kindDataQuality"), trend: alertsT("kindTrend") } as const;
+    const alertReasonLabel = {
+      coverage_insufficient: alertsT("reasonCoverage"),
+      citation_field_changed: alertsT("reasonCitation"),
+      mode_changed: alertsT("reasonMode"),
+      recommendation_drop: alertsT("reasonTrend"),
+    } as const;
+    const failedSlotCount = detail.slots.filter((slot) => slot.status === "failed").length;
+    const denominatorCount = detail.slots.filter((slot) => slot.status === "completed" || slot.status === "failed").length;
+    const sheetByRun = new Map(detail.manualSheets.map((sheet) => [sheet.runId, sheet]));
+    return (
+      <div className="min-w-0 space-y-6">
+        <header className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold tracking-tight wrap-anywhere">{t("windowDetailTitle")}</h1>
+            {detail.brandName ? (
+              <p className="mt-2 text-sm font-medium [overflow-wrap:anywhere]">{detail.brandName}</p>
+            ) : null}
+          </div>
+          <div className="flex max-w-full flex-wrap gap-2">
+            <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
+              <Link href="/dashboard/monitoring/alerts" prefetch={false}>{t("backAlerts")}</Link>
+            </Button>
+            <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
+              <Link href="/dashboard/monitoring/plans" prefetch={false}>{t("allPlans")}</Link>
+            </Button>
+            <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
+              <Link href="/dashboard/monitoring/overview" prefetch={false}>{t("backOverview")}</Link>
+            </Button>
+          </div>
+        </header>
+
+        <section className="min-w-0 space-y-4 rounded-2xl border bg-card p-4 sm:p-5">
+          <p className="font-mono text-sm [overflow-wrap:anywhere]">
+            {t("windowMetaPlan", {
+              id: detail.plan.id,
+              version: formatNumber(locale, detail.plan.version),
+              phase: phaseLabel[detail.plan.phase],
+            })}
+          </p>
+          <p className="text-sm font-medium wrap-anywhere">
+            {t("windowMetaScope", { window: detail.reading.windowId, timezone: detail.reading.timezone })}
+          </p>
+          <dl className="grid gap-3 rounded-xl bg-muted/50 p-3 sm:grid-cols-4">
+            {([
+              [t("windowPlannedLabel"), detail.reading.plannedCount],
+              [t("windowEligibleLabel"), detail.reading.eligibleCount],
+              [t("windowJudgedLabel"), detail.reading.judgedCount],
+              [t("windowRecommendedLabel"), detail.reading.recommendedCount],
+            ] as const).map(([label, count]) => (
+              <div key={label} className="min-w-0">
+                <dt className="text-xs text-muted-foreground wrap-anywhere">{label}</dt>
+                <dd className="mt-1 text-sm font-medium tabular-nums">{formatNumber(locale, count)}</dd>
+              </div>
+            ))}
+          </dl>
+          {detail.reading.coverageSufficient ? null : <p className="text-sm wrap-anywhere">{t("readingCoverage")}</p>}
+          <p className="text-sm text-muted-foreground wrap-anywhere">
+            {detail.reading.waitingForTrend
+              ? t("readingWaiting", { count: formatNumber(locale, detail.reading.comparableWindows) })
+              : t("readingReady")}
+          </p>
+          {detail.alert ? (
+            <div className="min-w-0 space-y-1 rounded-xl border bg-muted/30 p-3 text-sm">
+              <p className="wrap-anywhere">
+                {t("windowLinkedAlert", {
+                  kind: alertKindLabel[detail.alert.kind],
+                  reason: alertReasonLabel[detail.alert.reason],
+                })}
+              </p>
+              {detail.alert.claimBrandDecline ? null : (
+                <p className="text-muted-foreground wrap-anywhere">{t("windowNoDecline")}</p>
+              )}
+            </div>
+          ) : null}
+        </section>
+
+        <section aria-labelledby="window-runs-heading" className="min-w-0 space-y-4 rounded-2xl border bg-card p-4 sm:p-5">
+          <h2 id="window-runs-heading" className="text-lg font-semibold">{t("windowRunsTitle")}</h2>
+          {detail.acceptedRuns.length === 0 && detail.reservedRuns.length === 0 && detail.manualSheets.length === 0 ? (
+            <p className="text-sm text-muted-foreground wrap-anywhere">{t("windowNoRuns")}</p>
+          ) : (
+            <div className="min-w-0 space-y-3">
+              {detail.acceptedRuns.map((run) => {
+                const statusKey = run.runStatus && run.runStatus in runStatusLabel
+                  ? runStatusLabel[run.runStatus as keyof typeof runStatusLabel]
+                  : null;
+                return (
+                  <div key={run.dueRunId} className="min-w-0 space-y-2 rounded-xl border p-3 text-sm [overflow-wrap:anywhere]">
+                    <p className="font-mono text-xs [overflow-wrap:anywhere]">
+                      {t("windowRunItem", {
+                        id: run.monitoringRunId,
+                        slot: run.slotId,
+                        channel: run.channelId,
+                        amount: amount(detail.plan.currency, run.chargedMinor),
+                      })}
+                    </p>
+                    {statusKey ? (
+                      <>
+                        <p className="tabular-nums wrap-anywhere">
+                          {t("windowRunCounts", {
+                            status: monitoring(statusKey),
+                            total: formatNumber(locale, run.slotCount),
+                            succeeded: formatNumber(locale, run.succeededSlotCount),
+                            failed: formatNumber(locale, run.failedSlotCount),
+                            answers: formatNumber(locale, run.observationCount),
+                          })}
+                        </p>
+                        {run.observationCount === 0 ? (
+                          <p className="text-muted-foreground wrap-anywhere">{t("windowRunNoAnswers")}</p>
+                        ) : null}
+                        <Button asChild variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal">
+                          <Link href={`/dashboard/monitoring/runs/${encodeURIComponent(run.monitoringRunId)}`} prefetch={false}>
+                            {t("windowRunOpenDetail")}
+                          </Link>
+                        </Button>
+                      </>
+                    ) : (
+                      <p className="text-muted-foreground wrap-anywhere">{t("windowRunMissing")}</p>
+                    )}
+                  </div>
+                );
+              })}
+              {detail.reservedRuns.map((run) => (
+                <div key={run.id} className="min-w-0 rounded-xl border p-3 text-sm [overflow-wrap:anywhere]">
+                  <p>{t("dueReserved", { slot: run.slotId })}</p>
+                </div>
+              ))}
+              {detail.manualSheets.map((sheet) => {
+                const resolved = sheetByRun.get(sheet.runId);
+                return (
+                  <div key={sheet.runId} className="min-w-0 space-y-2 rounded-xl border p-3 text-sm [overflow-wrap:anywhere]">
+                    <p className="font-medium [overflow-wrap:anywhere]">{t("dueSheet", { slot: sheet.slotId })}</p>
+                    <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                      {resolved?.versionVerified && resolved.promptSetId && resolved.promptSetVersion !== null
+                        ? t("dueSheetFrozenVersion", {
+                          version: formatNumber(locale, resolved.promptSetVersion),
+                          id: resolved.promptSetId,
+                        })
+                        : t("dueSheetVersionUnverified")}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section aria-labelledby="window-slots-heading" className="min-w-0 space-y-4 rounded-2xl border bg-card p-4 sm:p-5">
+          <h2 id="window-slots-heading" className="text-lg font-semibold">{t("windowSlotsTitle")}</h2>
+          <p className="text-sm wrap-anywhere">{t("coverageLine", { count: formatNumber(locale, denominatorCount) })}</p>
+          {failedSlotCount > 0 ? (
+            <p className="text-sm font-medium wrap-anywhere">
+              {t("windowFailedSlotsKept", { count: formatNumber(locale, failedSlotCount) })}
+            </p>
+          ) : null}
+          {detail.slots.length === 0 ? (
+            <p className="text-sm text-muted-foreground wrap-anywhere">{t("windowNoSlots")}</p>
+          ) : (
+            <div role="region" aria-label={t("windowSlotsTitle")} tabIndex={0}
+              className="max-w-full overflow-x-auto rounded-xl border outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-secondary/50 text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-medium" scope="col">{t("slotAt")}</th>
+                    <th className="px-4 py-3 font-medium" scope="col">{t("channel")}</th>
+                    <th className="px-4 py-3 font-medium" scope="col">{t("status")}</th>
+                    <th className="px-4 py-3 font-medium" scope="col">{t("manual")}</th>
+                    <th className="px-4 py-3 font-medium" scope="col">{t("costMinor")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.slots.map((slot) => (
+                    <tr key={slot.id} className="border-t">
+                      <td className="whitespace-nowrap px-4 py-3">{showTime(locale, slot.at)}</td>
+                      <td className="min-w-36 max-w-48 px-4 py-3 [overflow-wrap:anywhere]">{slot.channelId}</td>
+                      <td className="whitespace-nowrap px-4 py-3">{statusLabel[slot.status]}</td>
+                      <td className="whitespace-nowrap px-4 py-3">{slot.manual ? t("manualYes") : t("manualNo")}</td>
+                      <td className="whitespace-nowrap px-4 py-3 tabular-nums">{amount(detail.plan.currency, slot.costMinor)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
 
   if (!active) {
     return (

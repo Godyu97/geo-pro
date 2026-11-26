@@ -2,10 +2,13 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
+import { brandIdSchema } from "../brands/contracts.ts";
+import { BrandDao } from "../brands/dao.ts";
 import { PromptDao } from "../prompts/dao.ts";
 import { recordQualityAlert } from "../quality-alerts/commands.ts";
+import { QualityAlertDao, type QualityAlertRecord } from "../quality-alerts/dao.ts";
 import type { SamplingPlanError, DriveDueWindowInput } from "./contracts.ts";
-import { driveDueWindowSchema } from "./contracts.ts";
+import { driveDueWindowSchema, windowIdSchema } from "./contracts.ts";
 import { SamplingDueDao, type SamplingDueRunRecord, type SamplingWindowReadingRecord } from "./due-dao.ts";
 import {
   buildWindowReadings,
@@ -361,6 +364,227 @@ export async function listSamplingDueWindows(db: DatabaseConnection, ownerId: st
   return {
     runs: runs.map((row) => toRunView(row, false)),
     readings: readings.map(toReadingView),
+  };
+}
+
+export type AlertWindowSourceRun = {
+  dueRunId: string;
+  slotId: string;
+  channelId: string;
+  monitoringRunId: string;
+  chargedMinor: number;
+};
+
+export type AlertWindowSource = {
+  alertId: string;
+  planId: string;
+  windowId: string;
+  timezone: string;
+  plannedCount: number;
+  eligibleCount: number;
+  recommendedCount: number;
+  judgedCount: number;
+  coverageSufficient: boolean;
+  comparableWindows: number;
+  waitingForTrend: boolean;
+  acceptedRuns: AlertWindowSourceRun[];
+};
+
+/** Resolve bound plan window readings and accepted official runs for quality alerts. */
+export async function listAlertWindowSources(
+  db: DatabaseConnection,
+  ownerId: string,
+  brandId: string,
+  alertIds: readonly string[],
+): Promise<{ sourcesByAlertId: Map<string, AlertWindowSource[]> } | { error: "NOT_FOUND" }> {
+  const owned = await new BrandDao(db).owned(ownerId, brandId);
+  if (!owned) return { error: "NOT_FOUND" };
+  const uniqueAlerts = [...new Set(alertIds)];
+  const sourcesByAlertId = new Map<string, AlertWindowSource[]>();
+  if (uniqueAlerts.length === 0) return { sourcesByAlertId };
+  const due = new SamplingDueDao(db);
+  const readings = await due.readingsForAlerts(ownerId, brandId, uniqueAlerts);
+  if (readings.length === 0) return { sourcesByAlertId };
+  const planIds = [...new Set(readings.map((row) => row.planId))];
+  const windowIds = [...new Set(readings.map((row) => row.windowId))];
+  const runs = await due.runsForWindows(ownerId, planIds, windowIds);
+  const acceptedByWindow = new Map<string, AlertWindowSourceRun[]>();
+  for (const run of runs) {
+    if (run.kind !== "official" || run.status !== "accepted" || !run.monitoringRunId) continue;
+    const key = `${run.planId}\u0000${run.windowId}`;
+    const list = acceptedByWindow.get(key) ?? [];
+    list.push({
+      dueRunId: run.id,
+      slotId: run.slotId,
+      channelId: run.channelId,
+      monitoringRunId: run.monitoringRunId,
+      chargedMinor: run.chargedMinor,
+    });
+    acceptedByWindow.set(key, list);
+  }
+  for (const reading of readings) {
+    if (!reading.alertId) continue;
+    const key = `${reading.planId}\u0000${reading.windowId}`;
+    const list = sourcesByAlertId.get(reading.alertId) ?? [];
+    list.push({
+      alertId: reading.alertId,
+      planId: reading.planId,
+      windowId: reading.windowId,
+      timezone: reading.timezone,
+      plannedCount: reading.plannedCount,
+      eligibleCount: reading.eligibleCount,
+      recommendedCount: reading.recommendedCount,
+      judgedCount: reading.judgedCount,
+      coverageSufficient: reading.coverageSufficient === 1,
+      comparableWindows: reading.comparableWindows,
+      waitingForTrend: reading.waitingForTrend === 1,
+      acceptedRuns: acceptedByWindow.get(key) ?? [],
+    });
+    sourcesByAlertId.set(reading.alertId, list);
+  }
+  return { sourcesByAlertId };
+}
+
+export type SamplingWindowAcceptedRunDetail = {
+  dueRunId: string;
+  slotId: string;
+  channelId: string;
+  monitoringRunId: string;
+  chargedMinor: number;
+  runStatus: string | null;
+  slotCount: number;
+  succeededSlotCount: number;
+  failedSlotCount: number;
+  observationCount: number;
+};
+
+export type SamplingWindowDetail = {
+  brandId: string;
+  brandName: string | null;
+  plan: {
+    id: string;
+    version: number;
+    phase: SamplingPlanRecord["phase"];
+    currency: string;
+  };
+  reading: DueWindowReadingView;
+  alert: {
+    id: string;
+    kind: QualityAlertRecord["kind"];
+    reason: QualityAlertRecord["reason"];
+    status: QualityAlertRecord["status"];
+    claimBrandDecline: boolean;
+  } | null;
+  slots: Array<{
+    id: string;
+    channelId: string;
+    at: string;
+    status: SamplingSlotRecord["status"];
+    manual: boolean;
+    costMinor: number;
+  }>;
+  acceptedRuns: SamplingWindowAcceptedRunDetail[];
+  reservedRuns: DueWindowRunView[];
+  manualSheets: Awaited<ReturnType<typeof manualSheetsForBrand>>;
+};
+
+/** Read one owned plan window, its retained slots in P, and runs linked strictly to that window. */
+export async function readSamplingWindowDetail(
+  db: DatabaseConnection,
+  ownerId: string,
+  planId: string,
+  windowId: string,
+): Promise<{ detail: SamplingWindowDetail } | { error: "NOT_FOUND" }> {
+  const parsedPlan = brandIdSchema.safeParse(planId);
+  const parsedWindow = windowIdSchema.safeParse(windowId);
+  if (!parsedPlan.success || !parsedWindow.success) return { error: "NOT_FOUND" };
+  const due = new SamplingDueDao(db);
+  const plans = new SamplingPlanDao(db);
+  const reading = await due.readingForWindow(ownerId, parsedPlan.data, parsedWindow.data);
+  if (!reading) return { error: "NOT_FOUND" };
+  const [versions, allSlots, dueRuns, ownedBrand, brandVersion, linkedAlert] = await Promise.all([
+    plans.versions(ownerId, parsedPlan.data),
+    plans.slotsForPlans(ownerId, [parsedPlan.data]),
+    due.runsForWindow(ownerId, parsedPlan.data, parsedWindow.data),
+    new BrandDao(db).owned(ownerId, reading.brandId),
+    new BrandDao(db).version(ownerId, reading.brandId),
+    reading.alertId ? new QualityAlertDao(db).alertForOwner(ownerId, reading.alertId) : Promise.resolve(null),
+  ]);
+  const latestPlan = versions[versions.length - 1];
+  if (!latestPlan || !ownedBrand) return { error: "NOT_FOUND" };
+  const windowSlots = allSlots
+    .filter((slot) => localWindowId(slot.at, reading.timezone) === reading.windowId)
+    .map((slot) => ({
+      id: slot.id,
+      channelId: slot.channelId,
+      at: slot.at,
+      status: slot.status,
+      manual: slot.manual === 1,
+      costMinor: slot.costMinor,
+    }));
+  const runViews = dueRuns.map((row) => toRunView(row, false));
+  const accepted = dueRuns.filter((row) => row.kind === "official" && row.status === "accepted" && row.monitoringRunId);
+  const reservedRuns = runViews.filter((row) => row.kind === "official" && row.status === "reserved");
+  const manualRuns = runViews.filter((row) => row.kind === "manual");
+  const manualSheets = await manualSheetsForBrand(db, reading.brandId, manualRuns);
+  const runIds = [...new Set(accepted.map((row) => row.monitoringRunId).filter((id): id is string => Boolean(id)))];
+  const [monitoringRuns, runSlots] = runIds.length > 0
+    ? await Promise.all([
+      due.monitoringRunsByIds(ownerId, reading.brandId, runIds),
+      due.runSlotSummaries(reading.brandId, runIds),
+    ])
+    : [[], []];
+  const observations = runSlots.length > 0
+    ? await due.observationLinksForSlots(ownerId, reading.brandId, runSlots.map((slot) => slot.id))
+    : [];
+  const runById = new Map(monitoringRuns.map((row) => [row.id, row]));
+  const slotsByRun = new Map<string, typeof runSlots>();
+  for (const slot of runSlots) {
+    const list = slotsByRun.get(slot.runId) ?? [];
+    list.push(slot);
+    slotsByRun.set(slot.runId, list);
+  }
+  const observedSlots = new Set(observations.map((row) => row.slotId).filter((id): id is string => Boolean(id)));
+  const acceptedRuns: SamplingWindowAcceptedRunDetail[] = accepted.map((row) => {
+    const runId = row.monitoringRunId as string;
+    const summary = runById.get(runId) ?? null;
+    const linkedSlots = slotsByRun.get(runId) ?? [];
+    return {
+      dueRunId: row.id,
+      slotId: row.slotId,
+      channelId: row.channelId,
+      monitoringRunId: runId,
+      chargedMinor: row.chargedMinor,
+      runStatus: summary?.status ?? null,
+      slotCount: summary?.slotCount ?? linkedSlots.length,
+      succeededSlotCount: linkedSlots.filter((slot) => slot.status === "succeeded").length,
+      failedSlotCount: linkedSlots.filter((slot) => slot.status === "failed").length,
+      observationCount: linkedSlots.filter((slot) => observedSlots.has(slot.id)).length,
+    };
+  });
+  return {
+    detail: {
+      brandId: reading.brandId,
+      brandName: brandVersion?.fields.name ?? null,
+      plan: {
+        id: latestPlan.id,
+        version: latestPlan.version,
+        phase: latestPlan.phase,
+        currency: latestPlan.currency,
+      },
+      reading: toReadingView(reading),
+      alert: linkedAlert ? {
+        id: linkedAlert.id,
+        kind: linkedAlert.kind,
+        reason: linkedAlert.reason,
+        status: linkedAlert.status,
+        claimBrandDecline: linkedAlert.claimBrandDecline === 1,
+      } : null,
+      slots: windowSlots,
+      acceptedRuns,
+      reservedRuns,
+      manualSheets,
+    },
   };
 }
 
