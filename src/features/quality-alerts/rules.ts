@@ -10,9 +10,9 @@ export type AlertDraft = {
   dropPp: number;
 };
 
-const defaultThresholdPp = 10;
+export const defaultTrendThresholdPp = 10;
 
-export function planAlerts(input: AlertDraft, thresholdPp = defaultThresholdPp): AlertKind[] {
+export function planAlerts(input: AlertDraft, thresholdPp = defaultTrendThresholdPp): AlertKind[] {
   const kinds: AlertKind[] = [];
   if (!input.coverageSufficient) kinds.push("data_quality");
   if (input.coverageSufficient && input.dropPp > thresholdPp) kinds.push("trend");
@@ -43,7 +43,7 @@ export function monitoringAlertReason(kind: AlertKind, latest: WindowSample): Al
 }
 
 /** Quality problems suppress a brand-decline claim. A trend needs two completed comparable windows. */
-export function assessMonitoringAlert(windows: readonly WindowSample[], thresholdPp = defaultThresholdPp) {
+export function assessMonitoringAlert(windows: readonly WindowSample[], thresholdPp = defaultTrendThresholdPp) {
   const latest = windows[windows.length - 1];
   if (!latest) return { kind: "none" as const, claimBrandDecline: false };
   if (!latest.coverageSufficient || latest.citationFieldChanged || latest.modeChanged) {

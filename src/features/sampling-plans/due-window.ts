@@ -1,9 +1,20 @@
 import type { AlertKind, WindowSample } from "../quality-alerts/rules.ts";
-import { assessMonitoringAlert } from "../quality-alerts/rules.ts";
+import { assessMonitoringAlert, defaultTrendThresholdPp } from "../quality-alerts/rules.ts";
 import type { SamplingSlotStatus } from "./rules.ts";
 
 const datePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
 export const dueCoverageFloor = 0.9;
+
+/** A budget version applies only to windows that end after it was saved. */
+export function trendThresholdForWindow(
+  versions: readonly { version: number; createdAt: string; trendThresholdPp: number }[],
+  windowEnd: string,
+) {
+  const ordered = [...versions].sort((left, right) => left.version - right.version || left.createdAt.localeCompare(right.createdAt));
+  const applicable = ordered.filter((row) => row.createdAt < windowEnd);
+  const chosen = applicable.length > 0 ? applicable[applicable.length - 1] : ordered[0];
+  return chosen?.trendThresholdPp ?? defaultTrendThresholdPp;
+}
 
 export type ChannelGateState = "eligible" | "degraded" | "expired";
 

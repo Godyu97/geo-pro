@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, pgTable, primaryKey, text, uniqueIndex } from "drizzle-orm/pg-core";
+import { check, doublePrecision, index, integer, pgTable, primaryKey, text, uniqueIndex } from "drizzle-orm/pg-core";
 import { brand } from "./brand-schema";
 import { monitoringRun } from "./monitoring-schema";
 
@@ -16,6 +16,7 @@ export const samplingPlan = pgTable("sampling_plan", {
   spentMinor: integer("spent_minor").notNull(),
   pendingMinor: integer("pending_minor").notNull(),
   createdAt: text("created_at").notNull(),
+  trendThresholdPp: doublePrecision("trend_threshold_pp").notNull().default(10),
 }, (table) => [
   primaryKey({ columns: [table.id, table.version] }),
   index("sampling_plan_owner_idx").on(table.brandId, table.ownerId, table.id),
@@ -23,6 +24,7 @@ export const samplingPlan = pgTable("sampling_plan", {
     and ${table.phase} in ('draft', 'active', 'paused', 'ended')
     and length(${table.currency}) = 3
     and ${table.budgetMinor} >= 0 and ${table.spentMinor} >= 0 and ${table.pendingMinor} >= 0
+    and ${table.trendThresholdPp} > 0
     and length(${table.ownerId}) between 1 and 128
     and length(${table.createdAt}) between 20 and 40`),
 ]);

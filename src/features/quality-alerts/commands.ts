@@ -7,6 +7,7 @@ import type { RecordQualityAlertInput } from "./contracts.ts";
 import { QualityAlertDao, type QualityAlertEventRecord, type QualityAlertRecord } from "./dao.ts";
 import {
   assessMonitoringAlert,
+  defaultTrendThresholdPp,
   mergeAlerts,
   monitoringAlertReason,
   recordAlertOccurrence,
@@ -82,8 +83,9 @@ export async function recordQualityAlert(
   ownerId: string,
   input: RecordQualityAlertInput,
   clock: Clock = systemClock,
+  thresholdPp = defaultTrendThresholdPp,
 ) {
-  const assessment = assessMonitoringAlert(input.windows);
+  const assessment = assessMonitoringAlert(input.windows, thresholdPp);
   if (assessment.kind === "none") return { recorded: false as const };
   const latest = input.windows[input.windows.length - 1];
   if (!latest) return { recorded: false as const };

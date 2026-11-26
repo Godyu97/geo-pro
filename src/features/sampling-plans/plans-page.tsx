@@ -13,6 +13,7 @@ import {
   driveDueSamplingWindowAction,
   expireSamplingChannelAction,
   reviseSamplingBudgetAction,
+  saveSamplingTrendThresholdAction,
   transitionSamplingPlanAction,
 } from "./actions";
 import { listSamplingPlans } from "./commands";
@@ -137,9 +138,14 @@ export default async function SamplingPlansPage({
             ))}
           </dl>
           <p className="text-xs text-muted-foreground">{t("minorUnit")}</p>
+          <p className="text-sm">{t("currentThreshold", { value: formatNumber(locale, plan.trendThresholdPp) })}</p>
           <ul className="space-y-1 text-sm">
             {plan.versions.map((item) => (
-              <li key={item.version}>{t("versionBudget", { version: item.version, amount: amount(item.currency, item.budgetMinor) })}</li>
+              <li key={item.version}>
+                {t("versionBudget", { version: item.version, amount: amount(item.currency, item.budgetMinor) })}
+                {" "}
+                {t("versionThreshold", { value: formatNumber(locale, item.trendThresholdPp) })}
+              </li>
             ))}
           </ul>
           <p className="text-sm">{t("coverageLine", { count: plan.coverageSlotIds.length })}</p>
@@ -236,12 +242,33 @@ export default async function SamplingPlansPage({
             </table>
           </div>
 
-          <form action={reviseSamplingBudgetAction} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
+          {plan.phase === "draft" ? (
+            <form action={saveSamplingTrendThresholdAction} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              <input type="hidden" name="planId" value={plan.id} />
+              <div className="text-sm">
+                <label>
+                  <span className="mb-1 block text-muted-foreground">{t("draftThreshold")}</span>
+                  <input name="trendThresholdPp" inputMode="decimal" defaultValue={plan.trendThresholdPp} className={fieldClass} />
+                </label>
+                <span className="mt-1 block text-xs text-muted-foreground">{t("trendThresholdHint")}</span>
+              </div>
+              <Button type="submit" variant="outline">{t("saveThreshold")}</Button>
+            </form>
+          ) : null}
+
+          <form action={reviseSamplingBudgetAction} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
             <input type="hidden" name="planId" value={plan.id} />
             <label className="text-sm">
               <span className="mb-1 block text-muted-foreground">{t("newBudget")}</span>
               <input name="budgetMinor" required inputMode="numeric" className={fieldClass} />
             </label>
+            <div className="text-sm">
+              <label>
+                <span className="mb-1 block text-muted-foreground">{t("newThreshold")}</span>
+                <input name="trendThresholdPp" inputMode="decimal" placeholder="10" className={fieldClass} />
+              </label>
+              <span className="mt-1 block text-xs text-muted-foreground">{t("newThresholdHint")}</span>
+            </div>
             <label className="text-sm">
               <span className="mb-1 block text-muted-foreground">{t("optionalNextAt")}</span>
               <input name="nextAt" placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />
@@ -313,6 +340,13 @@ export default async function SamplingPlansPage({
             <span className="mb-1 block text-muted-foreground">{t("pendingMinor")}</span>
             <input name="pendingMinor" required inputMode="numeric" className={fieldClass} />
           </label>
+          <div className="text-sm">
+            <label>
+              <span className="mb-1 block text-muted-foreground">{t("trendThreshold")}</span>
+              <input name="trendThresholdPp" inputMode="decimal" placeholder="10" className={fieldClass} />
+            </label>
+            <span className="mt-1 block text-xs text-muted-foreground">{t("trendThresholdHint")}</span>
+          </div>
           <label className="text-sm sm:col-span-2 lg:col-span-3">
             <span className="mb-1 block text-muted-foreground">{t("nextAt")}</span>
             <input name="nextAt" required placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />

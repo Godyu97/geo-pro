@@ -9,6 +9,7 @@ import type {
   ExpireSamplingChannelInput,
   ReviseSamplingBudgetInput,
   SamplingPlanError,
+  SetSamplingTrendThresholdInput,
   TransitionSamplingPlanInput,
 } from "./contracts.ts";
 import { SamplingPlanDao, type SamplingPlanRecord, type SamplingSlotRecord } from "./dao.ts";
@@ -68,12 +69,14 @@ export type SamplingPlanView = {
   budgetMinor: number;
   spentMinor: number;
   pendingMinor: number;
+  trendThresholdPp: number;
   createdAt: string;
   versions: Array<{
     version: number;
     budgetMinor: number;
     currency: string;
     phase: SamplingPlanRecord["phase"];
+    trendThresholdPp: number;
     createdAt: string;
   }>;
   slots: Array<{
@@ -104,12 +107,14 @@ function toView(versions: readonly SamplingPlanRecord[], slots: readonly Samplin
     budgetMinor: current.budgetMinor,
     spentMinor: current.spentMinor,
     pendingMinor: current.pendingMinor,
+    trendThresholdPp: current.trendThresholdPp,
     createdAt: current.createdAt,
     versions: versions.map((row) => ({
       version: row.version,
       budgetMinor: row.budgetMinor,
       currency: row.currency,
       phase: row.phase,
+      trendThresholdPp: row.trendThresholdPp,
       createdAt: row.createdAt,
     })),
     slots: visible,
@@ -144,6 +149,11 @@ function applyAffordability(
 
 function duplicateSlotIds(slots: readonly { id: string }[]) {
   return new Set(slots.map((slot) => slot.id)).size !== slots.length;
+}
+
+function finiteThreshold(value: number | undefined, fallback: number) {
+  const threshold = value ?? fallback;
+  return Number.isFinite(threshold) && threshold > 0 ? threshold : null;
 }
 
 export async function listSamplingPlans(db: DatabaseConnection, ownerId: string, brandId: string) {
@@ -186,6 +196,7 @@ export async function readSamplingPlanVersion(db: DatabaseConnection, ownerId: s
     budgetMinor: row.budgetMinor,
     currency: row.currency,
     phase: row.phase,
+    trendThresholdPp: row.trendThresholdPp,
   };
 }
 
@@ -196,6 +207,8 @@ export async function saveSamplingPlan(
   clock: Clock = systemClock,
 ) {
   if (duplicateSlotIds(input.slots)) return { error: "INVALID_INPUT" as const };
+  const trendThresholdPp = finiteThreshold(input.trendThresholdPp, 10);
+  if (trendThresholdPp === null) return { error: "INVALID_INPUT" as const };
   return db.transaction(async (tx) => {
     const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
     if (!owned) return { error: "NOT_FOUND" as const };
@@ -212,6 +225,7 @@ export async function saveSamplingPlan(
       budgetMinor: input.budgetMinor,
       spentMinor: input.spentMinor,
       pendingMinor: input.pendingMinor,
+      trendThresholdPp,
       createdAt: now,
     };
     const slots: SamplingSlotRecord[] = input.slots.map((slot) => ({
@@ -295,7 +309,29 @@ export async function transitionSamplingPlan(
     if (!next) return { error: "PLAN_PHASE_CONFLICT" as const };
     const saved = await dao.setPhase(ownerId, current.id, current.version, next);
     if (!saved) return { error: "NOT_FOUND" as const };
-    return { plan: { id: current.id, version: current.version, phase: next } };
+    return { plan: { id: current.id, version: current.version, phase: next, trendThresholdPp: current.trendThresholdPp } };
+  });
+}
+
+export async function saveSamplingTrendThreshold(
+  db: DatabaseConnection,
+  ownerId: string,
+  input: SetSamplingTrendThresholdInput,
+) {
+  const trendThresholdPp = finiteThreshold(input.trendThresholdPp, Number.NaN);
+  if (trendThresholdPp === null) return { error: "INVALID_INPUT" as const };
+  return db.transaction(async (tx) => {
+    const dao = new SamplingPlanDao(tx);
+    const current = await dao.latest(ownerId, input.planId);
+    if (!current) return { error: "NOT_FOUND" as const };
+    if (current.phase !== "draft") return { error: "PLAN_PHASE_CONFLICT" as const };
+    const saved = await dao.setTrendThreshold(ownerId, current.id, current.version, trendThresholdPp);
+    if (!saved) return { error: "PLAN_PHASE_CONFLICT" as const };
+    const [versions, slots] = await Promise.all([
+      dao.versions(ownerId, input.planId),
+      dao.slotsForPlans(ownerId, [input.planId]),
+    ]);
+    return { plan: toView(versions, slots) };
   });
 }
 
@@ -312,6 +348,8 @@ export async function reviseSamplingPlanBudget(
       const current = await dao.latest(ownerId, planId);
       if (!current) return { error: "NOT_FOUND" as const };
       const slots = await dao.slotsForPlans(ownerId, [planId]);
+      const trendThresholdPp = finiteThreshold(input.trendThresholdPp, current.trendThresholdPp);
+      if (trendThresholdPp === null) return { error: "INVALID_INPUT" as const };
       const revised = reviseBudget({
         version: current.version,
         phase: current.phase,
@@ -323,6 +361,7 @@ export async function reviseSamplingPlanBudget(
         version: revised.version,
         phase: revised.phase,
         budgetMinor: revised.budgetMinor,
+        trendThresholdPp,
         createdAt: clock(),
       };
       try {

@@ -10,6 +10,7 @@ import {
   pauseExpiredSamplingChannel,
   reviseSamplingPlanBudget,
   saveSamplingPlan,
+  saveSamplingTrendThreshold,
   transitionSamplingPlan,
 } from "./commands.ts";
 import { driveDueSamplingWindow } from "./due-commands.ts";
@@ -21,6 +22,7 @@ import {
   expireSamplingChannelSchema,
   planPhaseSchema,
   reviseSamplingBudgetSchema,
+  setSamplingTrendThresholdSchema,
   slotStatusSchema,
   transitionSamplingPlanSchema,
 } from "./contracts.ts";
@@ -35,6 +37,12 @@ function finish(error?: string): never {
 
 function whole(value: FormDataEntryValue | null) {
   return typeof value === "string" && /^\d{1,10}$/.test(value) ? Number(value) : value;
+}
+
+function thresholdField(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || value.trim() === "") return undefined;
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : value.trim();
 }
 
 function textList(formData: FormData, name: string) {
@@ -63,6 +71,7 @@ export async function createSamplingPlanAction(formData: FormData) {
       costMinor: cost,
     }];
   });
+  const threshold = thresholdField(formData.get("trendThresholdPp"));
   const parsed = createSamplingPlanSchema.safeParse({
     action: "create",
     brandId: String(formData.get("brandId") ?? ""),
@@ -72,6 +81,7 @@ export async function createSamplingPlanAction(formData: FormData) {
     spentMinor: whole(formData.get("spentMinor")),
     pendingMinor: whole(formData.get("pendingMinor")),
     nextAt: String(formData.get("nextAt") ?? "").trim(),
+    ...(threshold === undefined ? {} : { trendThresholdPp: threshold }),
     slots,
   });
   if (!parsed.success) finish("INVALID_INPUT");
@@ -83,12 +93,26 @@ export async function reviseSamplingBudgetAction(formData: FormData) {
   const session = await requireSession();
   const planId = String(formData.get("planId") ?? "");
   const nextAt = String(formData.get("nextAt") ?? "").trim();
+  const threshold = thresholdField(formData.get("trendThresholdPp"));
   const parsed = reviseSamplingBudgetSchema.safeParse({
     budgetMinor: whole(formData.get("budgetMinor")),
     ...(nextAt ? { nextAt } : {}),
+    ...(threshold === undefined ? {} : { trendThresholdPp: threshold }),
   });
   if (!parsed.success) finish("INVALID_INPUT");
   const result = await reviseSamplingPlanBudget(getConnection(), session.user.id, planId, parsed.data);
+  finish("error" in result ? result.error : undefined);
+}
+
+export async function saveSamplingTrendThresholdAction(formData: FormData) {
+  const session = await requireSession();
+  const threshold = thresholdField(formData.get("trendThresholdPp"));
+  const parsed = setSamplingTrendThresholdSchema.safeParse({
+    planId: String(formData.get("planId") ?? ""),
+    trendThresholdPp: threshold === undefined ? 10 : threshold,
+  });
+  if (!parsed.success) finish("INVALID_INPUT");
+  const result = await saveSamplingTrendThreshold(getConnection(), session.user.id, parsed.data);
   finish("error" in result ? result.error : undefined);
 }
 

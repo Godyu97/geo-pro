@@ -16,6 +16,7 @@ const planRow = z.object({
   spentMinor: z.int().min(0),
   pendingMinor: z.int().min(0),
   createdAt: z.iso.datetime({ precision: 3 }),
+  trendThresholdPp: z.number().finite().positive(),
 });
 
 const slotRow = z.object({
@@ -35,7 +36,7 @@ export type SamplingSlotRecord = z.infer<typeof slotRow>;
 
 const planColumns = `id, version, brand_id AS "brandId", owner_id AS "ownerId", phase, currency,
   budget_minor AS "budgetMinor", spent_minor AS "spentMinor", pending_minor AS "pendingMinor",
-  created_at AS "createdAt"`;
+  created_at AS "createdAt", trend_threshold_pp AS "trendThresholdPp"`;
 
 const slotColumns = `id, plan_id AS "planId", brand_id AS "brandId", owner_id AS "ownerId",
   channel_id AS "channelId", at, status, manual, cost_minor AS "costMinor"`;
@@ -72,11 +73,12 @@ export class SamplingPlanDao {
     await queryWithParameters(
       this.db,
       `INSERT INTO sampling_plan (
-        id, version, brand_id, owner_id, phase, currency, budget_minor, spent_minor, pending_minor, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, version, brand_id, owner_id, phase, currency, budget_minor, spent_minor, pending_minor, created_at,
+        trend_threshold_pp
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.id, row.version, row.brandId, row.ownerId, row.phase, row.currency,
-        row.budgetMinor, row.spentMinor, row.pendingMinor, row.createdAt,
+        row.budgetMinor, row.spentMinor, row.pendingMinor, row.createdAt, row.trendThresholdPp,
       ],
     );
   }
@@ -138,6 +140,17 @@ export class SamplingPlanDao {
     if (!query) return [];
     const rows = await queryWithParameters(this.db, query.sql, query.values);
     return z.array(slotRow).parse(rows);
+  }
+
+  async setTrendThreshold(ownerId: string, planId: string, version: number, trendThresholdPp: number) {
+    const rows = await queryWithParameters(
+      this.db,
+      `UPDATE sampling_plan SET trend_threshold_pp = ?
+       WHERE id = ? AND version = ? AND owner_id = ? AND phase = 'draft'
+       RETURNING id`,
+      [trendThresholdPp, planId, version, ownerId],
+    );
+    return rows.length === 1;
   }
 
   async setPhase(ownerId: string, planId: string, version: number, phase: SamplingPlanRecord["phase"]) {

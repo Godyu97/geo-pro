@@ -127,6 +127,7 @@ test("sampling plans show due manual work and budget pauses in both languages", 
     await page.getByLabel("预算（最小货币单位）", { exact: true }).fill("5");
     await page.getByLabel("已花费", { exact: true }).fill("0");
     await page.getByLabel("待对账", { exact: true }).fill("0");
+    await page.getByLabel("趋势阈值（百分点）", { exact: true }).fill("15");
     await page.locator('input[name="nextAt"]').fill("2099-12-02T00:00:00.000Z");
     const manual = page.getByRole("group", { name: "槽位 1", exact: true });
     await manual.getByRole("textbox", { name: "通道", exact: true }).fill("consumer-sheet");
@@ -151,6 +152,7 @@ test("sampling plans show due manual work and budget pauses in both languages", 
     await future.getByRole("textbox", { name: "槽位费用", exact: true }).fill("10");
     await page.getByRole("button", { name: "保存计划", exact: true }).click();
     await expect(page.getByRole("heading", { name: "当前版本 1", exact: true })).toBeVisible();
+    await expect(page.getByText("当前版本的趋势阈值是 15 个百分点。", { exact: true })).toBeVisible();
     await page.setViewportSize({ width: 375, height: 800 });
     await page.goto("/dashboard/monitoring/plans");
     await expect(page.getByRole("heading", { name: "当前版本 1", exact: true })).toBeInViewport();
@@ -159,7 +161,7 @@ test("sampling plans show due manual work and budget pauses in both languages", 
     const processWindow = page.getByRole("button", { name: "处理到期窗口", exact: true });
     await page.getByLabel("时区", { exact: true }).fill("Invalid/Timezone");
     await processWindow.press("Enter");
-    await expect(page.getByRole("alert").filter({ hasText: "请核对币种、金额、时段和槽位后再保存。" })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "请核对币种、金额、趋势阈值、时段和槽位后再保存。" })).toBeVisible();
     await page.getByLabel("时区", { exact: true }).fill("Asia/Shanghai");
     await page.getByLabel("人工题单的问题编号", { exact: true }).fill(`${currentA} ${currentB} ${deletedId}`);
     await processWindow.press("Enter");
@@ -178,7 +180,7 @@ test("sampling plans show due manual work and budget pauses in both languages", 
     const listed = await page.request.get(`/api/monitoring/plans?brandId=${brandId}`, { headers: { Origin: baseURL } });
     expect(listed.ok()).toBe(true);
     const { plans: [plan] } = await listed.json();
-    expect(plan).toMatchObject({ currency: "CNY", budgetMinor: 5, spentMinor: 0, pendingMinor: 0 });
+    expect(plan).toMatchObject({ currency: "CNY", budgetMinor: 5, spentMinor: 0, pendingMinor: 0, trendThresholdPp: 15 });
     expect(plan.slots).toEqual(expect.arrayContaining([
       expect.objectContaining({ channelId: futureChannel, status: "paused", manual: false }),
       expect.objectContaining({ channelId: "failed-official", status: "failed" }),
@@ -205,6 +207,9 @@ test("sampling plans show due manual work and budget pauses in both languages", 
         await page.setViewportSize({ width, height: 800 });
         await expect(main).toHaveCount(1);
         await expect(main.getByRole("heading", { name: title, exact: true })).toBeVisible();
+        await expect(main.getByText(locale === "en"
+          ? "This version's trend threshold is 15 percentage points."
+          : "当前版本的趋势阈值是 15 个百分点。", { exact: true })).toBeVisible();
         await expect(main.getByText(latestText, { exact: true })).toHaveCSS("white-space", "pre-wrap");
         await expect(main.getByText(secondText, { exact: true })).toBeVisible();
         await expect(main.getByText(missing, { exact: true })).toHaveCount(1);

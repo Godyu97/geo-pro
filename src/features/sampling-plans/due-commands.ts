@@ -11,6 +11,7 @@ import {
   buildWindowReadings,
   decideDueWindow,
   localWindowId,
+  trendThresholdForWindow,
   windowBounds,
   type DueDecision,
   type ObservationFact,
@@ -354,9 +355,10 @@ async function driveParsed(
   if (executor) await finishOfficial(db, ownerId, input.planId, executor);
   const due = new SamplingDueDao(db);
   const plans = new SamplingPlanDao(db);
-  const [runs, slots] = await Promise.all([
+  const [runs, slots, versions] = await Promise.all([
     due.runsForPlan(ownerId, input.planId),
     plans.slotsForPlans(ownerId, [input.planId]),
+    plans.versions(ownerId, input.planId),
   ]);
   const evidence = await loadFacts(due, ownerId, saved.plan.brandId, input.timezone, slots, runs);
   const statusById = new Map(slots.map((slot) => [slot.id, slot.status]));
@@ -368,7 +370,18 @@ async function driveParsed(
     list.push(slot);
     groups.set(windowId, list);
   }
+  const latestWindowId = [...groups.keys()].sort().at(-1);
+  const windowEnd = latestWindowId ? windowBounds(latestWindowId, input.timezone)?.end : undefined;
+  const thresholdPp = trendThresholdForWindow(
+    (versions.length > 0 ? versions : [saved.plan]).map((row) => ({
+      version: row.version,
+      createdAt: row.createdAt,
+      trendThresholdPp: row.trendThresholdPp,
+    })),
+    windowEnd ?? input.now,
+  );
   const built = buildWindowReadings({
+    thresholdPp,
     windows: [...groups.entries()].map(([windowId, windowSlots]) => {
       const backed = new Set(evidence.accepted.filter((row) => row.windowId === windowId).map((row) => row.slotId));
       const monitorCount = evidence.monitorSlots.filter((slot) => {
@@ -412,7 +425,7 @@ async function driveParsed(
       action: "record",
       brandId: saved.plan.brandId,
       windows: built.samples,
-    }, () => now);
+    }, () => now, thresholdPp);
     if ("alert" in recorded && recorded.recorded) {
       alert = {
         id: recorded.alert.id,

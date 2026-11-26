@@ -67,6 +67,8 @@ test("monitoring owners can review and confirm in-app quality alerts in both lan
 
     await page.setViewportSize({ width: 375, height: 800 });
     await page.goto("/dashboard/monitoring/plans");
+    await expect(page.getByText("当前版本的趋势阈值是 10 个百分点。", { exact: true })).toBeVisible();
+    await expectNoOverflow(page);
     await activateFromKeyboard(page, page.getByRole("link", { name: "查看站内提醒", exact: true }));
     await expect(page).toHaveURL(alertsPath);
     const main = page.getByRole("main");
@@ -113,7 +115,15 @@ test("monitoring owners can review and confirm in-app quality alerts in both lan
       }
     }
 
+    await page.setViewportSize({ width: 1440, height: 800 });
+    await page.goto("/dashboard/monitoring/plans");
+    await expect(page.getByText("This version's trend threshold is 10 percentage points.", { exact: true })).toBeVisible();
+    await expectNoOverflow(page);
     await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto("/dashboard/monitoring/plans");
+    await expect(page.getByText("This version's trend threshold is 10 percentage points.", { exact: true })).toBeVisible();
+    await expectNoOverflow(page);
+    await page.goto(alertsPath);
     await activateFromKeyboard(page, main.getByRole("button", { name: "Acknowledge", exact: true }));
     await expect(main.getByText("Acknowledged", { exact: true })).toBeVisible();
     await expect(main.getByRole("button", { name: "Acknowledge", exact: true })).toHaveCount(0);

@@ -4,6 +4,8 @@ import { minorAmountSchema, quotaCurrencySchema } from "../quotas/contracts.ts";
 import { isTimeZone } from "./due-window.ts";
 import type { PlanPhase, SamplingSlotStatus } from "./rules.ts";
 
+export const trendThresholdPpSchema = z.number().finite().positive();
+
 export const planPhases = ["draft", "active", "paused", "ended"] as const satisfies readonly PlanPhase[];
 export const slotStatuses = ["scheduled", "completed", "failed", "paused"] as const satisfies readonly SamplingSlotStatus[];
 
@@ -30,6 +32,7 @@ export const createSamplingPlanSchema = z.strictObject({
   spentMinor: minorAmountSchema,
   pendingMinor: minorAmountSchema,
   nextAt: instantSchema,
+  trendThresholdPp: trendThresholdPpSchema.optional(),
   slots: z.array(samplingSlotInputSchema).min(1).max(32),
 });
 
@@ -62,6 +65,12 @@ export const samplingPlanWriteSchema = z.discriminatedUnion("action", [
 export const reviseSamplingBudgetSchema = z.strictObject({
   budgetMinor: minorAmountSchema,
   nextAt: instantSchema.optional(),
+  trendThresholdPp: trendThresholdPpSchema.optional(),
+});
+
+export const setSamplingTrendThresholdSchema = z.strictObject({
+  planId: brandIdSchema,
+  trendThresholdPp: trendThresholdPpSchema,
 });
 
 export const dueChannelStateSchema = z.enum(["eligible", "degraded", "expired"]);
@@ -93,4 +102,5 @@ export type TransitionSamplingPlanInput = z.infer<typeof transitionSamplingPlanS
 export type ArriveSamplingPlanInput = z.infer<typeof arriveSamplingPlanSchema>;
 export type ExpireSamplingChannelInput = z.infer<typeof expireSamplingChannelSchema>;
 export type ReviseSamplingBudgetInput = z.infer<typeof reviseSamplingBudgetSchema>;
+export type SetSamplingTrendThresholdInput = z.infer<typeof setSamplingTrendThresholdSchema>;
 export type DriveDueWindowInput = z.infer<typeof driveDueWindowSchema>;
