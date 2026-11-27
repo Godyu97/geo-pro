@@ -59,11 +59,13 @@ const relatedClass = "inline-flex min-h-10 min-w-0 max-w-full items-center round
 function relatedLinks(
   t: Awaited<ReturnType<typeof getTranslator<"evidenceOverview">>>,
   brandId?: string,
+  includePlanAlertBrand = false,
 ) {
   const brandQuery = brandId ? `?brandId=${encodeURIComponent(brandId)}` : "";
+  const planAlertQuery = includePlanAlertBrand ? brandQuery : "";
   return [
-    { href: "/dashboard/monitoring/plans", label: t("openPlans") },
-    { href: "/dashboard/monitoring/alerts", label: t("openAlerts") },
+    { href: `/dashboard/monitoring/plans${planAlertQuery}`, label: t("openPlans") },
+    { href: `/dashboard/monitoring/alerts${planAlertQuery}`, label: t("openAlerts") },
     { href: "/dashboard/monitoring/capture", label: t("openCapture") },
     { href: "/dashboard/monitoring/protocols", label: t("openProtocols") },
     { href: `/dashboard/monitoring/explorations${brandQuery}`, label: t("openExplorations") },
@@ -145,7 +147,7 @@ export default async function EvidenceOverviewPage({
   }
 
   const parsed = overviewScopeFromSearch(params, { brandId, sourceMode: "model_api" });
-  const related = relatedLinks(t, brandId);
+  const related = relatedLinks(t, brandId, Boolean(requested));
   if (!parsed.success) {
     return (
       <EvidenceCanvas

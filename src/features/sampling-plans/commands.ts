@@ -1,8 +1,9 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { DatabaseConnection } from "../../lib/db/connection.ts";
+import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { authorizeBrandActor, type BrandScope } from "../team-access/brand-scope.ts";
 import type {
   ArriveSamplingPlanInput,
   CreateSamplingPlan,
@@ -156,9 +157,44 @@ function finiteThreshold(value: number | undefined, fallback: number) {
   return Number.isFinite(threshold) && threshold > 0 ? threshold : null;
 }
 
-export async function listSamplingPlans(db: DatabaseConnection, ownerId: string, brandId: string) {
-  const owned = await new BrandDao(db).owned(ownerId, brandId);
-  if (!owned) return { error: "NOT_FOUND" as const };
+export async function authorizeSamplingBrandWrite(
+  db: QueryConnection,
+  actorId: string,
+  brandId: string,
+  now = new Date().toISOString(),
+): Promise<BrandScope | { error: "FORBIDDEN" | "NOT_FOUND" }> {
+  const access = await authorizeBrandActor(db, actorId, brandId, "write", now);
+  if (access) return access;
+  const read = await authorizeBrandActor(db, actorId, brandId, "read", now);
+  return { error: read ? "FORBIDDEN" : "NOT_FOUND" };
+}
+
+async function authorizePlanRead(
+  db: QueryConnection,
+  actorId: string,
+  planId: string,
+  now = new Date().toISOString(),
+): Promise<BrandScope | null> {
+  const identity = await new SamplingPlanDao(db).planIdentity(planId);
+  if (!identity) return null;
+  return authorizeBrandActor(db, actorId, identity.brandId, "read", now);
+}
+
+export async function authorizeSamplingPlanWrite(
+  db: QueryConnection,
+  actorId: string,
+  planId: string,
+  now = new Date().toISOString(),
+): Promise<BrandScope | { error: "FORBIDDEN" | "NOT_FOUND" }> {
+  const identity = await new SamplingPlanDao(db).planIdentity(planId);
+  if (!identity) return { error: "NOT_FOUND" };
+  return authorizeSamplingBrandWrite(db, actorId, identity.brandId, now);
+}
+
+export async function listSamplingPlans(db: DatabaseConnection, actorId: string, brandId: string) {
+  const access = await authorizeBrandActor(db, actorId, brandId, "read");
+  if (!access) return { error: "NOT_FOUND" as const };
+  const ownerId = access.ownerId;
   const dao = new SamplingPlanDao(db);
   const rows = await dao.plansForBrand(brandId, ownerId);
   const planIds = [...new Set(rows.map((row) => row.id))];
@@ -180,7 +216,10 @@ export async function listSamplingPlans(db: DatabaseConnection, ownerId: string,
   };
 }
 
-export async function readSamplingPlan(db: DatabaseConnection, ownerId: string, planId: string) {
+export async function readSamplingPlan(db: DatabaseConnection, actorId: string, planId: string) {
+  const access = await authorizePlanRead(db, actorId, planId);
+  if (!access) return { error: "NOT_FOUND" as const };
+  const ownerId = access.ownerId;
   const dao = new SamplingPlanDao(db);
   const versions = await dao.versions(ownerId, planId);
   if (versions.length === 0) return { error: "NOT_FOUND" as const };
@@ -188,8 +227,10 @@ export async function readSamplingPlan(db: DatabaseConnection, ownerId: string, 
   return { plan: toView(versions, slots) };
 }
 
-export async function readSamplingPlanVersion(db: DatabaseConnection, ownerId: string, planId: string, version: number) {
-  const row = await new SamplingPlanDao(db).version(ownerId, planId, version);
+export async function readSamplingPlanVersion(db: DatabaseConnection, actorId: string, planId: string, version: number) {
+  const access = await authorizePlanRead(db, actorId, planId);
+  if (!access) return { error: "NOT_FOUND" as const };
+  const row = await new SamplingPlanDao(db).version(access.ownerId, planId, version);
   if (!row) return { error: "NOT_FOUND" as const };
   return {
     version: row.version,
@@ -202,7 +243,7 @@ export async function readSamplingPlanVersion(db: DatabaseConnection, ownerId: s
 
 export async function saveSamplingPlan(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: CreateSamplingPlan,
   clock: Clock = systemClock,
 ) {
@@ -210,10 +251,13 @@ export async function saveSamplingPlan(
   const trendThresholdPp = finiteThreshold(input.trendThresholdPp, 10);
   if (trendThresholdPp === null) return { error: "INVALID_INPUT" as const };
   return db.transaction(async (tx) => {
+    const now = clock();
+    const access = await authorizeSamplingBrandWrite(tx, actorId, input.brandId, now);
+    if ("error" in access) return access;
+    const ownerId = access.ownerId;
     const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
     if (!owned) return { error: "NOT_FOUND" as const };
     const dao = new SamplingPlanDao(tx);
-    const now = clock();
     const planId = randomUUID();
     const draft: SamplingPlanRecord = {
       id: planId,
@@ -259,10 +303,13 @@ async function persistPause(
 
 export async function arriveAtSamplingWindow(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: ArriveSamplingPlanInput,
 ) {
   return db.transaction(async (tx) => {
+    const access = await authorizeSamplingPlanWrite(tx, actorId, input.planId);
+    if ("error" in access) return access;
+    const ownerId = access.ownerId;
     const dao = new SamplingPlanDao(tx);
     const current = await dao.latest(ownerId, input.planId);
     if (!current) return { error: "NOT_FOUND" as const };
@@ -276,10 +323,13 @@ export async function arriveAtSamplingWindow(
 
 export async function pauseExpiredSamplingChannel(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: ExpireSamplingChannelInput,
 ) {
   return db.transaction(async (tx) => {
+    const access = await authorizeSamplingPlanWrite(tx, actorId, input.planId);
+    if ("error" in access) return access;
+    const ownerId = access.ownerId;
     const dao = new SamplingPlanDao(tx);
     const current = await dao.latest(ownerId, input.planId);
     if (!current) return { error: "NOT_FOUND" as const };
@@ -298,10 +348,13 @@ export async function pauseExpiredSamplingChannel(
 
 export async function transitionSamplingPlan(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: TransitionSamplingPlanInput,
 ) {
   return db.transaction(async (tx) => {
+    const access = await authorizeSamplingPlanWrite(tx, actorId, input.planId);
+    if ("error" in access) return access;
+    const ownerId = access.ownerId;
     const dao = new SamplingPlanDao(tx);
     const current = await dao.latest(ownerId, input.planId);
     if (!current) return { error: "NOT_FOUND" as const };
@@ -315,12 +368,15 @@ export async function transitionSamplingPlan(
 
 export async function saveSamplingTrendThreshold(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: SetSamplingTrendThresholdInput,
 ) {
   const trendThresholdPp = finiteThreshold(input.trendThresholdPp, Number.NaN);
   if (trendThresholdPp === null) return { error: "INVALID_INPUT" as const };
   return db.transaction(async (tx) => {
+    const access = await authorizeSamplingPlanWrite(tx, actorId, input.planId);
+    if ("error" in access) return access;
+    const ownerId = access.ownerId;
     const dao = new SamplingPlanDao(tx);
     const current = await dao.latest(ownerId, input.planId);
     if (!current) return { error: "NOT_FOUND" as const };
@@ -337,13 +393,17 @@ export async function saveSamplingTrendThreshold(
 
 export async function reviseSamplingPlanBudget(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   planId: string,
   input: ReviseSamplingBudgetInput,
   clock: Clock = systemClock,
 ) {
   try {
     return await db.transaction(async (tx) => {
+      const now = clock();
+      const access = await authorizeSamplingPlanWrite(tx, actorId, planId, now);
+      if ("error" in access) return access;
+      const ownerId = access.ownerId;
       const dao = new SamplingPlanDao(tx);
       const current = await dao.latest(ownerId, planId);
       if (!current) return { error: "NOT_FOUND" as const };
@@ -362,7 +422,7 @@ export async function reviseSamplingPlanBudget(
         phase: revised.phase,
         budgetMinor: revised.budgetMinor,
         trendThresholdPp,
-        createdAt: clock(),
+        createdAt: now,
       };
       try {
         await dao.insertPlan(next);

@@ -10,6 +10,7 @@ import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts";
 import { BrandDao } from "../brands/dao";
 import { PromptDao } from "../prompts/dao";
+import { authorizeBrandActor, workspaceBrand } from "../team-access/brand-scope";
 import { windowIdSchema } from "./contracts";
 import {
   arriveSamplingPlanAction,
@@ -26,7 +27,7 @@ import { listAttachableOfficialRuns, listSamplingDueWindows, manualSheetsForBran
 import { ManualSheetQuestions } from "./manual-sheet-questions";
 
 const fieldClass = "h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
-const knownErrors = ["PLAN_PHASE_CONFLICT", "NOT_FOUND", "INVALID_INPUT", "EXISTING_RUN_REJECTED", "VERSION_CONFLICT"] as const;
+const knownErrors = ["PLAN_PHASE_CONFLICT", "NOT_FOUND", "FORBIDDEN", "INVALID_INPUT", "EXISTING_RUN_REJECTED", "VERSION_CONFLICT"] as const;
 const phases = ["draft", "active", "paused", "ended"] as const;
 const statuses = ["scheduled", "completed", "failed", "paused"] as const;
 
@@ -55,8 +56,9 @@ export default async function SamplingPlansPage({
   const t = await getTranslator("samplingPlans");
   const monitoring = await getTranslator("monitoring");
   const errorCode = typeof params.error === "string" ? params.error : undefined;
+  const requestedBrandId = typeof params.brandId === "string" && params.brandId.trim() ? params.brandId.trim() : undefined;
+  if (requestedBrandId !== undefined && !brandIdSchema.safeParse(requestedBrandId).success) notFound();
   const connection = getConnection();
-  const active = await new BrandDao(connection).active(session.user.id);
   const phaseLabel = {
     draft: t("phaseDraft"),
     active: t("phaseActive"),
@@ -82,6 +84,8 @@ export default async function SamplingPlansPage({
     const focused = await readSamplingWindowDetail(connection, session.user.id, parsedPlan.data, parsedWindow.data);
     if ("error" in focused) notFound();
     const { detail } = focused;
+    if (requestedBrandId && detail.brandId !== requestedBrandId) notFound();
+    const detailBrandQuery = requestedBrandId ? `?brandId=${encodeURIComponent(detail.brandId)}` : "";
     const alertsT = await getTranslator("qualityAlerts");
     const runStatusLabel = {
       queued: "statusQueued",
@@ -113,13 +117,13 @@ export default async function SamplingPlansPage({
           </div>
           <div className="flex max-w-full flex-wrap gap-2">
             <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
-              <Link href="/dashboard/monitoring/alerts" prefetch={false}>{t("backAlerts")}</Link>
+              <Link href={`/dashboard/monitoring/alerts${detailBrandQuery}`} prefetch={false}>{t("backAlerts")}</Link>
             </Button>
             <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
-              <Link href="/dashboard/monitoring/plans" prefetch={false}>{t("allPlans")}</Link>
+              <Link href={`/dashboard/monitoring/plans${detailBrandQuery}`} prefetch={false}>{t("allPlans")}</Link>
             </Button>
             <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
-              <Link href="/dashboard/monitoring/overview" prefetch={false}>{t("backOverview")}</Link>
+              <Link href={`/dashboard/monitoring/overview${detailBrandQuery}`} prefetch={false}>{t("backOverview")}</Link>
             </Button>
           </div>
         </header>
@@ -282,7 +286,10 @@ export default async function SamplingPlansPage({
     );
   }
 
-  if (!active) {
+  const scope = await workspaceBrand(connection, session.user.id, requestedBrandId, "read");
+  if (requestedBrandId && !scope) notFound();
+
+  if (!scope) {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
@@ -292,15 +299,27 @@ export default async function SamplingPlansPage({
     );
   }
 
-  const listed = await listSamplingPlans(connection, session.user.id, active.id);
+  const [brand, writeScope, listed, attachable] = await Promise.all([
+    new BrandDao(connection).version(scope.ownerId, scope.brandId),
+    authorizeBrandActor(connection, session.user.id, scope.brandId, "write"),
+    listSamplingPlans(connection, session.user.id, scope.brandId),
+    listAttachableOfficialRuns(connection, session.user.id, scope.brandId),
+  ]);
+  if (!brand) notFound();
+  const canWrite = Boolean(writeScope);
+  const brandQuery = requestedBrandId ? `?brandId=${encodeURIComponent(scope.brandId)}` : "";
+  const brandParam = requestedBrandId ? `&brandId=${encodeURIComponent(scope.brandId)}` : "";
+  const returnBrandInput = requestedBrandId
+    ? <input type="hidden" name="returnBrandId" value={scope.brandId} />
+    : null;
   const plans: SamplingPlanView[] = "error" in listed ? [] : listed.plans;
   const due = plans.length === 0
     ? { runs: [], readings: [] }
     : await listSamplingDueWindows(connection, session.user.id, plans.map((plan) => plan.id));
-  const sheets = await manualSheetsForBrand(connection, active.id, due.runs);
+  const sheets = await manualSheetsForBrand(connection, scope.brandId, due.runs);
   const sheetByRun = new Map(sheets.map((sheet) => [sheet.runId, sheet]));
-  const promptVersions = plans.some((plan) => plan.phase === "active")
-    ? (await new PromptDao(connection, active.id).versions()).slice(0, 20).map((set) => ({
+  const promptVersions = canWrite && plans.some((plan) => plan.phase === "active")
+    ? (await new PromptDao(connection, scope.brandId).versions()).slice(0, 20).map((set) => ({
       id: set.id,
       version: set.version,
       questions: set.content.questions
@@ -309,25 +328,26 @@ export default async function SamplingPlansPage({
     }))
     : [];
   const { promptSetVersion, promptSetOption, manualSheetQuestions, manualSheetSelection, manualSheetNoQuestions } = getMessages(locale).samplingPlans;
-  const attachable = await listAttachableOfficialRuns(connection, session.user.id, active.id);
 
   return (
     <div className="min-w-0 space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-          <p className="mt-2 text-sm font-medium [overflow-wrap:anywhere]">{active.name}</p>
+          <p className="mt-2 text-sm font-medium [overflow-wrap:anywhere]">{brand.fields.name}</p>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{t("description")}</p>
         </div>
         <div className="flex max-w-full flex-wrap gap-2">
-          <Button asChild variant={plans.length === 0 ? "default" : "outline"} className="h-auto min-h-8 max-w-full whitespace-normal">
-            <a href="#new-sampling-plan">{t("createTitle")}</a>
+          {canWrite ? (
+            <Button asChild variant={plans.length === 0 ? "default" : "outline"} className="h-auto min-h-8 max-w-full whitespace-normal">
+              <a href="#new-sampling-plan">{t("createTitle")}</a>
+            </Button>
+          ) : null}
+          <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
+            <Link href={`/dashboard/monitoring/alerts${brandQuery}`} prefetch={false}>{t("openAlerts")}</Link>
           </Button>
           <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
-            <Link href="/dashboard/monitoring/alerts" prefetch={false}>{t("openAlerts")}</Link>
-          </Button>
-          <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
-            <Link href="/dashboard/monitoring/overview" prefetch={false}>{t("backOverview")}</Link>
+            <Link href={`/dashboard/monitoring/overview${brandQuery}`} prefetch={false}>{t("backOverview")}</Link>
           </Button>
         </div>
       </header>
@@ -448,17 +468,18 @@ export default async function SamplingPlansPage({
                   : t("readingReady")}
               </p>
               <Button asChild variant="outline" className="h-auto min-h-8 max-w-full whitespace-normal">
-                <Link href={`/dashboard/monitoring/plans?planId=${encodeURIComponent(plan.id)}&windowId=${encodeURIComponent(reading.windowId)}`} prefetch={false}>
+                <Link href={`/dashboard/monitoring/plans?planId=${encodeURIComponent(plan.id)}&windowId=${encodeURIComponent(reading.windowId)}${brandParam}`} prefetch={false}>
                   {t("openWindow")}
                 </Link>
               </Button>
               {reading.coverageSufficient ? null : <p>{t("readingCoverage")}</p>}
             </div>
           ))}
-          {plan.phase === "active" ? (
+          {canWrite && plan.phase === "active" ? (
             <form action={driveDueSamplingWindowAction} className="space-y-3 rounded-xl border p-4">
               <h3 className="text-sm font-medium">{t("driveTitle")}</h3>
               <p className="text-sm leading-6 text-muted-foreground">{t("driveHint")}</p>
+              {returnBrandInput}
               <input type="hidden" name="planId" value={plan.id} />
               {plan.slots.map((slot) => <input key={slot.id} type="hidden" name="channelId" value={slot.channelId} />)}
               <div className="grid gap-3 sm:grid-cols-2">
@@ -524,8 +545,9 @@ export default async function SamplingPlansPage({
             </table>
           </div>
 
-          {plan.phase === "draft" ? (
+          {canWrite && plan.phase === "draft" ? (
             <form action={saveSamplingTrendThresholdAction} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              {returnBrandInput}
               <input type="hidden" name="planId" value={plan.id} />
               <div className="text-sm">
                 <label>
@@ -538,67 +560,77 @@ export default async function SamplingPlansPage({
             </form>
           ) : null}
 
-          <form action={reviseSamplingBudgetAction} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
-            <input type="hidden" name="planId" value={plan.id} />
-            <label className="text-sm">
-              <span className="mb-1 block text-muted-foreground">{t("newBudget")}</span>
-              <input name="budgetMinor" required inputMode="numeric" className={fieldClass} />
-            </label>
-            <div className="text-sm">
-              <label>
-                <span className="mb-1 block text-muted-foreground">{t("newThreshold")}</span>
-                <input name="trendThresholdPp" inputMode="decimal" placeholder="10" className={fieldClass} />
-              </label>
-              <span className="mt-1 block text-xs text-muted-foreground">{t("newThresholdHint")}</span>
-            </div>
-            <label className="text-sm">
-              <span className="mb-1 block text-muted-foreground">{t("optionalNextAt")}</span>
-              <input name="nextAt" placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />
-            </label>
-            <Button type="submit" variant="outline">{t("reviseBudget")}</Button>
-          </form>
+          {canWrite ? (
+            <>
+              <form action={reviseSamplingBudgetAction} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
+                {returnBrandInput}
+                <input type="hidden" name="planId" value={plan.id} />
+                <label className="text-sm">
+                  <span className="mb-1 block text-muted-foreground">{t("newBudget")}</span>
+                  <input name="budgetMinor" required inputMode="numeric" className={fieldClass} />
+                </label>
+                <div className="text-sm">
+                  <label>
+                    <span className="mb-1 block text-muted-foreground">{t("newThreshold")}</span>
+                    <input name="trendThresholdPp" inputMode="decimal" placeholder="10" className={fieldClass} />
+                  </label>
+                  <span className="mt-1 block text-xs text-muted-foreground">{t("newThresholdHint")}</span>
+                </div>
+                <label className="text-sm">
+                  <span className="mb-1 block text-muted-foreground">{t("optionalNextAt")}</span>
+                  <input name="nextAt" placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />
+                </label>
+                <Button type="submit" variant="outline">{t("reviseBudget")}</Button>
+              </form>
 
-          <form action={transitionSamplingPlanAction} className="flex flex-wrap items-end gap-3">
-            <input type="hidden" name="planId" value={plan.id} />
-            <label className="text-sm">
-              <span className="mb-1 block text-muted-foreground">{t("phase")}</span>
-              <select name="phase" defaultValue={plan.phase} className={fieldClass}>
-                {phases.map((phase) => <option key={phase} value={phase}>{phaseLabel[phase]}</option>)}
-              </select>
-            </label>
-            <Button type="submit" variant="outline">{t("transition")}</Button>
-          </form>
+              <form action={transitionSamplingPlanAction} className="flex flex-wrap items-end gap-3">
+                {returnBrandInput}
+                <input type="hidden" name="planId" value={plan.id} />
+                <label className="text-sm">
+                  <span className="mb-1 block text-muted-foreground">{t("phase")}</span>
+                  <select name="phase" defaultValue={plan.phase} className={fieldClass}>
+                    {phases.map((phase) => <option key={phase} value={phase}>{phaseLabel[phase]}</option>)}
+                  </select>
+                </label>
+                <Button type="submit" variant="outline">{t("transition")}</Button>
+              </form>
 
-          <form action={arriveSamplingPlanAction} className="flex flex-wrap items-end gap-3">
-            <input type="hidden" name="planId" value={plan.id} />
-            <label className="min-w-0 flex-1 basis-60 text-sm">
-              <span className="mb-1 block text-muted-foreground">{t("arrive")}</span>
-              <input name="nextAt" required placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />
-            </label>
-            <Button type="submit" variant="outline">{t("arrive")}</Button>
-          </form>
+              <form action={arriveSamplingPlanAction} className="flex flex-wrap items-end gap-3">
+                {returnBrandInput}
+                <input type="hidden" name="planId" value={plan.id} />
+                <label className="min-w-0 flex-1 basis-60 text-sm">
+                  <span className="mb-1 block text-muted-foreground">{t("arrive")}</span>
+                  <input name="nextAt" required placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />
+                </label>
+                <Button type="submit" variant="outline">{t("arrive")}</Button>
+              </form>
 
-          <form action={expireSamplingChannelAction} className="flex flex-wrap items-end gap-3">
-            <input type="hidden" name="planId" value={plan.id} />
-            <label className="text-sm">
-              <span className="mb-1 block text-muted-foreground">{t("channelId")}</span>
-              <input name="channelId" required maxLength={64} className={fieldClass} />
-            </label>
-            <label className="min-w-0 flex-1 basis-60 text-sm">
-              <span className="mb-1 block text-muted-foreground">{t("nextAt")}</span>
-              <input name="nextAt" required placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />
-            </label>
-            <Button type="submit" variant="outline">{t("expireChannel")}</Button>
-          </form>
+              <form action={expireSamplingChannelAction} className="flex flex-wrap items-end gap-3">
+                {returnBrandInput}
+                <input type="hidden" name="planId" value={plan.id} />
+                <label className="text-sm">
+                  <span className="mb-1 block text-muted-foreground">{t("channelId")}</span>
+                  <input name="channelId" required maxLength={64} className={fieldClass} />
+                </label>
+                <label className="min-w-0 flex-1 basis-60 text-sm">
+                  <span className="mb-1 block text-muted-foreground">{t("nextAt")}</span>
+                  <input name="nextAt" required placeholder="2026-11-18T00:00:00.000Z" className={fieldClass} />
+                </label>
+                <Button type="submit" variant="outline">{t("expireChannel")}</Button>
+              </form>
+            </>
+          ) : null}
         </section>
       ))}
 
-      <form id="new-sampling-plan" aria-labelledby="new-sampling-plan-title" action={createSamplingPlanAction}
-        className="min-w-0 scroll-mt-20 space-y-4 rounded-2xl border bg-card p-4 sm:p-5">
-        <h2 id="new-sampling-plan-title" className="text-lg font-semibold">{t("createTitle")}</h2>
-        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t("recordedSpend")}</p>
-        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t("consumerNote")}</p>
-        <input type="hidden" name="brandId" value={active.id} />
+      {canWrite ? (
+        <form id="new-sampling-plan" aria-labelledby="new-sampling-plan-title" action={createSamplingPlanAction}
+          className="min-w-0 scroll-mt-20 space-y-4 rounded-2xl border bg-card p-4 sm:p-5">
+          <h2 id="new-sampling-plan-title" className="text-lg font-semibold">{t("createTitle")}</h2>
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t("recordedSpend")}</p>
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t("consumerNote")}</p>
+          {returnBrandInput}
+          <input type="hidden" name="brandId" value={scope.brandId} />
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <label className="text-sm">
             <span className="mb-1 block text-muted-foreground">{t("phase")}</span>
@@ -669,6 +701,7 @@ export default async function SamplingPlansPage({
         </div>
         <Button type="submit">{t("savePlan")}</Button>
       </form>
+      ) : null}
     </div>
   );
 }

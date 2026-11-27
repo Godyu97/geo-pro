@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { brandIdSchema } from "../brands/contracts.ts";
 import {
   arriveAtSamplingWindow,
   pauseExpiredSamplingChannel,
@@ -28,11 +29,20 @@ import {
 } from "./contracts.ts";
 
 const plansPath = "/dashboard/monitoring/plans";
-const pageErrors = new Set(["NOT_FOUND", "INVALID_INPUT", "EXISTING_RUN_REJECTED", "PLAN_PHASE_CONFLICT", "VERSION_CONFLICT"]);
+const pageErrors = new Set(["NOT_FOUND", "FORBIDDEN", "INVALID_INPUT", "EXISTING_RUN_REJECTED", "PLAN_PHASE_CONFLICT", "VERSION_CONFLICT"]);
 
-function finish(error?: string): never {
+function returnBrandFrom(formData: FormData) {
+  const parsed = brandIdSchema.safeParse(formData.get("returnBrandId"));
+  return parsed.success ? parsed.data : undefined;
+}
+
+function finish(error?: string, returnBrandId?: string): never {
   revalidatePath(plansPath);
-  redirect(error && pageErrors.has(error) ? `${plansPath}?error=${error}` : plansPath);
+  const query = new URLSearchParams();
+  if (returnBrandId) query.set("brandId", returnBrandId);
+  if (error && pageErrors.has(error)) query.set("error", error);
+  const suffix = query.toString();
+  redirect(suffix ? `${plansPath}?${suffix}` : plansPath);
 }
 
 function whole(value: FormDataEntryValue | null) {
@@ -51,6 +61,7 @@ function textList(formData: FormData, name: string) {
 
 export async function createSamplingPlanAction(formData: FormData) {
   const session = await requireSession();
+  const returnBrandId = returnBrandFrom(formData);
   const channels = textList(formData, "channelId");
   const times = textList(formData, "at");
   const statuses = textList(formData, "status");
@@ -84,13 +95,14 @@ export async function createSamplingPlanAction(formData: FormData) {
     ...(threshold === undefined ? {} : { trendThresholdPp: threshold }),
     slots,
   });
-  if (!parsed.success) finish("INVALID_INPUT");
+  if (!parsed.success) finish("INVALID_INPUT", returnBrandId);
   const result = await saveSamplingPlan(getConnection(), session.user.id, parsed.data);
-  finish("error" in result ? result.error : undefined);
+  finish("error" in result ? result.error : undefined, returnBrandId);
 }
 
 export async function reviseSamplingBudgetAction(formData: FormData) {
   const session = await requireSession();
+  const returnBrandId = returnBrandFrom(formData);
   const planId = String(formData.get("planId") ?? "");
   const nextAt = String(formData.get("nextAt") ?? "").trim();
   const threshold = thresholdField(formData.get("trendThresholdPp"));
@@ -99,49 +111,53 @@ export async function reviseSamplingBudgetAction(formData: FormData) {
     ...(nextAt ? { nextAt } : {}),
     ...(threshold === undefined ? {} : { trendThresholdPp: threshold }),
   });
-  if (!parsed.success) finish("INVALID_INPUT");
+  if (!parsed.success) finish("INVALID_INPUT", returnBrandId);
   const result = await reviseSamplingPlanBudget(getConnection(), session.user.id, planId, parsed.data);
-  finish("error" in result ? result.error : undefined);
+  finish("error" in result ? result.error : undefined, returnBrandId);
 }
 
 export async function saveSamplingTrendThresholdAction(formData: FormData) {
   const session = await requireSession();
+  const returnBrandId = returnBrandFrom(formData);
   const threshold = thresholdField(formData.get("trendThresholdPp"));
   const parsed = setSamplingTrendThresholdSchema.safeParse({
     planId: String(formData.get("planId") ?? ""),
     trendThresholdPp: threshold === undefined ? 10 : threshold,
   });
-  if (!parsed.success) finish("INVALID_INPUT");
+  if (!parsed.success) finish("INVALID_INPUT", returnBrandId);
   const result = await saveSamplingTrendThreshold(getConnection(), session.user.id, parsed.data);
-  finish("error" in result ? result.error : undefined);
+  finish("error" in result ? result.error : undefined, returnBrandId);
 }
 
 export async function transitionSamplingPlanAction(formData: FormData) {
   const session = await requireSession();
+  const returnBrandId = returnBrandFrom(formData);
   const parsed = transitionSamplingPlanSchema.safeParse({
     action: "transition",
     planId: String(formData.get("planId") ?? ""),
     phase: planPhaseSchema.safeParse(String(formData.get("phase") ?? "")).data,
   });
-  if (!parsed.success) finish("INVALID_INPUT");
+  if (!parsed.success) finish("INVALID_INPUT", returnBrandId);
   const result = await transitionSamplingPlan(getConnection(), session.user.id, parsed.data);
-  finish("error" in result ? result.error : undefined);
+  finish("error" in result ? result.error : undefined, returnBrandId);
 }
 
 export async function arriveSamplingPlanAction(formData: FormData) {
   const session = await requireSession();
+  const returnBrandId = returnBrandFrom(formData);
   const parsed = arriveSamplingPlanSchema.safeParse({
     action: "arrive",
     planId: String(formData.get("planId") ?? ""),
     nextAt: String(formData.get("nextAt") ?? "").trim(),
   });
-  if (!parsed.success) finish("INVALID_INPUT");
+  if (!parsed.success) finish("INVALID_INPUT", returnBrandId);
   const result = await arriveAtSamplingWindow(getConnection(), session.user.id, parsed.data);
-  finish("error" in result ? result.error : undefined);
+  finish("error" in result ? result.error : undefined, returnBrandId);
 }
 
 export async function expireSamplingChannelAction(formData: FormData) {
   const session = await requireSession();
+  const returnBrandId = returnBrandFrom(formData);
   const channel = channelIdSchema.safeParse(String(formData.get("channelId") ?? ""));
   const parsed = expireSamplingChannelSchema.safeParse({
     action: "expire-channel",
@@ -149,13 +165,14 @@ export async function expireSamplingChannelAction(formData: FormData) {
     channelId: channel.success ? channel.data : "",
     nextAt: String(formData.get("nextAt") ?? "").trim(),
   });
-  if (!parsed.success) finish("INVALID_INPUT");
+  if (!parsed.success) finish("INVALID_INPUT", returnBrandId);
   const result = await pauseExpiredSamplingChannel(getConnection(), session.user.id, parsed.data);
-  finish("error" in result ? result.error : undefined);
+  finish("error" in result ? result.error : undefined, returnBrandId);
 }
 
 export async function driveDueSamplingWindowAction(formData: FormData) {
   const session = await requireSession();
+  const returnBrandId = returnBrandFrom(formData);
   const channelIds = [...new Set(formData.getAll("channelId").map((value) => String(value).trim()).filter(Boolean))];
   const degrade = String(formData.get("degradeChannelId") ?? "").trim();
   const promptIds = String(formData.get("promptIds") ?? "").split(/[\s,]+/).filter(Boolean);
@@ -173,7 +190,7 @@ export async function driveDueSamplingWindowAction(formData: FormData) {
     ...(promptSetId ? { promptSetId } : {}),
     ...(existingRunId ? { existingRunId } : {}),
   });
-  if (!parsed.success) finish("INVALID_INPUT");
+  if (!parsed.success) finish("INVALID_INPUT", returnBrandId);
   const result = await driveDueSamplingWindow(getConnection(), session.user.id, parsed.data);
-  finish("error" in result ? result.error : undefined);
+  finish("error" in result ? result.error : undefined, returnBrandId);
 }

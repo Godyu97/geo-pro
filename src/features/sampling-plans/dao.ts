@@ -31,8 +31,15 @@ const slotRow = z.object({
   costMinor: z.int().min(0),
 });
 
+const planIdentityRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1).max(128),
+});
+
 export type SamplingPlanRecord = z.infer<typeof planRow>;
 export type SamplingSlotRecord = z.infer<typeof slotRow>;
+export type SamplingPlanIdentity = z.infer<typeof planIdentityRow>;
 
 const planColumns = `id, version, brand_id AS "brandId", owner_id AS "ownerId", phase, currency,
   budget_minor AS "budgetMinor", spent_minor AS "spentMinor", pending_minor AS "pendingMinor",
@@ -99,6 +106,32 @@ export class SamplingPlanDao {
       ) VALUES ${groups.join(", ")}`,
       values,
     );
+  }
+
+  async planIdentity(planId: string): Promise<SamplingPlanIdentity | null> {
+    const [row] = await queryWithParameters(
+      this.db,
+      `SELECT id, brand_id AS "brandId", owner_id AS "ownerId"
+       FROM sampling_plan
+       WHERE id = ?
+       ORDER BY version DESC
+       LIMIT 1`,
+      [planId],
+    );
+    return row ? planIdentityRow.parse(row) : null;
+  }
+
+  async planIdentities(planIds: readonly string[]): Promise<SamplingPlanIdentity[]> {
+    const unique = [...new Set(planIds)];
+    if (unique.length === 0) return [];
+    const rows = await queryWithParameters(
+      this.db,
+      `SELECT DISTINCT id, brand_id AS "brandId", owner_id AS "ownerId"
+       FROM sampling_plan
+       WHERE id IN (${unique.map(() => "?").join(", ")})`,
+      unique,
+    );
+    return z.array(planIdentityRow).parse(rows);
   }
 
   async plansForBrand(brandId: string, ownerId: string) {

@@ -24,6 +24,12 @@ const eventRow = z.object({
   occurredAt: z.iso.datetime({ precision: 3 }),
 });
 
+const alertIdentityRow = z.object({
+  id: brandIdSchema,
+  brandId: brandIdSchema,
+  ownerId: z.string().min(1).max(128),
+});
+
 export type QualityAlertRecord = z.infer<typeof alertRow>;
 export type QualityAlertEventRecord = z.infer<typeof eventRow>;
 
@@ -101,6 +107,15 @@ export class QualityAlertDao {
       [ownerId, brandId, kind, windowId],
     );
     return row ? alertRow.parse(row) : null;
+  }
+
+  async alertIdentity(alertId: string) {
+    const [row] = await queryWithParameters(
+      this.db,
+      `SELECT id, brand_id AS "brandId", owner_id AS "ownerId" FROM quality_alert WHERE id = ?`,
+      [alertId],
+    );
+    return row ? alertIdentityRow.parse(row) : null;
   }
 
   async alertForOwner(ownerId: string, alertId: string) {

@@ -1,8 +1,8 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { DatabaseConnection, TransactionConnection } from "../../lib/db/connection.ts";
-import { BrandDao } from "../brands/dao.ts";
+import type { DatabaseConnection, QueryConnection, TransactionConnection } from "../../lib/db/connection.ts";
+import { authorizeBrandActor, type BrandScope } from "../team-access/brand-scope.ts";
 import type { RecordQualityAlertInput } from "./contracts.ts";
 import { QualityAlertDao, type QualityAlertEventRecord, type QualityAlertRecord } from "./dao.ts";
 import {
@@ -16,7 +16,19 @@ import {
 } from "./rules.ts";
 
 type Clock = () => string;
-type Failure = { error: "NOT_FOUND" | "INVALID_INPUT" | "ALERT_STATE_CONFLICT" };
+type Failure = { error: "NOT_FOUND" | "FORBIDDEN" | "INVALID_INPUT" | "ALERT_STATE_CONFLICT" };
+
+async function authorizeAlertBrandWrite(
+  db: QueryConnection,
+  actorId: string,
+  brandId: string,
+  now = new Date().toISOString(),
+): Promise<BrandScope | Failure> {
+  const access = await authorizeBrandActor(db, actorId, brandId, "write", now);
+  if (access) return access;
+  const read = await authorizeBrandActor(db, actorId, brandId, "read", now);
+  return { error: read ? "FORBIDDEN" : "NOT_FOUND" };
+}
 
 const systemClock: Clock = () => new Date().toISOString();
 
@@ -69,9 +81,10 @@ async function viewOf(dao: QualityAlertDao, ownerId: string, alert: QualityAlert
   return toView(alert, events);
 }
 
-export async function listQualityAlerts(db: DatabaseConnection, ownerId: string, brandId: string) {
-  const owned = await new BrandDao(db).owned(ownerId, brandId);
-  if (!owned) return { error: "NOT_FOUND" as const };
+export async function listQualityAlerts(db: DatabaseConnection, actorId: string, brandId: string) {
+  const access = await authorizeBrandActor(db, actorId, brandId, "read");
+  if (!access) return { error: "NOT_FOUND" as const };
+  const ownerId = access.ownerId;
   const dao = new QualityAlertDao(db);
   const alerts = await dao.alertsForBrand(ownerId, brandId);
   const events = await dao.eventsFor(ownerId, alerts.map((alert) => alert.id));
@@ -80,7 +93,7 @@ export async function listQualityAlerts(db: DatabaseConnection, ownerId: string,
 
 export async function recordQualityAlert(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: RecordQualityAlertInput,
   clock: Clock = systemClock,
   thresholdPp = defaultTrendThresholdPp,
@@ -102,9 +115,9 @@ export async function recordQualityAlert(
   const claimBrandDecline = assessment.kind === "data_quality" ? 0 : 1;
 
   return db.transaction(async (tx) => {
-    const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
-    return writeAlert(tx, ownerId, input.brandId, latest.windowId, assessment.kind, reason, claimBrandDecline, clock);
+    const access = await authorizeAlertBrandWrite(tx, actorId, input.brandId, clock());
+    if ("error" in access) return access;
+    return writeAlert(tx, access.ownerId, input.brandId, latest.windowId, assessment.kind, reason, claimBrandDecline, clock);
   });
 }
 
@@ -165,13 +178,19 @@ async function writeAlert(
 
 async function changeStatus(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   alertId: string,
   status: Extract<AlertStatus, "acknowledged" | "snoozed">,
   clock: Clock,
 ) {
   return db.transaction(async (tx) => {
     const dao = new QualityAlertDao(tx);
+    const identity = await dao.alertIdentity(alertId);
+    if (!identity) return { error: "NOT_FOUND" as const };
+    const now = clock();
+    const access = await authorizeAlertBrandWrite(tx, actorId, identity.brandId, now);
+    if ("error" in access) return access;
+    const ownerId = access.ownerId;
     const alert = await dao.alertForOwner(ownerId, alertId);
     if (!alert) return { error: "NOT_FOUND" as const };
     if (alert.status === status) return { error: "ALERT_STATE_CONFLICT" as const };
@@ -183,7 +202,6 @@ async function changeStatus(
       occurrences: [],
     }, status, "status");
     if (!preview || preview.status !== status) return { error: "ALERT_STATE_CONFLICT" as const };
-    const now = clock();
     const updated = await dao.setStatus(ownerId, alert.id, alert.status, status, now);
     if (!updated) return { error: "ALERT_STATE_CONFLICT" as const };
     return { alert: await viewOf(dao, ownerId, { ...alert, status, updatedAt: now }) };

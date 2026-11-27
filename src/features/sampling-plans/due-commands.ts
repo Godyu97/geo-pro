@@ -7,6 +7,8 @@ import { BrandDao } from "../brands/dao.ts";
 import { PromptDao } from "../prompts/dao.ts";
 import { recordQualityAlert } from "../quality-alerts/commands.ts";
 import { QualityAlertDao, type QualityAlertRecord } from "../quality-alerts/dao.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
+import { authorizeSamplingPlanWrite } from "./commands.ts";
 import type { SamplingPlanError, DriveDueWindowInput } from "./contracts.ts";
 import { driveDueWindowSchema, windowIdSchema } from "./contracts.ts";
 import { SamplingDueDao, type SamplingDueRunRecord, type SamplingWindowReadingRecord } from "./due-dao.ts";
@@ -121,17 +123,20 @@ function toReadingView(row: SamplingWindowReadingRecord): DueWindowReadingView {
 }
 
 type RememberedDue =
-  | { error: "NOT_FOUND" | "PLAN_PHASE_CONFLICT" | "INVALID_INPUT" }
+  | { error: "NOT_FOUND" | "FORBIDDEN" | "PLAN_PHASE_CONFLICT" | "INVALID_INPUT" }
   | { plan: SamplingPlanRecord; decision: DueDecision; priorIds: Set<string> };
 
 async function rememberDueRows(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: DriveDueWindowInput,
   allowOfficialStart: boolean,
   officialSlotId?: string,
 ): Promise<RememberedDue> {
   return db.transaction(async (tx) => {
+    const access = await authorizeSamplingPlanWrite(tx, actorId, input.planId);
+    if ("error" in access) return access;
+    const ownerId = access.ownerId;
     const plans = new SamplingPlanDao(tx);
     const due = new SamplingDueDao(tx);
     const current = await plans.latest(ownerId, input.planId);
@@ -360,15 +365,35 @@ export async function manualSheetsForBrand(
   });
 }
 
-export async function listSamplingDueWindows(db: DatabaseConnection, ownerId: string, planIds: readonly string[]) {
+export async function listSamplingDueWindows(db: DatabaseConnection, actorId: string, planIds: readonly string[]) {
+  if (planIds.length === 0) return { runs: [], readings: [] };
+  const identities = await new SamplingPlanDao(db).planIdentities(planIds);
+  if (identities.length === 0) return { runs: [], readings: [] };
+  const brandIds = [...new Set(identities.map((item) => item.brandId))];
+  const scopes = await Promise.all(
+    brandIds.map(async (brandId) => [brandId, await authorizeBrandActor(db, actorId, brandId, "read")] as const),
+  );
+  const scopeByBrand = new Map(scopes);
+  const plansByOwner = new Map<string, string[]>();
+  for (const identity of identities) {
+    const scope = scopeByBrand.get(identity.brandId);
+    if (!scope) continue;
+    const list = plansByOwner.get(scope.ownerId) ?? [];
+    list.push(identity.id);
+    plansByOwner.set(scope.ownerId, list);
+  }
+  if (plansByOwner.size === 0) return { runs: [], readings: [] };
   const due = new SamplingDueDao(db);
-  const [runs, readings] = await Promise.all([
-    due.runsForPlans(ownerId, planIds),
-    due.readingsForPlans(ownerId, planIds),
-  ]);
+  const batches = await Promise.all([...plansByOwner.entries()].map(async ([ownerId, ids]) => {
+    const [runs, readings] = await Promise.all([
+      due.runsForPlans(ownerId, ids),
+      due.readingsForPlans(ownerId, ids),
+    ]);
+    return { runs, readings };
+  }));
   return {
-    runs: runs.map((row) => toRunView(row, false)),
-    readings: readings.map(toReadingView),
+    runs: batches.flatMap((batch) => batch.runs).map((row) => toRunView(row, false)),
+    readings: batches.flatMap((batch) => batch.readings).map(toReadingView),
   };
 }
 
@@ -398,12 +423,13 @@ export type AlertWindowSource = {
 /** Resolve bound plan window readings and accepted official runs for quality alerts. */
 export async function listAlertWindowSources(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   brandId: string,
   alertIds: readonly string[],
 ): Promise<{ sourcesByAlertId: Map<string, AlertWindowSource[]> } | { error: "NOT_FOUND" }> {
-  const owned = await new BrandDao(db).owned(ownerId, brandId);
-  if (!owned) return { error: "NOT_FOUND" };
+  const access = await authorizeBrandActor(db, actorId, brandId, "read");
+  if (!access) return { error: "NOT_FOUND" };
+  const ownerId = access.ownerId;
   const uniqueAlerts = [...new Set(alertIds)];
   const sourcesByAlertId = new Map<string, AlertWindowSource[]>();
   if (uniqueAlerts.length === 0) return { sourcesByAlertId };
@@ -496,7 +522,7 @@ export type SamplingWindowDetail = {
 /** Read one owned plan window, its retained slots in P, and runs linked strictly to that window. */
 export async function readSamplingWindowDetail(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   planId: string,
   windowId: string,
 ): Promise<{ detail: SamplingWindowDetail } | { error: "NOT_FOUND" }> {
@@ -505,6 +531,11 @@ export async function readSamplingWindowDetail(
   if (!parsedPlan.success || !parsedWindow.success) return { error: "NOT_FOUND" };
   const due = new SamplingDueDao(db);
   const plans = new SamplingPlanDao(db);
+  const identity = await plans.planIdentity(parsedPlan.data);
+  if (!identity) return { error: "NOT_FOUND" };
+  const access = await authorizeBrandActor(db, actorId, identity.brandId, "read");
+  if (!access) return { error: "NOT_FOUND" };
+  const ownerId = access.ownerId;
   const reading = await due.readingForWindow(ownerId, parsedPlan.data, parsedWindow.data);
   if (!reading) return { error: "NOT_FOUND" };
   const [versions, allSlots, dueRuns, ownedBrand, brandVersion, linkedAlert] = await Promise.all([
@@ -609,23 +640,26 @@ export async function driveDueSamplingWindow(
   }
 }
 
-/** Runs the owner can register onto a due official slot without calling the provider again. */
-export async function listAttachableOfficialRuns(db: DatabaseConnection, ownerId: string, brandId: string) {
-  const owned = await new BrandDao(db).owned(ownerId, brandId);
-  if (!owned) return [];
-  return new SamplingDueDao(db).attachableOfficialRuns(ownerId, brandId);
+/** Runs the authorized member can register onto a due official slot without calling the provider again. */
+export async function listAttachableOfficialRuns(db: DatabaseConnection, actorId: string, brandId: string) {
+  const access = await authorizeBrandActor(db, actorId, brandId, "read");
+  if (!access) return [];
+  return new SamplingDueDao(db).attachableOfficialRuns(access.ownerId, brandId);
 }
 
 async function prepareExistingRun(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: DriveDueWindowInput,
 ): Promise<
-  | { error: "NOT_FOUND" | "PLAN_PHASE_CONFLICT" | "EXISTING_RUN_REJECTED" | "INVALID_INPUT" }
+  | { error: "NOT_FOUND" | "FORBIDDEN" | "PLAN_PHASE_CONFLICT" | "EXISTING_RUN_REJECTED" | "INVALID_INPUT" }
   | { replay: true }
   | { slotId: string; receipt: Awaited<ReturnType<SamplingDueDao["attachableOfficialRuns"]>>[number] }
 > {
   if (!input.existingRunId) return { error: "INVALID_INPUT" };
+  const access = await authorizeSamplingPlanWrite(db, actorId, input.planId);
+  if ("error" in access) return access;
+  const ownerId = access.ownerId;
   const plans = new SamplingPlanDao(db);
   const due = new SamplingDueDao(db);
   const current = await plans.latest(ownerId, input.planId);
@@ -660,13 +694,15 @@ async function prepareExistingRun(
 
 async function driveParsed(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: DriveDueWindowInput,
   executor: DueOfficialExecutor | undefined,
 ): Promise<DueDriveResult | Failure> {
   if (input.existingRunId && executor) return { error: "INVALID_INPUT" };
+  const initialAccess = await authorizeSamplingPlanWrite(db, actorId, input.planId);
+  if ("error" in initialAccess) return initialAccess;
   const adoption = input.existingRunId
-    ? await prepareExistingRun(db, ownerId, input)
+    ? await prepareExistingRun(db, actorId, input)
     : null;
   if (adoption && "error" in adoption) return adoption;
   const adopting = adoption && "receipt" in adoption ? adoption : null;
@@ -678,8 +714,9 @@ async function driveParsed(
       return { runId: adopting.receipt.id, chargedMinor: adopting.receipt.knownMinor };
     }
     : executor;
-  const saved = await rememberDueRows(db, ownerId, input, Boolean(activeExecutor), adopting?.slotId);
+  const saved = await rememberDueRows(db, actorId, input, Boolean(activeExecutor), adopting?.slotId);
   if ("error" in saved) return saved;
+  const ownerId = saved.plan.ownerId;
   if (activeExecutor) await finishOfficial(db, ownerId, input.planId, activeExecutor, adopting?.slotId);
   const due = new SamplingDueDao(db);
   const plans = new SamplingPlanDao(db);

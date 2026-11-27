@@ -1,17 +1,20 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { Button } from "@/components/ui/button";
 import { getConnection } from "@/lib/db/connection";
 import { formatDateTime, formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
+import { brandIdSchema } from "../brands/contracts";
 import { BrandDao } from "../brands/dao";
 import { listAlertWindowSources, type AlertWindowSource } from "../sampling-plans/due-commands";
+import { authorizeBrandActor, workspaceBrand } from "../team-access/brand-scope";
 import { acknowledgeQualityAlertAction, snoozeQualityAlertAction } from "./actions";
 import { listQualityAlerts } from "./commands";
 import type { QualityAlertView } from "./commands";
 
-const knownErrors = ["NOT_FOUND", "INVALID_INPUT", "ALERT_STATE_CONFLICT"] as const;
+const knownErrors = ["NOT_FOUND", "FORBIDDEN", "INVALID_INPUT", "ALERT_STATE_CONFLICT"] as const;
 const linkClass = "inline-flex min-h-10 min-w-0 max-w-full items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 break-words outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const panelClass = "min-w-0 space-y-3 rounded-2xl border bg-card p-4 sm:p-5";
 const emptyClass = "min-w-0 rounded-2xl border border-dashed bg-card px-4 py-8 text-sm leading-7 break-words text-muted-foreground";
@@ -41,8 +44,13 @@ export default async function QualityAlertsPage({
   const locale = await getLocale();
   const t = await getTranslator("qualityAlerts");
   const errorCode = typeof params.error === "string" ? params.error : undefined;
+  const requestedBrandId = typeof params.brandId === "string" && params.brandId.trim() ? params.brandId.trim() : undefined;
+  if (requestedBrandId !== undefined && !brandIdSchema.safeParse(requestedBrandId).success) notFound();
   const connection = getConnection();
-  const active = await new BrandDao(connection).active(session.user.id);
+  const scope = await workspaceBrand(connection, session.user.id, requestedBrandId, "read");
+  if (requestedBrandId && !scope) notFound();
+  const brandQuery = requestedBrandId && scope ? `?brandId=${encodeURIComponent(scope.brandId)}` : "";
+  const brandParam = requestedBrandId && scope ? `&brandId=${encodeURIComponent(scope.brandId)}` : "";
   const kindLabel = { data_quality: t("kindDataQuality"), trend: t("kindTrend") } as const;
   const statusLabel = {
     open: t("statusOpen"),
@@ -58,12 +66,12 @@ export default async function QualityAlertsPage({
   } as const;
   const related = (
     <nav aria-label={t("relatedEntries")} className="flex min-w-0 flex-wrap gap-2">
-      <Link href="/dashboard/monitoring/plans" prefetch={false} className={linkClass}>{t("backPlans")}</Link>
-      <Link href="/dashboard/monitoring/overview" prefetch={false} className={linkClass}>{t("backOverview")}</Link>
+      <Link href={`/dashboard/monitoring/plans${brandQuery}`} prefetch={false} className={linkClass}>{t("backPlans")}</Link>
+      <Link href={`/dashboard/monitoring/overview${brandQuery}`} prefetch={false} className={linkClass}>{t("backOverview")}</Link>
     </nav>
   );
 
-  if (!active) {
+  if (!scope) {
     return (
       <div className="min-w-0 space-y-6">
         <header className="min-w-0 space-y-3">
@@ -78,11 +86,20 @@ export default async function QualityAlertsPage({
     );
   }
 
-  const listed = await listQualityAlerts(connection, session.user.id, active.id);
+  const [brand, writeScope, listed] = await Promise.all([
+    new BrandDao(connection).version(scope.ownerId, scope.brandId),
+    authorizeBrandActor(connection, session.user.id, scope.brandId, "write"),
+    listQualityAlerts(connection, session.user.id, scope.brandId),
+  ]);
+  if (!brand) notFound();
+  const canWrite = Boolean(writeScope);
+  const returnBrandInput = requestedBrandId
+    ? <input type="hidden" name="returnBrandId" value={scope.brandId} />
+    : null;
   const failed = "error" in listed ? listed.error : undefined;
   const alerts: QualityAlertView[] = "error" in listed ? [] : listed.alerts;
   const sourced = !failed && alerts.length > 0
-    ? await listAlertWindowSources(connection, session.user.id, active.id, alerts.map((alert) => alert.id))
+    ? await listAlertWindowSources(connection, session.user.id, scope.brandId, alerts.map((alert) => alert.id))
     : null;
   const sourcesByAlertId = sourced && "sourcesByAlertId" in sourced
     ? sourced.sourcesByAlertId
@@ -92,7 +109,7 @@ export default async function QualityAlertsPage({
     <div className="min-w-0 space-y-6">
       <header className="min-w-0 space-y-3">
         <h1 className="text-2xl font-semibold tracking-tight wrap-anywhere">{t("title")}</h1>
-        <p className="text-sm font-medium wrap-anywhere">{active.name}</p>
+        <p className="text-sm font-medium wrap-anywhere">{brand.fields.name}</p>
       </header>
 
       {isKnownError(errorCode) ? (
@@ -146,7 +163,7 @@ export default async function QualityAlertsPage({
                     <div className="flex min-w-0 flex-wrap gap-2">
                       <Button asChild variant="outline" className={actionClass}>
                         <Link
-                          href={`/dashboard/monitoring/plans?planId=${encodeURIComponent(source.planId)}&windowId=${encodeURIComponent(source.windowId)}`}
+                          href={`/dashboard/monitoring/plans?planId=${encodeURIComponent(source.planId)}&windowId=${encodeURIComponent(source.windowId)}${brandParam}`}
                           prefetch={false}
                         >
                           {t("openWindow")}
@@ -177,20 +194,24 @@ export default async function QualityAlertsPage({
               </div>
             );
           })()}
-          <div className="flex flex-wrap gap-2">
-            {alert.status === "open" ? (
-              <form action={acknowledgeQualityAlertAction}>
-                <input type="hidden" name="alertId" value={alert.id} />
-                <Button type="submit" className={actionClass}>{t("acknowledge")}</Button>
-              </form>
-            ) : null}
-            {alert.status === "open" || alert.status === "acknowledged" ? (
-              <form action={snoozeQualityAlertAction}>
-                <input type="hidden" name="alertId" value={alert.id} />
-                <Button type="submit" variant="outline" className={actionClass}>{t("snooze")}</Button>
-              </form>
-            ) : null}
-          </div>
+          {canWrite ? (
+            <div className="flex flex-wrap gap-2">
+              {alert.status === "open" ? (
+                <form action={acknowledgeQualityAlertAction}>
+                  {returnBrandInput}
+                  <input type="hidden" name="alertId" value={alert.id} />
+                  <Button type="submit" className={actionClass}>{t("acknowledge")}</Button>
+                </form>
+              ) : null}
+              {alert.status === "open" || alert.status === "acknowledged" ? (
+                <form action={snoozeQualityAlertAction}>
+                  {returnBrandInput}
+                  <input type="hidden" name="alertId" value={alert.id} />
+                  <Button type="submit" variant="outline" className={actionClass}>{t("snooze")}</Button>
+                </form>
+              ) : null}
+            </div>
+          ) : null}
         </section>
       ))}
 
