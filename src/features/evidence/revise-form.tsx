@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { Messages } from "@/lib/i18n/server";
+import { createOperationId } from "@/lib/operation-id";
 
 type Tri = "true" | "false" | "unknown";
 
@@ -61,7 +62,7 @@ export function ReviseAnalysisForm({
               brandId,
               observationId,
               expectedVersion,
-              operationId: crypto.randomUUID(),
+              operationId: createOperationId(),
               mentioned,
               recommended,
               officialSiteCited,

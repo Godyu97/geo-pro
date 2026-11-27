@@ -221,6 +221,25 @@ test("overview lists four per-question fractions without following answer filter
         await expect(table.getByRole("columnheader", { name: "Owned-page citation rate", exact: true })).toHaveText("Owned-page citation rate");
       }
     }
+
+    await page.getByRole("link", { name: "View answers", exact: true }).click();
+    const installationAnswer = page.locator("li[id^='answer-']").filter({ hasText: "安装是否复杂" });
+    await installationAnswer.getByRole("link", { name: "View evidence", exact: true }).click();
+    const form = page.locator("form").filter({ has: page.getByRole("heading", { name: "Correct labels", exact: true }) });
+    await expect(form.getByRole("combobox", { name: "Recommended", exact: true })).toHaveValue("unknown");
+    // LAN HTTP origins expose getRandomValues but omit randomUUID in Chrome.
+    await page.evaluate(() => Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true }));
+    await form.getByRole("combobox", { name: "Recommended", exact: true }).selectOption("false");
+    await form.getByRole("textbox", { name: "Revision reason", exact: true }).fill("The saved answer lists installation steps without a recommendation.");
+    const save = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/monitoring/answers" && response.request().method() === "POST");
+    await form.getByRole("button", { name: "Save revision", exact: true }).press("Enter");
+    const saved = await save;
+    expect(saved.status()).toBe(200);
+    expect(saved.request().postDataJSON().operationId).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+    await expect(page.getByText("Version 2 · classified", { exact: true })).toBeVisible();
+    await expect(page.getByText("安装步骤单独记录", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Back to overview", exact: true }).click();
+    await expect(questionRow(page, "安装是否复杂").getByRole("cell").nth(1)).toHaveText("0/1 (0.0%)");
   } finally {
     if (userId) cleanupAccount(userId, email);
   }
