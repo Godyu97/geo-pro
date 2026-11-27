@@ -27,10 +27,10 @@ const sourceUrl = z.url({ protocol: /^https?$/ }).refine((value) => {
   return !url.username && !url.password;
 });
 
-export function factGaps(fields: FactFields, today: string) {
+export function factGaps(fields: FactFields, today: string, hasOriginalFragment = false) {
   const gaps: ("claimMissing" | "sourceMissing" | "permissionMissing" | "validityMissing")[] = [];
   if (!fields.title || !fields.claim) gaps.push("claimMissing");
-  if (!fields.sourceReference || !fields.sourceLocator || !fields.sourceExcerpt ||
+  if ((!hasOriginalFragment && !fields.sourceReference) || !fields.sourceLocator || !fields.sourceExcerpt ||
       !fields.sourceDate || fields.sourceDate > today ||
       (fields.sourceType === "url" && !sourceUrl.safeParse(fields.sourceReference).success)) gaps.push("sourceMissing");
   if (fields.permission !== "public") gaps.push("permissionMissing");

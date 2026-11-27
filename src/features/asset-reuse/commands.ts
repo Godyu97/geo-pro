@@ -2,10 +2,11 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
-import { factFields } from "../brand-facts/contracts.ts";
+import { storedFactFields } from "../brand-facts/contracts.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { authorizeBrandActor } from "../team-access/brand-scope.ts";
+import { brandDutyAllows } from "../team-access/rules.ts";
 import {
   presignStoredObject,
   readStoredObject,
@@ -73,7 +74,7 @@ async function approvedFactRefs(db: QueryConnection, brandId: string) {
     } catch {
       continue;
     }
-    const parsed = factFields.safeParse(content);
+    const parsed = storedFactFields.safeParse(content);
     if (parsed.success) facts.push({ id: row.id, version: row.version, claim: parsed.data.claim });
   }
   return facts;
@@ -270,12 +271,16 @@ export async function listImportedOriginals(db: DatabaseConnection, userId: stri
   const access = await sourceAccessFor(db, userId, parsed.data, now.toISOString());
   if (!access) return denied("NOT_FOUND");
   const { viewer, owned } = access;
+  const canCreateFact = viewer === "owner"
+    ? Boolean(await authorizeBrandActor(db, userId, parsed.data, "write", now.toISOString()))
+    : brandDutyAllows(access.role, "write");
   const files = viewer === "owner"
     ? await listSourceOriginals(db, userId, parsed.data, listLimit)
     : await listBrandSourceOriginals(db, parsed.data, listLimit);
   return {
     viewer,
     canManage: canManageOriginals(owned),
+    canCreateFact,
     files: await withFragments(db, parsed.data, files),
   };
 }

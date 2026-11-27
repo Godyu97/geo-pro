@@ -2,8 +2,9 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection, TransactionConnection } from "../../lib/db/connection.ts";
+import { FactDao } from "../brand-facts/dao.ts";
 import { factGaps } from "../brand-facts/rules.ts";
-import { withEligibleFacts } from "../brand-facts/service.ts";
+import { canReviewOriginalFragment, withEligibleFacts } from "../brand-facts/service.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { approveContent } from "../content/commands.ts";
 import { computeApprovalFingerprint } from "../content/package.ts";
@@ -302,13 +303,14 @@ async function decideFact(
   actorContentApprover: boolean,
 ): Promise<ApprovalDecision> {
   const dao = new ApprovalPolicyDao(db);
-  const fact = await dao.factVersion(input.brandId, input.versionId);
+  const scope = { ownerId, brandId: input.brandId };
+  const fact = await new FactDao(db, scope).version(input.versionId);
   if (!fact) return { error: "NOT_FOUND" };
   const policy = await dao.policy(input.brandId);
   const decision = approveSeparated({
     dualControl: policy?.dualControl === 1,
     kind: "fact",
-    authorId: ownerId,
+    authorId: fact.originalFragment?.authorId ?? ownerId,
     actorId,
     actorFactApprover,
     actorContentApprover,
@@ -325,12 +327,16 @@ async function decideFact(
   }
   if (fact.state !== "pending_confirmation") return { error: "INVALID_INPUT" };
   return db.transaction(async (tx) => {
+    if (!await new BrandDao(tx).lockOwner(ownerId)) return { error: "NOT_FOUND" as const };
     const locked = new ApprovalPolicyDao(tx);
-    const fields = await locked.factFields(input.brandId, fact.id);
-    if (!fields || factGaps(fields, now.slice(0, 10)).length > 0) return { error: "INVALID_INPUT" as const };
-    const current = await locked.factVersion(input.brandId, fact.id);
+    const current = await new FactDao(tx, scope).version(fact.id);
     if (current?.state === "approved") return { kind: "fact" as const, versionId: fact.id, status: "approved" as const, replayed: true };
-    if (!current || current.state !== "pending_confirmation") return { error: "INVALID_INPUT" as const };
+    if (!current || current.state !== "pending_confirmation" || current.revision !== fact.revision) return { error: "INVALID_INPUT" as const };
+    const source = current.originalFragment;
+    if (factGaps(current.fields, now.slice(0, 10), Boolean(source)).length > 0 ||
+      (source && !await canReviewOriginalFragment(tx, scope, actorId, source.id, now))) {
+      return { error: "INVALID_INPUT" as const };
+    }
     const confirmed = await locked.confirmFact(input.brandId, fact.id, ownerId, actorId, now);
     if (!confirmed) return { error: "INVALID_INPUT" as const };
     return { kind: "fact" as const, versionId: fact.id, status: "approved" as const, replayed: false };

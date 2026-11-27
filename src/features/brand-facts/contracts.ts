@@ -11,7 +11,7 @@ export const timestamp = z.iso.datetime({ precision: 3 });
 const revision = z.number().int().positive();
 const date = z.iso.date().refine((value) => value > "0000-12-31" && value < "9999-12-31");
 
-export const factFields = z.strictObject({
+const factFieldShape = z.strictObject({
   category: factCategory,
   title: text(120).trim(),
   claim: text(4_000).trim(),
@@ -25,10 +25,20 @@ export const factFields = z.strictObject({
   validThrough: z.union([date, z.literal("")]),
   pasteId: id.nullable(),
   pasteSpan: z.tuple([z.number().int().nonnegative().max(pasteLimit * 2), z.number().int().positive().max(pasteLimit * 2)]).nullable(),
-}).refine(({ pasteId, pasteSpan }) => !pasteSpan || (pasteId !== null && pasteSpan[0] < pasteSpan[1]));
+});
+
+function validPasteSpan({ pasteId, pasteSpan }: z.infer<typeof factFieldShape>) {
+  return !pasteSpan || (pasteId !== null && pasteSpan[0] < pasteSpan[1]);
+}
+
+export const factFields = factFieldShape.refine(validPasteSpan);
+export const storedFactFields = factFieldShape.extend({
+  originalFragment: z.strictObject({ id, authorId: opaqueIdSchema }).optional(),
+}).refine(validPasteSpan);
 
 export const factCommand = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("savePaste"), id, previousId: id.nullable(), original }),
+  z.strictObject({ action: z.literal("createFromFragment"), id }),
   z.strictObject({ action: z.literal("create"), id, previousId: id.nullable(), fields: factFields }),
   z.strictObject({ action: z.literal("edit"), id, revision, fields: factFields }),
   z.strictObject({ action: z.literal("submit"), id, revision }),
@@ -56,6 +66,9 @@ export type FactScope = z.infer<typeof factScope>;
 export type FactStage = z.infer<typeof factStage>;
 export type FactFields = z.infer<typeof factFields>;
 export type FactCommand = z.infer<typeof factCommand>;
-export type FactVersion = Omit<z.infer<typeof versionRow>, "content"> & { fields: FactFields };
+export type FactVersion = Omit<z.infer<typeof versionRow>, "content"> & {
+  fields: FactFields;
+  originalFragment?: z.infer<typeof storedFactFields>["originalFragment"];
+};
 export type FactPaste = z.infer<typeof pasteRow>;
 export type FactCursor = z.infer<typeof cursorSchema>;

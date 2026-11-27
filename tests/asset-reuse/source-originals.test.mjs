@@ -12,6 +12,9 @@ import {
   setSourceOriginalRights,
 } from "../../src/features/asset-reuse/commands.ts";
 import { fragmentCandidates, importBatch, pagesFromText, sourceImportLimits } from "../../src/features/asset-reuse/rules.ts";
+import { saveApprovalPolicy, decideApproval } from "../../src/features/approval-policy/commands.ts";
+import { executeFactCommand, readFactWorkspace, withEligibleFacts } from "../../src/features/brand-facts/service.ts";
+import { listApprovedBriefFacts } from "../../src/features/content/commands.ts";
 import { structure } from "../maintenance/helpers.mjs";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
@@ -373,9 +376,11 @@ for (const kind of ["sqlite", "postgresql"]) {
     ]);
     await queryWithParameters(db, `INSERT INTO brand_member_grant
       (id, user_id, brand_id, role, active, expires_at, created_at, revoked_at)
-      VALUES (?, ?, ?, 'member', 1, NULL, ?, NULL),
+      VALUES (?, ?, ?, 'owner', 1, NULL, ?, NULL),
+             (?, ?, ?, 'member', 1, NULL, ?, NULL),
              (?, ?, ?, 'member', 1, NULL, ?, NULL),
              (?, ?, ?, 'member', 1, ?, ?, NULL)`, [
+      randomUUID(), owner, brandId, time,
       randomUUID(), member, brandId, time,
       randomUUID(), otherMember, otherBrandId, time,
       randomUUID(), expiredMember, brandId, "2020-01-01T00:00:00.000Z", time,
@@ -386,6 +391,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       brandId,
       files: [
         file("two.txt", { chars: [...text].length, pages: pagesFromText(`${text}\f`), body: Uint8Array.from(Buffer.from(`${text}\f`)) }),
+        file("unpaginated.txt", { pages: pagesFromText("ok") }),
         file("locked.pdf", { contentType: "application/pdf", encrypted: true, pages: [], chars: 0, body: Uint8Array.from([1]) }),
       ],
     }, { env: storageEnv, storage: memoryStorage(), now });
@@ -423,6 +429,53 @@ for (const kind of ["sqlite", "postgresql"]) {
     const expired = await listImportedOriginals(db, expiredMember, brandId, now);
     assert.equal(expired.error, "NOT_FOUND");
 
+    const id = two.fragments[0].id;
+    const scope = { ownerId: owner, brandId };
+    const clock = () => now;
+    const create = { action: "createFromFragment", id };
+    const run = (actorId, command) => executeFactCommand(db, { ownerId: actorId, brandId }, command, clock);
+    const linkedRead = () => readFactWorkspace(db, scope, { fact: id }, clock);
+    assert.deepEqual(await executeFactCommand(db, { ownerId: otherMember, brandId: otherBrandId }, create, clock), { error: "notFound" });
+    assert.deepEqual(await run(expiredMember, create), { error: "notFound" });
+    assert.deepEqual(await run(owner, { ...create, id: two.fragments[1].id }), { error: "notFound" });
+    const unpaginatedId = imported.files.find((item) => item.fileName === "unpaginated.txt").fragments[0].id;
+    assert.deepEqual(await run(owner, { ...create, id: unpaginatedId }), { id: unpaginatedId });
+    const unpaginated = await readFactWorkspace(db, scope, { fact: unpaginatedId }, clock);
+    assert.equal(unpaginated.originalFragment.page, null);
+    assert.equal(unpaginated.fact.fields.sourceLocator, "");
+    assert.deepEqual(await Promise.all([run(member, create), run(member, create)]), [{ id }, { id }]);
+    const pending = await linkedRead();
+    assert.equal(pending.versions.items.filter((item) => item.id === id).length, 1);
+    assert.equal(pending.fact.state, "pending_confirmation");
+    assert.equal(pending.fact.fields.permission, "unknown");
+    assert.equal(pending.fact.fields.sourceExcerpt, "");
+    assert.deepEqual(pending.originalFragment, { id, fileName: "two.txt", page: 1, excerpt: text });
+    const fields = { ...pending.fact.fields, title: "Public title", claim: "Public claim", sourceExcerpt: "Public excerpt",
+      sourceDate: time.slice(0, 10), permission: "public", validity: "longTerm" };
+    assert.deepEqual(await run(member, { action: "edit", id, revision: 1, fields }), { id });
+    const use = { factVersionIds: [id], contentVersionId: randomUUID(), stage: "delivery" };
+    const checkUse = () => withEligibleFacts(db, scope, use, async () => "used", clock);
+    assert.deepEqual(await checkUse(), { error: "factInvalid", ids: [id] });
+    assert.equal((await listApprovedBriefFacts(db, owner, brandId, time)).some((item) => item.id === id), false);
+    assert.equal((await saveApprovalPolicy(db, owner, {
+      brandId, dualControl: true, duties: [{ userId: member, factApprover: true, contentApprover: false }],
+    }, time)).dualControl, true);
+    const approve = { action: "approve", id, revision: 2, confirmed: true, conflictId: null, revokeConflict: false };
+    assert.deepEqual(await run(member, approve), { error: "separation" });
+    const alternate = { brandId, versionId: id, kind: "fact" };
+    const deniedApproval = await decideApproval(db, member, alternate, time);
+    assert.equal(deniedApproval.error, "SEPARATION");
+    assert.deepEqual(await run(owner, approve), { id });
+    assert.deepEqual(await checkUse(), { data: "used" });
+    const eligibilityTrace = trace(db);
+    assert.equal((await listApprovedBriefFacts(eligibilityTrace.connection, owner, brandId, time)).some((item) => item.id === id), true);
+    const eligibilityQueries = eligibilityTrace.queries.filter((sql) => sql.includes("FROM source_original_fragment f"));
+    assert.equal(eligibilityQueries.length, 1);
+    const eligibilityPlan = JSON.stringify(await explain(db, eligibilityQueries[0], [brandId, owner, id]));
+    assert.match(eligibilityPlan, /source_original_fragment_pkey|sqlite_autoindex_source_original_fragment_1/);
+    assert.match(eligibilityPlan, /source_original_(pkey|owner_idx|brand_idx)|sqlite_autoindex_source_original_1/);
+    console.log(`${kind} linked fact eligibility plan ${eligibilityPlan}`);
+
     const revoked = await setSourceOriginalRights(db, owner, { brandId, id: two.id, rights: "revoked" });
     assert.equal(revoked.file.rightsStatus, "revoked");
     const afterRevoke = await listImportedOriginals(db, owner, brandId, now);
@@ -431,6 +484,10 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(hidden.text, null);
     assert.equal(hidden.approved, false);
     assert.deepEqual(hidden.conflicts, [{ factVersionId: differentId, version: 3 }]);
+    assert.equal((await linkedRead()).originalFragment, null);
+    assert.deepEqual(await run(owner, create), { error: "notFound" });
+    assert.deepEqual(await checkUse(), { error: "factInvalid", ids: [id] });
+    assert.equal((await listApprovedBriefFacts(db, owner, brandId, time)).some((item) => item.id === id), false);
     const kept = await queryWithParameters(db, "SELECT excerpt FROM source_original_fragment WHERE id = ?", [hidden.id]);
     assert.equal(kept[0].excerpt, text);
     const conflictCount = await queryWithParameters(

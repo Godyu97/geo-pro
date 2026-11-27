@@ -1,10 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { brandIdSchema } from "../brands/contracts.ts";
+import { brandMaterialAccess } from "../brands/intake.ts";
+import { executeFactCommand, factUnavailable } from "../brand-facts/service.ts";
 import { importSourceOriginals, setSourceOriginalRights } from "./commands.ts";
 import { pagesFromText, sourceImportLimits, type ImportPage } from "./rules.ts";
 
@@ -118,4 +121,23 @@ export async function setSourceRightsAction(formData: FormData) {
   revalidatePath("/dashboard/content/sources");
   if ("error" in result) redirect(sourcesPath(brandId, { error: result.error }));
   redirect(sourcesPath(brandId));
+}
+
+export async function createFactFromSourceAction(brandId: string, fragmentId: string) {
+  const session = await requireSession();
+  const brand = brandIdSchema.safeParse(brandId);
+  if (!brand.success) redirect("/dashboard/content/sources?error=NOT_FOUND");
+  const material = brandMaterialAccess(await headers(), session.user.email);
+  if (!material.ok) redirect(sourcesPath(brand.data, { error: "FORBIDDEN" }));
+  const result = await Promise.resolve()
+    .then(() => executeFactCommand(getConnection(), { ownerId: session.user.id, brandId: brand.data }, {
+      action: "createFromFragment", id: fragmentId,
+    }))
+    .catch(factUnavailable);
+  if ("error" in result) {
+    redirect(sourcesPath(brand.data, { error: result.error === "unavailable" ? "SERVICE_UNAVAILABLE" : "NOT_FOUND" }));
+  }
+  const factsPath = `/dashboard/brands/${brand.data}/facts`;
+  revalidatePath(factsPath);
+  redirect(`${factsPath}?fact=${result.id}#fact-editor-heading`);
 }

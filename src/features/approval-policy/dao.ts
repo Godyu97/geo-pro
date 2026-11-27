@@ -2,7 +2,6 @@ import "server-only";
 
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
-import { factFields } from "../brand-facts/contracts.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { approvalBrandLimit, approvalDutyLimit, type ApprovalAttemptReason, type ApprovalKind } from "./contracts.ts";
 
@@ -45,12 +44,6 @@ const contentGateRow = z.object({
 const approvalHitRow = z.object({
   id: brandIdSchema,
   contentFingerprint: z.string().min(1),
-});
-
-const factGateRow = z.object({
-  id: brandIdSchema,
-  state: z.enum(["draft", "pending_confirmation", "approved", "revoked"]),
-  confirmedBy: z.string().nullable(),
 });
 
 export type ApprovalPolicyRecord = z.infer<typeof policyRow>;
@@ -184,30 +177,6 @@ export class ApprovalPolicyDao {
       [versionId],
     );
     return Boolean(row);
-  }
-
-  async factVersion(brandId: string, versionId: string) {
-    const [row] = await this.query(
-      `SELECT id, state, confirmed_by AS "confirmedBy"
-       FROM brand_fact_version WHERE brand_id = ? AND id = ?`,
-      [brandId, versionId],
-    );
-    return row ? factGateRow.parse(row) : null;
-  }
-
-  async factFields(brandId: string, versionId: string) {
-    const [row] = await this.query(
-      `SELECT content FROM brand_fact_version
-       WHERE brand_id = ? AND id = ? AND state = 'pending_confirmation'`,
-      [brandId, versionId],
-    );
-    if (!row || typeof row.content !== "string") return null;
-    try {
-      const parsed = factFields.safeParse(JSON.parse(row.content));
-      return parsed.success ? parsed.data : null;
-    } catch {
-      return null;
-    }
   }
 
   async usersExist(userIds: readonly string[]) {

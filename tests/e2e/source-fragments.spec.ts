@@ -234,15 +234,28 @@ test("source originals show import progress, per-file outcomes and scoped recove
     expect((await other.request.get(downloadHref)).status()).toBe(404);
 
     await db`insert into brand_member_grant (id, brand_id, user_id, role, active, created_at)
-      values (${randomUUID()}, ${brandId}, ${otherId}, 'member', 1, ${time})`;
+      values (${randomUUID()}, ${brandId}, ${otherId}, 'read_only', 1, ${time})`;
     await otherPage.goto(target);
     await expect(otherPage.getByText("You can review the import history for this brand.", { exact: true })).toBeVisible();
     await expect(otherPage.getByText(excerpt, { exact: true })).toBeVisible();
     await expect(otherPage.locator('input[name="files"]')).toHaveCount(0);
     await expect(otherPage.getByRole("link", { name: "Download original", exact: true })).toHaveCount(0);
+    await expect(otherPage.getByRole("button", { name: "Create fact for confirmation", exact: true })).toHaveCount(0);
     await activate(otherPage, otherPage.getByRole("link", { name: "View import history", exact: true }));
     await expect(otherPage.getByRole("heading", { name: "Import history", exact: true })).toBeFocused();
     expect((await other.request.get(downloadHref)).status()).toBe(404);
+
+    await db`update brand_member_grant set role = 'member' where brand_id = ${brandId} and user_id = ${otherId}`;
+    await otherPage.reload();
+    const fromPartial = otherPage.locator("li").filter({ has: otherPage.getByText(fileName, { exact: true }) });
+    const createFact = fromPartial.getByRole("button", { name: "Create fact for confirmation", exact: true });
+    await expect(createFact).toHaveCount(1);
+    expect((await other.request.get(downloadHref)).status()).toBe(200);
+    await activate(otherPage, createFact);
+    await expect(otherPage).toHaveURL(/\/facts\?fact=[a-f0-9-]+#fact-editor-heading$/);
+    const evidence = otherPage.getByRole("region", { name: "Private source fragment" });
+    await expect(evidence.getByText(excerpt, { exact: true })).toBeVisible();
+    await expect(evidence.getByText("Page 1", { exact: true })).toBeVisible();
   } finally {
     try {
       if (otherId) cleanupAccount(otherId, otherEmail);

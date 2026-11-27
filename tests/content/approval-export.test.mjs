@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { importSourceOriginals } from "../../src/features/asset-reuse/commands.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { expireImageAsset, readImageAsset, registerImageAsset, registerImageAssetUse, revokeImageAsset } from "../../src/features/asset-reuse/image-asset-commands.ts";
 import { PurgeDao } from "../../src/features/brands/purge-dao.ts";
@@ -167,11 +168,11 @@ async function setup(t, kind) {
   const packageOptions = { env: storageEnv, storage, now: new Date(time) };
 
   /** Generates one draft ContentVersion per claim in a single batch. */
-  async function drafts(claims) {
+  async function drafts(claims, makeFact = (claim) => approveFact(db, owner, brand, claim)) {
     const factIds = [];
     const briefIds = [];
     for (const [index, claim] of claims.entries()) {
-      const factId = await approveFact(db, owner, brand, claim);
+      const factId = await makeFact(claim);
       factIds.push(factId);
       const saved = await saveBriefDraft(db, owner, {
         action: "save-brief-draft",
@@ -246,7 +247,7 @@ async function setup(t, kind) {
     const [row] = await queryWithParameters(db, `SELECT count(*) AS n FROM ${table} WHERE ${where}`, values);
     return Number(row.n);
   };
-  return { db, owner, outsider, brand, newBrand, drafts, act, count };
+  return { db, owner, outsider, brand, newBrand, drafts, act, count, packageOptions };
 }
 
 test("pure: approval fingerprint covers every variant field", () => {
@@ -435,8 +436,20 @@ for (const kind of ["sqlite", "postgresql"]) {
   });
 
   run("AC-M0-10-2 formal package excludes internal assets and executable HTML", async (t, ctx) => {
-    const { act } = ctx;
-    const { versionIds: [versionId] } = await ctx.drafts(["Synthetic 100 CNY"]);
+    const { act, db, owner, brand, packageOptions } = ctx;
+    const privateFragment = "INTERNAL-RAW-FRAGMENT for Synthetic 100 CNY";
+    const { versionIds: [versionId], factIds: [linkedId] } = await ctx.drafts(["Synthetic 100 CNY"], async (claim) => {
+      const imported = await importSourceOriginals(db, owner, { brandId: brand, files: [{
+        name: "INTERNAL-ORIGINAL.txt", contentType: "text/plain", chars: privateFragment.length, encrypted: false,
+        pages: [{ page: 1, text: privateFragment }], body: Buffer.from(privateFragment),
+      }] }, packageOptions);
+      const id = imported.files[0].fragments[0].id;
+      const run = (command) => executeFactCommand(db, { ownerId: owner, brandId: brand }, command, factClock);
+      assert.deepEqual(await run({ action: "createFromFragment", id }), { id });
+      assert.deepEqual(await run({ action: "edit", id, revision: 1, fields: { ...usableFact, claim, sourceLocator: "1" } }), { id });
+      assert.deepEqual(await run({ action: "approve", id, revision: 2, confirmed: true, conflictId: null, revokeConflict: false }), { id });
+      return id;
+    });
     const publicAsset = (await act.asset({ kind: "cover", source: "Public studio", contentRef: "ref://public-cover" })).asset;
     const internalAsset = (await act.asset({
       visibility: "internal",
@@ -468,6 +481,12 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.doesNotMatch(read.files["content.html"], /<script|onerror/i);
     assert.match(read.files["public-images.json"], /ref:\/\/public-cover/);
     assert.match(read.files["public-sources.json"], /Synthetic 100 CNY/);
+    const source = JSON.parse(read.files["public-sources.json"]).sources[0];
+    assert.equal(source.factVersionId, linkedId);
+    assert.equal(source.sourceType, "internal");
+    assert.equal(source.sourceReference, null);
+    assert.equal(source.sourceExcerpt, usableFact.sourceExcerpt);
+    assert.equal(source.sourceLocator, "1");
     assert.match(read.files["publish-checklist.md"], /not publication/i);
     const manifest = JSON.parse(read.files["manifest.json"]);
     assert.equal(manifest.packageKind, "formal");

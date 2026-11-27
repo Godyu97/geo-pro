@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -7,8 +8,9 @@ import { getConnection } from "@/lib/db/connection";
 import { formatNumber } from "@/lib/i18n/format";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts.ts";
+import { brandMaterialAccess } from "../brands/intake.ts";
 import { workspaceBrand } from "../team-access/brand-scope.ts";
-import { importSourcesAction, setSourceRightsAction } from "./actions.ts";
+import { createFactFromSourceAction, importSourcesAction, setSourceRightsAction } from "./actions.ts";
 import { listImportedOriginals } from "./commands.ts";
 import type { SourceReason, SourceRights, SourceStatus } from "./contracts.ts";
 import { SourceImportSubmit } from "./source-import-submit";
@@ -102,6 +104,7 @@ export default async function SourceOriginalsPage({
   }
 
   const { brandId, canManage, files } = workspace;
+  const canCreateFact = workspace.canCreateFact && brandMaterialAccess(await headers(), session.user.email).ok;
   const groups = new Map<string, typeof files>();
   for (const file of files) {
     const group = groups.get(file.batchId);
@@ -223,6 +226,11 @@ export default async function SourceOriginalsPage({
                                       })}
                                     </p>
                                   ))}
+                                  {canCreateFact && fragment.readable && fragment.text?.trim() && (
+                                    <form className="mt-2" action={createFactFromSourceAction.bind(null, brandId, fragment.id)}>
+                                      <SourceImportSubmit label={t("createFact")} pendingLabel={t("creatingFact")} />
+                                    </form>
+                                  )}
                                 </li>
                               ))}
                             </ul>

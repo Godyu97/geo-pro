@@ -195,8 +195,33 @@ export type SourceFragmentConflictInsert = {
 };
 
 const fragmentColumns = `id, source_original_id AS "sourceId", ordinal, page, excerpt, candidate_state AS "candidateState"`;
+const activeFragmentSource = `FROM source_original_fragment f
+  JOIN source_original s ON s.id = f.source_original_id AND s.brand_id = f.brand_id AND s.owner_id = f.owner_id
+  WHERE f.brand_id = ? AND f.owner_id = ? AND s.rights_status = 'active'
+    AND s.status IN ('ready', 'partial') AND f.excerpt IS NOT NULL`;
 const conflictColumns = `fragment_id AS "fragmentId", fact_version_id AS "factVersionId", fact_version AS "factVersion"`;
 const insertChunk = 80;
+
+const linkedFragmentSchema = fragmentRowSchema.pick({ id: true, page: true }).extend({
+  fileName: sourceRowSchema.shape.fileName,
+  excerpt: z.string().min(1).max(50_000),
+});
+
+export async function readActiveSourceFragment(db: QueryConnection, brandId: string, ownerId: string, id: string) {
+  const [row] = await queryWithParameters(db, `SELECT f.id, f.page, f.excerpt, s.file_name AS "fileName"
+    ${activeFragmentSource} AND f.id = ?`, [brandId, ownerId, id]);
+  return row ? linkedFragmentSchema.parse(row) : null;
+}
+
+export async function activeSourceFragmentIds(db: QueryConnection, brandId: string, ownerId: string, ids: readonly string[]) {
+  const active = new Set<string>();
+  for (const group of chunk(ids, 100)) {
+    const rows = await queryWithParameters(db, `SELECT f.id ${activeFragmentSource}
+      AND f.id IN (${group.map(() => "?").join(", ")})`, [brandId, ownerId, ...group]);
+    for (const row of rows) active.add(brandIdSchema.parse(row.id));
+  }
+  return active;
+}
 
 function chunk<T>(items: readonly T[], size: number) {
   const groups: T[][] = [];

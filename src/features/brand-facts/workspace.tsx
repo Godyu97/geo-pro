@@ -203,8 +203,8 @@ function PasteEditor({ data, submit, pending, pendingAction, t, link, locale, se
   );
 }
 
-function Fields({ value, set, disabled, t }: {
-  value: FactFields; set: (fields: FactFields) => void; disabled: boolean; t: Translate;
+function Fields({ value, set, disabled, linkedOriginal, t }: {
+  value: FactFields; set: (fields: FactFields) => void; disabled: boolean; linkedOriginal: boolean; t: Translate;
 }) {
   function select<K extends "category" | "sourceType" | "permission" | "validity">(key: K, options: readonly FactFields[K][]) {
     return (
@@ -225,10 +225,14 @@ function Fields({ value, set, disabled, t }: {
           <textarea className={controlClass} rows={3} maxLength={4000} value={value.claim} onChange={(e) => set({ ...value, claim: e.target.value })} />
         </Labelled>
       </div>
-      <Labelled label={t("sourceType")}>{select("sourceType", ["url", "material", "internal"])}</Labelled>
-      <Labelled label={t("sourceReference")}>
-        <Input className={inputClass} value={value.sourceReference} maxLength={1000} onChange={(e) => set({ ...value, sourceReference: e.target.value })} />
-      </Labelled>
+      {!linkedOriginal && (
+        <>
+          <Labelled label={t("sourceType")}>{select("sourceType", ["url", "material", "internal"])}</Labelled>
+          <Labelled label={t("sourceReference")}>
+            <Input className={inputClass} value={value.sourceReference} maxLength={1000} onChange={(e) => set({ ...value, sourceReference: e.target.value })} />
+          </Labelled>
+        </>
+      )}
       <Labelled label={t("sourceLocator")}>
         <Input className={inputClass} value={value.sourceLocator} maxLength={500} onChange={(e) => set({ ...value, sourceLocator: e.target.value })} />
       </Labelled>
@@ -236,7 +240,7 @@ function Fields({ value, set, disabled, t }: {
         <Input className={inputClass} type="date" value={value.sourceDate} onChange={(e) => set({ ...value, sourceDate: e.target.value })} />
       </Labelled>
       <div className="sm:col-span-2">
-        <Labelled label={t("sourceExcerpt")}>
+        <Labelled label={t(linkedOriginal ? "publicSourceExcerpt" : "sourceExcerpt")}>
           <textarea className={controlClass} rows={3} maxLength={4000} value={value.sourceExcerpt} onChange={(e) => set({ ...value, sourceExcerpt: e.target.value })} />
         </Labelled>
       </div>
@@ -259,10 +263,12 @@ function FactEditor({ data, submit, pending, pendingAction, t, link, locale, see
   const [confirmed, setConfirmed] = useState(false);
   const [retire, setRetire] = useState(false);
   const newId = useDraftId();
+  const linkedOriginal = Boolean(fact?.originalFragment);
+  const originalFragment = linkedOriginal ? data.originalFragment : null;
   const edit = fact && (fact.state === "draft" || fact.state === "pending_confirmation");
   const canEdit = !data.readOnly && (!fact || edit || revising);
   const dirty = !!fact && JSON.stringify(fact.fields) !== JSON.stringify(fields);
-  const gaps = fact ? factGaps(fact.fields, data.today) : [];
+  const gaps = fact ? factGaps(fact.fields, data.today, linkedOriginal) : [];
   const time = (instant: string) => formatDateTime(locale, new Date(instant));
   const due = fact ? reviewDue(fact) : null;
 
@@ -283,7 +289,7 @@ function FactEditor({ data, submit, pending, pendingAction, t, link, locale, see
       <Card className="min-w-0 py-0 shadow-none">
         <CardContent className="space-y-4 p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 id="fact-editor-heading" className="text-base font-semibold">
+            <h2 id="fact-editor-heading" tabIndex={-1} className="scroll-mt-24 text-base font-semibold focus-visible:outline-2 focus-visible:outline-ring">
               {t(revising ? "replace" : fact ? edit ? "editFact" : "reviewFact" : "form")}
             </h2>
             {fact && <Badge variant="outline">{t(factStatus(fact, data.today))}</Badge>}
@@ -313,9 +319,25 @@ function FactEditor({ data, submit, pending, pendingAction, t, link, locale, see
               )}
             </div>
           )}
+          {linkedOriginal && (
+            <section className="space-y-2 rounded-lg border bg-background p-3 text-sm" aria-labelledby="fact-original-heading">
+              <h3 id="fact-original-heading" className="font-medium">{t("originalFragment")}</h3>
+              {originalFragment ? (
+                <>
+                  <p className="[overflow-wrap:anywhere]">{originalFragment.fileName}</p>
+                  <p>{originalFragment.page === null ? t("originalPageMissing") :
+                    t("originalPage", { page: formatNumber(locale, originalFragment.page) })}</p>
+                  <blockquote className="border-s ps-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                    {originalFragment.excerpt}
+                  </blockquote>
+                  <p className="text-muted-foreground">{t("originalFragmentHint")}</p>
+                </>
+              ) : <p role="status">{t("originalFragmentUnavailable")}</p>}
+            </section>
+          )}
 
           <form className="space-y-4" onSubmit={save}>
-            <Fields value={fields} set={setFields} disabled={!canEdit} t={t} />
+            <Fields value={fields} set={setFields} disabled={!canEdit} linkedOriginal={linkedOriginal} t={t} />
             {canEdit && (
               <Button type="submit" className={actionClass} aria-disabled={pending} disabled={!!edit && !dirty}>
                 {pending && (pendingAction === "create" || pendingAction === "edit")
@@ -426,7 +448,7 @@ function FactEditor({ data, submit, pending, pendingAction, t, link, locale, see
                         type="button"
                         className={actionClass}
                         aria-disabled={pending}
-                        disabled={dirty || !confirmed || gaps.length > 0}
+                        disabled={dirty || !confirmed || gaps.length > 0 || (linkedOriginal && !originalFragment)}
                         onClick={() => {
                           if (!pending) {
                             submit({

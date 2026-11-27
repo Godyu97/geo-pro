@@ -13,8 +13,7 @@ import { BrandDao } from "../brands/dao.ts";
 import { authorizeBrandActor } from "../team-access/brand-scope.ts";
 import type { BrandAccessAction } from "../team-access/rules.ts";
 import { FactDao } from "../brand-facts/dao.ts";
-import { factGaps, factStatus } from "../brand-facts/rules.ts";
-import { withEligibleFacts } from "../brand-facts/service.ts";
+import { usableFactVersions, withEligibleFacts } from "../brand-facts/service.ts";
 import {
   activeImageUses,
   insertImageAsset,
@@ -1047,9 +1046,9 @@ export async function listApprovedBriefFacts(
   const adopted = await adoptOwner(db, actorId, brandId, "read", now);
   if (!adopted) return [] as Array<{ id: string; title: string; claim: string }>;
   const today = now.slice(0, 10);
-  const versions = await new FactDao(db, { ownerId: adopted, brandId }).latestVersions();
-  return versions
-    .filter((fact) => factStatus(fact, today) === "approved" && factGaps(fact.fields, today).length === 0)
+  const scope = { ownerId: adopted, brandId };
+  const versions = await new FactDao(db, scope).latestVersions();
+  return (await usableFactVersions(db, scope, versions, today))
     .map((fact) => ({ id: fact.id, title: fact.fields.title, claim: fact.fields.claim }));
 }
 
@@ -1670,9 +1669,7 @@ async function computePreflight(
     else imagePins.set(use.contentVersionId, [pin]);
   }
   const today = now.slice(0, 10);
-  const usable = new Set(facts
-    .filter((fact) => factStatus(fact, today) === "approved" && factGaps(fact.fields, today).length === 0)
-    .map((fact) => fact.id));
+  const usable = new Set((await usableFactVersions(db, { ownerId, brandId }, facts, today)).map((fact) => fact.id));
 
   const items = versions.map((version) => {
     const ids = parseIds(version.factVersionIdsJson);

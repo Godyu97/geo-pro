@@ -7,8 +7,7 @@ import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { FactDao } from "../brand-facts/dao.ts";
 import type { FactVersion } from "../brand-facts/contracts.ts";
-import { factGaps, factStatus } from "../brand-facts/rules.ts";
-import { withEligibleFacts } from "../brand-facts/service.ts";
+import { usableFactVersions, withEligibleFacts } from "../brand-facts/service.ts";
 import { BrandDao } from "../brands/dao.ts";
 import {
   briefDraftFieldsSchema,
@@ -85,10 +84,6 @@ function hasUngroundedNumber(text: string, allowedCorpus: string) {
   return numberTokens(text).some((token) => !allowed.has(token));
 }
 
-function isPublicApproved(fact: FactVersion, today: string) {
-  return factStatus(fact, today) === "approved" && factGaps(fact.fields, today).length === 0;
-}
-
 function publicFact(fact: FactVersion): PublicFact {
   const text: PublicFact = {
     id: fact.id,
@@ -161,10 +156,12 @@ export async function draftContentFromBrief(
 
   const factVersionIds = [...new Set(fields.factVersionIds)];
   const today = clock().slice(0, 10);
-  const loaded = await new FactDao(db, { ownerId, brandId: command.brandId }).versionsById(factVersionIds);
-  const byId = new Map(loaded.map((fact) => [fact.id, fact]));
+  const scope = { ownerId, brandId: command.brandId };
+  const loaded = await new FactDao(db, scope).versionsById(factVersionIds);
+  const eligible = await usableFactVersions(db, scope, loaded, today);
+  const byId = new Map(eligible.map((fact) => [fact.id, fact]));
   const facts = factVersionIds.map((id) => byId.get(id));
-  if (facts.some((fact) => !fact || !isPublicApproved(fact, today))) return failure("FACT_INVALID");
+  if (facts.some((fact) => !fact)) return failure("FACT_INVALID");
   const usable = facts.filter((fact): fact is FactVersion => fact !== undefined);
   const promptFacts = usable.map(publicFact);
   const allowedCorpus = promptFacts.map((fact) => Object.values(fact).join("\n")).join("\n");

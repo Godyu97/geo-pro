@@ -3,7 +3,7 @@ import "server-only";
 import { z } from "zod";
 import { queryWithParameters, type QueryConnection, type QueryValue } from "../../lib/db/connection.ts";
 import {
-  factFields, factStage, pasteRow, versionRow,
+  storedFactFields, factStage, pasteRow, versionRow,
   type FactCursor, type FactFields, type FactScope, type FactStage, type FactVersion,
 } from "./contracts.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
@@ -17,8 +17,8 @@ export const pageSize = 20;
 
 function version(row: unknown): FactVersion {
   const { content, ...rest } = versionRow.parse(row);
-  const fields = factFields.parse(JSON.parse(content));
-  return { ...rest, fields };
+  const { originalFragment, ...fields } = storedFactFields.parse(JSON.parse(content));
+  return originalFragment ? { ...rest, fields, originalFragment } : { ...rest, fields };
 }
 
 export class FactDao {
@@ -115,18 +115,20 @@ export class FactDao {
   }
 
   async insertVersion(item: FactVersion) {
-    const { id, factId, version, entityVersion, fields, state, createdAt } = item;
+    const { id, factId, version, entityVersion, fields, state, createdAt, originalFragment } = item;
     await queryWithParameters(this.db, `INSERT INTO brand_fact_version
       (brand_id, id, fact_id, version, entity_version, paste_id, revision, state, content, created_at)
       SELECT b.id, ?, ?, ?, ?, ?, 1, ?, ?, ? FROM brand b
       WHERE b.id = ? AND b.owner_id = ? AND b.frozen_at IS NULL`,
-    [id, factId, version, entityVersion, fields.pasteId, state, JSON.stringify(fields), createdAt, this.scope.brandId, this.scope.ownerId]);
+    [id, factId, version, entityVersion, fields.pasteId, state,
+      JSON.stringify({ ...fields, originalFragment }), createdAt, this.scope.brandId, this.scope.ownerId]);
   }
 
   async edit(item: FactVersion, fields: FactFields) {
     await queryWithParameters(this.db, `UPDATE brand_fact_version SET content = ?, paste_id = ?, revision = revision + 1
       WHERE brand_id = ? AND id = ? AND EXISTS (SELECT 1 FROM brand WHERE id = ? AND owner_id = ? AND frozen_at IS NULL)`,
-    [JSON.stringify(fields), fields.pasteId, this.scope.brandId, item.id, this.scope.brandId, this.scope.ownerId]);
+    [JSON.stringify({ ...fields, originalFragment: item.originalFragment }),
+      fields.pasteId, this.scope.brandId, item.id, this.scope.brandId, this.scope.ownerId]);
   }
 
   async transition(item: FactVersion, state: FactVersion["state"], at: string, approverId = this.scope.ownerId) {
