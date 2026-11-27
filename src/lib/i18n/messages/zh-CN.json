@@ -2590,7 +2590,7 @@
     "observationLabel": "观察 {id}",
     "analysisLabel": "分析版本 {id}",
     "formTitle": "追加复核",
-    "hint": "保存后会新增一条复核。更正也不会改写旧记录、回答原文或已有分析版本。过期事实和互相冲突的事实不能记成确认错误。",
+    "hint": "保存后会新增一条复核。更正也保留旧记录、回答原文和已有分析版本。仅可依据当前分析版本和有效事实确认错误。",
     "observationId": "观察 ID",
     "analysisVersionId": "分析版本 ID",
     "population": "总体条数",
@@ -2629,7 +2629,7 @@
     "INVALID_MODEL_OUTPUT": "提取结果无法核对，没有写入复核。",
     "AI_FAILED": "提取主张失败，没有写入复核。",
     "NOT_FOUND": "找不到这个品牌，或它不属于当前账号。",
-    "INVALID_INPUT": "复核无效。确认错误数不能大于复核数，过期或冲突事实也不能写成确认错误。",
+    "INVALID_INPUT": "请检查复核样本与总体条数。确认错误需要当前分析版本和有效事实支持。",
     "SESSION_REQUIRED": "请先登录。",
     "FORBIDDEN": "当前会话不能保存复核。",
     "SERVICE_UNAVAILABLE": "暂时无法读取或保存复核，请稍后重试。"

@@ -4,8 +4,8 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AiResponseError, createAiResponse, isAiConfigured } from "../../lib/ai/responses.ts";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
-import { BrandDao } from "../brands/dao.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
+import { authorizeEntityWrite } from "./access.ts";
 import { applyExtractedClaim, claimJudgments, type BrandFactClaimView } from "./claims.ts";
 import { loadBrandFactClaim } from "./claim-read.ts";
 import { claimExtractBodySchema, type ClaimExtractError } from "./contracts.ts";
@@ -41,16 +41,17 @@ function failed(error: ClaimExtractError, traceId?: string) {
 
 export async function extractBrandFactClaim(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   brandId: string,
   input: unknown,
   options: ExtractOptions = {},
 ): Promise<{ claim: BrandFactClaimView } | { error: ClaimExtractError; traceId?: string }> {
   const parsed = claimExtractBodySchema.safeParse(input);
   if (!parsed.success) return failed("INVALID_INPUT");
-  const owned = await new BrandDao(db).owned(ownerId, brandId);
-  if (!owned) return failed("NOT_FOUND");
   const clock = options.clock ?? (() => new Date().toISOString());
+  const scope = await authorizeEntityWrite(db, actorId, brandId, clock());
+  if ("error" in scope) return scope;
+  const { ownerId } = scope;
   const loaded = await loadBrandFactClaim(db, ownerId, brandId, parsed.data.observationId, clock);
   if (!loaded) return failed("NOT_FOUND");
   const env = options.env ?? process.env;

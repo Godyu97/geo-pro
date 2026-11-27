@@ -603,12 +603,12 @@ const entityCommands = path.join(fixture, "src/features/entity-accuracy/commands
 const entityCommandsSource = await readFile(entityCommands, "utf8");
 const entityReviewsRead = `export async function readEntityReviewWorkspace(
   db: QueryConnection,
-  ownerId: string,
+  actorId: string,
   brandId: string,
 ): Promise<EntityReviewWorkspace | { error: "NOT_FOUND" }> {`;
 const entityReviewsWrite = `export async function recordEntityReviews(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: unknown,
   clock: Clock = systemClock,
 ) {`;
@@ -628,19 +628,19 @@ const entityRevisions = path.join(fixture, "src/features/entity-accuracy/revisio
 const entityRevisionsSource = await readFile(entityRevisions, "utf8");
 const entityCorrectionsRead = `export async function readEntityRevisionWorkspace(
   db: QueryConnection,
-  ownerId: string,
+  actorId: string,
   brandId: string,
 ): Promise<EntityRevisionWorkspace | { error: "NOT_FOUND" }> {`;
 const entityDisambiguationWrite = `export async function confirmEntityDisambiguation(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: unknown,
   clock: Clock = systemClock,
   cache?: CacheStore,
 ) {`;
 const entityCorrectionWrite = `export async function recordEntityCorrection(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: unknown,
   clock: Clock = systemClock,
 ) {`;

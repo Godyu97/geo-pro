@@ -20,7 +20,7 @@ const copy = {
     reviewsLoading: "正在加载抽样错误率…",
     reviewsUnavailable: "暂时无法读取或保存复核，请稍后重试。",
     reviewsInsufficient: "样本不足",
-    reviewsInvalid: "复核无效。确认错误数不能大于复核数，过期或冲突事实也不能写成确认错误。",
+    reviewsInvalid: "请检查复核样本与总体条数。确认错误需要当前分析版本和有效事实支持。",
     appendReview: "追加复核",
     viewSampleSummary: "查看抽样摘要",
     observationId: "观察 ID",
@@ -62,7 +62,7 @@ const copy = {
     reviewsLoading: "Loading sampled error rate…",
     reviewsUnavailable: "Reviews cannot be read or saved right now. Try again later.",
     reviewsInsufficient: "Insufficient sample",
-    reviewsInvalid: "This review is invalid. Confirmed errors cannot exceed reviewed samples, and expired or conflicting facts cannot be stored as confirmed errors.",
+    reviewsInvalid: "Check the reviewed samples and population count. Confirmed errors require the current analysis version and support from an active fact.",
     appendReview: "Append a review",
     viewSampleSummary: "View sample summary",
     observationId: "Observation ID",
@@ -256,6 +256,7 @@ test("entity reviews and corrections keep visual consistency, guards, isolation,
     await expect(page.getByLabel(zh.methodLabel, { exact: true })).toHaveValue(longMethod);
 
     await page.getByLabel(zh.fact, { exact: true }).selectOption("active");
+    await page.getByLabel(zh.confirmed, { exact: true }).uncheck();
     let reviewPosts = 0;
     page.on("request", (req) => {
       if (req.method() === "POST" && req.url().endsWith(`/api/brands/${brandId}/entity-reviews`)) reviewPosts += 1;
@@ -281,7 +282,7 @@ test("entity reviews and corrections keep visual consistency, guards, isolation,
         await expect(main).toHaveCount(1);
         const primary = main.getByRole("link", { name: t.viewSampleSummary, exact: true });
         await expect(primary).toBeVisible();
-        await expect(main.getByText("1/1").first()).toBeVisible();
+        await expect(main.getByText("0/1").first()).toBeVisible();
         await expect(main.getByText("1/20").first()).toBeVisible();
         await expect(main.getByText(longMethod).first()).toBeVisible();
         const mainText = await main.innerText();
@@ -399,7 +400,7 @@ test("entity reviews and corrections keep visual consistency, guards, isolation,
     await outsider.addCookies([{ name: "geo-locale", value: "en", url: origin }]);
     await stranger.setViewportSize({ width: 375, height: 800 });
     for (const route of [reviewsHref, correctionsHref]) {
-      await stranger.goto(route);
+      expect((await stranger.goto(route))?.status()).toBe(404);
       await expect(stranger.getByRole("heading", { name: copy.en.missing, exact: true })).toBeVisible();
       await expect(stranger.getByText(brandName, { exact: true })).toHaveCount(0);
       await expect(stranger.getByText(observationId)).toHaveCount(0);

@@ -66,7 +66,7 @@ async function loadClaims(
   ownerId: string,
   brandId: string,
   clock: Clock,
-  observationId?: string,
+  observationIds?: readonly string[],
 ): Promise<LoadedBrandFactClaim[]> {
   const dao = new BrandFactClaimDao(db);
   const [promptSetIds, facts] = await Promise.all([
@@ -75,7 +75,7 @@ async function loadClaims(
   ]);
   const contents = await dao.promptContents(brandId, promptSetIds);
   const questionIds = brandFactQuestionIds(contents.map((row) => row.content));
-  const rows = await dao.observations(ownerId, brandId, questionIds, observationId);
+  const rows = await dao.observations(ownerId, brandId, questionIds, observationIds);
   return rows.map((row) => {
     const compared = compareAnswerToFacts(row.answerText, facts);
     return {
@@ -97,8 +97,9 @@ export async function listBrandFactClaims(
   ownerId: string,
   brandId: string,
   clock: Clock = () => new Date().toISOString(),
+  observationIds?: readonly string[],
 ) {
-  const loaded = await loadClaims(db, ownerId, brandId, clock);
+  const loaded = await loadClaims(db, ownerId, brandId, clock, observationIds);
   return loaded.map((item) => item.view);
 }
 
@@ -109,6 +110,6 @@ export async function loadBrandFactClaim(
   observationId: string,
   clock: Clock = () => new Date().toISOString(),
 ) {
-  const [loaded] = await loadClaims(db, ownerId, brandId, clock, observationId);
+  const [loaded] = await loadClaims(db, ownerId, brandId, clock, [observationId]);
   return loaded ?? null;
 }

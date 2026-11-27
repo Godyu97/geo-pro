@@ -16,7 +16,7 @@ import type { EntityRevisionBoard } from "./revisions";
 
 type Copy = Messages["entityCorrections"];
 type Notice = { kind: "status" | "alert"; text: string };
-type InitialError = "disambiguationInvalid" | "correctionInvalid" | "SERVICE_UNAVAILABLE" | null;
+type InitialError = "FORBIDDEN" | "NOT_FOUND" | "disambiguationInvalid" | "correctionInvalid" | "SERVICE_UNAVAILABLE" | null;
 
 const inputClass = "h-10 bg-background";
 const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center aria-disabled:opacity-60";
@@ -64,12 +64,14 @@ function NoticeBanner({ notice }: { notice: Notice | null }) {
 
 export function CorrectionsWorkspace({
   brandId,
+  canWrite,
   locale,
   initialBoard,
   messages,
   initialError,
 }: {
   brandId: string;
+  canWrite: boolean;
   locale: Locale;
   initialBoard: EntityRevisionBoard;
   messages: Copy;
@@ -84,7 +86,7 @@ export function CorrectionsWorkspace({
   const [sameSurfaceName, setSameSurfaceName] = useState(false);
   const [confirmedDifferentEntity, setConfirmedDifferentEntity] = useState(false);
   const [disambiguationNotice, setDisambiguationNotice] = useState<Notice | null>(
-    initialError === "disambiguationInvalid" || initialError === "SERVICE_UNAVAILABLE"
+    initialError && initialError !== "correctionInvalid"
       ? { kind: "alert", text: t(initialError) }
       : null,
   );
@@ -275,64 +277,66 @@ export function CorrectionsWorkspace({
 
         <NoticeBanner notice={disambiguationNotice} />
 
-        <Card id="entity-disambiguation-form" tabIndex={-1} className="min-w-0 scroll-mt-24">
-          <CardHeader>
-            <CardDescription className="max-w-3xl leading-6">
-              {messages.disambiguationHint}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleDisambiguationSubmit} className="grid min-w-0 gap-4 sm:grid-cols-2">
-              <Field label={messages.observationId} htmlFor={`${idPrefix}-disambig-observation`}>
-                <Input
-                  id={`${idPrefix}-disambig-observation`}
-                  name="observationId"
-                  required
-                  value={disambiguationObservationId}
-                  onChange={(event) => setDisambiguationObservationId(event.target.value)}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label={messages.priorAnalysisId} htmlFor={`${idPrefix}-disambig-prior`}>
-                <Input
-                  id={`${idPrefix}-disambig-prior`}
-                  name="priorAnalysisId"
-                  required
-                  value={priorAnalysisId}
-                  onChange={(event) => setPriorAnalysisId(event.target.value)}
-                  className={inputClass}
-                />
-              </Field>
-              <div className="flex flex-wrap items-end gap-4 pt-1 text-sm sm:col-span-2">
-                <Label className="flex cursor-pointer items-center gap-2 font-normal">
-                  <input
-                    name="sameSurfaceName"
-                    type="checkbox"
-                    checked={sameSurfaceName}
-                    onChange={(event) => setSameSurfaceName(event.target.checked)}
-                    className={checkboxClass}
+        {canWrite && (
+          <Card id="entity-disambiguation-form" tabIndex={-1} className="min-w-0 scroll-mt-24">
+            <CardHeader>
+              <CardDescription className="max-w-3xl leading-6">
+                {messages.disambiguationHint}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleDisambiguationSubmit} className="grid min-w-0 gap-4 sm:grid-cols-2">
+                <Field label={messages.observationId} htmlFor={`${idPrefix}-disambig-observation`}>
+                  <Input
+                    id={`${idPrefix}-disambig-observation`}
+                    name="observationId"
+                    required
+                    value={disambiguationObservationId}
+                    onChange={(event) => setDisambiguationObservationId(event.target.value)}
+                    className={inputClass}
                   />
-                  <span>{messages.sameSurfaceName}</span>
-                </Label>
-                <Label className="flex cursor-pointer items-center gap-2 font-normal">
-                  <input
-                    name="confirmedDifferentEntity"
-                    type="checkbox"
-                    checked={confirmedDifferentEntity}
-                    onChange={(event) => setConfirmedDifferentEntity(event.target.checked)}
-                    className={checkboxClass}
+                </Field>
+                <Field label={messages.priorAnalysisId} htmlFor={`${idPrefix}-disambig-prior`}>
+                  <Input
+                    id={`${idPrefix}-disambig-prior`}
+                    name="priorAnalysisId"
+                    required
+                    value={priorAnalysisId}
+                    onChange={(event) => setPriorAnalysisId(event.target.value)}
+                    className={inputClass}
                   />
-                  <span>{messages.confirmedDifferentEntity}</span>
-                </Label>
-              </div>
-              <div className="sm:col-span-2">
-                <Button type="submit" aria-disabled={pendingDisambiguation} className={actionClass}>
-                  {pendingDisambiguation ? messages.savingDisambiguation : messages.saveDisambiguation}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+                </Field>
+                <div className="flex flex-wrap items-end gap-4 pt-1 text-sm sm:col-span-2">
+                  <Label className="flex cursor-pointer items-center gap-2 font-normal">
+                    <input
+                      name="sameSurfaceName"
+                      type="checkbox"
+                      checked={sameSurfaceName}
+                      onChange={(event) => setSameSurfaceName(event.target.checked)}
+                      className={checkboxClass}
+                    />
+                    <span>{messages.sameSurfaceName}</span>
+                  </Label>
+                  <Label className="flex cursor-pointer items-center gap-2 font-normal">
+                    <input
+                      name="confirmedDifferentEntity"
+                      type="checkbox"
+                      checked={confirmedDifferentEntity}
+                      onChange={(event) => setConfirmedDifferentEntity(event.target.checked)}
+                      className={checkboxClass}
+                    />
+                    <span>{messages.confirmedDifferentEntity}</span>
+                  </Label>
+                </div>
+                <div className="sm:col-span-2">
+                  <Button type="submit" aria-disabled={pendingDisambiguation} className={actionClass}>
+                    {pendingDisambiguation ? messages.savingDisambiguation : messages.saveDisambiguation}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
       </section>
 
       <section
@@ -389,54 +393,56 @@ export function CorrectionsWorkspace({
 
         <NoticeBanner notice={correctionNotice} />
 
-        <Card id="entity-correction-form" tabIndex={-1} className="min-w-0 scroll-mt-24">
-          <CardHeader>
-            <CardDescription className="max-w-3xl leading-6">
-              {messages.correctionHint}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleCorrectionSubmit} className="grid min-w-0 gap-4 sm:grid-cols-2">
-              <Field label={messages.observationId} htmlFor={`${idPrefix}-correction-observation`} className="sm:col-span-2">
-                <Input
-                  id={`${idPrefix}-correction-observation`}
-                  name="observationId"
-                  required
-                  value={correctionObservationId}
-                  onChange={(event) => setCorrectionObservationId(event.target.value)}
-                  className={inputClass}
-                />
-              </Field>
-              <div className="flex flex-wrap items-end gap-4 pt-1 text-sm sm:col-span-2">
-                <Label className="flex cursor-pointer items-center gap-2 font-normal">
-                  <input
-                    name="actionDone"
-                    type="checkbox"
-                    checked={actionDone}
-                    onChange={(event) => setActionDone(event.target.checked)}
-                    className={checkboxClass}
+        {canWrite && (
+          <Card id="entity-correction-form" tabIndex={-1} className="min-w-0 scroll-mt-24">
+            <CardHeader>
+              <CardDescription className="max-w-3xl leading-6">
+                {messages.correctionHint}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCorrectionSubmit} className="grid min-w-0 gap-4 sm:grid-cols-2">
+                <Field label={messages.observationId} htmlFor={`${idPrefix}-correction-observation`} className="sm:col-span-2">
+                  <Input
+                    id={`${idPrefix}-correction-observation`}
+                    name="observationId"
+                    required
+                    value={correctionObservationId}
+                    onChange={(event) => setCorrectionObservationId(event.target.value)}
+                    className={inputClass}
                   />
-                  <span>{messages.actionDone}</span>
-                </Label>
-                <Label className="flex cursor-pointer items-center gap-2 font-normal">
-                  <input
-                    name="retestStillWrong"
-                    type="checkbox"
-                    checked={retestStillWrong}
-                    onChange={(event) => setRetestStillWrong(event.target.checked)}
-                    className={checkboxClass}
-                  />
-                  <span>{messages.retestStillWrong}</span>
-                </Label>
-              </div>
-              <div className="sm:col-span-2">
-                <Button type="submit" aria-disabled={pendingCorrection} className={actionClass}>
-                  {pendingCorrection ? messages.savingCorrection : messages.saveCorrection}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+                </Field>
+                <div className="flex flex-wrap items-end gap-4 pt-1 text-sm sm:col-span-2">
+                  <Label className="flex cursor-pointer items-center gap-2 font-normal">
+                    <input
+                      name="actionDone"
+                      type="checkbox"
+                      checked={actionDone}
+                      onChange={(event) => setActionDone(event.target.checked)}
+                      className={checkboxClass}
+                    />
+                    <span>{messages.actionDone}</span>
+                  </Label>
+                  <Label className="flex cursor-pointer items-center gap-2 font-normal">
+                    <input
+                      name="retestStillWrong"
+                      type="checkbox"
+                      checked={retestStillWrong}
+                      onChange={(event) => setRetestStillWrong(event.target.checked)}
+                      className={checkboxClass}
+                    />
+                    <span>{messages.retestStillWrong}</span>
+                  </Label>
+                </div>
+                <div className="sm:col-span-2">
+                  <Button type="submit" aria-disabled={pendingCorrection} className={actionClass}>
+                    {pendingCorrection ? messages.savingCorrection : messages.saveCorrection}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
       </section>
     </div>
   );

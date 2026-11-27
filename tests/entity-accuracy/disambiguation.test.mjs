@@ -18,6 +18,8 @@ import {
   recordEntityCorrection,
 } from "../../src/features/entity-accuracy/revisions.ts";
 import { correctionStatus, sameNameConfusion } from "../../src/features/entity-accuracy/rules.ts";
+import { grantBrandMember } from "../../src/features/team-access/commands.ts";
+import { ensurePersonalGroup } from "../../src/features/team-access/platform-role.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { structure, testDatabase } from "../maintenance/helpers.mjs";
 
@@ -140,7 +142,7 @@ async function seedObservation(db, brandId, ownerId, observationId, analysisId, 
 async function versions(db, observationId) {
   return queryWithParameters(
     db,
-    `SELECT id, version, mentioned, status, revised_from AS "revisedFrom"
+    `SELECT id, version, mentioned, status, revised_from AS "revisedFrom", reviewer_id AS "reviewerId"
      FROM answer_analysis_version WHERE observation_id = ? ORDER BY version ASC`,
     [observationId],
   );
@@ -175,20 +177,21 @@ for (const kind of ["sqlite", "postgresql"]) {
       try {
         const db = fixture.connection;
         assert.deepEqual(await structure(db), await structure(ddl.connection));
-        const [owner, outsider] = await Promise.all([account(db), account(db)]);
+        const [owner, member, readOnly, outsider] = await Promise.all(Array.from({ length: 4 }, () => account(db)));
         const brand = randomUUID();
-        await new BrandDao(db).insertBrand(owner, brand, time);
+        const groupId = await ensurePersonalGroup(db, owner);
+        await new BrandDao(db).insertBrand(owner, brand, time, groupId);
+        assert.ok((await grantBrandMember(db, owner, { brandId: brand, userId: member, role: "member", expiresAt: null })).grant);
+        assert.ok((await grantBrandMember(db, owner, { brandId: brand, userId: readOnly, role: "read_only", expiresAt: null })).grant);
         const observationId = randomUUID();
         const priorId = randomUUID();
         const heldObservation = randomUUID();
         const heldAnalysis = randomUUID();
         await seedObservation(db, brand, owner, observationId, priorId);
         await seedObservation(db, brand, owner, heldObservation, heldAnalysis);
-        const clock = clockFrom([
-          "2026-11-22T08:00:01.000Z",
-          "2026-11-22T08:00:02.000Z",
-          "2026-11-22T08:00:03.000Z",
-        ]);
+        const clock = clockFrom(Array.from({ length: 20 }, (_, index) =>
+          new Date(Date.parse(time) + (index + 1) * 1000).toISOString(),
+        ));
         const base = {
           brandId: brand,
           observationId,
@@ -253,7 +256,9 @@ for (const kind of ["sqlite", "postgresql"]) {
 
         const savedCache = recordingCache();
         const savedWatch = watch(db);
-        const saved = await confirmEntityDisambiguation(savedWatch.connection, owner, {
+        const flags = { sameSurfaceName: true, confirmedDifferentEntity: true };
+        assert.deepEqual(await confirmEntityDisambiguation(db, readOnly, { ...base, ...flags }, clock, savedCache.cache), { error: "FORBIDDEN" });
+        const saved = await confirmEntityDisambiguation(savedWatch.connection, member, {
           ...base,
           sameSurfaceName: true,
           confirmedDifferentEntity: true,
@@ -266,9 +271,7 @@ for (const kind of ["sqlite", "postgresql"]) {
         assert.equal(saved.next.version, 2);
         assert.equal("resolved" in saved.disambiguation, false);
         const updates = savedWatch.captured.filter((item) => /^\s*UPDATE/i.test(item.sql));
-        assert.equal(updates.length, 1);
-        assert.match(updates[0].sql, /status = 'revised'/);
-        assert.equal(/mentioned/i.test(updates[0].sql), false);
+        assert.equal(updates.length, 0);
         assert.equal(savedWatch.captured.some((item) => /report_snapshot|answer_observation/.test(item.sql) && /UPDATE/i.test(item.sql)), false);
         assert.equal(savedWatch.captured.some((item) => /report_snapshot/.test(item.sql)), false);
         assert.equal(savedCache.deleted.some((key) => key.startsWith("evidence-overview:index:")), true);
@@ -276,10 +279,11 @@ for (const kind of ["sqlite", "postgresql"]) {
         assert.equal(storedVersions.length, 2);
         assert.equal(storedVersions[0].id, priorId);
         assert.equal(storedVersions[0].mentioned, "true");
-        assert.equal(storedVersions[0].status, "revised");
+        assert.equal(storedVersions[0].status, "classified");
         assert.equal(storedVersions[1].id, saved.next.id);
         assert.equal(storedVersions[1].mentioned, "false");
         assert.equal(storedVersions[1].revisedFrom, priorId);
+        assert.equal(storedVersions[1].reviewerId, member);
         assert.equal(await answerOf(db, observationId), answerText);
         const [disambiguation] = await queryWithParameters(
           db,
@@ -292,7 +296,10 @@ for (const kind of ["sqlite", "postgresql"]) {
         assert.equal(disambiguation.nextAnalysisId, saved.next.id);
         assert.equal(Number(disambiguation.countAsTargetMention), 0);
 
-        const correction = await recordEntityCorrection(db, owner, {
+        assert.deepEqual(await recordEntityCorrection(db, readOnly, {
+          brandId: brand, observationId, actionDone: true, retestStillWrong: true,
+        }, clock), { error: "FORBIDDEN" });
+        const correction = await recordEntityCorrection(db, member, {
           brandId: brand,
           observationId,
           actionDone: true,
@@ -337,6 +344,7 @@ for (const kind of ["sqlite", "postgresql"]) {
 
         const listWatch = watch(db);
         const listed = await listEntityRevisions(listWatch.connection, owner, brand);
+        assert.deepEqual(await listEntityRevisions(db, readOnly, brand), listed);
         assert.equal(listed.board.disambiguations[0].countAsTargetMention, false);
         assert.equal(listed.board.corrections[0].action, "actioned");
         assert.equal(listed.board.corrections[0].effect, "pending_retest");

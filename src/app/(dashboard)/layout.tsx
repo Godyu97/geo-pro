@@ -19,6 +19,7 @@ import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
 import { brandIntakeDecision, type BrandIntakeMode } from "@/features/brands/intake";
 import { feedbackBrandUnavailable } from "@/features/business-feedback/workspace";
+import { entityBrandUnavailable } from "@/features/entity-accuracy/access";
 import { retestBrandUnavailable } from "@/features/formal-retest/workspace";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -34,9 +35,11 @@ export default async function DashboardLayout({
 }) {
   const { user } = await requireSession();
   const requestHeaders = await headers();
-  // Reject inaccessible report brands before the dashboard loading boundary can stream.
+  // Reject inaccessible brands before the dashboard loading boundary can stream.
   const requestPath = requestHeaders.get("x-geo-path");
-  if (await retestBrandUnavailable(user.id, requestPath) || await feedbackBrandUnavailable(user.id, requestPath)) notFound();
+  if (await entityBrandUnavailable(user.id, requestPath)
+    || await retestBrandUnavailable(user.id, requestPath)
+    || await feedbackBrandUnavailable(user.id, requestPath)) notFound();
   const locale = await getLocale();
   const messages = getMessages(locale);
   const t = await getTranslator("common");

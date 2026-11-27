@@ -620,8 +620,8 @@ export async function BrandDetailsPage({ params, searchParams }: { params: Promi
             {brand.version > 1 && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "?version=" + (brand.version - 1)} prefetch={false}>{t("previousVersion")}</Link></Button>}
           </div>
           {canManage && !snapshot && <BrandStatusButton brand={{ id, status: brand.status, revision: brand.revision }} actorId={user.id} messages={messages} />}
-          {canManage && !snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/entity-reviews"} prefetch={false}>{getMessages(locale).entityReviews.title}</Link></Button>}
-          {canManage && !snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/entity-corrections"} prefetch={false}>{getMessages(locale).entityCorrections.title}</Link></Button>}
+          {!snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/entity-reviews"} prefetch={false}>{getMessages(locale).entityReviews.title}</Link></Button>}
+          {!snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/entity-corrections"} prefetch={false}>{getMessages(locale).entityCorrections.title}</Link></Button>}
           {canManage && !snapshot && <Button asChild variant="outline" className={brandActionClass}><Link href={href + "/delete"} prefetch={false}>{t("reviewDeletion")}</Link></Button>}
         </div>
       </div>

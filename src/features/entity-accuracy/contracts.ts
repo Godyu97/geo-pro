@@ -35,7 +35,7 @@ function validateReviewBatch(value: ReviewBatch, ctx: z.RefinementCtx) {
   const seen = new Set<string>();
   for (const mark of value.marks) {
     const claim = reviewClaim({ normalizedEqual: null, fact: mark.fact });
-    if (mark.confirmed && (mark.fact !== "active" || claim.autoError)) {
+    if (mark.confirmed && (!mark.reviewed || mark.fact !== "active" || claim.autoError)) {
       ctx.addIssue({ code: "custom", path: ["marks"], message: "fact_not_confirmable" });
     }
     const key = `${mark.observationId}:${mark.analysisVersionId}`;

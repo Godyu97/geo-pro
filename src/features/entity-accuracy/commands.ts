@@ -3,6 +3,8 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { BrandDao, type BrandRecord } from "../brands/dao.ts";
+import { brandDutyAllows } from "../team-access/rules.ts";
+import { authorizeEntityWrite, readEntityBrandScope } from "./access.ts";
 import { listBrandFactClaims } from "./claim-read.ts";
 import type { BrandFactClaimView } from "./claims.ts";
 import { entityReviewWriteSchema } from "./contracts.ts";
@@ -76,6 +78,7 @@ export function presentEntityReviewBoard(rows: readonly EntityReviewRecord[]): E
 export type EntityReviewWorkspace = {
   brandName: string;
   brandStatus: BrandRecord["status"];
+  canWrite: boolean;
   board: EntityReviewBoard;
   claims: BrandFactClaimView[];
 };
@@ -89,18 +92,21 @@ export function entityReviewUnavailable(error: unknown) {
   return { error: "SERVICE_UNAVAILABLE" as const, traceId };
 }
 
-export async function listEntityReviews(db: DatabaseConnection, ownerId: string, brandId: string) {
-  const owned = await new BrandDao(db).owned(ownerId, brandId);
-  if (!owned) return { error: "NOT_FOUND" as const };
-  const rows = await new EntityReviewDao(db).reviewsForBrand(ownerId, brandId);
+export async function listEntityReviews(db: DatabaseConnection, actorId: string, brandId: string) {
+  const scope = await readEntityBrandScope(db, actorId, brandId);
+  if (!scope) return { error: "NOT_FOUND" as const };
+  const rows = await new EntityReviewDao(db).reviewsForBrand(scope.ownerId, brandId);
   return { board: presentEntityReviewBoard(rows) };
 }
 
 export async function readEntityReviewWorkspace(
   db: QueryConnection,
-  ownerId: string,
+  actorId: string,
   brandId: string,
 ): Promise<EntityReviewWorkspace | { error: "NOT_FOUND" }> {
+  const scope = await readEntityBrandScope(db, actorId, brandId);
+  if (!scope) return { error: "NOT_FOUND" as const };
+  const { ownerId } = scope;
   const owned = await new BrandDao(db).ownedSummary(ownerId, brandId);
   if (!owned) return { error: "NOT_FOUND" as const };
   const reviews = new EntityReviewDao(db);
@@ -111,6 +117,7 @@ export async function readEntityReviewWorkspace(
   return {
     brandName: owned.name,
     brandStatus: owned.status,
+    canWrite: owned.status === "active" && brandDutyAllows(scope.role, "write"),
     board: presentEntityReviewBoard(rows),
     claims,
   };
@@ -118,7 +125,7 @@ export async function readEntityReviewWorkspace(
 
 export async function recordEntityReviews(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: unknown,
   clock: Clock = systemClock,
 ) {
@@ -126,13 +133,28 @@ export async function recordEntityReviews(
   if (!parsed.success) return { error: "INVALID_INPUT" as const };
   try {
     return await db.transaction(async (tx) => {
-      const owned = await new BrandDao(tx).owned(ownerId, parsed.data.brandId);
-      if (!owned) return { error: "NOT_FOUND" as const };
+      const { brandId, marks } = parsed.data;
       const now = clock();
+      const scope = await authorizeEntityWrite(tx, actorId, brandId, now);
+      if ("error" in scope) return scope;
+      const { ownerId } = scope;
       const dao = new EntityReviewDao(tx);
-      await dao.insertReviews(parsed.data.marks.map((mark) => ({
+      const samples = await dao.reviewSamples(ownerId, brandId, [...new Set(marks.map((mark) => mark.analysisVersionId))]);
+      const sampleByVersion = new Map(samples.map((sample) => [sample.analysisVersionId, sample.observationId]));
+      if (marks.some((mark) => sampleByVersion.get(mark.analysisVersionId) !== mark.observationId)) {
+        return { error: "NOT_FOUND" as const };
+      }
+      const confirmed = marks.filter((mark) => mark.confirmed);
+      if (confirmed.length) {
+        const claims = await listBrandFactClaims(tx, ownerId, brandId, () => now, confirmed.map((mark) => mark.observationId));
+        const confirmableVersions = new Set(claims.filter((claim) => claim.confirmable).map((claim) => claim.analysisVersionId));
+        if (confirmed.some((mark) => !confirmableVersions.has(mark.analysisVersionId))) {
+          return { error: "INVALID_INPUT" as const };
+        }
+      }
+      await dao.insertReviews(marks.map((mark) => ({
         id: randomUUID(),
-        brandId: parsed.data.brandId,
+        brandId,
         ownerId,
         observationId: mark.observationId,
         analysisVersionId: mark.analysisVersionId,
@@ -143,7 +165,7 @@ export async function recordEntityReviews(
         fact: mark.fact,
         createdAt: now,
       })));
-      const rows = await dao.reviewsForBrand(ownerId, parsed.data.brandId);
+      const rows = await dao.reviewsForBrand(ownerId, brandId);
       return { recorded: true as const, board: presentEntityReviewBoard(rows) };
     });
   } catch (error) {

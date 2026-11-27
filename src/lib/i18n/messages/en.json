@@ -2590,7 +2590,7 @@
     "observationLabel": "Observation {id}",
     "analysisLabel": "Analysis version {id}",
     "formTitle": "Append a review",
-    "hint": "Saving adds a new review row. A correction does not rewrite the previous review, the answer text, or an existing analysis version. Expired facts and conflicting facts cannot be stored as confirmed errors.",
+    "hint": "Saving appends a review and preserves earlier records, raw answers, and analysis versions. Confirmed errors require the current analysis version and support from an active fact.",
     "observationId": "Observation ID",
     "analysisVersionId": "Analysis version ID",
     "population": "Population count",
@@ -2629,7 +2629,7 @@
     "INVALID_MODEL_OUTPUT": "The extraction could not be checked, so no review was written.",
     "AI_FAILED": "Claim extraction failed, and no review was written.",
     "NOT_FOUND": "This brand was not found, or it belongs to another account.",
-    "INVALID_INPUT": "This review is invalid. Confirmed errors cannot exceed reviewed samples, and expired or conflicting facts cannot be stored as confirmed errors.",
+    "INVALID_INPUT": "Check the reviewed samples and population count. Confirmed errors require the current analysis version and support from an active fact.",
     "SESSION_REQUIRED": "Sign in first.",
     "FORBIDDEN": "This session cannot save reviews.",
     "SERVICE_UNAVAILABLE": "Reviews cannot be read or saved right now. Try again later."

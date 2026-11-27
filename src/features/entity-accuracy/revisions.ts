@@ -7,6 +7,8 @@ import type { DatabaseConnection, QueryConnection } from "../../lib/db/connectio
 import { BrandDao, type BrandRecord } from "../brands/dao.ts";
 import { EvidenceDao } from "../evidence/dao.ts";
 import { invalidateEvidenceOverview } from "../evidence/overview-cache.ts";
+import { brandDutyAllows } from "../team-access/rules.ts";
+import { authorizeEntityWrite, readEntityBrandScope } from "./access.ts";
 import { entityCorrectionWriteSchema, entityDisambiguationWriteSchema } from "./contracts.ts";
 import {
   EntityRevisionDao,
@@ -72,6 +74,7 @@ export function presentEntityRevisions(
 export type EntityRevisionWorkspace = {
   brandName: string;
   brandStatus: BrandRecord["status"];
+  canWrite: boolean;
   board: EntityRevisionBoard;
 };
 
@@ -84,20 +87,26 @@ export function entityRevisionUnavailable(error: unknown) {
   return { error: "SERVICE_UNAVAILABLE" as const, traceId };
 }
 
-export async function listEntityRevisions(db: DatabaseConnection, ownerId: string, brandId: string) {
-  const owned = await new BrandDao(db).owned(ownerId, brandId);
-  if (!owned) return { error: "NOT_FOUND" as const };
+export async function listEntityRevisions(db: DatabaseConnection, actorId: string, brandId: string) {
+  const scope = await readEntityBrandScope(db, actorId, brandId);
+  if (!scope) return { error: "NOT_FOUND" as const };
+  const { ownerId } = scope;
   const dao = new EntityRevisionDao(db);
-  const disambiguations = await dao.disambiguationsForBrand(ownerId, brandId);
-  const corrections = await dao.correctionsForBrand(ownerId, brandId);
+  const [disambiguations, corrections] = await Promise.all([
+    dao.disambiguationsForBrand(ownerId, brandId),
+    dao.correctionsForBrand(ownerId, brandId),
+  ]);
   return { board: presentEntityRevisions(disambiguations, corrections) };
 }
 
 export async function readEntityRevisionWorkspace(
   db: QueryConnection,
-  ownerId: string,
+  actorId: string,
   brandId: string,
 ): Promise<EntityRevisionWorkspace | { error: "NOT_FOUND" }> {
+  const scope = await readEntityBrandScope(db, actorId, brandId);
+  if (!scope) return { error: "NOT_FOUND" as const };
+  const { ownerId } = scope;
   const owned = await new BrandDao(db).ownedSummary(ownerId, brandId);
   if (!owned) return { error: "NOT_FOUND" as const };
   const dao = new EntityRevisionDao(db);
@@ -108,13 +117,14 @@ export async function readEntityRevisionWorkspace(
   return {
     brandName: owned.name,
     brandStatus: owned.status,
+    canWrite: owned.status === "active" && brandDutyAllows(scope.role, "write"),
     board: presentEntityRevisions(disambiguations, corrections),
   };
 }
 
 export async function confirmEntityDisambiguation(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: unknown,
   clock: Clock = systemClock,
   cache?: CacheStore,
@@ -127,8 +137,10 @@ export async function confirmEntityDisambiguation(
   });
   try {
     const result = await db.transaction(async (tx) => {
-      const owned = await new BrandDao(tx).owned(ownerId, parsed.data.brandId);
-      if (!owned) return { error: "NOT_FOUND" as const };
+      const now = clock();
+      const scope = await authorizeEntityWrite(tx, actorId, parsed.data.brandId, now);
+      if ("error" in scope) return scope;
+      const { ownerId } = scope;
       if (!decision.needsDisambiguation || decision.countAsTargetMention) return { error: "INVALID_INPUT" as const };
       const evidence = new EvidenceDao(tx);
       const observation = await evidence.observationForOwner(ownerId, parsed.data.observationId);
@@ -137,10 +149,8 @@ export async function confirmEntityDisambiguation(
       if (!latest || latest.id !== parsed.data.priorAnalysisId || latest.brandId !== parsed.data.brandId) {
         return { error: "INVALID_INPUT" as const };
       }
-      const now = clock();
       const nextId = randomUUID();
       const mentioned = decision.countAsTargetMention ? "true" : "false";
-      await evidence.markAnalysisRevised(latest.id, parsed.data.brandId);
       await evidence.insertAnalysis({
         id: nextId,
         observationId: observation.id,
@@ -155,7 +165,7 @@ export async function confirmEntityDisambiguation(
         status: latest.recommended === "true" && mentioned === "false" ? "needs_review" : "classified",
         revisedFrom: latest.id,
         reason: "same_name_different_entity",
-        reviewerId: ownerId,
+        reviewerId: actorId,
         createdAt: now,
       });
       const row: EntityDisambiguationRecord = {
@@ -170,16 +180,18 @@ export async function confirmEntityDisambiguation(
       };
       await new EntityRevisionDao(tx).insertDisambiguation(row);
       return {
-        recorded: true as const,
-        disambiguation: presentDisambiguation(row),
-        prior: { id: latest.id, version: latest.version, mentioned: latest.mentioned },
-        next: { id: nextId, version: latest.version + 1, mentioned },
+        ownerId,
+        saved: {
+          recorded: true as const,
+          disambiguation: presentDisambiguation(row),
+          prior: { id: latest.id, version: latest.version, mentioned: latest.mentioned },
+          next: { id: nextId, version: latest.version + 1, mentioned },
+        },
       };
     });
-    if ("recorded" in result) {
-      await invalidateEvidenceOverview(ownerId, parsed.data.brandId, cache ?? openCache());
-    }
-    return result;
+    if ("error" in result && result.error) return { error: result.error };
+    await invalidateEvidenceOverview(result.ownerId, parsed.data.brandId, cache ?? openCache());
+    return result.saved;
   } catch (error) {
     if (uniqueConflict(error)) return { error: "INVALID_INPUT" as const };
     throw error;
@@ -188,7 +200,7 @@ export async function confirmEntityDisambiguation(
 
 export async function recordEntityCorrection(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: unknown,
   clock: Clock = systemClock,
 ) {
@@ -200,8 +212,10 @@ export async function recordEntityCorrection(
   });
   try {
     return await db.transaction(async (tx) => {
-      const owned = await new BrandDao(tx).owned(ownerId, parsed.data.brandId);
-      if (!owned) return { error: "NOT_FOUND" as const };
+      const now = clock();
+      const scope = await authorizeEntityWrite(tx, actorId, parsed.data.brandId, now);
+      if ("error" in scope) return scope;
+      const { ownerId } = scope;
       const observation = await new EvidenceDao(tx).observationForOwner(ownerId, parsed.data.observationId);
       if (!observation || observation.brandId !== parsed.data.brandId) return { error: "NOT_FOUND" as const };
       const row: EntityCorrectionRecord = {
@@ -211,7 +225,7 @@ export async function recordEntityCorrection(
         observationId: observation.id,
         action: status.action,
         effect: status.effect,
-        createdAt: clock(),
+        createdAt: now,
       };
       await new EntityRevisionDao(tx).insertCorrection(row);
       return { recorded: true as const, correction: presentCorrection(row) };

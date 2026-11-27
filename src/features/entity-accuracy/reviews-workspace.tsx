@@ -73,6 +73,7 @@ function NoticeBanner({ notice }: { notice: Notice | null }) {
 
 export function ReviewsWorkspace({
   brandId,
+  canWrite,
   locale,
   initialBoard,
   initialClaims,
@@ -80,6 +81,7 @@ export function ReviewsWorkspace({
   initialError,
 }: {
   brandId: string;
+  canWrite: boolean;
   locale: Locale;
   initialBoard: EntityReviewBoard;
   initialClaims: BrandFactClaimView[];
@@ -267,24 +269,26 @@ export function ReviewsWorkspace({
                       {claim.confirmable ? null : (
                         <p className="text-sm leading-6 text-muted-foreground">{messages.confirmBlocked}</p>
                       )}
-                      <div className="flex flex-wrap gap-2">
-                        {claim.analysisVersionId ? (
-                          <Button type="button" variant="outline" className={actionClass} onClick={() => prefill(claim)}>
-                            {messages.prefillReview}
+                      {canWrite && (
+                        <div className="flex flex-wrap gap-2">
+                          {claim.analysisVersionId ? (
+                            <Button type="button" variant="outline" className={actionClass} onClick={() => prefill(claim)}>
+                              {messages.prefillReview}
+                            </Button>
+                          ) : (
+                            <p className="text-sm leading-6 text-muted-foreground">{messages.prefillNeedsAnalysis}</p>
+                          )}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className={actionClass}
+                            aria-disabled={extractingId === claim.observationId}
+                            onClick={() => extractClaim(claim)}
+                          >
+                            {extractingId === claim.observationId ? messages.extractingClaim : messages.extractClaim}
                           </Button>
-                        ) : (
-                          <p className="text-sm leading-6 text-muted-foreground">{messages.prefillNeedsAnalysis}</p>
-                        )}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className={actionClass}
-                          aria-disabled={extractingId === claim.observationId}
-                          onClick={() => extractClaim(claim)}
-                        >
-                          {extractingId === claim.observationId ? messages.extractingClaim : messages.extractClaim}
-                        </Button>
-                      </div>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </li>
@@ -364,115 +368,117 @@ export function ReviewsWorkspace({
         )}
       </section>
 
-      <section
-        id="entity-review-form"
-        tabIndex={-1}
-        aria-labelledby="entity-review-form-heading"
-        className="scroll-mt-24 focus-visible:outline-2 focus-visible:outline-ring"
-      >
-        <Card className="min-w-0">
-          <CardHeader>
-            <CardTitle id="entity-review-form-heading">{messages.formTitle}</CardTitle>
-            <CardDescription className="max-w-3xl leading-6">{messages.hint}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="grid min-w-0 gap-4 sm:grid-cols-2">
-              <Field label={messages.observationId} htmlFor={`${idPrefix}-observation`}>
-                <Input
-                  id={`${idPrefix}-observation`}
-                  name="observationId"
-                  required
-                  value={observationId}
-                  onChange={(event) => {
-                    setObservationId(event.target.value);
-                    setConfirmLocked(false);
-                  }}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label={messages.analysisVersionId} htmlFor={`${idPrefix}-analysis`}>
-                <Input
-                  id={`${idPrefix}-analysis`}
-                  name="analysisVersionId"
-                  required
-                  value={analysisVersionId}
-                  onChange={(event) => {
-                    setAnalysisVersionId(event.target.value);
-                    setConfirmLocked(false);
-                  }}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label={messages.population} htmlFor={`${idPrefix}-population`}>
-                <Input
-                  id={`${idPrefix}-population`}
-                  name="population"
-                  type="number"
-                  min={1}
-                  max={100000}
-                  step={1}
-                  required
-                  value={population}
-                  onChange={(event) => setPopulation(event.target.value)}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label={messages.methodLabel} htmlFor={`${idPrefix}-method`}>
-                <Input
-                  id={`${idPrefix}-method`}
-                  name="method"
-                  required
-                  maxLength={200}
-                  value={method}
-                  onChange={(event) => setMethod(event.target.value)}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label={messages.fact} htmlFor={`${idPrefix}-fact`}>
-                <select
-                  id={`${idPrefix}-fact`}
-                  name="fact"
-                  value={fact}
-                  onChange={(event) => setFact(event.target.value as FactState)}
-                  className={controlClass}
-                >
-                  <option value="active">{messages.factActive}</option>
-                  <option value="expired">{messages.factExpired}</option>
-                  <option value="conflict">{messages.factConflict}</option>
-                </select>
-              </Field>
-              <div className="flex flex-wrap items-end gap-4 pt-1 text-sm sm:col-span-2">
-                <Label className="flex cursor-pointer items-center gap-2 font-normal">
-                  <input
-                    name="reviewed"
-                    type="checkbox"
-                    checked={reviewed}
-                    onChange={(event) => setReviewed(event.target.checked)}
-                    className={checkboxClass}
+      {canWrite && (
+        <section
+          id="entity-review-form"
+          tabIndex={-1}
+          aria-labelledby="entity-review-form-heading"
+          className="scroll-mt-24 focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <Card className="min-w-0">
+            <CardHeader>
+              <CardTitle id="entity-review-form-heading">{messages.formTitle}</CardTitle>
+              <CardDescription className="max-w-3xl leading-6">{messages.hint}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmit} className="grid min-w-0 gap-4 sm:grid-cols-2">
+                <Field label={messages.observationId} htmlFor={`${idPrefix}-observation`}>
+                  <Input
+                    id={`${idPrefix}-observation`}
+                    name="observationId"
+                    required
+                    value={observationId}
+                    onChange={(event) => {
+                      setObservationId(event.target.value);
+                      setConfirmLocked(false);
+                    }}
+                    className={inputClass}
                   />
-                  <span>{messages.reviewed}</span>
-                </Label>
-                <Label className="flex cursor-pointer items-center gap-2 font-normal">
-                  <input
-                    name="confirmed"
-                    type="checkbox"
-                    checked={confirmed}
-                    disabled={confirmLocked}
-                    onChange={(event) => setConfirmed(event.target.checked)}
-                    className={checkboxClass}
+                </Field>
+                <Field label={messages.analysisVersionId} htmlFor={`${idPrefix}-analysis`}>
+                  <Input
+                    id={`${idPrefix}-analysis`}
+                    name="analysisVersionId"
+                    required
+                    value={analysisVersionId}
+                    onChange={(event) => {
+                      setAnalysisVersionId(event.target.value);
+                      setConfirmLocked(false);
+                    }}
+                    className={inputClass}
                   />
-                  <span>{messages.confirmed}</span>
-                </Label>
-              </div>
-              <div className="sm:col-span-2">
-                <Button type="submit" aria-disabled={pending} className={actionClass}>
-                  {pending ? messages.saving : messages.submit}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      </section>
+                </Field>
+                <Field label={messages.population} htmlFor={`${idPrefix}-population`}>
+                  <Input
+                    id={`${idPrefix}-population`}
+                    name="population"
+                    type="number"
+                    min={1}
+                    max={100000}
+                    step={1}
+                    required
+                    value={population}
+                    onChange={(event) => setPopulation(event.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label={messages.methodLabel} htmlFor={`${idPrefix}-method`}>
+                  <Input
+                    id={`${idPrefix}-method`}
+                    name="method"
+                    required
+                    maxLength={200}
+                    value={method}
+                    onChange={(event) => setMethod(event.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label={messages.fact} htmlFor={`${idPrefix}-fact`}>
+                  <select
+                    id={`${idPrefix}-fact`}
+                    name="fact"
+                    value={fact}
+                    onChange={(event) => setFact(event.target.value as FactState)}
+                    className={controlClass}
+                  >
+                    <option value="active">{messages.factActive}</option>
+                    <option value="expired">{messages.factExpired}</option>
+                    <option value="conflict">{messages.factConflict}</option>
+                  </select>
+                </Field>
+                <div className="flex flex-wrap items-end gap-4 pt-1 text-sm sm:col-span-2">
+                  <Label className="flex cursor-pointer items-center gap-2 font-normal">
+                    <input
+                      name="reviewed"
+                      type="checkbox"
+                      checked={reviewed}
+                      onChange={(event) => setReviewed(event.target.checked)}
+                      className={checkboxClass}
+                    />
+                    <span>{messages.reviewed}</span>
+                  </Label>
+                  <Label className="flex cursor-pointer items-center gap-2 font-normal">
+                    <input
+                      name="confirmed"
+                      type="checkbox"
+                      checked={confirmed}
+                      disabled={confirmLocked}
+                      onChange={(event) => setConfirmed(event.target.checked)}
+                      className={checkboxClass}
+                    />
+                    <span>{messages.confirmed}</span>
+                  </Label>
+                </div>
+                <div className="sm:col-span-2">
+                  <Button type="submit" aria-disabled={pending} className={actionClass}>
+                    {pending ? messages.saving : messages.submit}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </section>
+      )}
     </div>
   );
 }

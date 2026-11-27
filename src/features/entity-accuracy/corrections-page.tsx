@@ -9,7 +9,7 @@ import { brandIdSchema } from "../brands/contracts.ts";
 import { CorrectionsWorkspace } from "./corrections-workspace";
 import { entityRevisionUnavailable, readEntityRevisionWorkspace } from "./revisions";
 
-const knownErrors = ["disambiguationInvalid", "correctionInvalid", "SERVICE_UNAVAILABLE"] as const;
+const knownErrors = ["disambiguationInvalid", "correctionInvalid", "FORBIDDEN", "NOT_FOUND", "SERVICE_UNAVAILABLE"] as const;
 const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center";
 const relatedLinkClass = "inline-flex min-h-10 min-w-0 max-w-full items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 whitespace-normal [overflow-wrap:anywhere] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
@@ -70,7 +70,7 @@ export default async function EntityCorrectionsPage({
 
   const hasDisambiguations = result.board.disambiguations.length > 0;
   const hasCorrections = result.board.corrections.length > 0;
-  const primaryActions = hasCorrections ? (
+  const primaryActions = hasCorrections || !result.canWrite ? (
     <>
       <Button asChild className={actionClass}>
         <a href="#entity-correction-section">{messages.viewCorrections}</a>
@@ -121,7 +121,7 @@ export default async function EntityCorrectionsPage({
           <Link href={`${href}/entity-reviews`} prefetch={false} className={relatedLinkClass}>
             {messages.openReviews}
           </Link>
-          <Link href="/dashboard/monitoring/answers" prefetch={false} className={relatedLinkClass}>
+          <Link href={`/dashboard/monitoring/answers?brandId=${brandId.data}`} prefetch={false} className={relatedLinkClass}>
             {messages.openAnswers}
           </Link>
           <Link href={`${href}/facts`} prefetch={false} className={relatedLinkClass}>
@@ -136,6 +136,7 @@ export default async function EntityCorrectionsPage({
       <CorrectionsWorkspace
         key={session.user.id + brandId.data}
         brandId={brandId.data}
+        canWrite={result.canWrite}
         locale={locale}
         initialBoard={result.board}
         messages={messages}

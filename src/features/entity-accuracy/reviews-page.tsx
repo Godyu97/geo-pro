@@ -9,7 +9,7 @@ import { brandIdSchema } from "../brands/contracts.ts";
 import { entityReviewUnavailable, readEntityReviewWorkspace } from "./commands";
 import { ReviewsWorkspace } from "./reviews-workspace";
 
-const knownErrors = ["INVALID_INPUT", "NOT_FOUND", "SERVICE_UNAVAILABLE"] as const;
+const knownErrors = ["INVALID_INPUT", "FORBIDDEN", "NOT_FOUND", "SERVICE_UNAVAILABLE"] as const;
 const actionClass = "h-auto min-h-10 max-w-full whitespace-normal text-center";
 const relatedLinkClass = "inline-flex min-h-10 min-w-0 max-w-full items-center rounded-lg border bg-card px-3 py-2 text-left text-sm leading-5 whitespace-normal [overflow-wrap:anywhere] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
@@ -68,14 +68,16 @@ export default async function EntityReviewsPage({
     );
   }
 
-  const primaryActions = result.board.label === "sample" ? (
+  const primaryActions = result.board.label === "sample" || !result.canWrite ? (
     <>
       <Button asChild className={actionClass}>
         <a href="#entity-review-summary">{messages.viewSampleSummary}</a>
       </Button>
-      <Button asChild variant="outline" className={actionClass}>
-        <a href="#entity-review-form">{messages.appendReviewAction}</a>
-      </Button>
+      {result.canWrite && (
+        <Button asChild variant="outline" className={actionClass}>
+          <a href="#entity-review-form">{messages.appendReviewAction}</a>
+        </Button>
+      )}
     </>
   ) : (
     <Button asChild className={actionClass}>
@@ -105,7 +107,7 @@ export default async function EntityReviewsPage({
           <Link href={`${href}/entity-corrections`} prefetch={false} className={relatedLinkClass}>
             {messages.openCorrections}
           </Link>
-          <Link href="/dashboard/monitoring/answers" prefetch={false} className={relatedLinkClass}>
+          <Link href={`/dashboard/monitoring/answers?brandId=${brandId.data}`} prefetch={false} className={relatedLinkClass}>
             {messages.openAnswers}
           </Link>
           <Link href={`${href}/facts`} prefetch={false} className={relatedLinkClass}>
@@ -120,6 +122,7 @@ export default async function EntityReviewsPage({
       <ReviewsWorkspace
         key={session.user.id + brandId.data}
         brandId={brandId.data}
+        canWrite={result.canWrite}
         locale={locale}
         initialBoard={result.board}
         initialClaims={result.claims}

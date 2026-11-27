@@ -5,6 +5,8 @@ import { queryWithParameters, type QueryConnection, type QueryValue } from "../.
 import { brandIdSchema } from "../brands/contracts.ts";
 import { correctionActions, correctionEffects, reviewFactSchema } from "./contracts.ts";
 
+const savedEvidenceStates = `('complete', 'incomplete', 'contested')`;
+
 const reviewRow = z.object({
   id: brandIdSchema,
   brandId: brandIdSchema,
@@ -32,6 +34,18 @@ export function entityReviewListQuery(ownerId: string, brandId: string) {
       WHERE owner_id = ? AND brand_id = ?
       ORDER BY observation_id ASC, analysis_version_id ASC, created_at DESC, id DESC`,
     values: [ownerId, brandId] as QueryValue[],
+  };
+}
+
+export function entityReviewSamplesQuery(ownerId: string, brandId: string, analysisVersionIds: readonly string[]) {
+  return {
+    sql: `SELECT a.id AS "analysisVersionId", o.id AS "observationId"
+      FROM answer_analysis_version a
+      JOIN answer_observation o ON o.id = a.observation_id AND o.brand_id = a.brand_id
+      WHERE o.owner_id = ? AND o.brand_id = ?
+        AND o.evidence_state IN ${savedEvidenceStates}
+        AND a.id IN (${analysisVersionIds.map(() => "?").join(", ")})`,
+    values: [ownerId, brandId, ...analysisVersionIds] as QueryValue[],
   };
 }
 
@@ -74,6 +88,13 @@ export class EntityReviewDao {
   async reviewsForBrand(ownerId: string, brandId: string) {
     const query = entityReviewListQuery(ownerId, brandId);
     return z.array(reviewRow).parse(await queryWithParameters(this.db, query.sql, query.values));
+  }
+
+  async reviewSamples(ownerId: string, brandId: string, analysisVersionIds: readonly string[]) {
+    if (!analysisVersionIds.length) return [];
+    const query = entityReviewSamplesQuery(ownerId, brandId, analysisVersionIds);
+    const sample = z.object({ analysisVersionId: brandIdSchema, observationId: brandIdSchema });
+    return z.array(sample).parse(await queryWithParameters(this.db, query.sql, query.values));
   }
 }
 
@@ -190,8 +211,6 @@ const brandFactObservationRow = z.object({
 
 export type BrandFactObservationRow = z.infer<typeof brandFactObservationRow>;
 
-const savedEvidenceStates = `('complete', 'incomplete', 'contested')`;
-
 export function brandFactPromptSetIdQuery(ownerId: string, brandId: string) {
   return {
     sql: `SELECT DISTINCT r.prompt_set_id AS "promptSetId"
@@ -218,13 +237,13 @@ export function brandFactObservationQuery(
   ownerId: string,
   brandId: string,
   questionIds: readonly string[],
-  observationId?: string,
+  observationIds?: readonly string[],
 ) {
   const values: QueryValue[] = [ownerId, brandId, ...questionIds];
   let observationFilter = "";
-  if (observationId) {
-    observationFilter = " AND o.id = ?";
-    values.push(observationId);
+  if (observationIds) {
+    observationFilter = ` AND o.id IN (${observationIds.map(() => "?").join(", ")})`;
+    values.push(...observationIds);
   }
   return {
     sql: `SELECT o.id AS "observationId", o.question_text AS "questionText", o.answer_text AS "answerText",
@@ -242,7 +261,7 @@ export function brandFactObservationQuery(
         AND s.question_id IN (${questionIds.map(() => "?").join(", ")})
         ${observationFilter}
       ORDER BY o.captured_at DESC, o.id DESC
-      LIMIT 30`,
+      LIMIT ${observationIds?.length ?? 30}`,
     values,
   };
 }
@@ -266,9 +285,9 @@ export class BrandFactClaimDao {
     return z.array(promptContentRow).parse(await queryWithParameters(this.db, query.sql, query.values));
   }
 
-  async observations(ownerId: string, brandId: string, questionIds: readonly string[], observationId?: string) {
-    if (questionIds.length === 0) return [];
-    const query = brandFactObservationQuery(ownerId, brandId, questionIds, observationId);
+  async observations(ownerId: string, brandId: string, questionIds: readonly string[], observationIds?: readonly string[]) {
+    if (questionIds.length === 0 || observationIds?.length === 0) return [];
+    const query = brandFactObservationQuery(ownerId, brandId, questionIds, observationIds);
     return z.array(brandFactObservationRow).parse(await queryWithParameters(this.db, query.sql, query.values));
   }
 }

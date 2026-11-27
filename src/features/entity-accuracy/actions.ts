@@ -9,7 +9,7 @@ import { recordEntityReviews } from "./commands.ts";
 import { reviewFacts } from "./contracts.ts";
 import { confirmEntityDisambiguation, recordEntityCorrection } from "./revisions.ts";
 
-const pageErrors = new Set(["NOT_FOUND", "INVALID_INPUT"]);
+const pageErrors = new Set(["NOT_FOUND", "FORBIDDEN", "INVALID_INPUT"]);
 
 function finish(brandId: string, error?: string): never {
   const path = `/dashboard/brands/${brandId}/entity-reviews`;
@@ -38,7 +38,7 @@ export async function recordEntityReviewAction(formData: FormData) {
   finish(brandId.data, "error" in result ? result.error : undefined);
 }
 
-const correctionPageErrors = new Set(["NOT_FOUND", "disambiguationInvalid", "correctionInvalid"]);
+const correctionPageErrors = new Set(["NOT_FOUND", "FORBIDDEN", "disambiguationInvalid", "correctionInvalid"]);
 
 function finishCorrection(brandId: string, error?: string): never {
   const path = `/dashboard/brands/${brandId}/entity-corrections`;
