@@ -2600,6 +2600,7 @@ CREATE TABLE `image_asset_use` (
 	`content_version_id` text NOT NULL,
 	`asset_version` integer NOT NULL,
 	`created_at` text NOT NULL,
+	`superseded_at` text,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`asset_id`) REFERENCES `image_asset`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "image_asset_use_state_check" CHECK("image_asset_use"."asset_version" >= 1
@@ -2612,6 +2613,7 @@ CREATE TABLE `image_asset_use` (
 
 CREATE UNIQUE INDEX `image_asset_use_pair_uidx` ON `image_asset_use` (`asset_id`,`content_version_id`);
 CREATE INDEX `image_asset_use_asset_idx` ON `image_asset_use` (`asset_id`,`created_at`,`id`);
+CREATE INDEX `image_asset_use_content_idx` ON `image_asset_use` (`content_version_id`,`brand_id`) WHERE "image_asset_use"."superseded_at" is null;
 CREATE TABLE `intervention_batch` (
 	`id` text PRIMARY KEY NOT NULL,
 	`brand_id` text NOT NULL,

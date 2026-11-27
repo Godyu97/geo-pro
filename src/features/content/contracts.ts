@@ -46,8 +46,15 @@ export type ExportMode = z.infer<typeof exportModeSchema>;
 export const exportJobStatuses = ["queued", "ready", "failed"] as const;
 export const exportJobStatusSchema = z.enum(exportJobStatuses);
 
-export const preflightBlockerCodes = ["APPROVAL_REQUIRED", "FACT_INVALID", "LABELING_UNVERIFIED"] as const;
+export const preflightBlockerCodes = ["APPROVAL_REQUIRED", "FACT_INVALID", "LABELING_UNVERIFIED", "IMAGE_RIGHTS_INVALID"] as const;
 export type PreflightBlockerCode = (typeof preflightBlockerCodes)[number];
+
+export type InvalidImageAsset = {
+  id: string;
+  fileName: string;
+  version: number;
+  reason: "revoked" | "expired" | "version_changed";
+};
 
 export const defaultTargetChannel = "primary_page";
 export const defaultLabelingProfileVersion = "unverified";
@@ -118,6 +125,7 @@ export const contentErrors = {
   ASSET_TYPE_REJECTED: 415,
   ASSET_TOO_LARGE: 413,
   ASSET_UNREVIEWED: 422,
+  IMAGE_RIGHTS_INVALID: 422,
   EVIDENCE_TYPE_REJECTED: 415,
   EVIDENCE_TOO_LARGE: 413,
   SCREENSHOT_REQUIRED: 422,
@@ -138,6 +146,7 @@ const exportActionErrorCodes = [
   "FACT_INVALID",
   "APPROVAL_REQUIRED",
   "LABELING_UNVERIFIED",
+  "IMAGE_RIGHTS_INVALID",
   "OPERATION_CONFLICT",
   "SERVICE_UNAVAILABLE",
   "APPROVAL_INVALID",

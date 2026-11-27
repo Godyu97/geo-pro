@@ -4,20 +4,26 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { BrandDao } from "../../src/features/brands/dao.ts";
+import { expireImageAsset, readImageAsset, registerImageAsset, registerImageAssetUse, revokeImageAsset } from "../../src/features/asset-reuse/image-asset-commands.ts";
 import { PurgeDao } from "../../src/features/brands/purge-dao.ts";
 import { executeFactCommand } from "../../src/features/brand-facts/service.ts";
 import { emptyFields } from "../../src/features/brand-facts/rules.ts";
+import { publishChannelProfile } from "../../src/features/channel-variants/commands.ts";
 import {
+  approveChannelVariant,
   approveContent,
   confirmBrief,
   exportConfirm,
   exportPreflight,
   generateBatch,
   readContentVersion,
+  readChannelVariants,
   readDeliveryPackage,
+  readExportJob,
   registerAsset,
   rejectContent,
   saveBriefDraft,
+  saveChannelVariant,
   submitReview,
   updateVariant,
 } from "../../src/features/content/commands.ts";
@@ -201,7 +207,7 @@ async function setup(t, kind) {
       approveContent(db, who, base({ action: "approve-content", versionId }), clock),
     reject: (versionId, who = owner) =>
       rejectContent(db, who, base({ action: "reject-content", versionId }), clock),
-    asset: (patch, who = owner, brandId = brand) =>
+    asset: (patch, who = owner, brandId = brand, file) =>
       registerAsset(db, who, {
         action: "register-asset",
         brandId,
@@ -213,7 +219,7 @@ async function setup(t, kind) {
         reviewStatus: "approved",
         contentRef: "ref://public-image",
         ...patch,
-      }, clock),
+      }, clock, { ...packageOptions, file }),
     preflight: (versionIds, operationId = randomUUID(), mode = "auto", who = owner) =>
       exportPreflight(db, who, { action: "export-preflight", brandId: brand, operationId, versionIds, mode }, clock),
     confirm: (operationId, chosenVersionIds, who = owner) =>
@@ -567,6 +573,78 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(JSON.parse(read.files["manifest.json"]).nonPublishable, true);
     assert.equal(await count("content_delivery_package", "brand_id = ? AND kind = 'formal'", [ctx.brand]), 0);
     assert.equal(await count("content_delivery_package", "brand_id = ? AND kind = 'review' AND non_publishable = 1", [ctx.brand]), 1);
+  });
+
+  run("image rights block preflight and stale confirms until the image is replaced", async (t, ctx) => {
+    const { db, owner, outsider, brand, act, count } = ctx;
+    const { versionIds: [draft, clear] } = await ctx.drafts(["Image rights", "No image"]);
+    // Before public upload registration was linked, explicit ledger references were already stored.
+    const legacy = (await registerImageAsset(db, owner, { brandId: brand, fileName: "old.png", version: 3 }, time)).asset;
+    await registerImageAssetUse(db, owner, { brandId: brand, id: legacy.id, contentVersionId: draft }, time);
+    await act.approved(draft);
+    await act.approved(clear);
+    const channel = "zhihu";
+    const variantCommand = { brandId: brand, versionId: draft, channel, operationId: randomUUID() };
+    const { version: profile } = await publishChannelProfile(db, owner, {
+      brandId: brand, channelKey: channel, maxCharacters: null, note: "Channel image rights fixture",
+    }, clock);
+    const { version } = await readContentVersion(db, owner, draft);
+    await saveChannelVariant(db, owner, {
+      action: "save-channel-variant", ...variantCommand, bodyMarkdown: version.bodyMarkdown, profileVersionId: profile.id,
+    }, clock);
+    const originalVariantApproval = await approveChannelVariant(db, owner, {
+      action: "approve-channel-variant", ...variantCommand,
+    }, clock);
+    assert.equal((await readChannelVariants(db, owner, draft)).variants[0].rejection, null);
+    const issued = await act.preflight([draft], randomUUID(), "formal");
+    const old = await act.confirm(issued.operationId, [draft]);
+    const stale = await act.preflight([draft, clear], randomUUID(), "formal");
+
+    const closed = await revokeImageAsset(db, owner, { brandId: brand, id: legacy.id }, time);
+    assert.equal(closed.todos.length, 1);
+    const expected = [{ id: legacy.id, fileName: "old.png", version: 3, reason: "revoked" }];
+    const pre = await act.preflight([draft, clear], randomUUID(), "formal");
+    assert.deepEqual(pre.eligibleVersionIds, [clear]);
+    assert.deepEqual(pre.items[0].invalidImageAssets, expected);
+    assert.deepEqual((await readExportJob(db, owner, brand, stale.operationId)).items[0].invalidImageAssets, expected);
+    assert.deepEqual((await readChannelVariants(db, owner, draft)).invalidImageAssets, expected);
+
+    const denied = await act.confirm(stale.operationId, [draft, clear]);
+    assert.equal(denied.error, "IMAGE_RIGHTS_INVALID");
+    assert.deepEqual(denied.blockers[0].invalidImageAssets, expected);
+    assert.equal(await count("content_delivery_package"), 1);
+    assert.equal((await act.readPackage(old.packages[0].id)).package.doNotReuse, true);
+    assert.deepEqual((await act.confirm(pre.operationId, [clear])).packages.map((pkg) => pkg.contentVersionId), [clear]);
+    assert.deepEqual(await readExportJob(db, outsider, brand, stale.operationId), { error: "NOT_FOUND" });
+
+    const replacement = (await act.asset({}, owner, brand, {
+      fileName: "replacement.png", contentType: "image/png", body: Buffer.from("isolated image fixture"),
+    })).asset;
+    assert.equal((await act.update(draft, { imageAssetIds: [replacement.id] })).status, "invalidated");
+    assert.equal((await act.preflight([draft], randomUUID(), "formal")).items[0].blockers[0], "APPROVAL_REQUIRED");
+    await act.approved(draft);
+    assert.equal((await act.confirm(stale.operationId, [draft])).error, "PREFLIGHT_REQUIRED");
+    assert.equal((await readChannelVariants(db, owner, draft)).variants[0].rejection, "variant_unapproved");
+    const variantReapproval = await approveChannelVariant(db, owner, {
+      action: "approve-channel-variant", ...variantCommand,
+    }, clock);
+    assert.notEqual(variantReapproval.approvalId, originalVariantApproval.approvalId);
+    const next = await act.preflight([draft], randomUUID(), "formal");
+    const confirmed = await Promise.all([
+      act.confirm(next.operationId, [draft]),
+      act.confirm(next.operationId, [draft]),
+    ]);
+    assert.deepEqual(confirmed.map((result) => result.replayed).sort(), [false, true]);
+    assert.equal(confirmed[0].packages[0].id, confirmed[1].packages[0].id);
+    const delivery = await act.readPackage(confirmed[0].packages[0].id);
+    assert.deepEqual(JSON.parse(delivery.files["public-images.json"]).images.map((image) => image.id), [replacement.id]);
+    assert.equal((await readImageAsset(db, owner, { brandId: brand, id: legacy.id })).todos.length, 1);
+    assert.equal((await readImageAsset(db, owner, { brandId: brand, id: replacement.id })).uses[0].assetVersion, 1);
+
+    await expireImageAsset(db, owner, { brandId: brand, id: replacement.id }, time);
+    const review = await act.preflight([draft], randomUUID(), "review");
+    assert.equal(review.items[0].invalidImageAssets[0].reason, "expired");
+    assert.equal(await count("content_delivery_package"), 3);
   });
 
   run("non-owners and foreign assets get NOT_FOUND without leaking content", async (t, ctx) => {

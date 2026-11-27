@@ -72,6 +72,7 @@ export type ImageAssetUseView = {
   contentVersionId: string;
   assetVersion: number;
   createdAt: string;
+  supersededAt?: string;
 };
 
 export type ImageAssetTodoView = {

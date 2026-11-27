@@ -25,6 +25,7 @@ const linkRowSchema = z.object({
   contentVersionId: brandIdSchema,
   assetVersion: versionSchema,
   createdAt: timeSchema,
+  supersededAt: timeSchema.nullable(),
   todoId: brandIdSchema.nullable(),
   todoCreatedAt: timeSchema.nullable(),
 });
@@ -65,14 +66,14 @@ const assetColumns = `id, brand_id AS "brandId", version, rights_status AS "righ
   file_name AS "fileName", byte_size AS "byteSize", created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 const linkColumns = `u.id AS "id", u.asset_id AS "assetId", u.content_version_id AS "contentVersionId",
-  u.asset_version AS "assetVersion", u.created_at AS "createdAt",
+  u.asset_version AS "assetVersion", u.created_at AS "createdAt", u.superseded_at AS "supersededAt",
   t.id AS "todoId", t.created_at AS "todoCreatedAt"`;
 
 export function ownedImageAssetsQuery(ownerId: string, brandId: string, limit = imageAssetLimit) {
   return {
     sql: `SELECT ${assetColumns} FROM image_asset
       WHERE owner_id = ? AND brand_id = ?
-      ORDER BY created_at, id
+      ORDER BY created_at DESC, id DESC
       LIMIT ?`,
     values: [ownerId, brandId, limit] as QueryValue[],
   };
@@ -112,6 +113,67 @@ export async function loadOwnedImageAsset(db: QueryConnection, ownerId: string, 
   return row ? assetRowSchema.parse(row) : null;
 }
 
+export async function loadImageAssetsByIds(db: QueryConnection, ownerId: string, brandId: string, ids: string[]) {
+  if (ids.length === 0) return [];
+  const rows = await queryWithParameters(db,
+    `SELECT ${assetColumns} FROM image_asset
+      WHERE owner_id = ? AND brand_id = ? AND id IN (${ids.map(() => "?").join(", ")})`,
+    [ownerId, brandId, ...ids],
+  );
+  return z.array(assetRowSchema).parse(rows);
+}
+
+const activeImageUseSchema = z.object({
+  id: brandIdSchema,
+  contentVersionId: brandIdSchema,
+  version: versionSchema,
+  assetVersion: versionSchema,
+  fileName: assetRowSchema.shape.fileName,
+  rightsStatus: assetRowSchema.shape.rightsStatus,
+});
+
+export function activeImageUsesQuery(ownerId: string, brandId: string, versionIds: string[]) {
+  return {
+    sql: `SELECT a.id, u.content_version_id AS "contentVersionId", a.version,
+        u.asset_version AS "assetVersion", a.file_name AS "fileName", a.rights_status AS "rightsStatus"
+      FROM image_asset_use u JOIN image_asset a ON a.id = u.asset_id AND a.brand_id = u.brand_id
+      WHERE u.content_version_id IN (${versionIds.map(() => "?").join(", ")})
+        AND u.brand_id = ? AND a.owner_id = ? AND u.superseded_at IS NULL
+      ORDER BY u.content_version_id, a.file_name, a.id`,
+    values: [...versionIds, brandId, ownerId],
+  };
+}
+
+export async function activeImageUses(db: QueryConnection, ownerId: string, brandId: string, versionIds: string[]) {
+  if (versionIds.length === 0) return [];
+  const { sql, values } = activeImageUsesQuery(ownerId, brandId, versionIds);
+  return z.array(activeImageUseSchema).parse(await queryWithParameters(db, sql, values));
+}
+
+export async function supersedeImageUses(
+  db: QueryConnection, brandId: string, versionId: string, assetIds: string[], now: string,
+) {
+  if (assetIds.length === 0) return;
+  await queryWithParameters(db,
+    `UPDATE image_asset_use SET superseded_at = ?
+      WHERE brand_id = ? AND content_version_id = ? AND superseded_at IS NULL
+        AND asset_id IN (${assetIds.map(() => "?").join(", ")})`,
+    [now, brandId, versionId, ...assetIds],
+  );
+}
+
+export async function markImagePackagesDoNotReuse(db: QueryConnection, ownerId: string, brandId: string, assetId: string) {
+  await queryWithParameters(db,
+    `UPDATE content_delivery_package SET do_not_reuse = 1
+      WHERE owner_id = ? AND brand_id = ? AND do_not_reuse = 0
+        AND content_version_id IN (
+          SELECT content_version_id FROM image_asset_use
+          WHERE asset_id = ? AND brand_id = ? AND superseded_at IS NULL
+        )`,
+    [ownerId, brandId, assetId, brandId],
+  );
+}
+
 export async function listOwnedImageAssets(db: QueryConnection, ownerId: string, brandId: string) {
   const query = ownedImageAssetsQuery(ownerId, brandId);
   return z.array(assetRowSchema).parse(await queryWithParameters(db, query.sql, query.values));
@@ -138,22 +200,6 @@ export async function listImageAssetLinksForAsset(db: QueryConnection, assetId: 
   return z.array(linkRowSchema).parse(await queryWithParameters(db, query.sql, query.values));
 }
 
-export async function findImageAssetUse(db: QueryConnection, assetId: string, contentVersionId: string) {
-  const [row] = await queryWithParameters(
-    db,
-    `SELECT id, content_version_id AS "contentVersionId", asset_version AS "assetVersion", created_at AS "createdAt"
-      FROM image_asset_use WHERE asset_id = ? AND content_version_id = ?`,
-    [assetId, contentVersionId],
-  );
-  if (!row) return null;
-  return z.object({
-    id: brandIdSchema,
-    contentVersionId: brandIdSchema,
-    assetVersion: versionSchema,
-    createdAt: timeSchema,
-  }).parse(row);
-}
-
 export async function contentVersionOwnedBy(db: QueryConnection, ownerId: string, brandId: string, id: string) {
   const [row] = await queryWithParameters(
     db,
@@ -168,6 +214,7 @@ export async function insertImageAssetUse(db: QueryConnection, row: ImageAssetUs
     db,
     `INSERT INTO image_asset_use (id, asset_id, brand_id, content_version_id, asset_version, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (asset_id, content_version_id) DO UPDATE SET superseded_at = NULL
       RETURNING id, content_version_id AS "contentVersionId", asset_version AS "assetVersion", created_at AS "createdAt"`,
     [row.id, row.assetId, row.brandId, row.contentVersionId, row.assetVersion, row.createdAt],
   );

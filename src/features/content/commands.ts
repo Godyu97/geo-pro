@@ -15,6 +15,13 @@ import type { BrandAccessAction } from "../team-access/rules.ts";
 import { FactDao } from "../brand-facts/dao.ts";
 import { factGaps, factStatus } from "../brand-facts/rules.ts";
 import { withEligibleFacts } from "../brand-facts/service.ts";
+import {
+  activeImageUses,
+  insertImageAsset,
+  insertImageAssetUse,
+  loadImageAssetsByIds,
+  supersedeImageUses,
+} from "../asset-reuse/image-asset-dao.ts";
 import { OptimizationDao } from "../optimization/dao.ts";
 import { applyQuotaLedger, grantState } from "../quotas/ledger.ts";
 import { QuotaDao } from "../quotas/dao.ts";
@@ -32,6 +39,7 @@ import {
   type ExportConfirmInput,
   type ExportMode,
   type ExportPreflightInput,
+  type InvalidImageAsset,
   type SaveChannelVariantInput,
   type GenerateBatchInput,
   type MarkPublicationRemovedInput,
@@ -99,7 +107,7 @@ import {
 } from "./verify.ts";
 
 type Clock = () => string;
-export type ExportBlocker = { versionId: string; codes: PreflightBlockerCode[] };
+export type ExportBlocker = { versionId: string; codes: PreflightBlockerCode[]; invalidImageAssets?: InvalidImageAsset[] };
 type Failure = {
   error: ContentError;
   gaps?: Array<{ code: string }>;
@@ -1080,7 +1088,7 @@ export async function readContentVersion(
   if (!brand) return denied("NOT_FOUND");
   const restricted = scope?.role === "read_only";
   const readOnlyReason: "grant" | "archived" | null = restricted ? "grant" : brand.status === "archived" ? "archived" : null;
-  const [approvals, packageRows, assets, publications, publicationPredecessors] = await Promise.all([
+  const [approvals, packageRows, assets, publications, publicationPredecessors, imageUses] = await Promise.all([
     dao.listApprovals(ownerId, version.id),
     restricted ? [] : dao.listPackagesForVersion(ownerId, version.id),
     restricted ? [] : dao.getAssetsByIds(ownerId, version.brandId, parseIds(version.imageAssetIdsJson)),
@@ -1088,6 +1096,7 @@ export async function readContentVersion(
     actorId === ownerId && brand.status === "active" && version.status === "approved"
       ? dao.listPublicationPredecessors(ownerId, version.brandId, 30)
       : [],
+    restricted ? [] : activeImageUses(db, ownerId, version.brandId, [version.id]),
   ]);
   const currentFingerprint = versionFingerprint(version);
   return {
@@ -1095,6 +1104,7 @@ export async function readContentVersion(
     approvals,
     packages: packageRows.map(summarizePackage),
     assets,
+    imageUses,
     publications,
     publicationPredecessors,
     currentFingerprint,
@@ -1405,16 +1415,39 @@ export async function updateVariant(
   input: UpdateVariantInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "write", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   return locked(db, ownerId, async (transaction) => {
     if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
     const dao = new ContentDao(transaction);
     const version = await ownedVersion(dao, ownerId, input.brandId, input.versionId);
     if (!version) return denied("NOT_FOUND");
 
-    const imageAssetIds = input.imageAssetIds ? [...new Set(input.imageAssetIds)] : parseIds(version.imageAssetIdsJson);
+    let imageAssetIds = parseIds(version.imageAssetIdsJson);
+    let removedImageUses: string[] = [];
+    const now = clock();
     if (input.imageAssetIds) {
-      const found = await dao.getAssetsByIds(ownerId, input.brandId, imageAssetIds);
-      if (found.length !== imageAssetIds.length) return denied("NOT_FOUND");
+      const selected = [...new Set(input.imageAssetIds)];
+      const [assets, ledger, current] = await Promise.all([
+        dao.getAssetsByIds(ownerId, input.brandId, selected),
+        loadImageAssetsByIds(transaction, ownerId, input.brandId, selected),
+        activeImageUses(transaction, ownerId, input.brandId, [version.id]),
+      ]);
+      const contentIds = new Set(assets.map((asset) => asset.id));
+      const currentIds = new Set(current.map((asset) => asset.id));
+      if (selected.some((id) => !contentIds.has(id) && !currentIds.has(id))) return denied("NOT_FOUND");
+      const newUses = ledger.filter((asset) => !currentIds.has(asset.id));
+      if (newUses.some((asset) => asset.rightsStatus !== "active")) return denied("IMAGE_RIGHTS_INVALID");
+      for (const asset of newUses) {
+        await insertImageAssetUse(transaction, {
+          id: randomUUID(), assetId: asset.id, brandId: input.brandId,
+          contentVersionId: version.id, assetVersion: asset.version, createdAt: now,
+        });
+      }
+      removedImageUses = current.filter((asset) => !selected.includes(asset.id)).map((asset) => asset.id);
+      await supersedeImageUses(transaction, input.brandId, version.id, removedImageUses, now);
+      imageAssetIds = selected.filter((id) => contentIds.has(id));
     }
     const next: ContentVersionRow = {
       ...version,
@@ -1425,15 +1458,18 @@ export async function updateVariant(
       labelingProfileStatus: input.labelingProfileStatus ?? version.labelingProfileStatus,
       imageAssetIdsJson: JSON.stringify(imageAssetIds),
     };
-    if (versionFingerprint(next) === versionFingerprint(version)) {
+    if (versionFingerprint(next) === versionFingerprint(version) && removedImageUses.length === 0) {
       return { versionId: version.id, status: version.status, changed: false, invalidated: false };
     }
 
     // Any variant change voids an approval; old approvals and packages stay readable.
     const invalidated = version.status === "approved";
     const status = invalidated ? "invalidated" as const : version.status;
-    await dao.updateContentVersionVariant({ ...next, status, updatedAt: clock() });
-    if (invalidated) await dao.markPackagesDoNotReuse(ownerId, version.id, null);
+    await dao.updateContentVersionVariant({ ...next, status, updatedAt: now });
+    if (next.imageAssetIdsJson !== version.imageAssetIdsJson || removedImageUses.length > 0) {
+      await dao.invalidateChannelApprovalsForVersion(ownerId, version.id, now);
+    }
+    await dao.markPackagesDoNotReuse(ownerId, version.id, null);
     return { versionId: version.id, status, changed: true, invalidated };
   });
 }
@@ -1471,13 +1507,17 @@ export async function registerAsset(
   clock: Clock = () => new Date().toISOString(),
   options: RegisterAssetOptions = {},
 ) {
+  const adopted = await adoptOwner(db, ownerId, input.brandId, "write", clock());
+  if (!adopted) return denied("NOT_FOUND");
+  ownerId = adopted;
   if (!await activeBrand(db, ownerId, input.brandId)) return denied("NOT_FOUND");
   const file = options.file;
   const internal = input.visibility === "internal";
   let storedObjectId: string | null = null;
+  const fileName = file ? sanitizeObjectFileName(file.fileName) : undefined;
   if (file) {
     if (!input.source.trim() || !input.rightsStatement.trim() || !input.kind.trim()) return denied("INVALID_INPUT");
-    if (!sanitizeObjectFileName(file.fileName)) return denied("INVALID_INPUT");
+    if (!fileName) return denied("INVALID_INPUT");
     if (!(file.body instanceof Uint8Array) || file.body.byteLength < 1) return denied("INVALID_INPUT");
     if (file.body.byteLength > MAX_STORED_OBJECT_BYTES) return denied("ASSET_TOO_LARGE");
     if (!deliverableImageTypes.has(file.contentType)) return denied("ASSET_TYPE_REJECTED");
@@ -1486,7 +1526,7 @@ export async function registerAsset(
       brandId: input.brandId,
       class: internal ? "internal-material" : "authorized-media",
       visibility: internal ? "internal" : "public",
-      fileName: file.fileName,
+      fileName,
       contentType: file.contentType,
       body: file.body,
     }, {
@@ -1511,8 +1551,24 @@ export async function registerAsset(
     fingerprint: assetFingerprint(input, storedObjectId),
     createdAt: clock(),
   };
-  await new ContentDao(db).insertAsset(asset);
-  return { asset };
+  return locked(db, ownerId, async (transaction) => {
+    if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+    await new ContentDao(transaction).insertAsset(asset);
+    if (file && fileName && !internal) {
+      await insertImageAsset(transaction, {
+        id: asset.id, brandId: input.brandId, ownerId, version: 1,
+        fileName, byteSize: file.body.byteLength, createdAt: asset.createdAt,
+      });
+    }
+    return { asset };
+  });
+}
+
+export async function readRegisteredAsset(db: DatabaseConnection, ownerId: string, brandId: string, assetId: string) {
+  const adopted = await adoptOwner(db, ownerId, brandId, "write");
+  if (!adopted || !await activeBrand(db, adopted, brandId)) return null;
+  const [asset] = await new ContentDao(db).getAssetsByIds(adopted, brandId, [assetId]);
+  return asset ?? null;
 }
 
 function packageStoredMedia(row: StoredObjectRow | undefined): PackageStoredMedia | null {
@@ -1538,10 +1594,57 @@ type PreflightItem = {
   kind: PackageKind;
   blockers: PreflightBlockerCode[];
   invalidFactVersionIds: string[];
+  invalidImageAssets?: InvalidImageAsset[];
+  deliveryFingerprint?: string;
   eligible: boolean;
 };
 
 type ExportSelection = { versionIds: string[]; mode: ExportMode };
+
+async function invalidImagesByVersion(db: QueryConnection, ownerId: string, brandId: string, versionIds: string[]) {
+  return groupInvalidImages(await activeImageUses(db, ownerId, brandId, versionIds));
+}
+
+function groupInvalidImages(uses: Awaited<ReturnType<typeof activeImageUses>>) {
+  const byVersion = new Map<string, InvalidImageAsset[]>();
+  for (const asset of uses) {
+    if (asset.rightsStatus === "active" && asset.assetVersion === asset.version) continue;
+    const item: InvalidImageAsset = {
+      id: asset.id, fileName: asset.fileName, version: asset.assetVersion,
+      reason: asset.rightsStatus === "active" ? "version_changed" : asset.rightsStatus,
+    };
+    const existing = byVersion.get(asset.contentVersionId);
+    if (existing) existing.push(item);
+    else byVersion.set(asset.contentVersionId, [item]);
+  }
+  return byVersion;
+}
+
+function withCurrentImageBlockers(items: PreflightItem[], images: ReadonlyMap<string, InvalidImageAsset[]>) {
+  return items.map((item) => {
+    const invalidImageAssets = images.get(item.versionId);
+    if (!invalidImageAssets) return item;
+    const blockers = item.blockers.includes("IMAGE_RIGHTS_INVALID")
+      ? item.blockers
+      : [...item.blockers, "IMAGE_RIGHTS_INVALID" as const];
+    return { ...item, blockers, invalidImageAssets, eligible: false };
+  });
+}
+
+function exportBlocker(item: PreflightItem): ExportBlocker {
+  return {
+    versionId: item.versionId,
+    codes: item.blockers,
+    ...(item.invalidImageAssets ? { invalidImageAssets: item.invalidImageAssets } : {}),
+  };
+}
+
+async function imageDeliveryFailure(db: QueryConnection, ownerId: string, brandId: string, versionId: string) {
+  const invalid = (await invalidImagesByVersion(db, ownerId, brandId, [versionId])).get(versionId);
+  return invalid
+    ? denied("IMAGE_RIGHTS_INVALID", undefined, [{ versionId, codes: ["IMAGE_RIGHTS_INVALID"], invalidImageAssets: invalid }])
+    : null;
+}
 
 async function computePreflight(
   db: QueryConnection,
@@ -1552,23 +1655,35 @@ async function computePreflight(
   now: string,
 ): Promise<PreflightItem[]> {
   const dao = new ContentDao(db);
-  const approvals = await dao.listApprovalsForVersions(ownerId, versions.map((version) => version.id));
+  const versionIds = versions.map((version) => version.id);
   const factIds = [...new Set(versions.flatMap((version) => parseIds(version.factVersionIdsJson)))];
-  const facts = factIds.length ? await new FactDao(db, { ownerId, brandId }).versionsById(factIds) : [];
+  const [approvals, facts, imageUses] = await Promise.all([
+    dao.listApprovalsForVersions(ownerId, versionIds),
+    factIds.length ? new FactDao(db, { ownerId, brandId }).versionsById(factIds) : [],
+    activeImageUses(db, ownerId, brandId, versionIds),
+  ]);
+  const imagePins = new Map<string, [string, number][]>();
+  for (const use of imageUses) {
+    const pin: [string, number] = [use.id, use.assetVersion];
+    const current = imagePins.get(use.contentVersionId);
+    if (current) current.push(pin);
+    else imagePins.set(use.contentVersionId, [pin]);
+  }
   const today = now.slice(0, 10);
   const usable = new Set(facts
     .filter((fact) => factStatus(fact, today) === "approved" && factGaps(fact.fields, today).length === 0)
     .map((fact) => fact.id));
 
-  return versions.map((version) => {
+  const items = versions.map((version) => {
     const ids = parseIds(version.factVersionIdsJson);
     const invalid = ids.length ? ids.filter((id) => !usable.has(id)) : ["unbound"];
     const kind = resolveExportKind(mode, version.labelingProfileStatus);
+    const currentFingerprint = versionFingerprint(version);
     const blockers = preflightBlockers({
       kind,
       status: version.status,
       labelingStatus: version.labelingProfileStatus,
-      currentFingerprint: versionFingerprint(version),
+      currentFingerprint,
       approvedFingerprints: approvals
         .filter((approval) => approval.contentVersionId === version.id)
         .map((approval) => approval.contentFingerprint),
@@ -1583,9 +1698,13 @@ async function computePreflight(
       kind,
       blockers,
       invalidFactVersionIds: invalid,
+      deliveryFingerprint: createHash("sha256")
+        .update(JSON.stringify([currentFingerprint, imagePins.get(version.id) ?? []]))
+        .digest("hex"),
       eligible: blockers.length === 0,
     };
   });
+  return withCurrentImageBlockers(items, groupInvalidImages(imageUses));
 }
 
 function sameSelection(a: ExportSelection, b: ExportSelection) {
@@ -1601,77 +1720,80 @@ export async function exportPreflight(
   const adopted = await adoptOwner(db, ownerId, input.brandId, "download", clock());
   if (!adopted) return denied("NOT_FOUND");
   ownerId = adopted;
-  if (!await activeBrand(db, ownerId, input.brandId)) return denied("NOT_FOUND");
-  const dao = new ContentDao(db);
-  const found = await dao.getContentVersionsByIds(ownerId, input.brandId, input.versionIds);
-  if (found.length !== input.versionIds.length) return denied("NOT_FOUND");
-  const byId = new Map(found.map((version) => [version.id, version]));
-  const versions = input.versionIds.map((id) => byId.get(id)!);
+  return locked(db, ownerId, async (transaction) => {
+    if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+    const dao = new ContentDao(transaction);
+    const found = await dao.getContentVersionsByIds(ownerId, input.brandId, input.versionIds);
+    if (found.length !== input.versionIds.length) return denied("NOT_FOUND");
+    const byId = new Map(found.map((version) => [version.id, version]));
+    const versions = input.versionIds.map((id) => byId.get(id)!);
 
-  const selection: ExportSelection = { versionIds: input.versionIds, mode: input.mode };
-  const existing = await dao.getExportJobByOperation(ownerId, input.brandId, input.operationId);
-  if (existing) {
-    if (!sameSelection(JSON.parse(existing.selectionJson) as ExportSelection, selection)) {
-      return denied("OPERATION_CONFLICT");
+    const selection: ExportSelection = { versionIds: input.versionIds, mode: input.mode };
+    const existing = await dao.getExportJobByOperation(ownerId, input.brandId, input.operationId);
+    if (existing) {
+      if (!sameSelection(JSON.parse(existing.selectionJson) as ExportSelection, selection)) {
+        return denied("OPERATION_CONFLICT");
+      }
+      if (existing.status === "ready") {
+        const stored = JSON.parse(existing.preflightJson) as { items: PreflightItem[]; eligibleVersionIds: string[] };
+        const images = await invalidImagesByVersion(transaction, ownerId, input.brandId, input.versionIds);
+        return {
+          jobId: existing.id,
+          operationId: existing.operationId,
+          status: existing.status,
+          items: withCurrentImageBlockers(stored.items, images),
+          eligibleVersionIds: stored.eligibleVersionIds.filter((id) => !images.has(id)),
+          replayed: true,
+        };
+      }
     }
-    if (existing.status === "ready") {
-      const stored = JSON.parse(existing.preflightJson) as { items: PreflightItem[]; eligibleVersionIds: string[] };
-      return {
-        jobId: existing.id,
-        operationId: existing.operationId,
-        status: existing.status,
-        items: stored.items,
-        eligibleVersionIds: stored.eligibleVersionIds,
-        replayed: true,
-      };
-    }
-  }
 
-  const now = clock();
-  const items = await computePreflight(db, ownerId, input.brandId, versions, input.mode, now);
-  const eligibleVersionIds = items.filter((item) => item.eligible).map((item) => item.versionId);
-  const preflightJson = JSON.stringify({ items, eligibleVersionIds, checkedAt: now });
-  let jobId: string;
-  if (existing) {
-    jobId = existing.id;
-    await dao.updateExportJob({
-      id: existing.id,
-      status: "queued",
-      selectionJson: JSON.stringify(selection),
-      preflightJson,
-      chosenSubsetJson: "[]",
-      resultPackageIdsJson: "[]",
-      error: null,
-      updatedAt: now,
-    });
-  } else {
-    jobId = randomUUID();
-    await dao.insertExportJob({
-      id: jobId,
-      brandId: input.brandId,
-      ownerId,
+    const now = clock();
+    const items = await computePreflight(transaction, ownerId, input.brandId, versions, input.mode, now);
+    const eligibleVersionIds = items.filter((item) => item.eligible).map((item) => item.versionId);
+    const preflightJson = JSON.stringify({ items, eligibleVersionIds, checkedAt: now });
+    let jobId: string;
+    if (existing) {
+      jobId = existing.id;
+      await dao.updateExportJob({
+        id: existing.id,
+        status: "queued",
+        selectionJson: JSON.stringify(selection),
+        preflightJson,
+        chosenSubsetJson: "[]",
+        resultPackageIdsJson: "[]",
+        error: null,
+        updatedAt: now,
+      });
+    } else {
+      jobId = randomUUID();
+      await dao.insertExportJob({
+        id: jobId,
+        brandId: input.brandId,
+        ownerId,
+        operationId: input.operationId,
+        status: "queued",
+        selectionJson: JSON.stringify(selection),
+        preflightJson,
+        chosenSubsetJson: "[]",
+        resultPackageIdsJson: "[]",
+        error: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    return {
+      jobId,
       operationId: input.operationId,
-      status: "queued",
-      selectionJson: JSON.stringify(selection),
-      preflightJson,
-      chosenSubsetJson: "[]",
-      resultPackageIdsJson: "[]",
-      error: null,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-  return {
-    jobId,
-    operationId: input.operationId,
-    status: "queued" as const,
-    items,
-    eligibleVersionIds,
-    replayed: false,
-  };
+      status: "queued" as const,
+      items,
+      eligibleVersionIds,
+      replayed: false,
+    };
+  });
 }
 
-type AssembleResult = { ok: true; row: PackageRow } | { ok: false; error: ContentError };
+type AssembleResult = { ok: true; row: PackageRow } | ({ ok: false } & Failure);
 
 function storageCommandOptions(options: ObjectCommandOptions) {
   return {
@@ -1894,95 +2016,116 @@ export async function exportConfirm(
   const adopted = await adoptOwner(db, ownerId, input.brandId, "download", clock());
   if (!adopted) return denied("NOT_FOUND");
   ownerId = adopted;
-  if (!await activeBrand(db, ownerId, input.brandId)) return denied("NOT_FOUND");
-  const dao = new ContentDao(db);
-  const job = await dao.getExportJobByOperation(ownerId, input.brandId, input.operationId);
-  if (!job) return denied("PREFLIGHT_REQUIRED");
+  return locked(db, ownerId, async (transaction) => {
+    if (!await activeBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+    const dao = new ContentDao(transaction);
+    const job = await dao.getExportJobByOperation(ownerId, input.brandId, input.operationId);
+    if (!job) return denied("PREFLIGHT_REQUIRED");
 
-  const chosen = input.chosenVersionIds;
-  if (job.status === "ready") {
-    const previous = parseIds(job.chosenSubsetJson);
-    if ([...previous].sort().join() !== [...chosen].sort().join()) return denied("OPERATION_CONFLICT");
-    const rows = await dao.getPackagesByIds(ownerId, input.brandId, parseIds(job.resultPackageIdsJson));
+    const chosen = input.chosenVersionIds;
+    if (job.status === "ready") {
+      const previous = parseIds(job.chosenSubsetJson);
+      if ([...previous].sort().join() !== [...chosen].sort().join()) return denied("OPERATION_CONFLICT");
+      const rows = await dao.getPackagesByIds(ownerId, input.brandId, parseIds(job.resultPackageIdsJson));
+      return {
+        jobId: job.id,
+        operationId: job.operationId,
+        status: "ready" as const,
+        packages: rows.map(summarizePackage),
+        replayed: true,
+      };
+    }
+
+    const selection = JSON.parse(job.selectionJson) as ExportSelection;
+    const stored = JSON.parse(job.preflightJson) as { items: PreflightItem[]; eligibleVersionIds: string[] };
+    const subset = validateExportSubset(selection.versionIds, stored.eligibleVersionIds, chosen);
+    if (!subset.ok) {
+      return denied("SUBSET_INVALID", undefined, subset.invalid.map((versionId) => {
+        const item = stored.items.find((item) => item.versionId === versionId);
+        return item?.invalidImageAssets ? exportBlocker(item) : { versionId, codes: [] };
+      }));
+    }
+
+    // Re-run the gates on the chosen subset: facts or approvals may have changed since preflight.
+    const found = await dao.getContentVersionsByIds(ownerId, input.brandId, chosen);
+    if (found.length !== chosen.length) return denied("NOT_FOUND");
+    const byId = new Map(found.map((version) => [version.id, version]));
+    const now = clock();
+    const items = await computePreflight(
+      transaction, ownerId, input.brandId, chosen.map((id) => byId.get(id)!), selection.mode, now,
+    );
+    const blocked = items.filter((item) => !item.eligible);
+    if (blocked.length) {
+      return denied(
+        blocked.some((item) => item.invalidImageAssets) ? "IMAGE_RIGHTS_INVALID" : blocked[0].blockers[0],
+        undefined,
+        blocked.map(exportBlocker),
+      );
+    }
+    const checked = new Map(stored.items.map((item) => [item.versionId, item.deliveryFingerprint]));
+    if (items.some((item) => item.deliveryFingerprint !== checked.get(item.versionId))) {
+      return denied("PREFLIGHT_REQUIRED");
+    }
+
+    const previous = job.status === "failed"
+      ? await dao.getPackagesByIds(ownerId, input.brandId, parseIds(job.resultPackageIdsJson))
+      : [];
+    const created: PackageRow[] = [];
+    let failure: Failure | null = null;
+    for (const item of items) {
+      const version = byId.get(item.versionId)!;
+      const reusable = previous.find((row) => row.contentVersionId === item.versionId
+        && row.kind === item.kind && row.doNotReuse === 0 && row.contentFingerprint === versionFingerprint(version));
+      if (reusable) {
+        created.push(reusable);
+        continue;
+      }
+      let result: AssembleResult;
+      if (item.kind === "formal") {
+        const gate = await withEligibleFacts(
+          db,
+          { ownerId, brandId: input.brandId },
+          { factVersionIds: parseIds(version.factVersionIdsJson), contentVersionId: version.id, stage: "delivery" },
+          (transaction) => assemblePackage(
+            transaction, db, ownerId, input.brandId, version.id, "formal", now, { ...options, connection: transaction },
+          ),
+          () => new Date(now),
+          transaction,
+        );
+        result = "error" in gate
+          ? { ok: false, error: factFailure(gate).error }
+          : gate.data;
+      } else {
+        result = await assemblePackage(
+          transaction, db, ownerId, input.brandId, item.versionId, "review", now, { ...options, connection: transaction },
+        );
+      }
+      if (!result.ok) {
+        failure = denied(result.error, result.gaps, result.blockers);
+        break;
+      }
+      created.push(result.row);
+    }
+
+    await dao.updateExportJob({
+      id: job.id,
+      status: failure ? "failed" : "ready",
+      selectionJson: job.selectionJson,
+      preflightJson: job.preflightJson,
+      chosenSubsetJson: JSON.stringify(chosen),
+      resultPackageIdsJson: JSON.stringify(created.map((row) => row.id)),
+      error: failure?.error ?? null,
+      updatedAt: clock(),
+    });
+    if (failure) return failure;
     return {
       jobId: job.id,
       operationId: job.operationId,
       status: "ready" as const,
-      packages: rows.map(summarizePackage),
-      replayed: true,
+      packages: created.map(summarizePackage),
+      replayed: false,
     };
-  }
-
-  const selection = JSON.parse(job.selectionJson) as ExportSelection;
-  const stored = JSON.parse(job.preflightJson) as { eligibleVersionIds: string[] };
-  const subset = validateExportSubset(selection.versionIds, stored.eligibleVersionIds, chosen);
-  if (!subset.ok) {
-    return denied("SUBSET_INVALID", undefined, subset.invalid.map((versionId) => ({ versionId, codes: [] })));
-  }
-
-  // Re-run the gates on the chosen subset: facts or approvals may have changed since preflight.
-  const found = await dao.getContentVersionsByIds(ownerId, input.brandId, chosen);
-  if (found.length !== chosen.length) return denied("NOT_FOUND");
-  const byId = new Map(found.map((version) => [version.id, version]));
-  const now = clock();
-  const items = await computePreflight(
-    db, ownerId, input.brandId, chosen.map((id) => byId.get(id)!), selection.mode, now,
-  );
-  const blocked = items.filter((item) => !item.eligible);
-  if (blocked.length) {
-    return denied(
-      blocked[0].blockers[0],
-      undefined,
-      blocked.map((item) => ({ versionId: item.versionId, codes: item.blockers })),
-    );
-  }
-
-  const created: PackageRow[] = [];
-  let failure: ContentError | null = null;
-  for (const item of items) {
-    let result: AssembleResult;
-    if (item.kind === "formal") {
-      const version = byId.get(item.versionId)!;
-      const gate = await withEligibleFacts(
-        db,
-        { ownerId, brandId: input.brandId },
-        { factVersionIds: parseIds(version.factVersionIdsJson), contentVersionId: version.id, stage: "delivery" },
-        (transaction) => assemblePackage(
-          transaction, db, ownerId, input.brandId, version.id, "formal", now, { ...options, connection: transaction },
-        ),
-        () => new Date(now),
-      );
-      result = "error" in gate
-        ? { ok: false, error: factFailure(gate).error }
-        : gate.data;
-    } else {
-      result = await assemblePackage(db, db, ownerId, input.brandId, item.versionId, "review", now, options);
-    }
-    if (!result.ok) {
-      failure = result.error;
-      break;
-    }
-    created.push(result.row);
-  }
-
-  await dao.updateExportJob({
-    id: job.id,
-    status: failure ? "failed" : "ready",
-    selectionJson: job.selectionJson,
-    preflightJson: job.preflightJson,
-    chosenSubsetJson: JSON.stringify(chosen),
-    resultPackageIdsJson: JSON.stringify(created.map((row) => row.id)),
-    error: failure,
-    updatedAt: clock(),
   });
-  if (failure) return denied(failure);
-  return {
-    jobId: job.id,
-    operationId: job.operationId,
-    status: "ready" as const,
-    packages: created.map(summarizePackage),
-    replayed: false,
-  };
 }
 
 export async function readContentAssetBytes(
@@ -2000,6 +2143,8 @@ export async function readContentAssetBytes(
   const asset = await new ContentDao(db).findAssetByObject(ownerId, input.brandId, object.id);
   if (!asset || asset.storedObjectId !== object.id) return denied("NOT_FOUND");
   if (object.class === "authorized-media" && asset.reviewStatus !== "approved") return denied("ASSET_UNREVIEWED");
+  const [rights] = await loadImageAssetsByIds(db, ownerId, input.brandId, [asset.id]);
+  if (rights && rights.rightsStatus !== "active") return denied("IMAGE_RIGHTS_INVALID");
   if (object.class === "authorized-media" && (object.visibility !== "public" || asset.visibility !== "public")) {
     return denied("NOT_FOUND");
   }
@@ -2028,7 +2173,7 @@ export async function readExportJob(
   brandId: string,
   operationId: string,
 ) {
-  const adopted = await adoptOwner(db, ownerId, brandId, "read");
+  const adopted = await adoptOwner(db, ownerId, brandId, "download");
   if (!adopted) return denied("NOT_FOUND");
   ownerId = adopted;
   if (!await new BrandDao(db).owned(ownerId, brandId)) return denied("NOT_FOUND");
@@ -2036,11 +2181,14 @@ export async function readExportJob(
   const job = await dao.getExportJobByOperation(ownerId, brandId, operationId);
   if (!job) return denied("NOT_FOUND");
   const stored = JSON.parse(job.preflightJson) as { items: PreflightItem[]; eligibleVersionIds: string[] };
-  const packages = await dao.getPackagesByIds(ownerId, brandId, parseIds(job.resultPackageIdsJson));
+  const [packages, images] = await Promise.all([
+    dao.getPackagesByIds(ownerId, brandId, parseIds(job.resultPackageIdsJson)),
+    invalidImagesByVersion(db, ownerId, brandId, stored.items.map((item) => item.versionId)),
+  ]);
   return {
     job: { id: job.id, operationId: job.operationId, status: job.status, error: job.error },
-    items: stored.items,
-    eligibleVersionIds: stored.eligibleVersionIds,
+    items: withCurrentImageBlockers(stored.items, images),
+    eligibleVersionIds: stored.eligibleVersionIds.filter((id) => !images.has(id)),
     packages: packages.map(summarizePackage),
   };
 }
@@ -2708,7 +2856,10 @@ export async function readChannelVariants(
   if (!version) return denied("NOT_FOUND");
   const brand = await new BrandDao(db).owned(ownerId, version.brandId);
   if (!brand) return denied("NOT_FOUND");
-  const rows = await dao.listChannelVariants(ownerId, version.id);
+  const [rows, images] = await Promise.all([
+    dao.listChannelVariants(ownerId, version.id),
+    invalidImagesByVersion(db, ownerId, version.brandId, [version.id]),
+  ]);
   return {
     version: {
       id: version.id,
@@ -2719,6 +2870,7 @@ export async function readChannelVariants(
       targetChannel: version.targetChannel,
     },
     variants: rows.map((row) => presentChannelVariant(row, version)),
+    invalidImageAssets: images.get(version.id) ?? [],
     readOnly: brand.status !== "active",
   };
 }
@@ -2735,7 +2887,12 @@ export async function readChannelVariant(
   if (!version || version.brandId !== row.brandId) return denied("NOT_FOUND");
   const brand = await new BrandDao(db).owned(ownerId, row.brandId);
   if (!brand) return denied("NOT_FOUND");
-  return { variant: presentChannelVariant(row, version), readOnly: brand.status !== "active" };
+  const images = await invalidImagesByVersion(db, ownerId, row.brandId, [version.id]);
+  return {
+    variant: presentChannelVariant(row, version),
+    invalidImageAssets: images.get(version.id) ?? [],
+    readOnly: brand.status !== "active",
+  };
 }
 
 export async function saveChannelVariant(
@@ -2906,6 +3063,8 @@ export async function exportChannelVariant(
   if (!version) return denied("NOT_FOUND");
   const variant = await dao.getChannelVariantForVersion(ownerId, version.id, input.channel);
   if (!variant) return denied("NOT_FOUND");
+  const imageFailure = await imageDeliveryFailure(db, ownerId, input.brandId, version.id);
+  if (imageFailure) return imageFailure;
   const limited = profileLimitExceeded(variant);
   if (limited) return limited;
   if (variant.blocked === 1) return denied("VARIANT_CHANNEL_BLOCKED");
@@ -2928,6 +3087,8 @@ export async function exportChannelVariant(
       if (!currentVersion || !current || !current.approvalId) {
         return { ok: false as const, error: "NOT_FOUND" as const };
       }
+      const imageFailure = await imageDeliveryFailure(transaction, ownerId, input.brandId, currentVersion.id);
+      if (imageFailure) return { ok: false as const, ...imageFailure };
       if (current.channelProfileVersionId && current.profileVersionNumber == null) {
         return { ok: false as const, error: "NOT_FOUND" as const };
       }
@@ -2957,7 +3118,7 @@ export async function exportChannelVariant(
     () => new Date(now),
   );
   if ("error" in gate) return factFailure(gate);
-  if (!gate.data.ok) return denied(gate.data.error);
+  if (!gate.data.ok) return denied(gate.data.error, gate.data.gaps, gate.data.blockers);
   return {
     package: summarizePackage(gate.data.row),
     approvalId: gate.data.row.approvalId,

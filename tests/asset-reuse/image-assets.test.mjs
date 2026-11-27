@@ -12,7 +12,7 @@ import {
   revokeImageAsset,
 } from "../../src/features/asset-reuse/image-asset-commands.ts";
 import { registerImageAssetSchema, registerImageAssetUseSchema } from "../../src/features/asset-reuse/image-asset-contracts.ts";
-import { imageAssetUsesQuery, ownedImageAssetsQuery } from "../../src/features/asset-reuse/image-asset-dao.ts";
+import { activeImageUsesQuery, imageAssetUsesQuery, ownedImageAssetsQuery } from "../../src/features/asset-reuse/image-asset-dao.ts";
 import { safeReturnTo } from "../../src/lib/auth/return-to.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { structure, testDatabase } from "../maintenance/helpers.mjs";
@@ -207,7 +207,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       assert.equal(revoked.todos.length, 2);
       assert.deepEqual(revoked.todos.map((todo) => todo.contentVersionId).sort(), [firstVersion, secondVersion].sort());
       assert.equal(revoked.todos.every((todo) => todo.assetVersion === 3), true);
-      const useSelects = traced.queries.filter((sql) => /from image_asset_use/i.test(sql));
+      const useSelects = traced.queries.filter((sql) => /^select [\s\S]*from image_asset_use/i.test(sql));
       assert.equal(useSelects.length, 2);
       assert.equal(useSelects.every((sql) => /left join image_asset_todo/i.test(sql)), true);
       assert.equal(traced.queries.some((sql) => /image_asset_ids_json/i.test(sql)), false);
@@ -288,10 +288,12 @@ for (const kind of ["sqlite", "postgresql"]) {
         : JSON.stringify(await queryWithParameters(db, `EXPLAIN QUERY PLAN ${sql}`, values));
       const usesQuery = imageAssetUsesQuery(assetId);
       const listQuery = ownedImageAssetsQuery(owner, brand);
+      const activeQuery = activeImageUsesQuery(owner, brand, [firstVersion, secondVersion]);
       const usesPlan = await planFor(usesQuery.sql, usesQuery.values);
       const listPlan = await planFor(listQuery.sql, listQuery.values);
       assert.match(usesPlan, /image_asset_use_asset_idx/);
       assert.match(listPlan, /image_asset_owner_idx/);
+      assert.match(await planFor(activeQuery.sql, activeQuery.values), /image_asset_use_content_idx/);
       if (db.kind === "postgresql") {
         assert.doesNotMatch(usesPlan, /Seq Scan on image_asset_use/);
         assert.doesNotMatch(listPlan, /Seq Scan on image_asset/);

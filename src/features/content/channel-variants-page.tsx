@@ -1,3 +1,4 @@
+import { ImageExportBlockers } from "./image-export-blockers";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -187,6 +188,12 @@ export default async function ChannelVariantsPage({
       relatedLabel={t("relatedEntries")}
       related={related}
     >
+      {detail.invalidImageAssets.length ? (
+        <section className="min-w-0 rounded-2xl border bg-card p-5" aria-label={t("invalidImages")}>
+          <p role="status" className="text-sm">{t("IMAGE_RIGHTS_INVALID")}</p>
+          <ImageExportBlockers images={detail.invalidImageAssets} editHref={`${versionHref}#version-images`} t={t} />
+        </section>
+      ) : null}
       <section className="min-w-0 space-y-2">
         <h2 className="text-lg font-semibold">{t("titleField")}</h2>
         <p className="[overflow-wrap:anywhere] text-sm leading-6">{detail.version.title}</p>

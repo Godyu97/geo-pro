@@ -175,6 +175,7 @@ function AssetCard({ item, brandId, t }: { item: ImageAssetDetail; brandId: stri
           {item.uses.map((use) => (
             <li key={use.id} className="break-all font-mono text-xs leading-5">
               {t("useLine", { version: String(use.assetVersion), content: use.contentVersionId })}
+              {use.supersededAt ? <span> · {t("historicalUse")}</span> : null}
             </li>
           ))}
         </ul>

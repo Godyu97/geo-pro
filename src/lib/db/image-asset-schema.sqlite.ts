@@ -34,6 +34,7 @@ export const imageAssetUse = sqliteTable("image_asset_use", {
   contentVersionId: text("content_version_id").notNull(),
   assetVersion: integer("asset_version").notNull(),
   createdAt: text("created_at").notNull(),
+  supersededAt: text("superseded_at"),
 }, (table) => [
   foreignKey({
     name: "image_asset_use_asset_fk",
@@ -42,6 +43,8 @@ export const imageAssetUse = sqliteTable("image_asset_use", {
   }).onDelete("cascade"),
   uniqueIndex("image_asset_use_pair_uidx").on(table.assetId, table.contentVersionId),
   index("image_asset_use_asset_idx").on(table.assetId, table.createdAt, table.id),
+  index("image_asset_use_content_idx").on(table.contentVersionId, table.brandId)
+    .where(sql`${table.supersededAt} is null`),
   check("image_asset_use_state_check", sql`${table.assetVersion} >= 1
     and length(${table.id}) = 36
     and length(${table.assetId}) = 36

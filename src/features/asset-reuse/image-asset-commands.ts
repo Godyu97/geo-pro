@@ -21,7 +21,6 @@ import type {
 } from "./image-asset-contracts.ts";
 import {
   contentVersionOwnedBy,
-  findImageAssetUse,
   insertImageAsset,
   insertImageAssetTodos,
   insertImageAssetUse,
@@ -29,6 +28,7 @@ import {
   listImageAssetLinksForAsset,
   listOwnedImageAssets,
   loadOwnedImageAsset,
+  markImagePackagesDoNotReuse,
   setImageAssetRights,
   type ImageAssetLinkRow as DaoLink,
   type ImageAssetRow,
@@ -50,12 +50,13 @@ function toAsset(row: ImageAssetRow): ImageAssetView {
   };
 }
 
-function toUse(row: Pick<DaoLink, "id" | "contentVersionId" | "assetVersion" | "createdAt">): ImageAssetUseView {
+function toUse(row: DaoLink): ImageAssetUseView {
   return {
     id: row.id,
     contentVersionId: row.contentVersionId,
     assetVersion: row.assetVersion,
     createdAt: row.createdAt,
+    ...(row.supersededAt ? { supersededAt: row.supersededAt } : {}),
   };
 }
 
@@ -145,8 +146,6 @@ export async function registerImageAssetUse(
     if (!asset) return { error: "NOT_FOUND" };
     if (asset.rightsStatus !== "active") return { error: "RIGHTS_CLOSED" };
     if (!await contentVersionOwnedBy(tx, actorId, input.brandId, input.contentVersionId)) return { error: "NOT_FOUND" };
-    const existing = await findImageAssetUse(tx, asset.id, input.contentVersionId);
-    if (existing) return { use: existing };
     const inserted = await insertImageAssetUse(tx, {
       id: randomUUID(),
       assetId: asset.id,
@@ -183,6 +182,7 @@ export async function revokeImageAsset(
       updatedAt: now,
     });
     if (!updated) return { error: "NOT_FOUND" };
+    await markImagePackagesDoNotReuse(tx, actorId, input.brandId, asset.id);
     const pending = new Map(decision.todos.map((todo) => [`${todo.contentId}:${todo.assetVersion}`, todo]));
     await insertImageAssetTodos(tx, links.flatMap((link) => {
       if (link.todoId || !pending.has(`${link.contentVersionId}:${link.assetVersion}`)) return [];
@@ -220,6 +220,7 @@ export async function expireImageAsset(
       updatedAt: now,
     });
     const current = updated ?? asset;
+    await markImagePackagesDoNotReuse(tx, actorId, input.brandId, asset.id);
     const links = await listImageAssetLinksForAsset(tx, current.id);
     return detail(current, links);
   });

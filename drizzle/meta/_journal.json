@@ -694,6 +694,13 @@
       "when": 1795682054178,
       "tag": "0098_safe_sabretooth",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1795743167634,
+      "tag": "0099_image_asset_use_superseded",
+      "breakpoints": true
     }
   ]
 }

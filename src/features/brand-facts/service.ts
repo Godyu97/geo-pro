@@ -251,10 +251,11 @@ export async function withEligibleFacts<T>(
   db: DatabaseConnection, inputScope: unknown, input: unknown,
   work: (transaction: TransactionConnection, facts: { id: string; factId: string; version: number; claim: string }[]) => Promise<T>,
   clock = clockNow,
+  transaction?: TransactionConnection,
 ) {
   const scope = factScope.parse(inputScope);
   const { factVersionIds, contentVersionId, stage } = useInput.parse(input);
-  return db.transaction(async (transaction) => {
+  const checkAndUse = async (transaction: TransactionConnection) => {
     const brands = new BrandDao(transaction);
     if (!await brands.lockOwner(scope.ownerId)) return fail("notFound");
     const brand = await brands.owned(scope.ownerId, scope.brandId);
@@ -279,7 +280,8 @@ export async function withEligibleFacts<T>(
     });
     await dao.recordUse(contentVersionId, stage, factVersionIds);
     return { data: await work(transaction, facts) };
-  });
+  };
+  return transaction ? checkAndUse(transaction) : db.transaction(checkAndUse);
 }
 
 export function factUnavailable() {

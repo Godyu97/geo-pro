@@ -2223,6 +2223,7 @@ CREATE TABLE "image_asset_use" (
 	"content_version_id" text NOT NULL,
 	"asset_version" integer NOT NULL,
 	"created_at" text NOT NULL,
+	"superseded_at" text,
 	CONSTRAINT "image_asset_use_state_check" CHECK ("image_asset_use"."asset_version" >= 1
     and length("image_asset_use"."id") = 36
     and length("image_asset_use"."asset_id") = 36
@@ -3282,6 +3283,7 @@ CREATE UNIQUE INDEX "image_asset_todo_use_uidx" ON "image_asset_todo" USING btre
 CREATE INDEX "image_asset_todo_asset_idx" ON "image_asset_todo" USING btree ("asset_id","created_at","id");
 CREATE UNIQUE INDEX "image_asset_use_pair_uidx" ON "image_asset_use" USING btree ("asset_id","content_version_id");
 CREATE INDEX "image_asset_use_asset_idx" ON "image_asset_use" USING btree ("asset_id","created_at","id");
+CREATE INDEX "image_asset_use_content_idx" ON "image_asset_use" USING btree ("content_version_id","brand_id") WHERE "image_asset_use"."superseded_at" is null;
 CREATE INDEX "intervention_batch_owner_idx" ON "intervention_batch" USING btree ("owner_id","brand_id","created_at","id");
 CREATE UNIQUE INDEX "intervention_batch_page_key_uidx" ON "intervention_batch_page" USING btree ("batch_id","page_key");
 CREATE INDEX "capture_attempt_sheet_idx" ON "capture_attempt" USING btree ("owner_id","sheet_id","created_at","id");

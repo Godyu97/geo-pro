@@ -1,0 +1,2 @@
+ALTER TABLE "image_asset_use" ADD COLUMN "superseded_at" text;--> statement-breakpoint
+CREATE INDEX "image_asset_use_content_idx" ON "image_asset_use" USING btree ("content_version_id","brand_id") WHERE "image_asset_use"."superseded_at" is null;

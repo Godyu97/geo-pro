@@ -116,6 +116,7 @@ export function ChannelVariantPrimary({
           void action(formData).then((result) => {
             if (!result.ok) {
               setError(copy.errors[result.error] ?? copy.errors.INVALID_INPUT ?? result.error);
+              if (result.error === "IMAGE_RIGHTS_INVALID") router.refresh();
               return;
             }
             router.refresh();
@@ -215,6 +216,7 @@ export function ChannelVariantEditor({
       const result = await action(formData);
       if (!result.ok) {
         setError(copy.errors[result.error] ?? copy.errors.INVALID_INPUT ?? result.error);
+        if (result.error === "IMAGE_RIGHTS_INVALID") router.refresh();
         return;
       }
       if (kind === "save") setFeedback(copy.saved);

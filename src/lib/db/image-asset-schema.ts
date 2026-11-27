@@ -3,7 +3,7 @@ import { check, foreignKey, index, integer, pgTable, text, uniqueIndex } from "d
 import { brand } from "./brand-schema";
 
 // Versioned image rights. content_version.image_asset_ids_json is only an identifier
-// list and is not this ledger. Object bytes stay null until a later upload exists.
+// list and is not this ledger. Public uploads share their content asset ID.
 export const imageAsset = pgTable("image_asset", {
   id: text("id").primaryKey(),
   brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
@@ -36,6 +36,7 @@ export const imageAssetUse = pgTable("image_asset_use", {
   contentVersionId: text("content_version_id").notNull(),
   assetVersion: integer("asset_version").notNull(),
   createdAt: text("created_at").notNull(),
+  supersededAt: text("superseded_at"),
 }, (table) => [
   foreignKey({
     name: "image_asset_use_asset_fk",
@@ -44,6 +45,8 @@ export const imageAssetUse = pgTable("image_asset_use", {
   }).onDelete("cascade"),
   uniqueIndex("image_asset_use_pair_uidx").on(table.assetId, table.contentVersionId),
   index("image_asset_use_asset_idx").on(table.assetId, table.createdAt, table.id),
+  index("image_asset_use_content_idx").on(table.contentVersionId, table.brandId)
+    .where(sql`${table.supersededAt} is null`),
   check("image_asset_use_state_check", sql`${table.assetVersion} >= 1
     and length(${table.id}) = 36
     and length(${table.assetId}) = 36

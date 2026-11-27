@@ -1234,6 +1234,15 @@ export class ContentDao {
     );
   }
 
+  async invalidateChannelApprovalsForVersion(ownerId: string, versionId: string, updatedAt: string) {
+    await this.query(
+      `UPDATE content_channel_variant SET
+        approval_status = 'draft', approval_id = NULL, needs_own_approval = 1, updated_at = ?
+       WHERE owner_id = ? AND content_version_id = ? AND approval_status = 'approved'`,
+      [updatedAt, ownerId, versionId],
+    );
+  }
+
   async blockChannelVariant(ownerId: string, id: string, updatedAt: string) {
     await this.query(
       `UPDATE content_channel_variant SET blocked = 1, updated_at = ?

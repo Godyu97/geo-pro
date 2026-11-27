@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
+import { brandIdSchema } from "../brands/contracts";
 import {
   approveChannelVariant,
   approveContent,
@@ -230,15 +231,23 @@ export async function updateVariantAction(formData: FormData): Promise<void> {
     labelingProfileVersion: String(formData.get("labelingProfileVersion") ?? ""),
     labelingProfileStatus: String(formData.get("labelingProfileStatus") ?? ""),
   });
-  if (!parsed.success) return;
-  await updateVariant(getConnection(), session.user.id, parsed.data);
+  if (!parsed.success) {
+    const versionId = brandIdSchema.safeParse(formData.get("versionId"));
+    if (versionId.success) redirect(`${versionPath(versionId.data)}?assetError=INVALID_INPUT#version-images`);
+    return;
+  }
+  const result = await updateVariant(getConnection(), session.user.id, parsed.data);
+  if ("error" in result) {
+    redirect(`${versionPath(parsed.data.versionId)}?assetError=${result.error}#version-images`);
+  }
   revalidatePath("/dashboard/content");
   revalidatePath(versionPath(parsed.data.versionId));
+  redirect(`${versionPath(parsed.data.versionId)}#version-images`);
 }
 
 export async function registerAssetAction(formData: FormData): Promise<void> {
   const session = await requireSession();
-  const versionId = String(formData.get("versionId") ?? "");
+  const versionId = brandIdSchema.safeParse(formData.get("versionId")).data;
   const parsed = registerAssetSchema.safeParse({
     action: "register-asset",
     brandId: String(formData.get("brandId") ?? ""),
@@ -271,7 +280,10 @@ export async function registerAssetAction(formData: FormData): Promise<void> {
     if (versionId) redirect(`${versionPath(versionId)}?assetError=${result.error}`);
     return;
   }
-  if (versionId) revalidatePath(versionPath(versionId));
+  if (versionId) {
+    revalidatePath(versionPath(versionId));
+    redirect(`${versionPath(versionId)}?registeredAsset=${result.asset.id}#version-images`);
+  }
 }
 
 export async function exportPreflightAction(formData: FormData): Promise<void> {

@@ -11,6 +11,7 @@ import { workspaceBrand } from "../team-access/brand-scope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { exportConfirmAction, exportPreflightAction, generateBatchAction, saveBriefAction } from "./actions";
+import { ImageExportBlockers } from "./image-export-blockers";
 import { listApprovedBriefFacts, listBriefs, listContentVersions, readExportJob, type ContentVersionFilter } from "./commands";
 import { exportUiError, type ContentGapCode, type ExportUiError } from "./contracts";
 import type { ClusterPlanView, PageEvidenceBasis } from "./rules";
@@ -632,6 +633,11 @@ export default async function ContentListPage({
                     ))}
                   </ul>
                 ) : null}
+                <ImageExportBlockers
+                  images={item.invalidImageAssets}
+                  editHref={`/dashboard/content/versions/${item.versionId}#version-images`}
+                  t={t}
+                />
               </li>
             ))}
           </ul>
@@ -684,7 +690,10 @@ export default async function ContentListPage({
                       {pkg.doNotReuse ? <Badge variant="outline">{t("doNotReuse")}</Badge> : null}
                     </div>
                     <p className="mt-2 flex min-w-0 flex-wrap gap-3">
-                      {packageFiles.map((file) => (
+                      {[
+                        ...packageFiles,
+                        ...(typeof pkg.manifest.imageCount === "number" && pkg.manifest.imageCount > 0 ? ["public-images.json"] : []),
+                      ].map((file) => (
                         <a
                           key={file}
                           href={`/api/content/packages/${pkg.id}?file=${file}`}

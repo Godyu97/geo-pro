@@ -15,15 +15,17 @@ import {
   submitPublicationAction,
   updateVariantAction,
 } from "./actions";
-import { readContentVersion, readExportJob } from "./commands";
+import { brandIdSchema } from "../brands/contracts";
+import { readContentVersion, readExportJob, readRegisteredAsset } from "./commands";
 import { exportUiError, type VersionStatus } from "./contracts";
+import { ImageExportBlockers } from "./image-export-blockers";
 
 export async function generateMetadata() {
   const t = await getTranslator("content");
   return { title: t("versionDetail"), robots: { index: false, follow: false } };
 }
 
-const assetErrorCodes = ["ASSET_TYPE_REJECTED", "ASSET_TOO_LARGE", "ASSET_UNREVIEWED", "INVALID_INPUT", "NOT_FOUND", "SERVICE_UNAVAILABLE"] as const;
+const assetErrorCodes = ["ASSET_TYPE_REJECTED", "ASSET_TOO_LARGE", "ASSET_UNREVIEWED", "IMAGE_RIGHTS_INVALID", "INVALID_INPUT", "NOT_FOUND", "SERVICE_UNAVAILABLE"] as const;
 const reviewErrorCodes = ["SEPARATION", "DUTY", "FACT_INVALID", "INVALID_INPUT", "OPERATION_CONFLICT", "NOT_FOUND"] as const;
 const publicationErrorCodes = [
   "INVALID_INPUT", "NOT_FOUND", "APPROVAL_REQUIRED", "APPROVAL_INVALID", "OPERATION_CONFLICT", "PUBLICATION_PREDECESSOR_CONFLICT",
@@ -174,7 +176,7 @@ export default async function ContentVersionPage({
   }
 
   const db = getConnection();
-  const { version, approvals, packages, assets, publications, publicationPredecessors, approvalCurrent, readOnly, readOnlyReason } = detail;
+  const { version, approvals, packages, assets, imageUses, publications, publicationPredecessors, approvalCurrent, readOnly, readOnlyReason } = detail;
   const canAccessDelivery = readOnlyReason !== "grant";
   const operationId = typeof query.op === "string" ? query.op : null;
   const exportError = exportUiError(query.exportError);
@@ -183,6 +185,11 @@ export default async function ContentVersionPage({
     : null;
   const job = exported && !("error" in exported) ? exported : null;
   const canEdit = !readOnly;
+  const imageIds = [...new Set([...(JSON.parse(version.imageAssetIdsJson) as string[]), ...imageUses.map((image) => image.id)])];
+  const registeredId = brandIdSchema.safeParse(query.registeredAsset);
+  const registered = canEdit && registeredId.success
+    ? await readRegisteredAsset(db, session.user.id, version.brandId, registeredId.data)
+    : null;
   const assetError = assetErrorCode(query.assetError);
   const reviewError = reviewErrorCode(query.reviewError);
   const publicationError = publicationErrorCodes.find((code) => code === query.publicationError);
@@ -192,6 +199,7 @@ export default async function ContentVersionPage({
     { href: `/dashboard/content?brandId=${encodeURIComponent(version.brandId)}`, label: t("backToVersions") },
     ...(canAccessDelivery ? [{ href: `/dashboard/content/versions/${version.id}/variants`, label: t("openChannelVariants") }] : []),
     { href: `/dashboard/brands/${version.brandId}/facts`, label: t("brandFactsLink") },
+    ...(canAccessDelivery ? [{ href: `/dashboard/content/assets?brandId=${version.brandId}`, label: t("assetsLink") }] : []),
     ...(canAccessDelivery ? [{ href: `/dashboard/content/sources?brandId=${encodeURIComponent(version.brandId)}`, label: t("sourcesLink") }] : []),
   ];
 
@@ -227,7 +235,7 @@ export default async function ContentVersionPage({
         <p className="[overflow-wrap:anywhere]">{t("channel")}: {version.targetChannel}</p>
         <p className="[overflow-wrap:anywhere]">{t("labelingVersion")}: {version.labelingProfileVersion}</p>
         <p>{t("labelingStatus")}: {t(version.labelingProfileStatus)}</p>
-        {canAccessDelivery ? <p>{t("imagesAttached")}: {assets.length}</p> : null}
+        {canAccessDelivery ? <p>{t("imagesAttached")}: {imageIds.length}</p> : null}
         <p className="[overflow-wrap:anywhere] text-xs leading-5 text-muted-foreground">{t("fingerprint")}: {detail.currentFingerprint}</p>
         {canEdit && status === "in_review" ? (
           <div className="pt-2">
@@ -266,15 +274,26 @@ export default async function ContentVersionPage({
                 <option value="verified">{t("verified")}</option>
               </select>
             </label>
-            <label className="block min-w-0 text-sm">
+            <label id="version-images" className="block min-w-0 scroll-mt-24 text-sm">
               <span className="mb-1 block text-muted-foreground">{t("assetIds")}</span>
               <textarea
                 name="imageAssetIds"
                 rows={2}
-                defaultValue={assets.map((asset) => asset.id).join("\n")}
+                defaultValue={imageIds.join("\n")}
                 className={areaClass}
+                aria-describedby="version-image-help"
               />
+              <span id="version-image-help" className="block text-sm text-muted-foreground">{t("editImageIdsHint")}</span>
             </label>
+            <div className="min-w-0 space-y-2 text-sm">
+              {imageUses.length ? (
+                <ul className="space-y-1 [overflow-wrap:anywhere]" aria-label={t("assetsRegistered")}>
+                  {imageUses.map((image) => <li key={image.id}>{image.fileName} · {image.id}</li>)}
+                </ul>
+              ) : null}
+              {registered ? <p role="status" className="[overflow-wrap:anywhere]">{t("registeredImageId", { id: registered.id })}</p> : null}
+              {assetError ? <p role="alert" className="break-words text-destructive">{t(assetError)}</p> : null}
+            </div>
             <div className="sm:col-span-2">
               <Button type="submit" className={actionClass}>{t("saveVariant")}</Button>
             </div>
@@ -304,7 +323,6 @@ export default async function ContentVersionPage({
             ))}
           </ul>
         ) : null}
-        {assetError ? <p role="alert" className="break-words text-sm text-destructive">{t(assetError)}</p> : null}
         {canEdit ? (
           <form action={registerAssetAction} className="grid min-w-0 gap-3 sm:grid-cols-2">
             <input type="hidden" name="brandId" value={version.brandId} />
@@ -400,10 +418,15 @@ export default async function ContentVersionPage({
                       {item.blockers.map((code) => <li key={code}>{t(code)}</li>)}
                     </ul>
                   ) : null}
+                  <ImageExportBlockers
+                    images={item.invalidImageAssets}
+                    editHref={item.versionId === version.id ? "#version-images" : `/dashboard/content/versions/${item.versionId}#version-images`}
+                    t={t}
+                  />
                 </li>
               ))}
             </ul>
-            {job.job.status === "queued" && job.eligibleVersionIds.length && canEdit ? (
+            {job.job.status === "queued" && job.eligibleVersionIds.length > 0 && canEdit ? (
               <form action={exportConfirmAction}>
                 <input type="hidden" name="brandId" value={version.brandId} />
                 <input type="hidden" name="versionId" value={version.id} />
@@ -433,7 +456,10 @@ export default async function ContentVersionPage({
                   <span className="[overflow-wrap:anywhere] text-xs text-muted-foreground">{pkg.targetChannel} · {pkg.createdAt}</span>
                 </div>
                 <p className="mt-2 flex min-w-0 flex-wrap gap-3">
-                  {["content.md", "content.html", "manifest.json", "public-sources.json", "publish-checklist.md"].map((file) => (
+                  {[
+                    "content.md", "content.html", "manifest.json", "public-sources.json", "publish-checklist.md",
+                    ...(typeof pkg.manifest.imageCount === "number" && pkg.manifest.imageCount > 0 ? ["public-images.json"] : []),
+                  ].map((file) => (
                     <a
                       key={file}
                       href={`/api/content/packages/${pkg.id}?file=${file}`}
