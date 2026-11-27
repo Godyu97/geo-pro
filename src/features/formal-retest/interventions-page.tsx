@@ -1,15 +1,15 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
-import { BrandDao } from "../brands/dao";
 import { createInterventionBatchAction, registerInterventionPageAction } from "./intervention-actions";
 import { listInterventionBatches, type InterventionBatchView } from "./intervention-commands";
 
-const interventionsPath = "/dashboard/reports/interventions";
-const knownErrors = ["NOT_FOUND", "INVALID_INPUT"] as const;
+import { interventionsPath, readRetestWorkspace, reportsPath, retestHref } from "./workspace";
+const knownErrors = ["NOT_FOUND", "FORBIDDEN", "INVALID_INPUT"] as const;
 const actionClass = "h-auto min-h-10 max-w-full py-2 whitespace-normal";
 const summaryClass = "max-w-2xl text-sm leading-6 text-muted-foreground [overflow-wrap:anywhere]";
 const focusClass = "focus-visible:rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring";
@@ -20,21 +20,25 @@ function isKnownError(value: string | undefined): value is (typeof knownErrors)[
   return knownErrors.some((code) => code === value);
 }
 
-async function readWorkspace(ownerId: string) {
+async function readWorkspace(actorId: string, brandParam: string | string[] | undefined) {
   try {
     const connection = getConnection();
-    const active = await new BrandDao(connection).active(ownerId);
-    if (!active) return { kind: "noBrand" } as const;
-    const listed = await listInterventionBatches(connection, ownerId, active.id);
-    if ("error" in listed) return { kind: "error", code: listed.error } as const;
-    return { kind: "ready", brand: active, batches: listed.batches } as const;
+    const workspace = await readRetestWorkspace(actorId, brandParam);
+    if (workspace.kind !== "ready") return workspace;
+    const listed = await listInterventionBatches(connection, actorId, workspace.brand.id);
+    if ("error" in listed) return { kind: "notFound" } as const;
+    return { ...workspace, batches: listed.batches };
   } catch {
     console.error("intervention-batches-read-unavailable");
-    return { kind: "error", code: "SERVICE_UNAVAILABLE" } as const;
+    return { kind: "error" } as const;
   }
 }
 
-function BatchCard({ batch, t }: { batch: InterventionBatchView; t: Translate }) {
+function BatchCard({ batch, canWrite, t }: {
+  batch: InterventionBatchView;
+  canWrite: boolean;
+  t: Translate;
+}) {
   const headingId = `intervention-batch-${batch.id}`;
   const pageFieldId = `intervention-page-${batch.id}`;
   const timeFieldId = `intervention-time-${batch.id}`;
@@ -68,8 +72,9 @@ function BatchCard({ batch, t }: { batch: InterventionBatchView; t: Translate })
         )}
       </div>
 
-      <form action={registerInterventionPageAction} className="grid gap-4 border-t pt-5 sm:grid-cols-2">
+      {canWrite && <form action={registerInterventionPageAction} className="grid gap-4 border-t pt-5 sm:grid-cols-2">
         <h3 className="text-base font-semibold sm:col-span-2">{t("pageTitle")}</h3>
+        <input type="hidden" name="brandId" value={batch.brandId} />
         <input type="hidden" name="batchId" value={batch.id} />
         <div className="min-w-0 space-y-2 text-sm">
           <label htmlFor={pageFieldId} className="font-medium">{t("pageKey")}</label>
@@ -86,7 +91,7 @@ function BatchCard({ batch, t }: { batch: InterventionBatchView; t: Translate })
         <div>
           <Button type="submit" variant="outline" className={actionClass}>{t("savePage")}</Button>
         </div>
-      </form>
+      </form>}
     </section>
   );
 }
@@ -105,11 +110,16 @@ export default async function InterventionBatchesPage({
   const params = await searchParams;
   const t = await getTranslator("interventionBatches");
   const errorCode = typeof params.error === "string" ? params.error : undefined;
-  const workspace = await readWorkspace(session.user.id);
+  const workspace = await readWorkspace(session.user.id, params.brandId);
+  if (workspace.kind === "notFound") notFound();
   const ready = workspace.kind === "ready" ? workspace : null;
   const pending = ready?.batches.find((batch) => batch.status === "pending");
   const latest = ready?.batches[0];
-  const reportsHref = ready ? `/dashboard/reports?brandId=${encodeURIComponent(ready.brand.id)}` : "/dashboard/reports";
+  const reportsHref = retestHref(reportsPath, ready?.brand.id);
+  const retryHref = retestHref(interventionsPath, typeof params.brandId === "string" ? params.brandId : undefined);
+  const summaryKey = workspace.kind === "noBrand" ? "noBrand"
+    : ready?.canWrite ? pending ? "taskPending" : latest ? "taskEffective" : "empty"
+      : latest ? "readOnly" : "emptyReadOnly";
 
   return (
     <div className="min-w-0 max-w-full space-y-6">
@@ -117,23 +127,23 @@ export default async function InterventionBatchesPage({
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         {ready ? <p className={summaryClass}>{ready.brand.name}</p> : null}
         {workspace.kind === "error" ? (
-          <p role="alert" className={summaryClass}>{t(workspace.code)}</p>
+          <p role="alert" className={summaryClass}>{t("SERVICE_UNAVAILABLE")}</p>
         ) : (
           <p className={summaryClass}>
-            {t(workspace.kind === "noBrand" ? "noBrand" : pending ? "taskPending" : latest ? "taskEffective" : "empty")}
+            {t(summaryKey)}
           </p>
         )}
         {ready && isKnownError(errorCode) ? (
           <p role="alert" className="rounded-xl border bg-card px-4 py-3 text-sm">{t(errorCode)}</p>
         ) : null}
         <div className="flex flex-wrap items-center gap-2">
-          {workspace.kind === "error" && workspace.code === "SERVICE_UNAVAILABLE" ? (
-            <Button asChild className={actionClass}><a href={interventionsPath}>{t("reload")}</a></Button>
+          {workspace.kind === "error" ? (
+            <Button asChild className={actionClass}><a href={retryHref}>{t("reload")}</a></Button>
           ) : null}
-          {workspace.kind === "noBrand" || (workspace.kind === "error" && workspace.code === "NOT_FOUND") ? (
+          {workspace.kind === "noBrand" ? (
             <Button asChild className={actionClass}><Link href="/dashboard/brands" prefetch={false}>{t("openBrand")}</Link></Button>
           ) : null}
-          {pending ? (
+          {pending && ready?.canWrite ? (
             <Button asChild className={actionClass}>
               <a href={`#intervention-page-${pending.id}`}>{t("openRegistration")}</a>
             </Button>
@@ -142,7 +152,7 @@ export default async function InterventionBatchesPage({
               <a href={`#intervention-batch-${latest.id}`}>{t("reviewPages")}</a>
             </Button>
           ) : null}
-          {ready ? (
+          {ready?.canWrite ? (
             <form action={createInterventionBatchAction}>
               <input type="hidden" name="brandId" value={ready.brand.id} />
               <Button type="submit" variant={latest ? "outline" : "default"} className={actionClass}>{t("create")}</Button>
@@ -156,7 +166,7 @@ export default async function InterventionBatchesPage({
 
       {ready ? (
         <>
-          {ready.batches.map((batch) => <BatchCard key={batch.id} batch={batch} t={t} />)}
+          {ready.batches.map((batch) => <BatchCard key={batch.id} batch={batch} canWrite={ready.canWrite} t={t} />)}
           <details className="rounded-2xl border bg-card px-4 py-3 text-sm">
             <summary className={`cursor-pointer font-medium ${focusClass}`}>{t("effectiveRule")}</summary>
             <p className={`mt-2 ${summaryClass}`}>{t("description")}</p>

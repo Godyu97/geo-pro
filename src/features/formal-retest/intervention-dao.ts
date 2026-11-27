@@ -109,6 +109,15 @@ export class InterventionBatchDao {
     return row ? batchRow.parse(row) : null;
   }
 
+  async batchBrandId(batchId: string) {
+    const [row] = await queryWithParameters(
+      this.db,
+      'SELECT brand_id AS "brandId" FROM intervention_batch WHERE id = ?',
+      [batchId],
+    );
+    return row ? brandIdSchema.parse(row.brandId) : null;
+  }
+
   async batchesForBrand(ownerId: string, brandId: string) {
     const query = interventionBatchListQuery(ownerId, brandId);
     const rows = await queryWithParameters(this.db, query.sql, query.values);

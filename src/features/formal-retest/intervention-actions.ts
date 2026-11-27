@@ -7,13 +7,13 @@ import { getConnection } from "@/lib/db/connection";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { createInterventionBatch, registerInterventionPage } from "./intervention-commands.ts";
 import { createInterventionBatchSchema, registerInterventionPageSchema } from "./intervention-contracts.ts";
+import { interventionsPath, retestHref } from "./workspace.ts";
 
-const interventionsPath = "/dashboard/reports/interventions";
-const pageErrors = new Set(["NOT_FOUND", "INVALID_INPUT"]);
+const pageErrors = new Set(["NOT_FOUND", "FORBIDDEN", "INVALID_INPUT"]);
 
-function finish(error?: string): never {
+function finish(brandId?: string, error?: string): never {
   revalidatePath(interventionsPath);
-  redirect(error && pageErrors.has(error) ? `${interventionsPath}?error=${error}` : interventionsPath);
+  redirect(retestHref(interventionsPath, brandId, error && pageErrors.has(error) ? error : undefined));
 }
 
 function verifiedAt(value: FormDataEntryValue | null) {
@@ -24,19 +24,21 @@ function verifiedAt(value: FormDataEntryValue | null) {
 export async function createInterventionBatchAction(formData: FormData) {
   const session = await requireSession();
   const command = createInterventionBatchSchema.safeParse({ brandId: formData.get("brandId") });
-  if (!command.success) finish("INVALID_INPUT");
+  if (!command.success) finish(undefined, "INVALID_INPUT");
   const result = await createInterventionBatch(getConnection(), session.user.id, command.data);
-  finish("error" in result ? result.error : undefined);
+  finish(command.data.brandId, "error" in result ? result.error : undefined);
 }
 
 export async function registerInterventionPageAction(formData: FormData) {
   const session = await requireSession();
+  const brandId = brandIdSchema.safeParse(formData.get("brandId"));
+  if (!brandId.success) finish(undefined, "INVALID_INPUT");
   const batchId = brandIdSchema.safeParse(formData.get("batchId"));
   const command = registerInterventionPageSchema.safeParse({
     pageKey: formData.get("pageKey"),
     verifiedAt: verifiedAt(formData.get("verifiedAt")),
   });
-  if (!batchId.success || !command.success) finish("INVALID_INPUT");
-  const result = await registerInterventionPage(getConnection(), session.user.id, batchId.data, command.data);
-  finish("error" in result ? result.error : undefined);
+  if (!batchId.success || !command.success) finish(brandId.data, "INVALID_INPUT");
+  const result = await registerInterventionPage(getConnection(), session.user.id, { id: batchId.data, brandId: brandId.data }, command.data);
+  finish(brandId.data, "error" in result ? result.error : undefined);
 }

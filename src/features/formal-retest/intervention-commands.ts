@@ -2,7 +2,8 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
-import { BrandDao } from "../brands/dao.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
+import { authorizeRetestWrite, type RetestResourceRef } from "./brand-access.ts";
 import type { CreateInterventionBatchInput, RegisterInterventionPageInput } from "./intervention-contracts.ts";
 import {
   InterventionBatchDao,
@@ -61,7 +62,7 @@ function pointFrom(verifiedAt: readonly (string | null)[]) {
   return { status: "effective" as const, effectiveAt };
 }
 
-type BatchResult = { batch: InterventionBatchView } | { error: "NOT_FOUND" };
+type BatchResult = { batch: InterventionBatchView } | { error: "NOT_FOUND" | "FORBIDDEN" };
 type ListResult = { batches: InterventionBatchView[] } | { error: "NOT_FOUND" };
 type EffectiveSync =
   | { error: "NOT_FOUND" }
@@ -83,10 +84,11 @@ async function syncEffectivePoint(
   return { status: "effective", effectiveAt: point.effectiveAt, pages };
 }
 
-export async function listInterventionBatches(db: DatabaseConnection, ownerId: string, brandId: string): Promise<ListResult> {
+export async function listInterventionBatches(db: DatabaseConnection, actorId: string, brandId: string): Promise<ListResult> {
   return db.transaction(async (tx) => {
-    const owned = await new BrandDao(tx).owned(ownerId, brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    const access = await authorizeBrandActor(tx, actorId, brandId, "read");
+    if (!access) return { error: "NOT_FOUND" as const };
+    const { ownerId } = access;
     const dao = new InterventionBatchDao(tx);
     const batches = await dao.batchesForBrand(ownerId, brandId);
     const pages = await dao.pagesForBatches(ownerId, batches.map((batch) => batch.id));
@@ -94,13 +96,15 @@ export async function listInterventionBatches(db: DatabaseConnection, ownerId: s
   });
 }
 
-export async function getInterventionBatch(db: DatabaseConnection, ownerId: string, batchId: string): Promise<BatchResult> {
+export async function getInterventionBatch(db: DatabaseConnection, actorId: string, batchId: string): Promise<BatchResult> {
   return db.transaction(async (tx) => {
     const dao = new InterventionBatchDao(tx);
+    const brandId = await dao.batchBrandId(batchId);
+    const access = brandId && await authorizeBrandActor(tx, actorId, brandId, "read");
+    if (!access) return { error: "NOT_FOUND" as const };
+    const { ownerId } = access;
     const batch = await dao.batchForOwner(ownerId, batchId, false);
-    if (!batch) return { error: "NOT_FOUND" as const };
-    const owned = await new BrandDao(tx).owned(ownerId, batch.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    if (!batch || batch.brandId !== brandId) return { error: "NOT_FOUND" as const };
     const pages = await dao.pagesForBatch(ownerId, batch.id);
     return { batch: toBatch(batch, pages) };
   });
@@ -108,13 +112,14 @@ export async function getInterventionBatch(db: DatabaseConnection, ownerId: stri
 
 export async function createInterventionBatch(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: CreateInterventionBatchInput,
   clock: Clock = systemClock,
 ): Promise<BatchResult> {
   return db.transaction(async (tx) => {
-    const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    const access = await authorizeRetestWrite(tx, actorId, input.brandId);
+    if ("error" in access) return access;
+    const { ownerId } = access;
     const now = clock();
     const point = pointFrom([]);
     const batch: InterventionBatchRecord = {
@@ -133,17 +138,23 @@ export async function createInterventionBatch(
 
 export async function registerInterventionPage(
   db: DatabaseConnection,
-  ownerId: string,
-  batchId: string,
+  actorId: string,
+  batchRef: RetestResourceRef,
   input: RegisterInterventionPageInput,
   clock: Clock = systemClock,
 ): Promise<BatchResult> {
   return db.transaction(async (tx) => {
     const dao = new InterventionBatchDao(tx);
+    const batchId = typeof batchRef === "string" ? batchRef : batchRef.id;
+    const brandId = await dao.batchBrandId(batchId);
+    if (!brandId || (typeof batchRef !== "string" && batchRef.brandId !== brandId)) {
+      return { error: "NOT_FOUND" as const };
+    }
+    const access = await authorizeRetestWrite(tx, actorId, brandId);
+    if ("error" in access) return access;
+    const { ownerId } = access;
     const batch = await dao.batchForOwner(ownerId, batchId, true);
-    if (!batch) return { error: "NOT_FOUND" as const };
-    const owned = await new BrandDao(tx).owned(ownerId, batch.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    if (!batch || batch.brandId !== brandId) return { error: "NOT_FOUND" as const };
     const now = clock();
     await dao.upsertPage({
       id: randomUUID(),

@@ -260,18 +260,16 @@ await writeFile(reportCommands, (await readFile(reportCommands, "utf8")).replace
   const adopted = await authorizeBrandActor(db, ownerId, brandId, "read");`));
 
 const observationCommands = path.join(fixture, "src/features/formal-retest/commands.ts");
-const observationList = `export async function listFormalObservations(db: DatabaseConnection, ownerId: string, brandId: string) {
-  const owned = await new BrandDao(db).owned(ownerId, brandId);`;
+const observationList = "export async function listFormalObservations(db: DatabaseConnection, actorId: string, brandId: string) {";
 assert.ok((await readFile(observationCommands, "utf8")).includes(observationList));
-await writeFile(observationCommands, (await readFile(observationCommands, "utf8")).replace(observationList, `export async function listFormalObservations(db: DatabaseConnection, ownerId: string, brandId: string) {
+await writeFile(observationCommands, (await readFile(observationCommands, "utf8")).replace(observationList, `${observationList}
   if ((await (await import("next/headers")).cookies()).get("geo-observations-unavailable")?.value === "1") {
     throw new Error("Private observation fixture failure");
-  }
-  const owned = await new BrandDao(db).owned(ownerId, brandId);`));
+  }`));
 
 const interventionCommands = path.join(fixture, "src/features/formal-retest/intervention-commands.ts");
 const interventionSource = await readFile(interventionCommands, "utf8");
-const interventionList = "export async function listInterventionBatches(db: DatabaseConnection, ownerId: string, brandId: string): Promise<ListResult> {";
+const interventionList = "export async function listInterventionBatches(db: DatabaseConnection, actorId: string, brandId: string): Promise<ListResult> {";
 assert.ok(interventionSource.includes(interventionList));
 await writeFile(interventionCommands, interventionSource.replace(interventionList, `${interventionList}
   if ((await (await import("next/headers")).cookies()).get("geo-interventions-unavailable")?.value === "1") {

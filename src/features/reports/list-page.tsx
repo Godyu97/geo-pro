@@ -7,6 +7,7 @@ import { getConnection } from "@/lib/db/connection";
 import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { workspaceBrand } from "@/features/team-access/brand-scope";
+import { interventionsPath, observationsPath, retestHref } from "@/features/formal-retest/workspace";
 import { brandIdSchema } from "@/features/brands/contracts";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockRetestButton } from "@/features/functional-mock/run-buttons";
@@ -39,8 +40,8 @@ export async function generateMetadata() {
 function relatedLinks(t: Awaited<ReturnType<typeof getTranslator<"reports">>>, brandId?: string) {
   return [
     ...(brandId ? [{ href: `/dashboard/monitoring/new?brandId=${encodeURIComponent(brandId)}`, label: t("openMonitoringNew") }] : []),
-    { href: "/dashboard/reports/observations", label: t("openObservations") },
-    { href: "/dashboard/reports/interventions", label: t("openInterventions") },
+    { href: retestHref(observationsPath, brandId), label: t("openObservations") },
+    { href: retestHref(interventionsPath, brandId), label: t("openInterventions") },
     { href: "/dashboard/reports/leads", label: t("openLeads") },
     { href: "/dashboard/reports/lead-quality", label: t("openLeadQuality") },
     { href: "/dashboard/reports/lead-suggestions", label: t("openLeadSuggestions") },
@@ -468,7 +469,7 @@ export default async function ReportsListPage({
   }
   const openRetests = new Set(result.snapshots.filter((item) => item.status === "created").map((item) => item.retestId));
   const next = nextSnapshot(result.snapshots);
-  const observationsHref = "/dashboard/reports/observations";
+  const observationsHref = retestHref(observationsPath, brandId);
   const taskKey = next.kind === "current"
     ? "snapshotTaskCurrent"
     : next.kind === "history"

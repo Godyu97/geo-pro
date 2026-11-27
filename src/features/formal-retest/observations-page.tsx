@@ -1,15 +1,15 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { Button } from "@/components/ui/button";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
-import { brandIdSchema } from "../brands/contracts";
-import { BrandDao } from "../brands/dao";
 import { appendFormalConfounderAction, createFormalObservationAction, recordFormalCheckpointAction, registerFormalControlAction, stopFormalObservationAction } from "./actions";
 import { listFormalObservations, type FormalObservationView } from "./commands";
+import { observationsPath, readRetestWorkspace, reportsPath, retestHref } from "./workspace";
 
-const knownErrors = ["NOT_FOUND", "INVALID_INPUT", "THRESHOLD_REJECTED", "CHECKPOINT_EXISTS", "OBSERVATION_STOPPED"] as const;
+const knownErrors = ["NOT_FOUND", "FORBIDDEN", "INVALID_INPUT", "THRESHOLD_REJECTED", "CHECKPOINT_EXISTS", "OBSERVATION_STOPPED"] as const;
 const checkpointOrder = ["d7", "d14", "d28"] as const;
 const createFormId = "observation-create";
 const actionClass = "h-auto max-w-full whitespace-normal";
@@ -34,16 +34,21 @@ function formatRatio(value: number | null, naLabel: string) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-function reportsHref(brandId?: string) {
-  return brandId ? `/dashboard/reports?brandId=${encodeURIComponent(brandId)}` : "/dashboard/reports";
-}
-
-function observationsHref(brandId?: string) {
-  return brandId ? `/dashboard/reports/observations?brandId=${encodeURIComponent(brandId)}` : "/dashboard/reports/observations";
-}
-
 function associated(form?: string) {
   return form ? { form } : {};
+}
+
+async function readWorkspace(actorId: string, brandParam: string | string[] | undefined) {
+  try {
+    const workspace = await readRetestWorkspace(actorId, brandParam);
+    if (workspace.kind !== "ready") return workspace;
+    const listed = await listFormalObservations(getConnection(), actorId, workspace.brand.id);
+    if ("error" in listed) return { kind: "notFound" } as const;
+    return { ...workspace, observations: listed.observations };
+  } catch {
+    console.error("formal-observations-read-failed");
+    return { kind: "error" } as const;
+  }
 }
 
 function nextObservation(observations: readonly FormalObservationView[]) {
@@ -205,71 +210,34 @@ export default async function FormalObservationsPage({
   const params = await searchParams;
   const t = await getTranslator("formalObservations");
   const errorCode = typeof params.error === "string" ? params.error : undefined;
-  const connection = getConnection();
-  const requested = typeof params.brandId === "string" ? params.brandId : undefined;
-  const parsedBrand = requested ? brandIdSchema.safeParse(requested) : null;
-  const active = await new BrandDao(connection).active(session.user.id);
-  const brandsAction = (
-    <Button asChild className={actionClass}>
-      <Link href="/dashboard/brands" prefetch={false}>{t("openBrand")}</Link>
-    </Button>
-  );
-  const related = (brandId?: string) => [{ href: reportsHref(brandId), label: t("backReports") }];
+  const related = (brandId?: string) => [{ href: retestHref(reportsPath, brandId), label: t("backReports") }];
+  const result = await readWorkspace(session.user.id, params.brandId);
 
-  if (requested && !parsedBrand?.success) {
+  if (result.kind === "notFound") notFound();
+  if (result.kind !== "ready") {
+    const retryHref = retestHref(observationsPath, typeof params.brandId === "string" ? params.brandId : undefined);
     return (
       <ObservationCanvas
         title={t("title")}
-        summary={<p role="alert" className="max-w-2xl break-words text-sm leading-7">{t("NOT_FOUND")}</p>}
-        primary={brandsAction}
+        summary={<p role={result.kind === "error" ? "alert" : undefined} className="max-w-2xl break-words text-sm leading-7 text-muted-foreground">
+          {t(result.kind === "error" ? "SERVICE_UNAVAILABLE" : "noBrand")}
+        </p>}
+        primary={(
+          <Button asChild className={actionClass}>
+            {result.kind === "error" ? <a href={retryHref}>{t("reload")}</a> : (
+              <Link href="/dashboard/brands" prefetch={false}>{t("openBrand")}</Link>
+            )}
+          </Button>
+        )}
         relatedLabel={t("relatedEntries")}
         related={related()}
       />
     );
   }
 
-  const brandId = parsedBrand?.success ? parsedBrand.data : active?.id;
-  if (!brandId) {
-    return (
-      <ObservationCanvas
-        title={t("title")}
-        summary={<p className="max-w-2xl break-words text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>}
-        primary={brandsAction}
-        relatedLabel={t("relatedEntries")}
-        related={related()}
-      />
-    );
-  }
-
-  const href = observationsHref(brandId);
-  const reloadAction = (
-    <Button asChild className={actionClass}>
-      <a href={href}>{t("reload")}</a>
-    </Button>
-  );
-  let listed: Awaited<ReturnType<typeof listFormalObservations>> | { error: "SERVICE_UNAVAILABLE" };
-  try {
-    listed = await listFormalObservations(connection, session.user.id, brandId);
-  } catch {
-    console.error("formal-observations-read-failed", { brandId });
-    listed = { error: "SERVICE_UNAVAILABLE" };
-  }
-  if ("error" in listed && listed.error) {
-    const code = listed.error;
-    return (
-      <ObservationCanvas
-        title={t("title")}
-        summary={<p role="alert" className="max-w-2xl break-words text-sm leading-7">{t(code)}</p>}
-        primary={code === "NOT_FOUND" ? brandsAction : reloadAction}
-        relatedLabel={t("relatedEntries")}
-        related={related(code === "NOT_FOUND" ? undefined : brandId)}
-      />
-    );
-  }
-
-  const version = active?.id === brandId ? active : await new BrandDao(connection).version(session.user.id, brandId);
-  const brandName = version && "name" in version ? version.name : "";
-  const observations = listed.observations;
+  const { brand, canWrite, observations } = result;
+  const brandId = brand.id;
+  const brandField = <input type="hidden" name="brandId" value={brandId} />;
   const next = nextObservation(observations);
   const taskKey = {
     empty: "taskEmpty",
@@ -280,7 +248,7 @@ export default async function FormalObservationsPage({
     stopped: "taskStopped",
   } as const;
   const checkpointFormId = next.observation ? `formal-checkpoint-${next.observation.id}` : "";
-  const recordsCheckpoint = next.kind === "pending" || next.kind === "progress";
+  const recordsCheckpoint = canWrite && (next.kind === "pending" || next.kind === "progress");
   const modeLabel = {
     progress: t("modeProgress"),
     formal: t("modeFormal"),
@@ -294,9 +262,9 @@ export default async function FormalObservationsPage({
   const checkpointLabel = { d7: t("checkpointD7"), d14: t("checkpointD14"), d28: t("checkpointD28") } as const;
   const factorLabel = { model: t("factorModel"), marketing: t("factorMarketing"), price: t("factorPrice") } as const;
   const statusLabel = { observing: t("statusObserving"), checkpoint_due: t("statusCheckpointDue"), stopped: t("statusStopped") } as const;
-  const primary = next.kind === "empty" ? (
+  const primary = canWrite && next.kind === "empty" ? (
     <form id={createFormId} action={createFormalObservationAction}>
-      <input type="hidden" name="brandId" value={brandId} />
+      {brandField}
       <Button type="submit" className={actionClass}>{t("create")}</Button>
     </form>
   ) : next.kind === "stopped" && next.observation ? (
@@ -305,10 +273,11 @@ export default async function FormalObservationsPage({
     </Button>
   ) : recordsCheckpoint && next.observation ? (
     <form id={checkpointFormId} action={recordFormalCheckpointAction}>
+      {brandField}
       <input type="hidden" name="observationId" value={next.observation.id} />
       <Button type="submit" className={actionClass}>{t("requestFormal")}</Button>
     </form>
-  ) : next.observation ? (
+  ) : next.observation && next.observation.checkpoints.length > 0 ? (
     <Button asChild className={actionClass}>
       <Link
         href={next.kind === "exploratory" ? `#excluded-${next.observation.id}` : `#history-${next.observation.id}`}
@@ -332,7 +301,7 @@ export default async function FormalObservationsPage({
                 end: next.observation.baseline.end,
                 date: next.observation.baseline.rescheduleOn,
               })
-              : t(taskKey[next.kind])}
+              : t(canWrite ? taskKey[next.kind] : "readOnly")}
           </p>
           <p className="break-words text-sm leading-7 text-muted-foreground">{t("description")}</p>
         </div>
@@ -341,21 +310,21 @@ export default async function FormalObservationsPage({
       relatedLabel={t("relatedEntries")}
       related={related(brandId)}
     >
-      {brandName ? <p className="[overflow-wrap:anywhere] text-sm text-muted-foreground">{brandName}</p> : null}
+      <p className="[overflow-wrap:anywhere] text-sm text-muted-foreground">{brand.name}</p>
 
-      {next.kind === "empty" ? (
+      {canWrite && (next.kind === "empty" ? (
         <div className="grid min-w-0 gap-4 rounded-2xl border bg-card p-5 sm:grid-cols-2">
           <CreateFields t={t} form={createFormId} />
         </div>
       ) : (
         <form action={createFormalObservationAction} className="grid min-w-0 gap-4 rounded-2xl border bg-card p-5 sm:grid-cols-2">
-          <input type="hidden" name="brandId" value={brandId} />
+          {brandField}
           <CreateFields t={t} />
           <div className="flex items-end">
             <Button type="submit" className={actionClass}>{t("create")}</Button>
           </div>
         </form>
-      )}
+      ))}
 
       {observations.length === 0 ? <p className={emptyClass}>{t("empty")}</p> : observations.map((observation) => {
         const checkpointTarget = recordsCheckpoint && next.observation?.id === observation.id;
@@ -386,10 +355,11 @@ export default async function FormalObservationsPage({
 
             {observation.status === "stopped" ? (
               <StopNotice t={t} observation={observation} checkpointLabel={checkpointLabel} />
-            ) : (
+            ) : canWrite ? (
               <form action={stopFormalObservationAction} className="grid min-w-0 gap-4 sm:grid-cols-2">
                 <h3 className="text-base font-semibold sm:col-span-2">{t("stopTitle")}</h3>
                 <p className="text-sm leading-7 text-muted-foreground sm:col-span-2">{t("stopHint")}</p>
+                {brandField}
                 <input type="hidden" name="observationId" value={observation.id} />
                 <label className="min-w-0 space-y-2 text-sm break-words sm:col-span-2">
                   <span>{t("stopReason")}</span>
@@ -400,13 +370,16 @@ export default async function FormalObservationsPage({
                   <Button type="submit" className={actionClass}>{t("saveStop")}</Button>
                 </div>
               </form>
-            )}
+            ) : null}
 
             <div className="min-w-0 space-y-4">
               <h3 className="text-base font-semibold">{t("controlsHeading")}</h3>
               <p className="text-sm leading-7 text-muted-foreground">{t("controlsHint")}</p>
-              {observation.checkpoints.length === 0 ? (
+              {observation.checkpoints.length > 0 ? (
+                <p className="text-sm leading-7 text-muted-foreground">{t("controlsClosed")}</p>
+              ) : canWrite ? (
                 <form action={registerFormalControlAction} className="grid min-w-0 gap-4 sm:grid-cols-2">
+                  {brandField}
                   <input type="hidden" name="observationId" value={observation.id} />
                   <input type="hidden" name="label" value="observation" />
                   <label className="min-w-0 space-y-2 text-sm break-words sm:col-span-2">
@@ -418,9 +391,7 @@ export default async function FormalObservationsPage({
                     <Button type="submit" className={actionClass}>{t("saveControl")}</Button>
                   </div>
                 </form>
-              ) : (
-                <p className="text-sm leading-7 text-muted-foreground">{t("controlsClosed")}</p>
-              )}
+              ) : null}
               {observation.controls.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{t("noControls")}</p>
               ) : observation.controls.map((control) => (
@@ -432,12 +403,13 @@ export default async function FormalObservationsPage({
               ))}
             </div>
 
-            {observation.status === "stopped" ? null : checkpointTarget ? (
+            {!canWrite || observation.status === "stopped" ? null : checkpointTarget ? (
               <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                 <CheckpointFields t={t} form={checkpointFormId} checkpointLabel={checkpointLabel} />
               </div>
             ) : (
               <form action={recordFormalCheckpointAction} className="grid min-w-0 gap-4 sm:grid-cols-2">
+                {brandField}
                 <input type="hidden" name="observationId" value={observation.id} />
                 <CheckpointFields t={t} checkpointLabel={checkpointLabel} />
                 <div>
@@ -614,9 +586,10 @@ export default async function FormalObservationsPage({
               )}
             </div>
 
-            <form action={appendFormalConfounderAction} className="grid min-w-0 gap-4 sm:grid-cols-2">
+            {canWrite && <form action={appendFormalConfounderAction} className="grid min-w-0 gap-4 sm:grid-cols-2">
               <h3 className="text-base font-semibold sm:col-span-2">{t("confounderTitle")}</h3>
               <p className="text-sm leading-7 text-muted-foreground sm:col-span-2">{t("confounderHint")}</p>
+              {brandField}
               <input type="hidden" name="observationId" value={observation.id} />
               <label className="min-w-0 space-y-2 text-sm break-words">
                 <span>{t("factor")}</span>
@@ -634,7 +607,7 @@ export default async function FormalObservationsPage({
               <div>
                 <Button type="submit" className={actionClass}>{t("saveConfounder")}</Button>
               </div>
-            </form>
+            </form>}
 
             <div className="min-w-0 space-y-3">
               <h3 className="text-base font-semibold">{t("confoundersHeading")}</h3>

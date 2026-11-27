@@ -7,13 +7,21 @@ import { getConnection } from "@/lib/db/connection";
 import { brandIdSchema } from "../brands/contracts.ts";
 import { appendFormalConfounder, createFormalObservation, recordFormalCheckpoint, registerFormalControl, stopFormalObservation } from "./commands.ts";
 import { createFormalObservationSchema, recordFormalCheckpointSchema } from "./contracts.ts";
+import { observationsPath, retestHref } from "./workspace.ts";
 
-const observationsPath = "/dashboard/reports/observations";
-const pageErrors = new Set(["NOT_FOUND", "INVALID_INPUT", "THRESHOLD_REJECTED", "CHECKPOINT_EXISTS", "OBSERVATION_STOPPED"]);
+const pageErrors = new Set(["NOT_FOUND", "FORBIDDEN", "INVALID_INPUT", "THRESHOLD_REJECTED", "CHECKPOINT_EXISTS", "OBSERVATION_STOPPED"]);
 
-function finish(error?: string): never {
+function finish(brandId?: string, error?: string): never {
   revalidatePath(observationsPath);
-  redirect(error && pageErrors.has(error) ? `${observationsPath}?error=${error}` : observationsPath);
+  redirect(retestHref(observationsPath, brandId, error && pageErrors.has(error) ? error : undefined));
+}
+
+function observationRef(formData: FormData) {
+  const brandId = brandIdSchema.safeParse(formData.get("brandId"));
+  const id = brandIdSchema.safeParse(formData.get("observationId"));
+  if (!brandId.success) finish(undefined, "INVALID_INPUT");
+  if (!id.success) finish(brandId.data, "INVALID_INPUT");
+  return { id: id.data, brandId: brandId.data };
 }
 
 function wholeNumber(value: FormDataEntryValue | null) {
@@ -34,55 +42,55 @@ export async function createFormalObservationAction(formData: FormData) {
     effectiveOn: formData.get("effectiveOn"),
     frozenNonBrandCount: wholeNumber(formData.get("frozenNonBrandCount")),
   });
-  if (!command.success) finish("INVALID_INPUT");
+  if (!command.success) {
+    const brand = brandIdSchema.safeParse(formData.get("brandId"));
+    finish(brand.data, "INVALID_INPUT");
+  }
   const result = await createFormalObservation(getConnection(), session.user.id, command.data);
-  finish("error" in result ? result.error : undefined);
+  finish(command.data.brandId, "error" in result ? result.error : undefined);
 }
 
 export async function recordFormalCheckpointAction(formData: FormData) {
   const session = await requireSession();
-  const observationId = brandIdSchema.safeParse(formData.get("observationId"));
+  const ref = observationRef(formData);
   const command = recordFormalCheckpointSchema.safeParse({
     checkpoint: formData.get("checkpoint"),
     today: formData.get("today"),
     requestedMode: "formal",
   });
-  if (!observationId.success || !command.success) finish("INVALID_INPUT");
-  const result = await recordFormalCheckpoint(getConnection(), session.user.id, observationId.data, command.data);
-  finish("error" in result ? result.error : undefined);
+  if (!command.success) finish(ref.brandId, "INVALID_INPUT");
+  const result = await recordFormalCheckpoint(getConnection(), session.user.id, ref, command.data);
+  finish(ref.brandId, "error" in result ? result.error : undefined);
 }
 
 export async function appendFormalConfounderAction(formData: FormData) {
   const session = await requireSession();
-  const observationId = brandIdSchema.safeParse(formData.get("observationId"));
-  if (!observationId.success) finish("INVALID_INPUT");
+  const ref = observationRef(formData);
   const raw: Record<string, FormDataEntryValue | null> = {
     factor: formData.get("factor"),
     note: formData.get("note"),
   };
   if (formData.has("thresholdPp")) raw.thresholdPp = formData.get("thresholdPp");
   if (formData.has("threshold")) raw.threshold = formData.get("threshold");
-  const result = await appendFormalConfounder(getConnection(), session.user.id, observationId.data, raw);
-  finish("error" in result ? result.error : undefined);
+  const result = await appendFormalConfounder(getConnection(), session.user.id, ref, raw);
+  finish(ref.brandId, "error" in result ? result.error : undefined);
 }
 
 export async function stopFormalObservationAction(formData: FormData) {
   const session = await requireSession();
-  const observationId = brandIdSchema.safeParse(formData.get("observationId"));
-  if (!observationId.success) finish("INVALID_INPUT");
-  const result = await stopFormalObservation(getConnection(), session.user.id, observationId.data, {
+  const ref = observationRef(formData);
+  const result = await stopFormalObservation(getConnection(), session.user.id, ref, {
     reason: formData.get("reason"),
   });
-  finish("error" in result ? result.error : undefined);
+  finish(ref.brandId, "error" in result ? result.error : undefined);
 }
 
 export async function registerFormalControlAction(formData: FormData) {
   const session = await requireSession();
-  const observationId = brandIdSchema.safeParse(formData.get("observationId"));
-  if (!observationId.success) finish("INVALID_INPUT");
-  const result = await registerFormalControl(getConnection(), session.user.id, observationId.data, {
+  const ref = observationRef(formData);
+  const result = await registerFormalControl(getConnection(), session.user.id, ref, {
     pageKey: formData.get("pageKey"),
     label: formData.get("label"),
   });
-  finish("error" in result ? result.error : undefined);
+  finish(ref.brandId, "error" in result ? result.error : undefined);
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
@@ -17,6 +18,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
 import { brandIntakeDecision, type BrandIntakeMode } from "@/features/brands/intake";
+import { retestBrandUnavailable } from "@/features/formal-retest/workspace";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator("common");
@@ -30,11 +32,14 @@ export default async function DashboardLayout({
   children: ReactNode;
 }) {
   const { user } = await requireSession();
+  const requestHeaders = await headers();
+  // Resolve explicit retest brands before the dashboard loading boundary can stream.
+  if (await retestBrandUnavailable(user.id, requestHeaders.get("x-geo-path"))) notFound();
   const locale = await getLocale();
   const messages = getMessages(locale);
   const t = await getTranslator("common");
   const settings = await getTranslator("settings");
-  const decision = brandIntakeDecision(await headers(), user.email);
+  const decision = brandIntakeDecision(requestHeaders, user.email);
   let brandIntake: BrandIntakeMode | "closed" | "dev-denied" = "closed";
   if (decision.state === "denied") brandIntake = "dev-denied";
   if (decision.state === "open") brandIntake = decision.intake.mode;

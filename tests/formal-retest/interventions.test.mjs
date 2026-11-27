@@ -347,6 +347,14 @@ for (const kind of ["sqlite", "postgresql"]) {
         const pagePlan = JSON.stringify(await queryWithParameters(db, explain + pageQuery.sql, pageQuery.values));
         assert.match(listPlan, /intervention_batch_owner_idx/);
         assert.match(pagePlan, /intervention_batch_page_key_uidx/);
+        const detail = watch(db);
+        assert.deepEqual(await getInterventionBatch(detail.connection, owner, created.batch.id), { batch: visible });
+        const batchReads = detail.captured.filter((item) => isSelect(item.sql, "intervention_batch"));
+        assert.equal(batchReads.length, 2);
+        const identityRead = batchReads[0];
+        assert.deepEqual(identityRead.values, [created.batch.id]);
+        const identityPlan = JSON.stringify(await queryWithParameters(db, explain + identityRead.sql, identityRead.values));
+        assert.match(identityPlan, db.kind === "postgresql" ? /intervention_batch_pkey/ : /sqlite_autoindex_intervention_batch_1/);
         if (db.kind === "postgresql") {
           assert.doesNotMatch(listPlan, /Seq Scan on intervention_batch(?!_)/);
           assert.doesNotMatch(pagePlan, /Seq Scan on intervention_batch_page/);

@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { statisticsTimeZone } from "../../lib/i18n/format.ts";
-import { BrandDao } from "../brands/dao.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
+import { authorizeRetestWrite, type RetestResourceRef } from "./brand-access.ts";
 import { SamplingProtocolDao } from "../monitoring/protocol-dao.ts";
 import { draftContent, primaryTypes } from "../prompts/contracts.ts";
 import { isTimeZone } from "../sampling-plans/due-window.ts";
@@ -314,9 +315,34 @@ export function decideFormalCheckpoint(input: {
   });
 }
 
-export async function listFormalObservations(db: DatabaseConnection, ownerId: string, brandId: string) {
-  const owned = await new BrandDao(db).owned(ownerId, brandId);
-  if (!owned) return { error: "NOT_FOUND" as const };
+async function resolveObservation(
+  db: QueryConnection,
+  dao: FormalObservationDao,
+  actorId: string,
+  ref: RetestResourceRef,
+  action: "read" | "write",
+) {
+  const id = typeof ref === "string" ? ref : ref.id;
+  const brandId = await dao.observationBrandId(id);
+  if (!brandId || (typeof ref !== "string" && ref.brandId !== brandId)) {
+    return { error: "NOT_FOUND" as const };
+  }
+
+  const access = action === "write"
+    ? await authorizeRetestWrite(db, actorId, brandId)
+    : await authorizeBrandActor(db, actorId, brandId, "read");
+  if (!access) return { error: "NOT_FOUND" as const };
+  if ("error" in access) return access;
+
+  const observation = await dao.observationForOwner(access.ownerId, id);
+  if (!observation || observation.brandId !== brandId) return { error: "NOT_FOUND" as const };
+  return { observation, ownerId: access.ownerId };
+}
+
+export async function listFormalObservations(db: DatabaseConnection, actorId: string, brandId: string) {
+  const access = await authorizeBrandActor(db, actorId, brandId, "read");
+  if (!access) return { error: "NOT_FOUND" as const };
+  const { ownerId } = access;
   const dao = new FormalObservationDao(db);
   const observations = await dao.observationsForBrand(ownerId, brandId);
   const observationIds = observations.map((item) => item.id);
@@ -337,13 +363,14 @@ export async function listFormalObservations(db: DatabaseConnection, ownerId: st
 
 export async function createFormalObservation(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: CreateFormalObservationInput,
   clock: Clock = systemClock,
 ) {
   return db.transaction(async (tx) => {
-    const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    const access = await authorizeRetestWrite(tx, actorId, input.brandId);
+    if ("error" in access) return access;
+    const { ownerId } = access;
     const now = clock();
     const baseline = baselineFor(await loadBaselineContext(tx, ownerId, input.brandId), input.effectiveOn);
     const observation: FormalObservationRecord = {
@@ -365,17 +392,16 @@ export async function createFormalObservation(
 
 export async function recordFormalCheckpoint(
   db: DatabaseConnection,
-  ownerId: string,
-  observationId: string,
+  actorId: string,
+  observationRef: RetestResourceRef,
   input: RecordFormalCheckpointInput,
   clock: Clock = systemClock,
 ) {
   return db.transaction(async (tx) => {
     const dao = new FormalObservationDao(tx);
-    const observation = await dao.observationForOwner(ownerId, observationId);
-    if (!observation) return { error: "NOT_FOUND" as const };
-    const owned = await new BrandDao(tx).owned(ownerId, observation.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    const resolved = await resolveObservation(tx, dao, actorId, observationRef, "write");
+    if ("error" in resolved) return resolved;
+    const { observation, ownerId } = resolved;
     if (observation.status === "stopped") return { error: "OBSERVATION_STOPPED" as const };
     const due = checkpointDue({
       effectiveOn: observation.effectiveOn,
@@ -430,29 +456,27 @@ export async function recordFormalCheckpoint(
   });
 }
 
-export async function listFormalConfounders(db: DatabaseConnection, ownerId: string, observationId: string) {
+export async function listFormalConfounders(db: DatabaseConnection, actorId: string, observationId: string) {
   const dao = new FormalObservationDao(db);
-  const observation = await dao.observationForOwner(ownerId, observationId);
-  if (!observation) return { error: "NOT_FOUND" as const };
-  const owned = await new BrandDao(db).owned(ownerId, observation.brandId);
-  if (!owned) return { error: "NOT_FOUND" as const };
+  const resolved = await resolveObservation(db, dao, actorId, observationId, "read");
+  if ("error" in resolved) return resolved;
+  const { observation, ownerId } = resolved;
   const confounders = await dao.confoundersFor(ownerId, [observation.id]);
   return { confounders: confounders.map(toConfounder) };
 }
 
 export async function appendFormalConfounder(
   db: DatabaseConnection,
-  ownerId: string,
-  observationId: string,
+  actorId: string,
+  observationRef: RetestResourceRef,
   input: unknown,
   clock: Clock = systemClock,
 ) {
   return db.transaction(async (tx) => {
     const dao = new FormalObservationDao(tx);
-    const observation = await dao.observationForOwner(ownerId, observationId);
-    if (!observation) return { error: "NOT_FOUND" as const };
-    const owned = await new BrandDao(tx).owned(ownerId, observation.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    const resolved = await resolveObservation(tx, dao, actorId, observationRef, "write");
+    if ("error" in resolved) return resolved;
+    const { observation, ownerId } = resolved;
     if (!isRecord(input)) return { error: "INVALID_INPUT" as const };
     if ("thresholdPp" in input || "threshold" in input) {
       const factor = typeof input.factor === "string" ? input.factor : "";
@@ -482,29 +506,27 @@ export async function appendFormalConfounder(
   });
 }
 
-export async function listFormalControls(db: DatabaseConnection, ownerId: string, observationId: string) {
+export async function listFormalControls(db: DatabaseConnection, actorId: string, observationId: string) {
   const dao = new FormalObservationDao(db);
-  const observation = await dao.observationForOwner(ownerId, observationId);
-  if (!observation) return { error: "NOT_FOUND" as const };
-  const owned = await new BrandDao(db).owned(ownerId, observation.brandId);
-  if (!owned) return { error: "NOT_FOUND" as const };
+  const resolved = await resolveObservation(db, dao, actorId, observationId, "read");
+  if ("error" in resolved) return resolved;
+  const { observation, ownerId } = resolved;
   const controls = await dao.controlsFor(ownerId, [observation.id]);
   return { controls: controls.map(toControl) };
 }
 
 export async function registerFormalControl(
   db: DatabaseConnection,
-  ownerId: string,
-  observationId: string,
+  actorId: string,
+  observationRef: RetestResourceRef,
   input: unknown,
   clock: Clock = systemClock,
 ) {
   return db.transaction(async (tx) => {
     const dao = new FormalObservationDao(tx);
-    const observation = await dao.observationForOwner(ownerId, observationId);
-    if (!observation) return { error: "NOT_FOUND" as const };
-    const owned = await new BrandDao(tx).owned(ownerId, observation.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    const resolved = await resolveObservation(tx, dao, actorId, observationRef, "write");
+    if ("error" in resolved) return resolved;
+    const { observation, ownerId } = resolved;
     if (!isRecord(input)) return { error: "INVALID_INPUT" as const };
     const label = typeof input.label === "string" ? input.label : "";
     const labelDecision = registerControlPage({ label, checkpointCount: 0, checkpointMode: null });
@@ -553,12 +575,11 @@ async function observationView(
   return toObservation(observation, checkpoints, confounders, controls, baseline);
 }
 
-export async function readFormalObservation(db: DatabaseConnection, ownerId: string, observationId: string) {
+export async function readFormalObservation(db: DatabaseConnection, actorId: string, observationId: string) {
   const dao = new FormalObservationDao(db);
-  const observation = await dao.observationForOwner(ownerId, observationId);
-  if (!observation) return { error: "NOT_FOUND" as const };
-  const owned = await new BrandDao(db).owned(ownerId, observation.brandId);
-  if (!owned) return { error: "NOT_FOUND" as const };
+  const resolved = await resolveObservation(db, dao, actorId, observationId, "read");
+  if ("error" in resolved) return resolved;
+  const { observation, ownerId } = resolved;
   const checkpoints = await dao.checkpointsFor(ownerId, [observation.id]);
   const confounders = await dao.confoundersFor(ownerId, [observation.id]);
   const controls = await dao.controlsFor(ownerId, [observation.id]);
@@ -569,17 +590,16 @@ export async function readFormalObservation(db: DatabaseConnection, ownerId: str
 
 export async function stopFormalObservation(
   db: DatabaseConnection,
-  ownerId: string,
-  observationId: string,
+  actorId: string,
+  observationRef: RetestResourceRef,
   input: unknown,
   clock: Clock = systemClock,
 ) {
   return db.transaction(async (tx) => {
     const dao = new FormalObservationDao(tx);
-    const observation = await dao.observationForOwner(ownerId, observationId);
-    if (!observation) return { error: "NOT_FOUND" as const };
-    const owned = await new BrandDao(tx).owned(ownerId, observation.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    const resolved = await resolveObservation(tx, dao, actorId, observationRef, "write");
+    if ("error" in resolved) return resolved;
+    const { observation, ownerId } = resolved;
     const parsed = stopFormalObservationSchema.safeParse(input);
     if (!parsed.success) return { error: "INVALID_INPUT" as const };
     const checkpoints = await dao.checkpointsFor(ownerId, [observation.id]);

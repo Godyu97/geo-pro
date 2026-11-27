@@ -289,7 +289,12 @@ for (const kind of ["sqlite", "postgresql"]) {
         const scaledRead = await readFormalObservation(scaled.connection, owner, observationId);
         assert.equal(scaledRead.observation.stopReason, reason);
         assert.deepEqual(scaledRead.observation.retainedSlotIds, stopped.retainedSlotIds);
-        assert.equal(scaled.captured.filter((item) => item.sql.includes("FROM formal_observation")).length, 1);
+        const observationReads = scaled.captured.filter((item) => item.sql.includes("FROM formal_observation"));
+        assert.equal(observationReads.length, 2);
+        const identityRead = observationReads[0];
+        assert.deepEqual(identityRead.values, [observationId]);
+        const identityPlan = JSON.stringify(await queryWithParameters(db, explain + identityRead.sql, identityRead.values));
+        assert.match(identityPlan, db.kind === "postgresql" ? /formal_observation_pkey/ : /sqlite_autoindex_formal_observation_1/);
       } finally {
         await ddl.cleanup();
       }

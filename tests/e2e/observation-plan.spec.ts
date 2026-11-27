@@ -35,8 +35,6 @@ const copy = {
     exploratoryConclusion: "窗口已到期，已保存槽位的覆盖或指标门槛未全部达标。这是探索记录。",
     unavailable: "暂时无法读取或保存观察记录，请稍后重试。",
     reload: "重新载入",
-    missing: "找不到这条观察，或它不属于当前账号。",
-    openBrand: "去建档",
     taskStopped: "这份观察已提前停止。已写入的检查点和槽位编号仍可查看。下一步是查看停止原因。",
     stopTitle: "提前停止观察",
     saveStop: "停止观察",
@@ -66,8 +64,7 @@ const copy = {
     exploratoryConclusion: "The window is due, but saved slots did not pass every coverage or metric threshold. This is an exploratory record.",
     unavailable: "Observations cannot be read or saved right now. Try again later.",
     reload: "Reload",
-    missing: "This observation was not found, or it belongs to another account.",
-    openBrand: "Open brands",
+    missing: "Page not found",
     taskStopped: "This observation was stopped early. Written checkpoints and slot IDs remain available. Review the stop reason next.",
     stopTitle: "Stop the observation early",
     saveStop: "Stop observation",
@@ -477,14 +474,13 @@ test("observation plans keep the next checkpoint readable and recoverable", asyn
     const stranger = await outsider.newPage();
     await outsider.addCookies([{ name: "geo-locale", value: "en", url: origin }]);
     await stranger.setViewportSize({ width: 375, height: 800 });
-    await stranger.goto(href);
+    const denied = await stranger.goto(href);
+    expect(denied?.status()).toBe(404);
     await stranger.evaluate(() => window.scrollTo(0, 0));
     const hidden = stranger.getByRole("main");
-    await expect(hidden.getByRole("heading", { name: copy.en.title, exact: true })).toBeVisible();
-    await expect(hidden.getByRole("alert")).toContainText(copy.en.missing);
+    await expect(hidden.getByRole("heading", { name: copy.en.missing, exact: true })).toBeVisible();
     await expect(hidden.getByText(frozenSetId)).toHaveCount(0);
     await expect(hidden.getByText(brandName)).toHaveCount(0);
-    await expect(hidden.getByRole("link", { name: copy.en.openBrand, exact: true })).toBeInViewport();
     await expect(hidden.getByRole("button", { name: copy.en.requestFormal, exact: true })).toHaveCount(0);
     await expect(hidden.getByText(stopReason)).toHaveCount(0);
     await expect(hidden.getByText(seededSlotIds[0]!)).toHaveCount(0);

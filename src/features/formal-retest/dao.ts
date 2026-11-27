@@ -351,6 +351,15 @@ export class FormalObservationDao {
     return row ? observationRow.parse(row) : null;
   }
 
+  async observationBrandId(observationId: string) {
+    const [row] = await queryWithParameters(
+      this.db,
+      'SELECT brand_id AS "brandId" FROM formal_observation WHERE id = ?',
+      [observationId],
+    );
+    return row ? brandIdSchema.parse(row.brandId) : null;
+  }
+
   async observationsForBrand(ownerId: string, brandId: string) {
     const query = formalObservationListQuery(ownerId, brandId);
     const rows = await queryWithParameters(this.db, query.sql, query.values);
