@@ -426,7 +426,60 @@ test("weekly action drafts keep the next action, confirmation, isolation, and re
     await expect(stranger.getByText(actionText)).toHaveCount(0);
     await expect(stranger.getByRole("option", { name: new RegExp(factTitle) })).toHaveCount(0);
     await expectNoOverflow(stranger);
+    expect((await stranger.goto(`/dashboard/assistant?brandId=${brandId}`))?.status()).toBe(404);
     await stranger.close();
+
+    for (const role of ["read_only", "member"] as const) {
+      const collaborator = await browser.newContext({ baseURL: origin });
+      try {
+        const email = `assistant-plans-${role}-${randomUUID()}@example.invalid`;
+        const userId = await register(collaborator, email);
+        accounts.push({ userId, email });
+        const granted = await context.request.post("/api/settings/team/grants", {
+          headers,
+          data: { userId, brandId, role },
+        });
+        expect(granted.ok()).toBe(true);
+        const collabPage = await collaborator.newPage();
+        for (const locale of locales) {
+          await collaborator.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+          for (const width of widths) {
+            await collabPage.setViewportSize({ width, height: 800 });
+            expect((await collabPage.goto(`/dashboard/assistant?brandId=${brandId}`))?.status()).toBe(200);
+            const main = collabPage.getByRole("main");
+            await expect(main.getByText(brandName, { exact: true })).toBeVisible();
+            await expect(main.getByText(actionText, { exact: true })).toBeVisible();
+            await expect(main.locator("#assistant-create")).toHaveCount(role === "read_only" ? 0 : 1);
+            await expectNoOverflow(collabPage);
+          }
+        }
+        if (role === "read_only") {
+          for (const [url, data] of [
+            ["/api/assistant/plans", { brandId, material: "read only", budgetMinor: 100, successes: 1, items: [{ action: "Check", factVersionId: factId }] }],
+            [`/api/assistant/plans/${planId}/confirm`, { itemIds: [itemId] }],
+            [`/api/assistant/plans/${planId}/execute`, {}],
+            [`/api/assistant/plans/${planId}/review`, { nextStep: "Read only review" }],
+          ] as const) {
+            const denied = await collaborator.request.post(url, { headers, data });
+            expect(denied.status()).toBe(403);
+            expect((await denied.json()).error.code).toBe("FORBIDDEN");
+          }
+        } else {
+          await collabPage.goto(`/dashboard/assistant/plans?brandId=${brandId}`);
+          const factSelect = collabPage.getByRole("combobox", { name: copy.en.firstFact, exact: true });
+          await expect(factSelect.getByRole("option", { name: new RegExp(factTitle) })).toHaveAttribute("value", factId);
+          const reviewSection = collabPage.getByRole("region", { name: copy.en.reviewTitle });
+          await reviewSection.getByRole("textbox", { name: copy.en.reviewNextStep }).fill("Member reviewed settled plan.");
+          const savedReview = collabPage.waitForResponse((response) => response.url().endsWith(`/api/assistant/plans/${planId}/review`) && response.request().method() === "POST");
+          await reviewSection.getByRole("button", { name: copy.en.saveReview, exact: true }).click();
+          expect((await savedReview).ok()).toBe(true);
+          await collabPage.reload();
+          await expect(collabPage.getByText("Member reviewed settled plan.", { exact: true })).toBeVisible();
+        }
+      } finally {
+        await collaborator.close();
+      }
+    }
 
     for (const locale of locales) {
       const t = copy[locale];

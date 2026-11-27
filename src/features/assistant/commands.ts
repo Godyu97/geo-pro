@@ -9,6 +9,12 @@ import { factStatus } from "../brand-facts/rules.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import {
+  lockAssistantWrite,
+  readAssistantAccess,
+  resolveAssistantWorkspaceBrand,
+  writeAssistantAccess,
+} from "./brand-access.ts";
+import {
   confirmAssistantPlanSchema,
   createAssistantPlanSchema,
   saveAssistantPlanReviewSchema,
@@ -102,24 +108,19 @@ function toView(
   };
 }
 
-async function ownedBrand(db: DatabaseConnection, ownerId: string, brandId: string) {
-  if (!brandIdSchema.safeParse(brandId).success) return null;
-  return new BrandDao(db).version(ownerId, brandId);
-}
-
 async function loadView(dao: AssistantPlanDao, ownerId: string, plan: AssistantPlanRecord) {
   const items = await dao.itemsForPlans(ownerId, [plan.id]);
   return { plan: toView(plan, items) };
 }
 
-export async function listAssistantPlans(db: DatabaseConnection, ownerId: string, brandId: string) {
-  const brand = await ownedBrand(db, ownerId, brandId);
-  if (!brand) return failed("NOT_FOUND");
+export async function listAssistantPlans(db: DatabaseConnection, actorId: string, brandId: string) {
+  const access = await readAssistantAccess(db, actorId, brandId);
+  if (!access) return failed("NOT_FOUND");
   const dao = new AssistantPlanDao(db);
-  const plans = await dao.plansForBrand(ownerId, brand.id);
-  const items = await dao.itemsForPlans(ownerId, plans.map((plan) => plan.id));
+  const plans = await dao.plansForBrand(access.ownerId, access.brandId);
+  const items = await dao.itemsForPlans(access.ownerId, plans.map((plan) => plan.id));
   const settledIds = plans.filter((plan) => plan.status === "settled").map((plan) => plan.id);
-  const reviews = new Map((await dao.reviewsForPlans(ownerId, settledIds)).map((review) => [review.planId, review]));
+  const reviews = new Map((await dao.reviewsForPlans(access.ownerId, settledIds)).map((review) => [review.planId, review]));
   return { plans: plans.map((plan) => toView(plan, items, reviews.get(plan.id))) };
 }
 
@@ -132,46 +133,65 @@ export function assistantWorkspaceUnavailable(error: unknown) {
   return { error: "SERVICE_UNAVAILABLE" as const, traceId };
 }
 
-export async function readAssistantWorkspace(db: DatabaseConnection, ownerId: string) {
-  const active = await new BrandDao(db).active(ownerId);
-  if (!active) return { kind: "no-brand" as const };
-  const [listed, facts] = await Promise.all([
-    listAssistantPlans(db, ownerId, active.id),
-    new FactDao(db, { ownerId, brandId: active.id }).latestVersions("approved"),
+export async function readAssistantWorkspace(
+  db: DatabaseConnection,
+  actorId: string,
+  requestedBrandId?: string,
+) {
+  const resolved = await resolveAssistantWorkspaceBrand(db, actorId, requestedBrandId);
+  if (resolved.kind !== "ready") return resolved;
+  const dao = new AssistantPlanDao(db);
+  const [plans, facts] = await Promise.all([
+    dao.plansForBrand(resolved.ownerId, resolved.brandId),
+    resolved.canWrite
+      ? new FactDao(db, { ownerId: resolved.ownerId, brandId: resolved.brandId }).latestVersions("approved")
+      : Promise.resolve([]),
   ]);
-  if ("error" in listed) throw new Error("assistant-plans-unavailable");
+  const items = await dao.itemsForPlans(resolved.ownerId, plans.map((plan) => plan.id));
+  const settledIds = plans.filter((plan) => plan.status === "settled").map((plan) => plan.id);
+  const reviews = new Map((await dao.reviewsForPlans(resolved.ownerId, settledIds)).map((review) => [review.planId, review]));
   const today = new Date().toISOString().slice(0, 10);
   return {
     kind: "ready" as const,
-    brandId: active.id,
-    brandName: active.name,
-    plans: listed.plans,
+    brandId: resolved.brandId,
+    brandName: resolved.brandName,
+    canWrite: resolved.canWrite,
+    plans: plans.map((plan) => toView(plan, items, reviews.get(plan.id))),
     factOptions: facts
       .filter((fact) => factStatus(fact, today) === "approved")
       .map(({ id, version, fields }) => ({ id, version, title: fields.title })),
   };
 }
 
-export async function readAssistantPlan(db: DatabaseConnection, ownerId: string, planId: string) {
+export async function readAssistantPlan(db: DatabaseConnection, actorId: string, planId: string) {
   if (!brandIdSchema.safeParse(planId).success) return failed("INVALID_INPUT");
   const dao = new AssistantPlanDao(db);
-  const plan = await dao.planForOwner(ownerId, planId);
+  const identity = await dao.planIdentity(planId);
+  if (!identity) return failed("NOT_FOUND");
+  const access = await readAssistantAccess(db, actorId, identity.brandId);
+  if (!access || access.ownerId !== identity.ownerId) return failed("NOT_FOUND");
+  const plan = await dao.planForOwner(access.ownerId, planId);
   if (!plan) return failed("NOT_FOUND");
-  const items = await dao.itemsForPlans(ownerId, [plan.id]);
-  const [review] = plan.status === "settled" ? await dao.reviewsForPlans(ownerId, [plan.id]) : [];
+  const items = await dao.itemsForPlans(access.ownerId, [plan.id]);
+  const [review] = plan.status === "settled" ? await dao.reviewsForPlans(access.ownerId, [plan.id]) : [];
   return { plan: toView(plan, items, review) };
 }
 
-export async function readAssistantPlanReview(db: DatabaseConnection, ownerId: string, planId: string) {
+export async function readAssistantPlanReview(db: DatabaseConnection, actorId: string, planId: string) {
   const id = brandIdSchema.safeParse(planId);
   if (!id.success) return failed("INVALID_INPUT");
-  const [review] = await new AssistantPlanDao(db).reviewsForPlans(ownerId, [id.data]);
+  const dao = new AssistantPlanDao(db);
+  const identity = await dao.planIdentity(id.data);
+  if (!identity) return failed("NOT_FOUND");
+  const access = await readAssistantAccess(db, actorId, identity.brandId);
+  if (!access || access.ownerId !== identity.ownerId) return failed("NOT_FOUND");
+  const [review] = await dao.reviewsForPlans(access.ownerId, [id.data]);
   return review ? { review } : failed("NOT_FOUND");
 }
 
 export async function saveAssistantPlanReview(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   planId: string,
   input: unknown,
   options: Pick<PlanOptions, "clock"> = {},
@@ -180,18 +200,22 @@ export async function saveAssistantPlanReview(
   if (!id.success) return failed("INVALID_INPUT");
   const parsed = saveAssistantPlanReviewSchema.safeParse(input);
   if (!parsed.success) return failed("INVALID_REVIEW");
+  const now = stampOf(options.clock);
   return db.transaction(async (tx) => {
-    const brands = new BrandDao(tx);
-    if (!await brands.lockOwner(ownerId)) return failed("NOT_FOUND");
     const dao = new AssistantPlanDao(tx);
-    const plan = await dao.planForOwner(ownerId, id.data, true);
-    if (!plan || !await brands.owned(ownerId, plan.brandId)) return failed("NOT_FOUND");
+    const identity = await dao.planIdentity(id.data);
+    if (!identity) return failed("NOT_FOUND");
+    const access = await lockAssistantWrite(tx, actorId, identity.brandId, now);
+    if ("error" in access) return access;
+    if (access.ownerId !== identity.ownerId) return failed("NOT_FOUND");
+    const plan = await dao.planForOwner(access.ownerId, id.data, true);
+    if (!plan || !await new BrandDao(tx).owned(access.ownerId, plan.brandId)) return failed("NOT_FOUND");
     if (plan.status !== "settled") return failed("PLAN_NOT_SETTLED");
 
-    const [existing] = await dao.reviewsForPlans(ownerId, [plan.id]);
+    const [existing] = await dao.reviewsForPlans(access.ownerId, [plan.id]);
     if (existing && existing.nextStep !== parsed.data.nextStep) return failed("REVIEW_ALREADY_SAVED");
 
-    const items = await dao.itemsForPlans(ownerId, [plan.id]);
+    const items = await dao.itemsForPlans(access.ownerId, [plan.id]);
     if (existing) return { plan: toView(plan, items, existing) };
 
     const review = {
@@ -200,7 +224,7 @@ export async function saveAssistantPlanReview(
       executedCount: items.filter((item) => item.status === "executed").length,
       staleBlockedCount: items.filter((item) => item.status === "blocked" && item.blockReason === "fact_stale").length,
       nextStep: parsed.data.nextStep,
-      createdAt: stampOf(options.clock),
+      createdAt: now,
     };
     await dao.insertReview(review);
     return { plan: toView(plan, items, review) };
@@ -209,14 +233,17 @@ export async function saveAssistantPlanReview(
 
 export async function draftWeeklyPlan(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: CreateAssistantPlanInput,
   options: PlanOptions = {},
 ) {
   const parsed = createAssistantPlanSchema.safeParse(input);
   if (!parsed.success) return failed("INVALID_INPUT");
-  const brand = await ownedBrand(db, ownerId, parsed.data.brandId);
-  if (!brand) return failed("NOT_FOUND");
+  const now = stampOf(options.clock);
+  const access = await writeAssistantAccess(db, actorId, parsed.data.brandId, now);
+  if ("error" in access) return access;
+  const brand = await new BrandDao(db).version(access.ownerId, parsed.data.brandId);
+  if (!brand || brand.status !== "active") return failed("NOT_FOUND");
   const requested = parsed.data.items.slice(0, 5);
   const knownFacts = await new AssistantPlanDao(db).currentFacts(brand.id, requested.map((item) => item.factVersionId));
   const known = new Set(knownFacts.map((fact) => fact.id));
@@ -255,15 +282,14 @@ export async function draftWeeklyPlan(
   }
   const ignoredByModel = modelIgnored(response.outputText);
   if (ignoredByModel === null) return failed("INVALID_MODEL_OUTPUT");
-  const now = stampOf(options.clock);
   const droppedRequest = parsed.data.items.length > 5;
   const planId = randomUUID();
   try {
     return await db.transaction(async (tx) => {
-      const brands = new BrandDao(tx);
-      if (!await brands.lockOwner(ownerId)) throw new PlanAbort(failed("NOT_FOUND"));
-      const current = await brands.version(ownerId, brand.id);
-      if (!current) throw new PlanAbort(failed("NOT_FOUND"));
+      const currentAccess = await lockAssistantWrite(tx, actorId, brand.id, now);
+      if ("error" in currentAccess) throw new PlanAbort(currentAccess);
+      const current = await new BrandDao(tx).version(currentAccess.ownerId, brand.id);
+      if (!current || current.status !== "active") throw new PlanAbort(failed("NOT_FOUND"));
       const dao = new AssistantPlanDao(tx);
       const facts = await dao.currentFacts(current.id, requested.map((item) => item.factVersionId), true);
       const byId = new Map(facts.map((fact) => [fact.id, fact.factCurrent]));
@@ -271,7 +297,7 @@ export async function draftWeeklyPlan(
       const plan: AssistantPlanRecord = {
         id: planId,
         brandId: current.id,
-        ownerId,
+        ownerId: currentAccess.ownerId,
         materialHash: createHash("sha256").update(parsed.data.material).digest("hex"),
         status: "draft",
         controlsUnchanged: 1,
@@ -287,7 +313,7 @@ export async function draftWeeklyPlan(
         id: randomUUID(),
         planId,
         brandId: current.id,
-        ownerId,
+        ownerId: currentAccess.ownerId,
         position: index + 1,
         actionText: drafted.items[index] ?? item.action,
         factVersionId: item.factVersionId,
@@ -309,7 +335,7 @@ export async function draftWeeklyPlan(
 
 export async function confirmPlanItems(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   planId: string,
   input: ConfirmAssistantPlanInput,
   options: PlanOptions = {},
@@ -320,20 +346,23 @@ export async function confirmPlanItems(
   const now = stampOf(options.clock);
   try {
     return await db.transaction(async (tx) => {
-      const brands = new BrandDao(tx);
-      if (!await brands.lockOwner(ownerId)) throw new PlanAbort(failed("NOT_FOUND"));
       const dao = new AssistantPlanDao(tx);
-      const plan = await dao.planForOwner(ownerId, id.data, true);
+      const identity = await dao.planIdentity(id.data);
+      if (!identity) throw new PlanAbort(failed("NOT_FOUND"));
+      const access = await lockAssistantWrite(tx, actorId, identity.brandId, now);
+      if ("error" in access) throw new PlanAbort(access);
+      if (access.ownerId !== identity.ownerId) throw new PlanAbort(failed("NOT_FOUND"));
+      const plan = await dao.planForOwner(access.ownerId, id.data, true);
       if (!plan || plan.status !== "draft") throw new PlanAbort(failed("NOT_FOUND"));
-      const items = await dao.itemsForPlans(ownerId, [plan.id], true);
+      const items = await dao.itemsForPlans(access.ownerId, [plan.id], true);
       const selected = new Set(parsed.data.itemIds);
       const matches = items.filter((item) => selected.has(item.id) && item.status === "draft");
       if (matches.length !== selected.size) throw new PlanAbort(failed("INVALID_INPUT"));
-      const updated = await dao.confirmItems(ownerId, plan.id, parsed.data.itemIds, now);
+      const updated = await dao.confirmItems(access.ownerId, plan.id, parsed.data.itemIds, now);
       if (updated !== selected.size) throw new PlanAbort(failed("INVALID_INPUT"));
-      const refreshed = await dao.planForOwner(ownerId, plan.id);
+      const refreshed = await dao.planForOwner(access.ownerId, plan.id);
       if (!refreshed) throw new PlanAbort(failed("NOT_FOUND"));
-      return loadView(dao, ownerId, refreshed);
+      return loadView(dao, access.ownerId, refreshed);
     });
   } catch (error) {
     if (error instanceof PlanAbort) return error.failure;
@@ -343,7 +372,7 @@ export async function confirmPlanItems(
 
 export async function executeConfirmedPlan(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   planId: string,
   options: PlanOptions = {},
 ) {
@@ -352,12 +381,15 @@ export async function executeConfirmedPlan(
   const now = stampOf(options.clock);
   try {
     return await db.transaction(async (tx) => {
-      const brands = new BrandDao(tx);
-      if (!await brands.lockOwner(ownerId)) throw new PlanAbort(failed("NOT_FOUND"));
       const dao = new AssistantPlanDao(tx);
-      const plan = await dao.planForOwner(ownerId, id.data, true);
+      const identity = await dao.planIdentity(id.data);
+      if (!identity) throw new PlanAbort(failed("NOT_FOUND"));
+      const access = await lockAssistantWrite(tx, actorId, identity.brandId, now);
+      if ("error" in access) throw new PlanAbort(access);
+      if (access.ownerId !== identity.ownerId) throw new PlanAbort(failed("NOT_FOUND"));
+      const plan = await dao.planForOwner(access.ownerId, id.data, true);
       if (!plan) throw new PlanAbort(failed("NOT_FOUND"));
-      const items = await dao.itemsForPlans(ownerId, [plan.id], true);
+      const items = await dao.itemsForPlans(access.ownerId, [plan.id], true);
       const confirmed = items.filter((item) => item.status === "confirmed");
       if (confirmed.length === 0 || plan.status !== "draft") throw new PlanAbort(failed("INVALID_INPUT"));
       const facts = await dao.currentFacts(plan.brandId, confirmed.map((item) => item.factVersionId), true);
@@ -373,17 +405,17 @@ export async function executeConfirmedPlan(
         factCurrent: (fresh.get(confirmed.find((item) => item.id === decision.id)?.factVersionId ?? "") === true ? 1 : 0) as 0 | 1,
         blockReason: decision.status === "blocked" ? "fact_stale" as const : null,
       }));
-      const settled = await dao.settleItems(ownerId, plan.id, updates, now);
+      const settled = await dao.settleItems(access.ownerId, plan.id, updates, now);
       if (settled !== updates.length) throw new PlanAbort(failed("INVALID_INPUT"));
-      if (!await dao.markSettled(ownerId, plan.id, now)) throw new PlanAbort(failed("INVALID_INPUT"));
-      const refreshed = await dao.planForOwner(ownerId, plan.id);
+      if (!await dao.markSettled(access.ownerId, plan.id, now)) throw new PlanAbort(failed("INVALID_INPUT"));
+      const refreshed = await dao.planForOwner(access.ownerId, plan.id);
       if (!refreshed || refreshed.budgetMinor !== plan.budgetMinor || refreshed.guaranteed !== 0) {
         throw new PlanAbort(failed("INVALID_INPUT"));
       }
       if (refreshed.successes !== plan.successes || refreshed.strategyLabel !== "observation") {
         throw new PlanAbort(failed("INVALID_INPUT"));
       }
-      const view = await loadView(dao, ownerId, refreshed);
+      const view = await loadView(dao, access.ownerId, refreshed);
       if (view.plan.items.length !== items.length) throw new PlanAbort(failed("INVALID_INPUT"));
       return view;
     });

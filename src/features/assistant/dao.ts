@@ -143,6 +143,17 @@ export class AssistantPlanDao {
     );
   }
 
+  async planIdentity(planId: string) {
+    const [row] = await queryWithParameters(
+      this.db,
+      `SELECT id, brand_id AS "brandId", owner_id AS "ownerId" FROM assistant_plan WHERE id = ? LIMIT 1`,
+      [planId],
+    );
+    return row
+      ? z.object({ id: brandIdSchema, brandId: brandIdSchema, ownerId: z.string().min(1).max(128) }).parse(row)
+      : null;
+  }
+
   async planForOwner(ownerId: string, planId: string, forUpdate = false) {
     const [row] = await queryWithParameters(
       this.db,

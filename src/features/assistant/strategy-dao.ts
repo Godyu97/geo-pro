@@ -67,6 +67,17 @@ export class StrategyTemplateDao {
     return z.array(templateRow).parse(await queryWithParameters(this.db, query.sql, query.values));
   }
 
+  async templateIdentity(templateId: string) {
+    const [row] = await queryWithParameters(
+      this.db,
+      `SELECT id, brand_id AS "brandId", owner_id AS "ownerId" FROM strategy_template WHERE id = ? LIMIT 1`,
+      [templateId],
+    );
+    return row
+      ? z.object({ id: brandIdSchema, brandId: brandIdSchema, ownerId: z.string().min(1).max(128) }).parse(row)
+      : null;
+  }
+
   async templateForOwner(ownerId: string, templateId: string) {
     const rows = await queryWithParameters(
       this.db,

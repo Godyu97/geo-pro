@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition, type ComponentProps, type FormEvent, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,7 +38,7 @@ const wrapBadgeClass = "h-auto max-w-full whitespace-normal rounded-xl px-3 py-1
 const textClass = "min-h-28 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const selectClass = "h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const emptySurfaceClass = "rounded-xl border border-dashed bg-card px-4 py-5 text-sm leading-6 text-muted-foreground";
-const currentPath = "/dashboard/assistant/strategies";
+const fallbackPath = "/dashboard/assistant/strategies";
 
 function emptyFields(): Fields {
   return {
@@ -197,12 +197,14 @@ function ObservationFields({
 
 export function StrategiesWorkspace({
   brandId,
+  canWrite,
   locale,
   initialTemplates,
   messages,
   initialError,
 }: {
   brandId: string;
+  canWrite: boolean;
   locale: Locale;
   initialTemplates: StrategyTemplateView[];
   messages: Copy;
@@ -210,6 +212,7 @@ export function StrategiesWorkspace({
 }) {
   const t = createTranslator(locale, messages);
   const router = useRouter();
+  const pathname = usePathname();
   const [templates, setTemplates] = useState(initialTemplates);
   const [saveFields, setSaveFields] = useState<Fields>(emptyFields);
   const [draftFields, setDraftFields] = useState<Fields>(emptyFields);
@@ -250,7 +253,7 @@ export function StrategiesWorkspace({
     if (!response.ok) {
       const code = payload && "error" in payload ? payload.error?.code : undefined;
       if (response.status === 401 || code === "SESSION_REQUIRED") {
-        router.push(loginPath(currentPath, "session-required"));
+        router.push(loginPath(pathname || fallbackPath, "session-required"));
         return;
       }
       setNotice({
@@ -335,53 +338,57 @@ export function StrategiesWorkspace({
   return (
     <div className="min-w-0 space-y-6">
       <NoticeBanner notice={notice} />
-      <Card id="strategy-save" className="min-w-0 scroll-mt-24">
-        <CardHeader>
-          <CardTitle>
-            <h2 className="[overflow-wrap:anywhere]">{t("saveTitle")}</h2>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSave} className="grid min-w-0 gap-4 sm:grid-cols-2">
-            <ObservationFields
-              idPrefix="strategy"
-              values={saveFields}
-              onChange={(patch) => setSaveFields((current) => ({ ...current, ...patch }))}
-              t={t}
-              note="explanation"
-            />
-            <div className="sm:col-span-2">
-              <Button type="submit" aria-disabled={pending === "save"} className={actionClass}>
-                {pending === "save" ? t("saving") : t("save")}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+      {canWrite ? (
+        <>
+          <Card id="strategy-save" className="min-w-0 scroll-mt-24">
+            <CardHeader>
+              <CardTitle>
+                <h2 className="[overflow-wrap:anywhere]">{t("saveTitle")}</h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSave} className="grid min-w-0 gap-4 sm:grid-cols-2">
+                <ObservationFields
+                  idPrefix="strategy"
+                  values={saveFields}
+                  onChange={(patch) => setSaveFields((current) => ({ ...current, ...patch }))}
+                  t={t}
+                  note="explanation"
+                />
+                <div className="sm:col-span-2">
+                  <Button type="submit" aria-disabled={pending === "save"} className={actionClass}>
+                    {pending === "save" ? t("saving") : t("save")}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
 
-      <Card id="strategy-draft" className="min-w-0 scroll-mt-24">
-        <CardHeader>
-          <CardTitle>
-            <h2 className="[overflow-wrap:anywhere]">{t("draftTitle")}</h2>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleDraft} className="grid min-w-0 gap-4 sm:grid-cols-2">
-            <ObservationFields
-              idPrefix="strategy-draft"
-              values={draftFields}
-              onChange={(patch) => setDraftFields((current) => ({ ...current, ...patch }))}
-              t={t}
-              note="materials"
-            />
-            <div className="sm:col-span-2">
-              <Button type="submit" aria-disabled={pending === "draft"} className={actionClass}>
-                {pending === "draft" ? t("saving") : t("draft")}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+          <Card id="strategy-draft" className="min-w-0 scroll-mt-24">
+            <CardHeader>
+              <CardTitle>
+                <h2 className="[overflow-wrap:anywhere]">{t("draftTitle")}</h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleDraft} className="grid min-w-0 gap-4 sm:grid-cols-2">
+                <ObservationFields
+                  idPrefix="strategy-draft"
+                  values={draftFields}
+                  onChange={(patch) => setDraftFields((current) => ({ ...current, ...patch }))}
+                  t={t}
+                  note="materials"
+                />
+                <div className="sm:col-span-2">
+                  <Button type="submit" aria-disabled={pending === "draft"} className={actionClass}>
+                    {pending === "draft" ? t("saving") : t("draft")}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
 
       {templates.length === 0 ? (
         <p className={emptySurfaceClass}>{t("empty")}</p>

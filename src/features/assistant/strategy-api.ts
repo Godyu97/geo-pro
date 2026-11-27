@@ -61,17 +61,17 @@ export async function strategyTemplateListResponse(request: Request) {
   const keys = [...url.searchParams.keys()];
   if (keys.length !== 1 || (keys[0] !== "brandId" && keys[0] !== "id")) return failure("INVALID_INPUT");
   try {
-    const ownerId = gate.session.session.user.id;
+    const actorId = gate.session.session.user.id;
     if (keys[0] === "brandId") {
       const brandId = brandIdSchema.safeParse(url.searchParams.get("brandId"));
       if (!brandId.success) return failure("INVALID_INPUT");
-      const result = await listStrategyTemplates(getConnection(), ownerId, brandId.data);
+      const result = await listStrategyTemplates(getConnection(), actorId, brandId.data);
       if ("error" in result && result.error) return failure(result.error);
       return json(result);
     }
     const templateId = brandIdSchema.safeParse(url.searchParams.get("id"));
     if (!templateId.success) return failure("INVALID_INPUT");
-    const result = await readStrategyTemplate(getConnection(), ownerId, templateId.data);
+    const result = await readStrategyTemplate(getConnection(), actorId, templateId.data);
     if ("error" in result && result.error) return failure(result.error);
     return json(result);
   } catch {

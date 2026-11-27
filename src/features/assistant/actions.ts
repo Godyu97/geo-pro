@@ -9,11 +9,20 @@ import { confirmPlanItems, draftWeeklyPlan, executeConfirmedPlan } from "./comma
 import { confirmAssistantPlanSchema, createAssistantPlanSchema } from "./contracts.ts";
 
 const assistantPath = "/dashboard/assistant";
-const pageErrors = new Set(["NOT_FOUND", "INVALID_INPUT", "AI_UNAVAILABLE", "AI_FAILED", "INVALID_MODEL_OUTPUT"]);
+const pageErrors = new Set(["NOT_FOUND", "FORBIDDEN", "INVALID_INPUT", "AI_UNAVAILABLE", "AI_FAILED", "INVALID_MODEL_OUTPUT"]);
 
-function finish(error?: string): never {
+function finish(error?: string, brandId?: string): never {
   revalidatePath(assistantPath);
-  redirect(error && pageErrors.has(error) ? `${assistantPath}?error=${error}` : assistantPath);
+  const params = new URLSearchParams();
+  if (brandId) params.set("brandId", brandId);
+  if (error && pageErrors.has(error)) params.set("error", error);
+  const query = params.toString();
+  redirect(query ? `${assistantPath}?${query}` : assistantPath);
+}
+
+function optionalBrandId(formData: FormData) {
+  const parsed = brandIdSchema.safeParse(formData.get("brandId"));
+  return parsed.success ? parsed.data : undefined;
 }
 
 function wholeNumber(value: FormDataEntryValue | null) {
@@ -35,6 +44,7 @@ function itemsFromForm(formData: FormData) {
 
 export async function createAssistantPlanAction(formData: FormData) {
   const session = await requireSession();
+  const returnBrandId = optionalBrandId(formData);
   const command = createAssistantPlanSchema.safeParse({
     brandId: formData.get("brandId"),
     material: formData.get("material"),
@@ -42,25 +52,27 @@ export async function createAssistantPlanAction(formData: FormData) {
     successes: wholeNumber(formData.get("successes")),
     items: itemsFromForm(formData),
   });
-  if (!command.success) finish("INVALID_INPUT");
+  if (!command.success) finish("INVALID_INPUT", returnBrandId);
   const result = await draftWeeklyPlan(getConnection(), session.user.id, command.data);
-  finish("error" in result ? result.error : undefined);
+  finish("error" in result ? result.error : undefined, command.data.brandId);
 }
 
 export async function confirmAssistantPlanAction(formData: FormData) {
   const session = await requireSession();
+  const returnBrandId = optionalBrandId(formData);
   const planId = brandIdSchema.safeParse(formData.get("planId"));
   const itemIds = formData.getAll("itemId").map((value) => String(value));
   const command = confirmAssistantPlanSchema.safeParse({ itemIds });
-  if (!planId.success || !command.success) finish("INVALID_INPUT");
+  if (!planId.success || !command.success) finish("INVALID_INPUT", returnBrandId);
   const result = await confirmPlanItems(getConnection(), session.user.id, planId.data, command.data);
-  finish("error" in result ? result.error : undefined);
+  finish("error" in result ? result.error : undefined, returnBrandId);
 }
 
 export async function executeAssistantPlanAction(formData: FormData) {
   const session = await requireSession();
+  const returnBrandId = optionalBrandId(formData);
   const planId = brandIdSchema.safeParse(formData.get("planId"));
-  if (!planId.success) finish("INVALID_INPUT");
+  if (!planId.success) finish("INVALID_INPUT", returnBrandId);
   const result = await executeConfirmedPlan(getConnection(), session.user.id, planId.data);
-  finish("error" in result ? result.error : undefined);
+  finish("error" in result ? result.error : undefined, returnBrandId);
 }

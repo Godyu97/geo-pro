@@ -7,6 +7,12 @@ import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
 import {
+  lockAssistantWrite,
+  readAssistantAccess,
+  resolveAssistantWorkspaceBrand,
+  writeAssistantAccess,
+} from "./brand-access.ts";
+import {
   draftStrategyTemplateSchema,
   explanationSchema,
   saveStrategyTemplateSchema,
@@ -78,15 +84,9 @@ function parseModelExplanation(outputText: string) {
   }
 }
 
-async function ownedActiveBrand(db: DatabaseConnection, ownerId: string, brandId: string) {
-  if (!brandIdSchema.safeParse(brandId).success) return null;
-  const brand = await new BrandDao(db).owned(ownerId, brandId);
-  return brand?.status === "active" ? brand : null;
-}
-
 async function insertTemplate(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: SaveStrategyTemplateInput,
   explanation: string,
   clock: (() => string) | undefined,
@@ -96,16 +96,16 @@ async function insertTemplate(
   if (!marker || !cleaned.success || cleaned.data !== explanation) return failed("INVALID_INPUT");
   const now = stampOf(clock);
   return db.transaction(async (tx) => {
-    const brands = new BrandDao(tx);
-    if (!await brands.lockOwner(ownerId)) return failed("NOT_FOUND");
-    const brand = await brands.owned(ownerId, input.brandId);
+    const access = await lockAssistantWrite(tx, actorId, input.brandId, now);
+    if ("error" in access) return access;
+    const brand = await new BrandDao(tx).owned(access.ownerId, input.brandId);
     if (!brand || brand.status !== "active") return failed("NOT_FOUND");
     const id = randomUUID();
     const dao = new StrategyTemplateDao(tx);
     await dao.insertTemplate({
       id,
       brandId: brand.id,
-      ownerId,
+      ownerId: access.ownerId,
       industry: input.industry,
       samplingCondition: input.samplingCondition,
       evidenceStrength: input.evidenceStrength,
@@ -115,7 +115,7 @@ async function insertTemplate(
       createdAt: now,
       updatedAt: now,
     });
-    const stored = await dao.templateForOwner(ownerId, id);
+    const stored = await dao.templateForOwner(access.ownerId, id);
     if (
       !stored
       || stored.guaranteed !== 0
@@ -133,11 +133,11 @@ async function insertTemplate(
   });
 }
 
-export async function listStrategyTemplates(db: DatabaseConnection, ownerId: string, brandId: string) {
+export async function listStrategyTemplates(db: DatabaseConnection, actorId: string, brandId: string) {
   if (!brandIdSchema.safeParse(brandId).success) return failed("INVALID_INPUT");
-  const brand = await new BrandDao(db).owned(ownerId, brandId);
-  if (!brand) return failed("NOT_FOUND");
-  const templates = await new StrategyTemplateDao(db).templatesForBrand(ownerId, brand.id);
+  const access = await readAssistantAccess(db, actorId, brandId);
+  if (!access) return failed("NOT_FOUND");
+  const templates = await new StrategyTemplateDao(db).templatesForBrand(access.ownerId, access.brandId);
   return { templates: templates.map(toView) };
 }
 
@@ -150,29 +150,38 @@ export function strategyWorkspaceUnavailable(error: unknown) {
   return { error: "SERVICE_UNAVAILABLE" as const, traceId };
 }
 
-export async function readStrategyWorkspace(db: DatabaseConnection, ownerId: string) {
-  const active = await new BrandDao(db).active(ownerId);
-  if (!active) return { kind: "no-brand" as const };
-  const listed = await listStrategyTemplates(db, ownerId, active.id);
-  if ("error" in listed) throw new Error("strategy-templates-unavailable");
+export async function readStrategyWorkspace(
+  db: DatabaseConnection,
+  actorId: string,
+  requestedBrandId?: string,
+) {
+  const resolved = await resolveAssistantWorkspaceBrand(db, actorId, requestedBrandId);
+  if (resolved.kind !== "ready") return resolved;
+  const templates = await new StrategyTemplateDao(db).templatesForBrand(resolved.ownerId, resolved.brandId);
   return {
     kind: "ready" as const,
-    brandId: active.id,
-    brandName: active.name,
-    templates: listed.templates,
+    brandId: resolved.brandId,
+    brandName: resolved.brandName,
+    canWrite: resolved.canWrite,
+    templates: templates.map(toView),
   };
 }
 
-export async function readStrategyTemplate(db: DatabaseConnection, ownerId: string, templateId: string) {
+export async function readStrategyTemplate(db: DatabaseConnection, actorId: string, templateId: string) {
   if (!brandIdSchema.safeParse(templateId).success) return failed("INVALID_INPUT");
-  const row = await new StrategyTemplateDao(db).templateForOwner(ownerId, templateId);
+  const dao = new StrategyTemplateDao(db);
+  const identity = await dao.templateIdentity(templateId);
+  if (!identity) return failed("NOT_FOUND");
+  const access = await readAssistantAccess(db, actorId, identity.brandId);
+  if (!access || access.ownerId !== identity.ownerId) return failed("NOT_FOUND");
+  const row = await dao.templateForOwner(access.ownerId, templateId);
   if (!row) return failed("NOT_FOUND");
   return { template: toView(row) };
 }
 
 export async function saveStrategyTemplate(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: SaveStrategyTemplateInput,
   options: TemplateOptions = {},
 ) {
@@ -180,19 +189,21 @@ export async function saveStrategyTemplate(
   if (!parsed.success) return failed("INVALID_INPUT");
   const explanation = stripGuaranteeSentences(parsed.data.explanation);
   if (!explanationSchema.safeParse(explanation).success) return failed("INVALID_INPUT");
-  return insertTemplate(db, ownerId, { ...parsed.data, explanation }, explanation, options.clock);
+  return insertTemplate(db, actorId, { ...parsed.data, explanation }, explanation, options.clock);
 }
 
 export async function draftStrategyTemplate(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: DraftStrategyTemplateInput,
   options: TemplateOptions = {},
 ) {
   const parsed = draftStrategyTemplateSchema.safeParse(input);
   if (!parsed.success) return failed("INVALID_INPUT");
-  const brand = await ownedActiveBrand(db, ownerId, parsed.data.brandId);
-  if (!brand) return failed("NOT_FOUND");
+  const access = await writeAssistantAccess(db, actorId, parsed.data.brandId, stampOf(options.clock));
+  if ("error" in access) return access;
+  const brand = await new BrandDao(db).owned(access.ownerId, parsed.data.brandId);
+  if (!brand || brand.status !== "active") return failed("NOT_FOUND");
   const env = options.env ?? process.env;
   if (!isAiConfigured(env)) return failed("AI_UNAVAILABLE");
   let response;
@@ -223,5 +234,5 @@ export async function draftStrategyTemplate(
   const explanation = parseModelExplanation(response.outputText);
   const cleaned = explanation === null ? null : stripGuaranteeSentences(explanation);
   if (!cleaned || !explanationSchema.safeParse(cleaned).success) return failed("INVALID_MODEL_OUTPUT");
-  return insertTemplate(db, ownerId, { ...parsed.data, explanation: cleaned }, cleaned, options.clock);
+  return insertTemplate(db, actorId, { ...parsed.data, explanation: cleaned }, cleaned, options.clock);
 }

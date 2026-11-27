@@ -386,7 +386,64 @@ test("strategy templates keep the next action, one observation, isolation, and r
     await expect(stranger.getByText(industryName)).toHaveCount(0);
     await expect(stranger.getByText(failureText)).toHaveCount(0);
     await expectNoOverflow(stranger);
+    expect((await stranger.goto(`/dashboard/assistant/strategies?brandId=${brandId}`))?.status()).toBe(404);
     await stranger.close();
+
+    for (const role of ["read_only", "member"] as const) {
+      const collaborator = await browser.newContext({ baseURL: origin });
+      try {
+        const email = `strategy-templates-${role}-${randomUUID()}@example.invalid`;
+        const userId = await register(collaborator, email);
+        accounts.push({ userId, email });
+        const granted = await context.request.post("/api/settings/team/grants", {
+          headers,
+          data: { userId, brandId, role },
+        });
+        expect(granted.ok()).toBe(true);
+        const collabPage = await collaborator.newPage();
+        for (const locale of locales) {
+          await collaborator.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+          for (const width of widths) {
+            await collabPage.setViewportSize({ width, height: 800 });
+            expect((await collabPage.goto(`/dashboard/assistant/strategies?brandId=${brandId}`))?.status()).toBe(200);
+            const main = collabPage.getByRole("main");
+            await expect(main.getByText(brandName, { exact: true })).toBeVisible();
+            await expect(main.getByRole("heading", { level: 3, name: industryName, exact: true })).toBeVisible();
+            await expect(main.locator("#strategy-save")).toHaveCount(role === "read_only" ? 0 : 1);
+            await expect(main.locator("#strategy-draft")).toHaveCount(role === "read_only" ? 0 : 1);
+            await expectNoOverflow(collabPage);
+          }
+        }
+        if (role === "read_only") {
+          for (const [url, data] of [
+            ["/api/assistant/strategy-templates", { brandId, industry: "ReadOnly", samplingCondition: samplingText, successes: 1, evidenceStrength: "single_observation", failureCase: "Failure", explanation: "Note" }],
+            ["/api/assistant/strategy-templates/draft", { brandId, industry: "ReadOnly", samplingCondition: samplingText, successes: 1, evidenceStrength: "single_observation", failureCase: "Failure", materials: "Material" }],
+          ] as const) {
+            const denied = await collaborator.request.post(url, { headers, data });
+            expect(denied.status()).toBe(403);
+            expect((await denied.json()).error.code).toBe("FORBIDDEN");
+          }
+        } else {
+          const memberIndustry = "成员组内观察行业";
+          await collaborator.addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+          await collabPage.goto(`/dashboard/assistant/strategies?brandId=${brandId}`);
+          const form = collabPage.locator("#strategy-save");
+          await form.getByLabel(tZh.industry, { exact: true }).fill(memberIndustry);
+          await form.getByLabel(tZh.sampling, { exact: true }).fill(samplingText);
+          await form.getByLabel(tZh.successes, { exact: true }).fill("1");
+          await form.getByLabel(tZh.strength, { exact: true }).selectOption("single_observation");
+          await form.getByLabel(tZh.failure, { exact: true }).fill("成员补充失败案例。");
+          await form.getByLabel(tZh.explanation, { exact: true }).fill("成员保存单次观察说明。");
+          const savedStrategy = collabPage.waitForResponse((response) => new URL(response.url()).pathname === "/api/assistant/strategy-templates" && response.request().method() === "POST");
+          await form.getByRole("button", { name: tZh.save, exact: true }).click();
+          expect((await savedStrategy).ok()).toBe(true);
+          await collabPage.reload();
+          await expect(collabPage.getByRole("heading", { level: 3, name: memberIndustry, exact: true })).toBeVisible();
+        }
+      } finally {
+        await collaborator.close();
+      }
+    }
 
     for (const locale of locales) {
       const t = copy[locale];

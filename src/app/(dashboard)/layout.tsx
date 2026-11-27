@@ -17,6 +17,8 @@ import { Separator } from "@/components/ui/separator";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
+import { getConnection } from "@/lib/db/connection";
+import { assistantBrandUnavailable } from "@/features/assistant/brand-access";
 import { brandIntakeDecision, type BrandIntakeMode } from "@/features/brands/intake";
 import { feedbackBrandUnavailable } from "@/features/business-feedback/workspace";
 import { calendarBrandUnavailable } from "@/features/content/calendar-workspace";
@@ -38,7 +40,8 @@ export default async function DashboardLayout({
   const requestHeaders = await headers();
   // Reject inaccessible brands before the dashboard loading boundary can stream.
   const requestPath = requestHeaders.get("x-geo-path");
-  if (await entityBrandUnavailable(user.id, requestPath)
+  if (await assistantBrandUnavailable(getConnection(), user.id, requestPath)
+    || await entityBrandUnavailable(user.id, requestPath)
     || await retestBrandUnavailable(user.id, requestPath)
     || await feedbackBrandUnavailable(user.id, requestPath)
     || await calendarBrandUnavailable(user.id, requestPath)) notFound();

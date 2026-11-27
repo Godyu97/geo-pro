@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { brandIdSchema } from "@/features/brands/contracts";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
@@ -31,7 +33,13 @@ export default async function AssistantPlansPage({
   const messages = getMessages(locale).assistant;
   const queryError = typeof params.error === "string" ? params.error : undefined;
   const errorCode = isKnownError(queryError) ? queryError : null;
-  const result = await readAssistantWorkspace(getConnection(), session.user.id).catch(assistantWorkspaceUnavailable);
+  if (Array.isArray(params.brandId)) notFound();
+  const requestedBrandId = typeof params.brandId === "string" && params.brandId.trim() ? params.brandId.trim() : undefined;
+  if (requestedBrandId !== undefined && !brandIdSchema.safeParse(requestedBrandId).success) notFound();
+  const result = await readAssistantWorkspace(getConnection(), session.user.id, requestedBrandId).catch(assistantWorkspaceUnavailable);
+  const reloadHref = requestedBrandId
+    ? `/dashboard/assistant?brandId=${encodeURIComponent(requestedBrandId)}`
+    : "/dashboard/assistant";
 
   if ("error" in result) {
     return (
@@ -41,7 +49,7 @@ export default async function AssistantPlansPage({
           <p role="alert" className="max-w-2xl text-sm leading-7 text-destructive">{messages.SERVICE_UNAVAILABLE}</p>
           <div className="flex flex-wrap gap-2">
             <Button asChild className={actionClass}>
-              <a href="/dashboard/assistant">{messages.reload}</a>
+              <a href={reloadHref}>{messages.reload}</a>
             </Button>
             <Button asChild variant="outline" className={actionClass}>
               <Link href="/dashboard" prefetch={false}>{messages.backOverview}</Link>
@@ -52,6 +60,8 @@ export default async function AssistantPlansPage({
       </div>
     );
   }
+
+  if (result.kind === "not-found") notFound();
 
   if (result.kind === "no-brand") {
     return (
@@ -70,16 +80,19 @@ export default async function AssistantPlansPage({
     );
   }
 
+  const brandQuery = requestedBrandId ? `?brandId=${encodeURIComponent(result.brandId)}` : "";
+  const strategiesHref = `/dashboard/assistant/strategies${brandQuery}`;
   const hasPlans = result.plans.length > 0;
   const onlySettled = hasPlans && result.plans.every((plan) => plan.status === "settled");
+  const taskDescription = !result.canWrite
+    ? (hasPlans ? t("readOnlyPlansTask") : t("readOnlyEmptyTask"))
+    : (onlySettled ? t("reviewTask") : hasPlans ? t("plansTask") : t("createTask"));
   return (
     <div className="min-w-0 space-y-6">
       <header className="min-w-0 space-y-3">
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{t("description")}</p>
-        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          {onlySettled ? t("reviewTask") : hasPlans ? t("plansTask") : t("createTask")}
-        </p>
+        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{taskDescription}</p>
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <span className="font-medium text-foreground">{t("activeBrand")}</span>
           <span className="min-w-0 [overflow-wrap:anywhere]">{result.brandName}</span>
@@ -89,26 +102,32 @@ export default async function AssistantPlansPage({
             <Button asChild className={actionClass}>
               <AssistantJump href="#assistant-plans">{onlySettled ? t("viewSettledPlans") : t("viewPlans")}</AssistantJump>
             </Button>
-          ) : (
+          ) : result.canWrite ? (
             <Button asChild className={actionClass}>
               <AssistantJump href="#assistant-material">{t("fillDraft")}</AssistantJump>
             </Button>
+          ) : (
+            <Button asChild className={actionClass}>
+              <Link href={strategiesHref} prefetch={false}>{t("strategiesLink")}</Link>
+            </Button>
           )}
           <Button asChild variant="outline" className={actionClass}>
-            <Link href="/dashboard/assistant/strategies" prefetch={false}>{t("strategiesLink")}</Link>
+            <Link href={strategiesHref} prefetch={false}>{t("strategiesLink")}</Link>
           </Button>
           <Button asChild variant="outline" className={actionClass}>
             <Link href="/dashboard" prefetch={false}>{t("backOverview")}</Link>
           </Button>
         </div>
         <nav aria-label={t("relatedEntries")} className="flex min-w-0 flex-wrap gap-2">
-          <Link href="/dashboard/assistant/strategies" prefetch={false} className={relatedLinkClass}>{t("strategiesLink")}</Link>
+          <Link href={strategiesHref} prefetch={false} className={relatedLinkClass}>{t("strategiesLink")}</Link>
           <Link href="/dashboard/brands" prefetch={false} className={relatedLinkClass}>{t("openBrands")}</Link>
           <Link href="/dashboard" prefetch={false} className={relatedLinkClass}>{t("backOverview")}</Link>
         </nav>
       </header>
       <PlansWorkspace
+        key={result.brandId}
         brandId={result.brandId}
+        canWrite={result.canWrite}
         locale={locale}
         initialPlans={result.plans}
         factOptions={result.factOptions}

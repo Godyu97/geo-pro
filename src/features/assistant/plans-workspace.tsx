@@ -78,6 +78,7 @@ function emptySlots(): Slot[] {
 
 export function PlansWorkspace({
   brandId,
+  canWrite,
   locale,
   initialPlans,
   factOptions,
@@ -85,6 +86,7 @@ export function PlansWorkspace({
   initialError,
 }: {
   brandId: string;
+  canWrite: boolean;
   locale: Locale;
   initialPlans: AssistantPlanView[];
   factOptions: { id: string; title: string; version: number }[];
@@ -268,102 +270,104 @@ export function PlansWorkspace({
   return (
     <div className="min-w-0 space-y-6">
       <NoticeBanner notice={notice?.planId ? null : notice} />
-      <Card id="assistant-create" className="min-w-0 scroll-mt-24">
-        <CardHeader>
-          <CardTitle>
-            <h2 className="[overflow-wrap:anywhere]">{t("createTitle")}</h2>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {factOptions.length === 0 ? (
-            <div className="mb-4 space-y-2">
-              <p className="text-sm leading-6 text-muted-foreground">{t("noApprovedFacts")}</p>
-              <Button asChild variant="outline" className={actionClass}>
-                <Link href={`/dashboard/brands/${brandId}/facts`}>{t("openFacts")}</Link>
-              </Button>
-            </div>
-          ) : null}
-          <form onSubmit={handleCreate} className="grid min-w-0 gap-4 sm:grid-cols-2">
-            <input type="hidden" name="brandId" value={brandId} />
-            <div className="flex min-w-0 flex-col gap-2 sm:col-span-2">
-              <Label htmlFor="assistant-material">{t("material")}</Label>
-              <textarea
-                id="assistant-material"
-                value={material}
-                maxLength={4000}
-                onChange={(event) => setMaterial(event.target.value)}
-                className={textClass}
-              />
-              <p className="text-sm leading-6 text-muted-foreground">{t("materialHint")}</p>
-            </div>
-            <div className="flex min-w-0 flex-col gap-2">
-              <Label htmlFor={`${formId}-budget`}>{t("budget")}</Label>
-              <Input
-                id={`${formId}-budget`}
-                value={budget}
-                inputMode="numeric"
-                maxLength={10}
-                onChange={(event) => setBudget(event.target.value)}
-                className="h-10 bg-background tabular-nums"
-              />
-            </div>
-            <div className="flex min-w-0 flex-col gap-2">
-              <Label htmlFor={`${formId}-successes`}>{t("successes")}</Label>
-              <Input
-                id={`${formId}-successes`}
-                value={successes}
-                inputMode="numeric"
-                maxLength={7}
-                onChange={(event) => setSuccesses(event.target.value)}
-                className="h-10 bg-background tabular-nums"
-              />
-            </div>
-            {slots.map((slot, index) => {
-              const position = index + 1;
-              return (
-                <div key={position} className="grid min-w-0 gap-4 sm:col-span-2 sm:grid-cols-2">
-                  <div className="flex min-w-0 flex-col gap-2">
-                    <Label htmlFor={`${formId}-action-${position}`}>{t("action", { index: position })}</Label>
-                    <Input
-                      id={`${formId}-action-${position}`}
-                      value={slot.action}
-                      maxLength={200}
-                      onChange={(event) => setSlots((current) => current.map((item, itemIndex) => (
-                        itemIndex === index ? { ...item, action: event.target.value } : item
-                      )))}
-                      className="h-10 bg-background"
-                    />
+      {canWrite ? (
+        <Card id="assistant-create" className="min-w-0 scroll-mt-24">
+          <CardHeader>
+            <CardTitle>
+              <h2 className="[overflow-wrap:anywhere]">{t("createTitle")}</h2>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {factOptions.length === 0 ? (
+              <div className="mb-4 space-y-2">
+                <p className="text-sm leading-6 text-muted-foreground">{t("noApprovedFacts")}</p>
+                <Button asChild variant="outline" className={actionClass}>
+                  <Link href={`/dashboard/brands/${brandId}/facts`}>{t("openFacts")}</Link>
+                </Button>
+              </div>
+            ) : null}
+            <form onSubmit={handleCreate} className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <input type="hidden" name="brandId" value={brandId} />
+              <div className="flex min-w-0 flex-col gap-2 sm:col-span-2">
+                <Label htmlFor="assistant-material">{t("material")}</Label>
+                <textarea
+                  id="assistant-material"
+                  value={material}
+                  maxLength={4000}
+                  onChange={(event) => setMaterial(event.target.value)}
+                  className={textClass}
+                />
+                <p className="text-sm leading-6 text-muted-foreground">{t("materialHint")}</p>
+              </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label htmlFor={`${formId}-budget`}>{t("budget")}</Label>
+                <Input
+                  id={`${formId}-budget`}
+                  value={budget}
+                  inputMode="numeric"
+                  maxLength={10}
+                  onChange={(event) => setBudget(event.target.value)}
+                  className="h-10 bg-background tabular-nums"
+                />
+              </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label htmlFor={`${formId}-successes`}>{t("successes")}</Label>
+                <Input
+                  id={`${formId}-successes`}
+                  value={successes}
+                  inputMode="numeric"
+                  maxLength={7}
+                  onChange={(event) => setSuccesses(event.target.value)}
+                  className="h-10 bg-background tabular-nums"
+                />
+              </div>
+              {slots.map((slot, index) => {
+                const position = index + 1;
+                return (
+                  <div key={position} className="grid min-w-0 gap-4 sm:col-span-2 sm:grid-cols-2">
+                    <div className="flex min-w-0 flex-col gap-2">
+                      <Label htmlFor={`${formId}-action-${position}`}>{t("action", { index: position })}</Label>
+                      <Input
+                        id={`${formId}-action-${position}`}
+                        value={slot.action}
+                        maxLength={200}
+                        onChange={(event) => setSlots((current) => current.map((item, itemIndex) => (
+                          itemIndex === index ? { ...item, action: event.target.value } : item
+                        )))}
+                        className="h-10 bg-background"
+                      />
+                    </div>
+                    <div className="flex min-w-0 flex-col gap-2">
+                      <Label htmlFor={`${formId}-fact-${position}`}>{t("factVersion", { index: position })}</Label>
+                      <select
+                        id={`${formId}-fact-${position}`}
+                        value={slot.fact}
+                        disabled={factOptions.length === 0}
+                        onChange={(event) => setSlots((current) => current.map((item, itemIndex) => (
+                          itemIndex === index ? { ...item, fact: event.target.value } : item
+                        )))}
+                        className={selectClass}
+                      >
+                        <option value="">{t("chooseFact")}</option>
+                        {factOptions.map(({ id, title, version }) => (
+                          <option key={id} value={id} disabled={slot.fact !== id && slots.some(({ fact }) => fact === id)}>
+                            {t("factOption", { title, version: formatNumber(locale, version), id: id.slice(0, 8) })}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                  <div className="flex min-w-0 flex-col gap-2">
-                    <Label htmlFor={`${formId}-fact-${position}`}>{t("factVersion", { index: position })}</Label>
-                    <select
-                      id={`${formId}-fact-${position}`}
-                      value={slot.fact}
-                      disabled={factOptions.length === 0}
-                      onChange={(event) => setSlots((current) => current.map((item, itemIndex) => (
-                        itemIndex === index ? { ...item, fact: event.target.value } : item
-                      )))}
-                      className={selectClass}
-                    >
-                      <option value="">{t("chooseFact")}</option>
-                      {factOptions.map(({ id, title, version }) => (
-                        <option key={id} value={id} disabled={slot.fact !== id && slots.some(({ fact }) => fact === id)}>
-                          {t("factOption", { title, version: formatNumber(locale, version), id: id.slice(0, 8) })}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              );
-            })}
-            <div className="sm:col-span-2">
-              <Button type="submit" aria-disabled={pending === "create"} className={actionClass}>
-                {pending === "create" ? t("saving") : t("create")}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+                );
+              })}
+              <div className="sm:col-span-2">
+                <Button type="submit" aria-disabled={pending === "create"} className={actionClass}>
+                  {pending === "create" ? t("saving") : t("create")}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {plans.length === 0 ? (
         <p className={emptySurfaceClass}>{t("empty")}</p>
@@ -373,7 +377,7 @@ export function PlansWorkspace({
             const confirming = pending === `confirm:${plan.id}`;
             const executing = pending === `execute:${plan.id}`;
             const savingReview = pending === `review:${plan.id}`;
-            const canConfirm = plan.status === "draft" && plan.items.some((item) => item.status === "draft");
+            const canConfirm = canWrite && plan.status === "draft" && plan.items.some((item) => item.status === "draft");
             const reviewField = `assistant-review-${plan.id}`;
             return (
               <Card key={plan.id} className="min-w-0">
@@ -438,7 +442,7 @@ export function PlansWorkspace({
                       ))}
                     </ul>
                   )}
-                  {plan.status === "draft" ? (
+                  {canWrite && plan.status === "draft" ? (
                     <form onSubmit={(event) => handleExecute(event, plan.id)}>
                       <Button type="submit" variant="outline" aria-disabled={executing} className={actionClass}>
                         {executing ? t("saving") : t("execute")}
@@ -461,7 +465,7 @@ export function PlansWorkspace({
                             <dd className="[overflow-wrap:anywhere]">{plan.review.nextStep}</dd>
                           </dl>
                         </>
-                      ) : (
+                      ) : canWrite ? (
                         <form noValidate onSubmit={(event) => handleReview(event, plan.id)} className="min-w-0 space-y-3">
                           <div className="flex min-w-0 flex-col gap-2">
                             <Label htmlFor={reviewField}>{t("reviewNextStep")}</Label>
@@ -479,6 +483,8 @@ export function PlansWorkspace({
                             {savingReview ? t("saving") : t("saveReview")}
                           </Button>
                         </form>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">{t("reviewReadOnlyPending")}</p>
                       )}
                       <NoticeBanner notice={notice?.planId === plan.id ? notice : null} />
                     </section>

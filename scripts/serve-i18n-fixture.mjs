@@ -698,10 +698,14 @@ await writeFile(deletionCommands, deletionCommandSource.replace(deletionCommand,
 
 const assistantCommands = path.join(fixture, "src/features/assistant/commands.ts");
 const assistantSource = await readFile(assistantCommands, "utf8");
-const assistantRead = `export async function readAssistantWorkspace(db: DatabaseConnection, ownerId: string) {`;
+const assistantRead = `export async function readAssistantWorkspace(
+  db: DatabaseConnection,
+  actorId: string,
+  requestedBrandId?: string,
+) {`;
 const assistantConfirm = `export async function confirmPlanItems(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   planId: string,
   input: ConfirmAssistantPlanInput,
   options: PlanOptions = {},
@@ -721,10 +725,14 @@ await writeFile(assistantCommands, assistantSource
 
 const strategyCommands = path.join(fixture, "src/features/assistant/strategy-commands.ts");
 const strategySource = await readFile(strategyCommands, "utf8");
-const strategyRead = `export async function readStrategyWorkspace(db: DatabaseConnection, ownerId: string) {`;
+const strategyRead = `export async function readStrategyWorkspace(
+  db: DatabaseConnection,
+  actorId: string,
+  requestedBrandId?: string,
+) {`;
 const strategySave = `export async function saveStrategyTemplate(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: SaveStrategyTemplateInput,
   options: TemplateOptions = {},
 ) {`;

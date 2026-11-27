@@ -129,12 +129,12 @@ export async function assistantPlanReviewResponse(request: Request, planId: stri
   if (new URL(request.url).searchParams.size || !brandIdSchema.safeParse(planId).success) {
     return failure("INVALID_INPUT");
   }
-  const ownerId = gate.session.session.user.id;
+  const actorId = gate.session.session.user.id;
   try {
     const db = getConnection();
     const result = request.method === "POST"
-      ? await saveAssistantPlanReview(db, ownerId, planId, await readBoundedJson(request, 8192))
-      : await readAssistantPlanReview(db, ownerId, planId);
+      ? await saveAssistantPlanReview(db, actorId, planId, await readBoundedJson(request, 8192))
+      : await readAssistantPlanReview(db, actorId, planId);
     return "error" in result ? failure(result.error) : json(result);
   } catch {
     const traceId = randomUUID();

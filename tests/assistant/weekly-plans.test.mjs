@@ -139,6 +139,29 @@ for (const kind of ["sqlite", "postgresql"]) {
       assert.equal(await publications(), 0);
       assert.equal(await sampling(), 0);
 
+      // Seed one pre-upgrade plan/item at 0091/0092 before migrating to the latest schema.
+      const legacyPlanId = randomUUID();
+      await queryWithParameters(
+        db,
+        `INSERT INTO assistant_plan (
+          id, brand_id, owner_id, material_hash, status, controls_unchanged, ignored, budget_minor,
+          strategy_label, guaranteed, successes, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'settled', 1, 0, 100, 'observation', 0, 1, ?, ?)`,
+        [legacyPlanId, brand, owner, "b".repeat(64), time, time],
+      );
+      await queryWithParameters(
+        db,
+        `INSERT INTO assistant_plan_item (
+          id, plan_id, brand_id, owner_id, position, action_text, fact_version_id, fact_current,
+          status, block_reason, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 1, '升级前既有一条', ?, 1, 'executed', NULL, ?, ?)`,
+        [randomUUID(), legacyPlanId, brand, owner, facts[0], time, time],
+      );
+      execFileSync("pnpm", ["db:migrate"], { env: { ...process.env, ...fixture.env }, stdio: "inherit" });
+      assert.deepEqual(await structure(db), await structure(ddl.connection));
+      assert.equal(await count(db, "assistant_plan", brand), 1);
+      assert.equal(await count(db, "assistant_plan_item", brand), 1);
+
       const calls = [];
       let mode = hostile;
       const fetchImpl = async (url, init) => {
@@ -287,7 +310,7 @@ for (const kind of ["sqlite", "postgresql"]) {
       assert.equal(executed.plan.strategy.guaranteed, false);
       assert.equal(executed.plan.strategy.label, "observation");
       assert.equal(executed.plan.strategy.successes, 1);
-      assert.equal(await count(db, "assistant_plan_item", brand), 5 + 5 + 3);
+      assert.equal(await count(db, "assistant_plan_item", brand), 1 + 5 + 5 + 3);
       assert.equal(await grants(), 1);
       assert.equal(await publications(), 0);
 
@@ -311,8 +334,6 @@ for (const kind of ["sqlite", "postgresql"]) {
       const partialResult = await executeConfirmedPlan(db, owner, partial.plan.id, options);
       assert.deepEqual(partialResult.plan.items.map((item) => item.status), ["executed", "blocked", "draft"]);
 
-      execFileSync("pnpm", ["db:migrate"], { env: { ...process.env, ...fixture.env }, stdio: "inherit" });
-      assert.deepEqual(await structure(db), await structure(ddl.connection));
       assert.deepEqual(await readAssistantPlan(db, owner, partial.plan.id), partialResult);
       const workspaceDb = watch(db);
       const workspaceStart = performance.now();
