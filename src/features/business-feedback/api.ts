@@ -57,17 +57,17 @@ export async function businessLeadListResponse(request: Request) {
   const keys = [...url.searchParams.keys()];
   if (keys.length !== 1 || (keys[0] !== "brandId" && keys[0] !== "id")) return failure("INVALID_INPUT");
   try {
-    const ownerId = gate.session.session.user.id;
+    const actorId = gate.session.session.user.id;
     if (keys[0] === "id") {
       const leadId = brandIdSchema.safeParse(url.searchParams.get("id"));
       if (!leadId.success) return failure("INVALID_INPUT");
-      const result = await readBusinessLead(getConnection(), ownerId, leadId.data);
+      const result = await readBusinessLead(getConnection(), actorId, leadId.data);
       if ("error" in result && result.error) return failure(result.error);
       return json(result);
     }
     const brandId = brandIdSchema.safeParse(url.searchParams.get("brandId"));
     if (!brandId.success) return failure("INVALID_INPUT");
-    const result = await listBusinessLeads(getConnection(), ownerId, brandId.data);
+    const result = await listBusinessLeads(getConnection(), actorId, brandId.data);
     if ("error" in result && result.error) return failure(result.error);
     return json(result);
   } catch {

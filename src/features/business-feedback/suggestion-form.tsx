@@ -99,6 +99,7 @@ export function LeadSuggestionReview({
   messages,
   suggestionId,
   status,
+  canWrite,
   modelName,
   children,
 }: {
@@ -106,6 +107,7 @@ export function LeadSuggestionReview({
   messages: Copy;
   suggestionId: string;
   status: LeadSuggestionStatus;
+  canWrite: boolean;
   modelName: string;
   children: ReactNode;
 }) {
@@ -124,7 +126,7 @@ export function LeadSuggestionReview({
   }[visibleStatus];
 
   async function decide(action: Decision, trigger: HTMLButtonElement) {
-    if (pending || visibleStatus !== "draft") return;
+    if (!canWrite || pending || visibleStatus !== "draft") return;
     setPending(action);
     setError(null);
     try {
@@ -157,7 +159,7 @@ export function LeadSuggestionReview({
         <p className="min-w-0 text-sm text-muted-foreground">{t("modelLine", { model: modelName })}</p>
       </div>
       {children}
-      {visibleStatus === "draft" ? (
+      {canWrite && visibleStatus === "draft" ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" aria-disabled={pending !== null} className={actionClass} onClick={(event) => void decide("accept", event.currentTarget)}>
             {pending === "accept" ? t("accepting") : t("accept")}

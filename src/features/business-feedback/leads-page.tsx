@@ -1,23 +1,19 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { Button } from "@/components/ui/button";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts";
-import { BrandDao } from "../brands/dao";
-import { authorizeBrandActor, workspaceBrand } from "../team-access/brand-scope";
-import { TeamAccessDao } from "../team-access/dao";
-import { authorizePlatformAdmin } from "../team-access/platform-role";
 import { readBrandSyncSurface } from "../data-connections/commands";
-import { listBusinessLeads, readBusinessLead } from "./commands";
+import { listBusinessLeadsForBrand, readBusinessLeadForBrand } from "./commands";
 import { LeadFeedbackDao, type LeadFeedback } from "./feedback-dao";
 import { LeadFeedbackForm } from "./feedback-form";
 import { LeadQualityDao } from "./quality-dao";
 import { LeadImportForm } from "./import-form";
+import { feedbackHref, leadsPath, qualityPath, readFeedbackWorkspace, reportsPath, suggestionsPath } from "./workspace";
 
 const knownErrors = ["NOT_FOUND", "INVALID_INPUT"] as const;
-const leadsPath = "/dashboard/reports/leads";
-const reportsPath = "/dashboard/reports";
 const rowsId = "lead-rows";
 const actionClass = "h-auto min-h-10 max-w-full py-2 whitespace-normal";
 const summaryClass = "max-w-2xl text-sm leading-6 text-muted-foreground [overflow-wrap:anywhere]";
@@ -27,37 +23,25 @@ function isKnownError(value: string | undefined): value is (typeof knownErrors)[
 }
 
 async function readWorkspace(actorId: string, params: Record<string, string | string[] | undefined>) {
-  const requested = brandIdSchema.safeParse(params.brandId);
   const leadId = brandIdSchema.safeParse(params.leadId);
   const feedbackId = brandIdSchema.safeParse(params.feedbackId);
-  if ((!requested.success && params.brandId !== undefined) || (!leadId.success && params.leadId !== undefined)
+  if ((!leadId.success && params.leadId !== undefined)
     || (params.feedbackId !== undefined && (!leadId.success || !feedbackId.success))) {
     return { kind: "error", code: "INVALID_INPUT" } as const;
   }
   try {
     const connection = getConnection();
-    const brandDao = new BrandDao(connection);
-    const own = requested.success ? null : await brandDao.active(actorId);
-    const brandId = requested.data ?? own?.id;
-    const scope = await workspaceBrand(connection, actorId, brandId, "read");
-    const canAdminRead = !scope && requested.success && await authorizePlatformAdmin(connection, actorId);
-    const adminBrand = canAdminRead ? await new TeamAccessDao(connection).brandActor(actorId, requested.data) : null;
-    const ownerId = scope?.ownerId ?? adminBrand?.ownerId;
-    const resolvedBrandId = scope?.brandId ?? brandId;
-    const brand = ownerId && resolvedBrandId ? await brandDao.ownedSummary(ownerId, resolvedBrandId) : null;
-    if (!brand || !ownerId) return requested.success || leadId.success
-      ? { kind: "error", code: "NOT_FOUND" } as const : { kind: "noBrand" } as const;
-
+    const scope = await readFeedbackWorkspace(actorId, params.brandId);
+    if (scope.kind !== "ready") return scope;
+    const { ownerId, brand, canWrite } = scope;
     const dao = new LeadFeedbackDao(connection);
-    const canWrite = scope ? Boolean(await authorizeBrandActor(connection, actorId, brand.id, "write")) : false;
     let selected: { current: LeadFeedback | null; saved: LeadFeedback | null } | null = null;
     let rules: { id: string; version: number }[] = [];
     const listed = leadId.success
-      ? await readBusinessLead(connection, ownerId, leadId.data)
-      : await listBusinessLeads(connection, ownerId, brand.id);
+      ? await readBusinessLeadForBrand(connection, ownerId, brand.id, leadId.data)
+      : await listBusinessLeadsForBrand(connection, ownerId, brand.id);
     if ("error" in listed) return { kind: "error", code: "NOT_FOUND" } as const;
     const leads = "lead" in listed ? [listed.lead] : listed.leads;
-    if (leads.some((lead) => lead.brandId !== brand.id)) return { kind: "error", code: "NOT_FOUND" } as const;
     if (leadId.success) {
       const current = await dao.read(leadId.data);
       const saved = feedbackId.success && feedbackId.data !== current?.id ? await dao.read(leadId.data, feedbackId.data) : current;
@@ -67,8 +51,10 @@ async function readWorkspace(actorId: string, params: Record<string, string | st
     }
     const statuses = selected ? [] : await dao.currentForBrand(ownerId, brand.id);
     const surface = await readBrandSyncSurface(connection, ownerId, brand.id, leads.map((lead) => lead.eventId));
-    return { kind: "ready", brand, leads, surface, selected, rules, canWrite, feedbackId: feedbackId.data,
-      canImport: canWrite && scope?.ownerId === actorId, statuses: new Map(statuses.map((item) => [item.leadId, item])) } as const;
+    return {
+      kind: "ready", brand, leads, surface, selected, rules, canWrite, feedbackId: feedbackId.data,
+      statuses: new Map(statuses.map((item) => [item.leadId, item])),
+    } as const;
   } catch {
     console.error("business-leads-page-read-unavailable");
     return { kind: "error", code: "SERVICE_UNAVAILABLE" } as const;
@@ -92,10 +78,11 @@ export default async function BusinessLeadsPage({
   const messages = getMessages(locale).businessLeads;
   const errorCode = typeof params.error === "string" ? params.error : undefined;
   const workspace = await readWorkspace(session.user.id, params);
+  if (workspace.kind === "notFound") notFound();
   const ready = workspace.kind === "ready" ? workspace : null;
   const syncSources = ready ? [...new Set(ready.surface.sources.map((source) => source.source))] : [];
-  const reportsHref = ready ? `${reportsPath}?brandId=${encodeURIComponent(ready.brand.id)}` : reportsPath;
-  const ledgerHref = ready ? `${leadsPath}?brandId=${encodeURIComponent(ready.brand.id)}` : leadsPath;
+  const reportsHref = feedbackHref(reportsPath, ready?.brand.id);
+  const ledgerHref = feedbackHref(leadsPath, ready?.brand.id);
   const evidenceLabel = {
     referral: t("evidenceReferral"),
     self_report: t("evidenceSelfReport"),
@@ -115,7 +102,7 @@ export default async function BusinessLeadsPage({
         )}
         <div className="flex flex-wrap gap-2">
           {workspace.kind === "error" && workspace.code === "SERVICE_UNAVAILABLE" ? (
-            <Button asChild className={actionClass}><a href={`${leadsPath}${typeof params.brandId === "string" ? `?brandId=${encodeURIComponent(params.brandId)}` : ""}`}>{t("reload")}</a></Button>
+            <Button asChild className={actionClass}><a href={feedbackHref(leadsPath, params.brandId)}>{t("reload")}</a></Button>
           ) : null}
           {workspace.kind === "noBrand" || (workspace.kind === "error" && workspace.code === "NOT_FOUND") ? (
             <Button asChild className={actionClass}><Link href="/dashboard/brands" prefetch={false}>{t("openBrand")}</Link></Button>
@@ -124,14 +111,14 @@ export default async function BusinessLeadsPage({
             <>
               {ready.selected ? (
                 <Button asChild className={actionClass}><Link href={ledgerHref}>{t("feedbackBackLedger")}</Link></Button>
-              ) : ready.canImport ? (
+              ) : ready.canWrite ? (
                 <Button asChild className={actionClass}><a href={`#${rowsId}`}>{t("startImport")}</a></Button>
               ) : null}
               <Button asChild variant="outline" className={actionClass}>
-                <Link href="/dashboard/reports/lead-quality" prefetch={false}>{t("openQuality")}</Link>
+                <Link href={feedbackHref(qualityPath, ready.brand.id)} prefetch={false}>{t("openQuality")}</Link>
               </Button>
               <Button asChild variant="outline" className={actionClass}>
-                <Link href="/dashboard/reports/lead-suggestions" prefetch={false}>{t("openSuggestions")}</Link>
+                <Link href={feedbackHref(suggestionsPath, ready.brand.id)} prefetch={false}>{t("openSuggestions")}</Link>
               </Button>
             </>
           ) : null}
@@ -149,7 +136,7 @@ export default async function BusinessLeadsPage({
           {ready.leads.length === 0 ? (
             <p role="status" className="rounded-xl border border-dashed bg-card px-4 py-5 text-sm text-muted-foreground">{t("empty")}</p>
           ) : null}
-          {ready.canImport && !ready.selected ? (
+          {ready.canWrite && !ready.selected ? (
             <LeadImportForm key={ready.brand.id} locale={locale} messages={messages} brandId={ready.brand.id} rowsId={rowsId} />
           ) : null}
           <section aria-labelledby="lead-sync" className="min-w-0 space-y-3">

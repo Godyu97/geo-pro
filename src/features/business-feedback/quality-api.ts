@@ -83,10 +83,10 @@ export async function leadRuleWriteResponse(request: Request) {
     const body = await readBoundedJson(request, 8 * 1024);
     const command = leadRuleCommandSchema.safeParse(body);
     if (!command.success) return failure("INVALID_INPUT");
-    const ownerId = gate.session.session.user.id;
+    const actorId = gate.session.session.user.id;
     const result = isQualifyLeadRule(command.data)
-      ? await qualifyLeadAgainstRule(getConnection(), ownerId, command.data)
-      : await saveLeadValidityRule(getConnection(), ownerId, command.data);
+      ? await qualifyLeadAgainstRule(getConnection(), actorId, command.data)
+      : await saveLeadValidityRule(getConnection(), actorId, command.data);
     if ("error" in result && result.error) return failure(result.error);
     return json(result);
   } catch {

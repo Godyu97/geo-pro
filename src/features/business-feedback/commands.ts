@@ -5,6 +5,7 @@ import type { DatabaseConnection, QueryConnection } from "../../lib/db/connectio
 import { BrandDao } from "../brands/dao.ts";
 import { writeConnectorEvents } from "../data-connections/event-commands.ts";
 import { csvEventDigest } from "../data-connections/sync.ts";
+import { readFeedbackAccess, writeFeedbackAccess } from "./brand-access.ts";
 import { prepareLeadRow, type ImportBusinessLeadsInput } from "./contracts.ts";
 import {
   BusinessLeadDao,
@@ -56,19 +57,30 @@ async function viewsFor(dao: BusinessLeadDao, ownerId: string, leadIds: readonly
   return leads.map((lead) => toView(lead, evidence));
 }
 
-export async function listBusinessLeads(db: DatabaseConnection, ownerId: string, brandId: string) {
-  const owned = await new BrandDao(db).owned(ownerId, brandId);
-  if (!owned) return { error: "NOT_FOUND" as const };
+export async function listBusinessLeads(db: DatabaseConnection, actorId: string, brandId: string) {
+  const access = await readFeedbackAccess(db, actorId, brandId);
+  if (!access) return { error: "NOT_FOUND" as const };
+  return listBusinessLeadsForBrand(db, access.ownerId, brandId);
+}
+
+export async function listBusinessLeadsForBrand(db: QueryConnection, ownerId: string, brandId: string) {
   const dao = new BusinessLeadDao(db);
   const leads = await dao.leadsForBrand(ownerId, brandId);
   const evidence = await dao.evidenceFor(ownerId, leads.map((lead) => lead.id));
   return { leads: leads.map((lead) => toView(lead, evidence)) };
 }
 
-export async function readBusinessLead(db: DatabaseConnection, ownerId: string, leadId: string) {
+export async function readBusinessLead(db: DatabaseConnection, actorId: string, leadId: string) {
+  const brandId = await new BusinessLeadDao(db).leadBrandId(leadId);
+  const access = brandId && await readFeedbackAccess(db, actorId, brandId);
+  if (!access) return { error: "NOT_FOUND" as const };
+  return readBusinessLeadForBrand(db, access.ownerId, brandId, leadId);
+}
+
+export async function readBusinessLeadForBrand(db: QueryConnection, ownerId: string, brandId: string, leadId: string) {
   const dao = new BusinessLeadDao(db);
   const lead = await dao.leadForOwner(ownerId, leadId);
-  if (!lead) return { error: "NOT_FOUND" as const };
+  if (!lead || lead.brandId !== brandId) return { error: "NOT_FOUND" as const };
   const evidence = await dao.evidenceFor(ownerId, [lead.id]);
   return { lead: toView(lead, evidence) };
 }
@@ -160,13 +172,19 @@ export async function writeBusinessLeads(
 
 export async function importBusinessLeads(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: ImportBusinessLeadsInput,
   clock: Clock = systemClock,
 ) {
   return db.transaction(async (tx) => {
-    const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    const access = await writeFeedbackAccess(tx, actorId, input.brandId);
+    if ("error" in access) return access;
+    const { ownerId } = access;
+    // Serialize imports into the same ledger, including when its first event is new.
+    if (!await new BrandDao(tx).lockOwner(ownerId)) return { error: "NOT_FOUND" as const };
+    const current = await writeFeedbackAccess(tx, actorId, input.brandId);
+    if ("error" in current) return current;
+    if (current.ownerId !== ownerId) return { error: "NOT_FOUND" as const };
     const result = await writeBusinessLeads(tx, ownerId, input, clock);
     if ("error" in result || result.leads.length === 0) return result;
     await writeConnectorEvents(tx, ownerId, {

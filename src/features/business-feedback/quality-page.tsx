@@ -1,17 +1,16 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { Fragment } from "react";
 import { Button } from "@/components/ui/button";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { formatNumber, formatPercent } from "@/lib/i18n/format";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
-import { BrandDao } from "../brands/dao";
-import { listLeadQuality } from "./quality-commands";
+import { listLeadQualityForBrand } from "./quality-commands";
 import { LeadObservationForm, LeadRuleActions, SaveLeadRuleForm } from "./quality-form";
+import { feedbackHref, leadsPath, qualityPath, readFeedbackWorkspace, reportsPath, suggestionsPath } from "./workspace";
 
 const knownErrors = ["NOT_FOUND", "INVALID_INPUT"] as const;
-const qualityPath = "/dashboard/reports/lead-quality";
-const reportsPath = "/dashboard/reports";
 const firstCriterionId = "lead-rule-real-need";
 const versionsId = "lead-rule-versions";
 const actionClass = "h-auto min-h-10 max-w-full py-2 whitespace-normal";
@@ -21,14 +20,12 @@ function isKnownError(value: string | undefined): value is (typeof knownErrors)[
   return knownErrors.some((code) => code === value);
 }
 
-async function readWorkspace(ownerId: string) {
+async function readWorkspace(actorId: string, brandId: string | string[] | undefined) {
   try {
-    const connection = getConnection();
-    const brand = await new BrandDao(connection).active(ownerId);
-    if (!brand) return { kind: "noBrand" } as const;
-    const quality = await listLeadQuality(connection, ownerId, brand.id);
-    if ("error" in quality && quality.error) return { kind: "error", code: quality.error } as const;
-    return { kind: "ready", brand, quality } as const;
+    const scope = await readFeedbackWorkspace(actorId, brandId);
+    if (scope.kind !== "ready") return scope;
+    const quality = await listLeadQualityForBrand(getConnection(), scope.ownerId, scope.brand.id);
+    return { ...scope, quality };
   } catch {
     console.error("lead-quality-page-read-unavailable");
     return { kind: "error", code: "SERVICE_UNAVAILABLE" } as const;
@@ -51,9 +48,10 @@ export default async function LeadQualityPage({
   const t = await getTranslator("leadQuality");
   const messages = getMessages(locale).leadQuality;
   const errorCode = typeof params.error === "string" ? params.error : undefined;
-  const workspace = await readWorkspace(session.user.id);
+  const workspace = await readWorkspace(session.user.id, params.brandId);
+  if (workspace.kind === "notFound") notFound();
   const ready = workspace.kind === "ready" ? workspace : null;
-  const reportsHref = ready ? `${reportsPath}?brandId=${encodeURIComponent(ready.brand.id)}` : reportsPath;
+  const reportsHref = feedbackHref(reportsPath, ready?.brand.id);
   const hasRules = Boolean(ready?.quality.rules.length);
   const number = (value: number) => formatNumber(locale, value);
   const statusLabel = {
@@ -74,21 +72,23 @@ export default async function LeadQualityPage({
         )}
         <div className="flex flex-wrap gap-2">
           {workspace.kind === "error" && workspace.code === "SERVICE_UNAVAILABLE" ? (
-            <Button asChild className={actionClass}><a href={qualityPath}>{t("reload")}</a></Button>
+            <Button asChild className={actionClass}><a href={feedbackHref(qualityPath, params.brandId)}>{t("reload")}</a></Button>
           ) : null}
-          {workspace.kind === "noBrand" || (workspace.kind === "error" && workspace.code === "NOT_FOUND") ? (
+          {workspace.kind === "noBrand" ? (
             <Button asChild className={actionClass}><Link href="/dashboard/brands" prefetch={false}>{t("openBrand")}</Link></Button>
           ) : null}
           {ready ? (
             <>
-              <Button asChild className={actionClass}>
-                <a href={`#${hasRules ? versionsId : firstCriterionId}`}>{t(hasRules ? "viewRules" : "startRule")}</a>
+              {hasRules || ready.canWrite ? (
+                <Button asChild className={actionClass}>
+                  <a href={`#${hasRules ? versionsId : firstCriterionId}`}>{t(hasRules ? "viewRules" : "startRule")}</a>
+                </Button>
+              ) : null}
+              <Button asChild variant="outline" className={actionClass}>
+                <Link href={feedbackHref(leadsPath, ready.brand.id)} prefetch={false}>{t("openLeads")}</Link>
               </Button>
               <Button asChild variant="outline" className={actionClass}>
-                <Link href="/dashboard/reports/leads" prefetch={false}>{t("openLeads")}</Link>
-              </Button>
-              <Button asChild variant="outline" className={actionClass}>
-                <Link href="/dashboard/reports/lead-suggestions" prefetch={false}>{t("openSuggestions")}</Link>
+                <Link href={feedbackHref(suggestionsPath, ready.brand.id)} prefetch={false}>{t("openSuggestions")}</Link>
               </Button>
             </>
           ) : null}
@@ -106,7 +106,9 @@ export default async function LeadQualityPage({
           {!hasRules ? (
             <p className="rounded-xl border border-dashed bg-card px-4 py-5 text-sm text-muted-foreground">{t("emptyRules")}</p>
           ) : null}
-          <SaveLeadRuleForm locale={locale} messages={messages} brandId={ready.brand.id} firstCriterionId={firstCriterionId} />
+          {ready.canWrite ? (
+            <SaveLeadRuleForm locale={locale} messages={messages} brandId={ready.brand.id} firstCriterionId={firstCriterionId} />
+          ) : null}
           <p className="text-sm tabular-nums">{t("qualifiedCount", { count: number(ready.quality.qualifiedCount) })}</p>
           {hasRules ? (
             <section aria-labelledby={versionsId} className="space-y-4">
@@ -126,13 +128,15 @@ export default async function LeadQualityPage({
                       <li>{t("industryLine", { state: rule.requiresIndustry ? t("switchOn") : t("switchOff") })}</li>
                       <li>{t("followUpLine", { state: rule.requiresFollowUp ? t("switchOn") : t("switchOff") })}</li>
                     </ul>
-                    <LeadRuleActions
-                      locale={locale}
-                      messages={messages}
-                      brandId={ready.brand.id}
-                      ruleId={rule.id}
-                      frozen={rule.frozen}
-                    />
+                    {ready.canWrite ? (
+                      <LeadRuleActions
+                        locale={locale}
+                        messages={messages}
+                        brandId={ready.brand.id}
+                        ruleId={rule.id}
+                        frozen={rule.frozen}
+                      />
+                    ) : null}
                     {judgments.length === 0 ? (
                       <p className="text-sm text-muted-foreground">{t("emptyQualifications")}</p>
                     ) : (
@@ -154,7 +158,7 @@ export default async function LeadQualityPage({
             </section>
           ) : null}
 
-          <LeadObservationForm locale={locale} messages={messages} brandId={ready.brand.id} />
+          {ready.canWrite ? <LeadObservationForm locale={locale} messages={messages} brandId={ready.brand.id} /> : null}
 
           {ready.quality.observations.length === 0 ? (
             <p className="rounded-xl border border-dashed bg-card px-4 py-5 text-sm text-muted-foreground">{t("emptyObservations")}</p>

@@ -52,7 +52,7 @@ async function visit(page: Page, locale: keyof typeof copy, width: number, viaRe
   await page.setViewportSize({ width, height: 800 });
   await page.goto(viaReports ? "/dashboard/reports" : path);
   if (viaReports) await activate(page, page.getByRole("link", { name: copy[locale].entry, exact: true }));
-  await expect(page).toHaveURL(`${origin}${path}`);
+  await expect(page).toHaveURL((url) => url.pathname === path && url.searchParams.has("brandId") === viaReports);
   await expect(page.locator("html")).toHaveAttribute("lang", locale);
   await expect(page.locator('[data-workspace-section="reports"]')).toBeVisible();
   const main = page.getByRole("main");
@@ -244,13 +244,10 @@ test("lead suggestions expose a keyboard action and keep decisions out of the qu
       await expect(main.getByRole("heading", { name: copy[locale].accepted })).toBeVisible();
     }
 
-    await context.addCookies([{ name: "geo-lead-suggestions-read", value: "not-found", url: origin }]);
-    await visit(page, "en", 375);
-    await expect(main.getByRole("alert")).toContainText("was not found");
-    await expect(main).not.toContainText(brandName);
-    await expect(main.getByRole("form")).toHaveCount(0);
-    await expect(main.getByRole("link", { name: copy.en.brand, exact: true })).toBeInViewport();
-    await context.clearCookies({ name: "geo-lead-suggestions-read" });
+    const missing = await page.goto(`${path}?brandId=${randomUUID()}`);
+    expect(missing?.status()).toBe(404);
+    await expect(page.getByRole("main")).not.toContainText(brandName);
+    await expect(page.getByRole("form")).toHaveCount(0);
 
     const stranger = await outsider.newPage();
     for (const locale of locales) {

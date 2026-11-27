@@ -82,6 +82,12 @@ export class LeadSuggestionDao {
     );
   }
 
+  async suggestionBrandId(id: string) {
+    const [row] = await queryWithParameters(this.db,
+      `SELECT brand_id FROM lead_question_suggestion WHERE id = ?`, [id]);
+    return typeof row?.brand_id === "string" ? row.brand_id : null;
+  }
+
   async forOwner(ownerId: string, id: string) {
     const [row] = await queryWithParameters(
       this.db,

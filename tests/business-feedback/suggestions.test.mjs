@@ -4,6 +4,12 @@ import { createServer } from "node:http";
 import { test } from "node:test";
 import { executeBrandCommand } from "../../src/features/brands/commands.ts";
 import { ensureRetentionPolicy } from "../brands/retention-setup.mjs";
+import { importBusinessLeads, listBusinessLeads, readBusinessLead } from "../../src/features/business-feedback/commands.ts";
+import { recordLeadFeedback } from "../../src/features/business-feedback/feedback-commands.ts";
+import {
+  freezeLeadValidityRule, listLeadQuality, qualifyLeadAgainstRule, recordLeadObservation, saveLeadValidityRule,
+} from "../../src/features/business-feedback/quality-commands.ts";
+import { grantBrandMember, revokeBrandGrant } from "../../src/features/team-access/commands.ts";
 import { initialBrandFields } from "../../src/features/brands/contracts.ts";
 import {
   decideLeadSuggestion,
@@ -352,5 +358,99 @@ for (const kind of ["sqlite", "postgresql"]) {
       await fixture.cleanup();
       await ddl.cleanup();
     }
+  });
+}
+
+for (const kind of ["sqlite", "postgresql"]) {
+  test(`${kind}: business feedback is shared by brand grant and rechecked before saving an AI draft`, async (t) => {
+    const fixture = await testDatabase(kind);
+    t.after(() => fixture.cleanup());
+    const mock = await startLoopback();
+    mock.setMode("valid");
+    t.after(() => mock.close());
+    const db = fixture.connection;
+    const { ownerId, brandId } = await addBrand(db);
+    const { ownerId: outsider, brandId: otherBrandId } = await addBrand(db);
+    const [member, reader] = [randomUUID(), randomUUID()];
+    for (const [actor, role] of [[member, "member"], [reader, "read_only"]]) {
+      await queryWithParameters(db, 'INSERT INTO "user" (id, name, email) VALUES (?, ?, ?)',
+        [actor, role, `${actor}@example.invalid`]);
+    }
+    const memberGrant = await grantBrandMember(db, ownerId, { userId: member, brandId, role: "member", expiresAt: null }, time);
+    assert.ok(memberGrant.grant);
+    assert.ok((await grantBrandMember(db, ownerId, { userId: reader, brandId, role: "read_only", expiresAt: null }, time)).grant);
+
+    const rows = [
+      { eventId: "acceptance-event", evidence: "unknown", directIdentifier: false },
+      { eventId: "person@example.invalid", evidence: "referral", directIdentifier: false },
+    ];
+    const imported = await Promise.all([member, ownerId].map(actor => importBusinessLeads(db, actor, { brandId, rows }, stamp)));
+    assert.equal(imported[0].leads[0].id, imported[1].leads[0].id);
+    assert.deepEqual(imported[0].rejected, [{ index: 1, reason: "direct_pii" }]);
+    const [lead] = imported[0].leads;
+    assert.equal(lead.primary, "unknown");
+    assert.deepEqual(await listBusinessLeads(db, reader, brandId), { leads: [lead] });
+    assert.deepEqual(await readBusinessLead(db, reader, lead.id), { lead });
+
+    const ruleInput = { brandId, requiresRealNeed: true, requiresIndustry: true, requiresFollowUp: true };
+    const created = await Promise.all([member, ownerId].map(actor => saveLeadValidityRule(db, actor, ruleInput, stamp)));
+    assert.deepEqual(created.map(result => result.rule.version).sort(), [1, 2]);
+    const ruleId = created[0].rule.id;
+    const { rule } = await freezeLeadValidityRule(db, member, ruleId);
+    assert.equal(rule.frozen, true);
+    const qualify = { brandId, ruleId, realNeed: true, targetIndustry: true, followUp: true };
+    assert.equal((await qualifyLeadAgainstRule(db, member, qualify, stamp)).qualification.status, "qualified");
+    assert.deepEqual(await qualifyLeadAgainstRule(db, outsider, { ...qualify, brandId: otherBrandId }, stamp), { error: "NOT_FOUND" });
+
+    const observationInput = { brandId, identifiedReferrals: 1, sessionDenominator: null, selfReported: 0, crawlerVisits: 1, answerCitations: 0 };
+    const { observation } = await recordLeadObservation(db, member, observationInput, stamp);
+    assert.equal(observation.identified.rate, null);
+    assert.equal(observation.calledIncluded, false);
+    assert.deepEqual((await listLeadQuality(db, reader, brandId)).observations, [observation]);
+
+    const suggestionInput = { brandId, summary };
+    const opts = { env: mock.env, clock: stamp };
+    const { suggestion } = await draftLeadSuggestions(db, member, suggestionInput, opts);
+    assert.equal(suggestion.status, "draft");
+    assert.ok(suggestion.questions.every(question => question.frozen === false));
+    assert.deepEqual(await listLeadSuggestions(db, reader, brandId), { suggestions: [suggestion] });
+    assert.equal(mock.calls.length, 1);
+    const { feedback } = await recordLeadFeedback(db, member, {
+      brandId, leadId: lead.id, ruleId, realNeed: null, targetIndustry: null, canFollowUp: null,
+      outcome: "unknown", expectedRevision: 0,
+    });
+    assert.equal(feedback.status, "unknown");
+
+    const reads = actor => [
+      () => listBusinessLeads(db, actor, brandId),
+      () => readBusinessLead(db, actor, lead.id),
+      () => listLeadQuality(db, actor, brandId),
+      () => listLeadSuggestions(db, actor, brandId),
+    ];
+    const writes = actor => [
+      () => importBusinessLeads(db, actor, { brandId, rows }, stamp),
+      () => saveLeadValidityRule(db, actor, ruleInput, stamp),
+      () => freezeLeadValidityRule(db, actor, ruleId),
+      () => qualifyLeadAgainstRule(db, actor, qualify, stamp),
+      () => recordLeadObservation(db, actor, observationInput, stamp),
+      () => draftLeadSuggestions(db, actor, suggestionInput, opts),
+      () => decideLeadSuggestion(db, actor, suggestion.id, { action: "discard" }),
+    ];
+    for (const write of writes(reader)) assert.deepEqual(await write(), { error: "FORBIDDEN" });
+    for (const action of [...reads(outsider), ...writes(outsider)]) assert.deepEqual(await action(), { error: "NOT_FOUND" });
+    assert.equal(mock.calls.length, 1);
+
+    const revokedDuringRequest = await draftLeadSuggestions(db, member, suggestionInput, {
+      ...opts,
+      async fetchImpl(url, init) {
+        const response = await fetch(url, init);
+        assert.ok((await revokeBrandGrant(db, ownerId, memberGrant.grant.id, time)).grant);
+        return response;
+      },
+    });
+    assert.deepEqual(revokedDuringRequest, { error: "NOT_FOUND" });
+    assert.equal(mock.calls.length, 2);
+    for (const action of [...reads(member), ...writes(member)]) assert.deepEqual(await action(), { error: "NOT_FOUND" });
+    assert.deepEqual(await listLeadSuggestions(db, ownerId, brandId), { suggestions: [suggestion] });
   });
 }

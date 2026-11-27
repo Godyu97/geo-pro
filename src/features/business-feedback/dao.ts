@@ -121,6 +121,12 @@ export class BusinessLeadDao {
     return z.array(leadRow).parse(rows);
   }
 
+  async leadBrandId(id: string) {
+    const [row] = await queryWithParameters(this.db,
+      `SELECT brand_id FROM business_lead WHERE id = ?`, [id]);
+    return typeof row?.brand_id === "string" ? row.brand_id : null;
+  }
+
   async leadForOwner(ownerId: string, leadId: string) {
     const [row] = await queryWithParameters(
       this.db,

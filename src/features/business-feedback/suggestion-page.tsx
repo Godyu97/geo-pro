@@ -1,15 +1,14 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
-import { BrandDao } from "../brands/dao";
-import { listLeadSuggestions } from "./suggestion-commands";
+import { listLeadSuggestionsForBrand } from "./suggestion-commands";
 import { DraftLeadSuggestionsForm, LeadSuggestionReview } from "./suggestion-form";
+import { feedbackHref, leadsPath, qualityPath, readFeedbackWorkspace, reportsPath, suggestionsPath } from "./workspace";
 
 const knownErrors = ["NOT_FOUND", "INVALID_INPUT", "AI_UNAVAILABLE", "CONFLICT"] as const;
-const suggestionsPath = "/dashboard/reports/lead-suggestions";
-const reportsPath = "/dashboard/reports";
 const summaryId = "lead-suggestion-summary";
 const actionClass = "h-auto min-h-10 max-w-full py-2 whitespace-normal";
 const summaryClass = "max-w-2xl text-sm leading-6 text-muted-foreground [overflow-wrap:anywhere]";
@@ -18,14 +17,12 @@ function isKnownError(value: string | undefined): value is (typeof knownErrors)[
   return knownErrors.some((code) => code === value);
 }
 
-async function readWorkspace(ownerId: string) {
+async function readWorkspace(actorId: string, brandId: string | string[] | undefined) {
   try {
-    const connection = getConnection();
-    const brand = await new BrandDao(connection).active(ownerId);
-    if (!brand) return { kind: "noBrand" } as const;
-    const listed = await listLeadSuggestions(connection, ownerId, brand.id);
-    if ("error" in listed) return { kind: "error", code: listed.error } as const;
-    return { kind: "ready", brand, suggestions: listed.suggestions } as const;
+    const scope = await readFeedbackWorkspace(actorId, brandId);
+    if (scope.kind !== "ready") return scope;
+    const listed = await listLeadSuggestionsForBrand(getConnection(), scope.ownerId, scope.brand.id);
+    return { ...scope, suggestions: listed.suggestions };
   } catch {
     console.error("lead-suggestions-page-read-unavailable");
     return { kind: "error", code: "SERVICE_UNAVAILABLE" } as const;
@@ -48,10 +45,10 @@ export default async function LeadSuggestionsPage({
   const t = await getTranslator("leadSuggestions");
   const messages = getMessages(locale).leadSuggestions;
   const errorCode = typeof params.error === "string" ? params.error : undefined;
-  const workspace = await readWorkspace(session.user.id);
+  const workspace = await readWorkspace(session.user.id, params.brandId);
+  if (workspace.kind === "notFound") notFound();
   const ready = workspace.kind === "ready" ? workspace : null;
   const pending = ready?.suggestions.find((suggestion) => suggestion.status === "draft");
-  const needsBrand = workspace.kind === "noBrand" || (workspace.kind === "error" && workspace.code === "NOT_FOUND");
 
   return (
     <div className="min-w-0 space-y-6">
@@ -64,31 +61,33 @@ export default async function LeadSuggestionsPage({
           <p className={summaryClass}>{t(workspace.kind === "noBrand" ? "noBrand" : "description")}</p>
         )}
         <div className="flex flex-wrap gap-2">
-          {needsBrand ? (
+          {workspace.kind === "noBrand" ? (
             <Button asChild className={actionClass}>
               <Link href="/dashboard/brands" prefetch={false}>{t("openBrand")}</Link>
             </Button>
           ) : null}
-          {workspace.kind === "error" && !needsBrand ? (
-            <Button asChild className={actionClass}><a href={suggestionsPath}>{t("reload")}</a></Button>
+          {workspace.kind === "error" ? (
+            <Button asChild className={actionClass}><a href={feedbackHref(suggestionsPath, params.brandId)}>{t("reload")}</a></Button>
           ) : null}
           {ready ? (
             <>
-              <Button asChild className={actionClass}>
-                <a href={pending ? `#lead-suggestion-${pending.id}` : `#${summaryId}`}>
-                  {t(pending ? "reviewDraft" : "writeSummary")}
-                </a>
+              {ready.canWrite ? (
+                <Button asChild className={actionClass}>
+                  <a href={pending ? `#lead-suggestion-${pending.id}` : `#${summaryId}`}>
+                    {t(pending ? "reviewDraft" : "writeSummary")}
+                  </a>
+                </Button>
+              ) : null}
+              <Button asChild variant="outline" className={actionClass}>
+                <Link href={feedbackHref(leadsPath, ready.brand.id)} prefetch={false}>{t("openLeads")}</Link>
               </Button>
               <Button asChild variant="outline" className={actionClass}>
-                <Link href="/dashboard/reports/leads" prefetch={false}>{t("openLeads")}</Link>
-              </Button>
-              <Button asChild variant="outline" className={actionClass}>
-                <Link href="/dashboard/reports/lead-quality" prefetch={false}>{t("openQuality")}</Link>
+                <Link href={feedbackHref(qualityPath, ready.brand.id)} prefetch={false}>{t("openQuality")}</Link>
               </Button>
             </>
           ) : null}
           <Button asChild variant="outline" className={actionClass}>
-            <Link href={ready ? `${reportsPath}?brandId=${ready.brand.id}` : reportsPath} prefetch={false}>
+            <Link href={feedbackHref(reportsPath, ready?.brand.id)} prefetch={false}>
               {t("backReports")}
             </Link>
           </Button>
@@ -112,6 +111,7 @@ export default async function LeadSuggestionsPage({
                   messages={messages}
                   suggestionId={suggestion.id}
                   status={suggestion.status}
+                  canWrite={ready.canWrite}
                   modelName={suggestion.modelName}
                 >
                   {suggestion.ignored ? <p className="text-sm">{t("ignored")}</p> : null}
@@ -127,7 +127,9 @@ export default async function LeadSuggestionsPage({
               ))}
             </section>
           )}
-          <DraftLeadSuggestionsForm locale={locale} messages={messages} brandId={ready.brand.id} summaryId={summaryId} />
+          {ready.canWrite ? (
+            <DraftLeadSuggestionsForm locale={locale} messages={messages} brandId={ready.brand.id} summaryId={summaryId} />
+          ) : null}
         </div>
       ) : null}
     </div>

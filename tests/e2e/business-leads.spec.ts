@@ -59,7 +59,7 @@ async function visit(page: Page, locale: keyof typeof copy, width: number, viaRe
   await page.setViewportSize({ width, height: 800 });
   await page.goto(viaReports ? "/dashboard/reports" : path);
   if (viaReports) await activate(page, page.getByRole("link", { name: copy[locale].open, exact: true }));
-  await expect(page).toHaveURL(`${origin}${path}`);
+  await expect(page).toHaveURL((url) => url.pathname === path && url.searchParams.has("brandId") === viaReports);
   await expect(page.locator("html")).toHaveAttribute("lang", locale);
   await expect(page.locator('[data-workspace-section="reports"]')).toBeVisible();
   const main = page.getByRole("main");

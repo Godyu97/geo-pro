@@ -258,9 +258,9 @@ test("report snapshots keep the current download readable and recoverable", asyn
     const { feedbackId } = seeded.business_feedback.lead_feedback.records[0];
     const feedbackHref = `/dashboard/reports/leads?brandId=${brandId}&leadId=${lead.leads[0].id}&feedbackId=${feedbackId}#lead-record`;
     const other = await outsider.newPage();
-    await other.goto(feedbackHref);
+    const deniedFeedback = await other.goto(feedbackHref);
+    expect(deniedFeedback?.status()).toBe(404);
     await expect(other.getByRole("main")).not.toContainText("evt-self");
-    await expect(other.getByRole("main").getByRole("alert")).toBeVisible();
     await other.close();
     const metricKeys = ["mention_rate", "recommendation_rate", "official_site_citation_rate"] as const;
     await page.setViewportSize({ width: 375, height: 800 });

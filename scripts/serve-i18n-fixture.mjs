@@ -278,7 +278,7 @@ await writeFile(interventionCommands, interventionSource.replace(interventionLis
 
 const leadCommands = path.join(fixture, "src/features/business-feedback/commands.ts");
 const leadSource = await readFile(leadCommands, "utf8");
-const leadList = "export async function listBusinessLeads(db: DatabaseConnection, ownerId: string, brandId: string) {";
+const leadList = "export async function listBusinessLeadsForBrand(db: QueryConnection, ownerId: string, brandId: string) {";
 assert.ok(leadSource.includes(leadList));
 await writeFile(leadCommands, leadSource.replace(leadList, `${leadList}
   if ((await (await import("next/headers")).cookies()).get("geo-leads-unavailable")?.value === "1") {
@@ -287,7 +287,7 @@ await writeFile(leadCommands, leadSource.replace(leadList, `${leadList}
 
 const leadQualityCommands = path.join(fixture, "src/features/business-feedback/quality-commands.ts");
 const leadQualitySource = await readFile(leadQualityCommands, "utf8");
-const leadQualityList = "export async function listLeadQuality(db: DatabaseConnection, ownerId: string, brandId: string) {";
+const leadQualityList = "export async function listLeadQualityForBrand(db: DatabaseConnection, ownerId: string, brandId: string) {";
 assert.ok(leadQualitySource.includes(leadQualityList));
 await writeFile(leadQualityCommands, leadQualitySource.replace(leadQualityList, `${leadQualityList}
   if ((await (await import("next/headers")).cookies()).get("geo-lead-quality-unavailable")?.value === "1") {
@@ -296,14 +296,13 @@ await writeFile(leadQualityCommands, leadQualitySource.replace(leadQualityList, 
 
 const leadSuggestionCommands = path.join(fixture, "src/features/business-feedback/suggestion-commands.ts");
 const leadSuggestionSource = await readFile(leadSuggestionCommands, "utf8");
-const leadSuggestionList = "export async function listLeadSuggestions(db: DatabaseConnection, ownerId: string, brandId: string) {";
+const leadSuggestionList = "export async function listLeadSuggestionsForBrand(db: DatabaseConnection, ownerId: string, brandId: string) {";
 const leadSuggestionEnv = "  const env = options.env ?? process.env;";
 assert.ok(leadSuggestionSource.includes(leadSuggestionList) && leadSuggestionSource.includes(leadSuggestionEnv));
 await writeFile(leadSuggestionCommands, leadSuggestionSource
   .replace(leadSuggestionList, leadSuggestionList + '\n' + [
     '  const probe = (await (await import("next/headers")).cookies()).get("geo-lead-suggestions-read")?.value;',
     '  if (probe === "unavailable") throw new Error("Private lead suggestions fixture failure");',
-    '  if (probe === "not-found") return failed("NOT_FOUND");',
   ].join("\n"))
   .replace(leadSuggestionEnv, [
     '  const port = Number((await (await import("next/headers")).cookies()).get("geo-lead-suggestions-mock-port")?.value);',

@@ -6,6 +6,7 @@ import { AiResponseError, createAiResponse, isAiConfigured } from "../../lib/ai/
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { brandIdSchema } from "../brands/contracts.ts";
+import { readFeedbackAccess, writeFeedbackAccess } from "./brand-access.ts";
 import {
   decideLeadSuggestionSchema,
   draftLeadSuggestionsSchema,
@@ -84,29 +85,31 @@ function toView(row: LeadSuggestionRecord): LeadSuggestionView {
   };
 }
 
-async function ownedBrand(db: DatabaseConnection, ownerId: string, brandId: string) {
-  if (!brandIdSchema.safeParse(brandId).success) return null;
-  return new BrandDao(db).version(ownerId, brandId);
+export async function listLeadSuggestions(db: DatabaseConnection, actorId: string, brandId: string) {
+  if (!brandIdSchema.safeParse(brandId).success) return failed("NOT_FOUND");
+  const access = await readFeedbackAccess(db, actorId, brandId);
+  if (!access) return failed("NOT_FOUND");
+  return listLeadSuggestionsForBrand(db, access.ownerId, brandId);
 }
 
-export async function listLeadSuggestions(db: DatabaseConnection, ownerId: string, brandId: string) {
-  const brand = await ownedBrand(db, ownerId, brandId);
-  if (!brand) return failed("NOT_FOUND");
-  const rows = await new LeadSuggestionDao(db).forBrand(ownerId, brand.id);
+export async function listLeadSuggestionsForBrand(db: DatabaseConnection, ownerId: string, brandId: string) {
+  const rows = await new LeadSuggestionDao(db).forBrand(ownerId, brandId);
   return { suggestions: rows.map(toView) };
 }
 
 export async function draftLeadSuggestions(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: DraftLeadSuggestionsInput,
   options: SuggestionOptions = {},
 ) {
   const parsed = draftLeadSuggestionsSchema.safeParse(input);
   if (!parsed.success) return failed("INVALID_INPUT");
   if (containsDirectIdentifier(parsed.data.summary)) return failed("INVALID_INPUT");
-  const brand = await ownedBrand(db, ownerId, parsed.data.brandId);
-  if (!brand) return failed("NOT_FOUND");
+  const { brandId } = parsed.data;
+  const access = await writeFeedbackAccess(db, actorId, brandId);
+  if ("error" in access) return failed(access.error);
+  const { ownerId } = access;
   const env = options.env ?? process.env;
   if (!isAiConfigured(env)) return failed("AI_UNAVAILABLE");
   let response;
@@ -138,12 +141,13 @@ export async function draftLeadSuggestions(
     return await db.transaction(async (tx) => {
       const brands = new BrandDao(tx);
       if (!await brands.lockOwner(ownerId)) throw new SuggestionAbort(failed("NOT_FOUND"));
-      const current = await brands.version(ownerId, brand.id);
-      if (!current) throw new SuggestionAbort(failed("NOT_FOUND"));
+      const current = await writeFeedbackAccess(tx, actorId, brandId);
+      if ("error" in current) throw new SuggestionAbort(failed(current.error));
+      if (current.ownerId !== ownerId) throw new SuggestionAbort(failed("NOT_FOUND"));
       const dao = new LeadSuggestionDao(tx);
       const row: LeadSuggestionInsert = {
         id: rowId,
-        brandId: current.id,
+        brandId,
         ownerId,
         summaryHash: createHash("sha256").update(parsed.data.summary).digest("hex"),
         modelName,
@@ -164,7 +168,7 @@ export async function draftLeadSuggestions(
 
 export async function decideLeadSuggestion(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   suggestionId: string,
   input: DecideLeadSuggestionInput,
 ) {
@@ -174,13 +178,14 @@ export async function decideLeadSuggestion(
   const status = parsed.data.action === "accept" ? "accepted" : "discarded";
   try {
     return await db.transaction(async (tx) => {
-      const brands = new BrandDao(tx);
-      if (!await brands.lockOwner(ownerId)) throw new SuggestionAbort(failed("NOT_FOUND"));
       const dao = new LeadSuggestionDao(tx);
+      const brandId = await dao.suggestionBrandId(id.data);
+      if (!brandId) throw new SuggestionAbort(failed("NOT_FOUND"));
+      const access = await writeFeedbackAccess(tx, actorId, brandId);
+      if ("error" in access) throw new SuggestionAbort(failed(access.error));
+      const { ownerId } = access;
       const current = await dao.forOwner(ownerId, id.data);
       if (!current) throw new SuggestionAbort(failed("NOT_FOUND"));
-      const brand = await brands.version(ownerId, current.brandId);
-      if (!brand) throw new SuggestionAbort(failed("NOT_FOUND"));
       if (current.status !== "draft") throw new SuggestionAbort(failed("CONFLICT"));
       if (!await dao.mark(ownerId, id.data, status)) throw new SuggestionAbort(failed("CONFLICT"));
       const stored = await dao.forOwner(ownerId, id.data);

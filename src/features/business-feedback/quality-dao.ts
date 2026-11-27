@@ -195,6 +195,12 @@ export class LeadQualityDao {
     return row ? ruleRow.parse(row) : null;
   }
 
+  async ruleBrandId(id: string) {
+    const [row] = await queryWithParameters(this.db,
+      `SELECT brand_id FROM lead_validity_rule WHERE id = ?`, [id]);
+    return typeof row?.brand_id === "string" ? row.brand_id : null;
+  }
+
   async ruleForOwner(ownerId: string, ruleId: string) {
     const [row] = await queryWithParameters(
       this.db,

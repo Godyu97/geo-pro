@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
 import { BrandDao } from "../brands/dao.ts";
+import { readFeedbackAccess, writeFeedbackAccess } from "./brand-access.ts";
 import {
   LeadQualityDao,
   type LeadObservationRecord,
@@ -118,10 +119,14 @@ function observationView(row: LeadObservationRecord): LeadObservationView {
   };
 }
 
-export async function listLeadQuality(db: DatabaseConnection, ownerId: string, brandId: string) {
+export async function listLeadQuality(db: DatabaseConnection, actorId: string, brandId: string) {
+  const access = await readFeedbackAccess(db, actorId, brandId);
+  if (!access) return { error: "NOT_FOUND" as const };
+  return listLeadQualityForBrand(db, access.ownerId, brandId);
+}
+
+export async function listLeadQualityForBrand(db: DatabaseConnection, ownerId: string, brandId: string) {
   return db.transaction(async (tx) => {
-    const owned = await new BrandDao(tx).owned(ownerId, brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
     const dao = new LeadQualityDao(tx);
     const rules = await dao.rulesForBrand(ownerId, brandId);
     const qualifications = await dao.qualificationsForBrand(ownerId, brandId);
@@ -138,14 +143,20 @@ export async function listLeadQuality(db: DatabaseConnection, ownerId: string, b
 
 export async function saveLeadValidityRule(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: SaveLeadRuleInput,
   clock: Clock = systemClock,
 ) {
   return db.transaction(async (tx) => {
-    const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    const access = await writeFeedbackAccess(tx, actorId, input.brandId);
+    if ("error" in access) return access;
+    const { ownerId } = access;
     const dao = new LeadQualityDao(tx);
+    // A brand may have no existing rule row to lock.
+    if (!await new BrandDao(tx).lockOwner(ownerId)) return { error: "NOT_FOUND" as const };
+    const current = await writeFeedbackAccess(tx, actorId, input.brandId);
+    if ("error" in current) return current;
+    if (current.ownerId !== ownerId) return { error: "NOT_FOUND" as const };
     const latest = await dao.latestRule(ownerId, input.brandId);
     const next = latest
       ? reviseValidity({
@@ -179,14 +190,14 @@ export async function saveLeadValidityRule(
   });
 }
 
-export async function freezeLeadValidityRule(db: DatabaseConnection, ownerId: string, ruleId: string) {
+export async function freezeLeadValidityRule(db: DatabaseConnection, actorId: string, ruleId: string) {
   return db.transaction(async (tx) => {
     const dao = new LeadQualityDao(tx);
-    const current = await dao.ruleForOwner(ownerId, ruleId);
-    if (!current) return { error: "NOT_FOUND" as const };
-    const owned = await new BrandDao(tx).owned(ownerId, current.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
-    const frozen = await dao.freeze(ownerId, ruleId);
+    const brandId = await dao.ruleBrandId(ruleId);
+    if (!brandId) return { error: "NOT_FOUND" as const };
+    const access = await writeFeedbackAccess(tx, actorId, brandId);
+    if ("error" in access) return access;
+    const frozen = await dao.freeze(access.ownerId, ruleId);
     if (!frozen) return { error: "NOT_FOUND" as const };
     return { rule: ruleView(frozen) };
   });
@@ -194,13 +205,14 @@ export async function freezeLeadValidityRule(db: DatabaseConnection, ownerId: st
 
 export async function qualifyLeadAgainstRule(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: QualifyLeadRuleInput,
   clock: Clock = systemClock,
 ) {
   return db.transaction(async (tx) => {
-    const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    const access = await writeFeedbackAccess(tx, actorId, input.brandId);
+    if ("error" in access) return access;
+    const { ownerId } = access;
     const dao = new LeadQualityDao(tx);
     const rule = await dao.ruleForOwner(ownerId, input.ruleId);
     if (!rule || rule.brandId !== input.brandId) return { error: "NOT_FOUND" as const };
@@ -234,13 +246,14 @@ export async function qualifyLeadAgainstRule(
 
 export async function recordLeadObservation(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: RecordLeadObservationInput,
   clock: Clock = systemClock,
 ) {
   return db.transaction(async (tx) => {
-    const owned = await new BrandDao(tx).owned(ownerId, input.brandId);
-    if (!owned) return { error: "NOT_FOUND" as const };
+    const access = await writeFeedbackAccess(tx, actorId, input.brandId);
+    if ("error" in access) return access;
+    const { ownerId } = access;
     const inclusion = crawlerVisitIsNotAiInclusion({
       crawlerVisits: input.crawlerVisits,
       answerCitations: input.answerCitations,

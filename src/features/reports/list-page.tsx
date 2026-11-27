@@ -8,6 +8,7 @@ import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { workspaceBrand } from "@/features/team-access/brand-scope";
 import { interventionsPath, observationsPath, retestHref } from "@/features/formal-retest/workspace";
+import { feedbackHref, leadsPath, qualityPath, suggestionsPath } from "@/features/business-feedback/workspace";
 import { brandIdSchema } from "@/features/brands/contracts";
 import { brandIntakeOrigin } from "@/features/brands/intake";
 import { ApplyMockRetestButton } from "@/features/functional-mock/run-buttons";
@@ -42,9 +43,9 @@ function relatedLinks(t: Awaited<ReturnType<typeof getTranslator<"reports">>>, b
     ...(brandId ? [{ href: `/dashboard/monitoring/new?brandId=${encodeURIComponent(brandId)}`, label: t("openMonitoringNew") }] : []),
     { href: retestHref(observationsPath, brandId), label: t("openObservations") },
     { href: retestHref(interventionsPath, brandId), label: t("openInterventions") },
-    { href: "/dashboard/reports/leads", label: t("openLeads") },
-    { href: "/dashboard/reports/lead-quality", label: t("openLeadQuality") },
-    { href: "/dashboard/reports/lead-suggestions", label: t("openLeadSuggestions") },
+    { href: feedbackHref(leadsPath, brandId), label: t("openLeads") },
+    { href: feedbackHref(qualityPath, brandId), label: t("openLeadQuality") },
+    { href: feedbackHref(suggestionsPath, brandId), label: t("openLeadSuggestions") },
     { href: "/dashboard/reports/shares", label: t("openShares") },
     { href: "/dashboard/reports/connector-events", label: t("openConnectorEvents") },
     { href: "/dashboard/reports/crawler-visits", label: t("openCrawlerVisits") },

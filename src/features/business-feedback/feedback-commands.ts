@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection } from "../../lib/db/connection.ts";
-import { authorizeBrandActor } from "../team-access/brand-scope.ts";
+import { writeFeedbackAccess } from "./brand-access.ts";
 import type { RecordLeadFeedbackInput } from "./feedback-contracts.ts";
 import { LeadFeedbackDao, type LeadFeedback } from "./feedback-dao.ts";
 import { LeadQualityDao } from "./quality-dao.ts";
@@ -13,9 +13,10 @@ function flag(value: boolean | null) {
 
 export async function recordLeadFeedback(db: DatabaseConnection, actorId: string, input: RecordLeadFeedbackInput) {
   return db.transaction(async (tx) => {
-    const scope = await authorizeBrandActor(tx, actorId, input.brandId, "write");
+    const scope = await writeFeedbackAccess(tx, actorId, input.brandId);
+    if ("error" in scope) return scope;
     const dao = new LeadFeedbackDao(tx);
-    if (!scope || !(await dao.lockLead(scope.ownerId, scope.brandId, input.leadId))) {
+    if (!await dao.lockLead(scope.ownerId, scope.brandId, input.leadId)) {
       return { error: "NOT_FOUND" as const };
     }
     const rule = await new LeadQualityDao(tx).ruleForOwner(scope.ownerId, input.ruleId);
