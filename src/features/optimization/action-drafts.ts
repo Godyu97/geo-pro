@@ -11,6 +11,8 @@ import { brandIdSchema } from "../brands/contracts.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { triStateSchema } from "../evidence/contracts.ts";
 import { invalidateEvidenceOverview } from "../evidence/overview-cache.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
+import { authorizeOptimizationWrite } from "./commands.ts";
 import type {
   ConfirmActionDraftInput,
   DismissActionDraftInput,
@@ -312,21 +314,21 @@ async function ownedBrand(db: DatabaseConnection, ownerId: string, brandId: stri
 
 export async function listActionDrafts(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   brandId: string,
   evidenceId?: string,
 ) {
   if (!brandIdSchema.safeParse(brandId).success) return failed("INVALID_INPUT");
   if (evidenceId && !brandIdSchema.safeParse(evidenceId).success) return failed("INVALID_INPUT");
-  const brand = await ownedBrand(db, ownerId, brandId);
-  if (!brand) return failed("NOT_FOUND");
-  const drafts = await new OptimizationDao(db).listOpenActionDrafts(ownerId, brandId, 20, evidenceId);
+  const access = await authorizeBrandActor(db, actorId, brandId, "read");
+  if (!access) return failed("NOT_FOUND");
+  const drafts = await new OptimizationDao(db).listOpenActionDrafts(access.ownerId, brandId, 20, evidenceId);
   return { drafts: drafts.map(publicDraft) };
 }
 
 export async function draftFromEvidence(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: DraftFromEvidenceInput,
   options: DraftOptions = {},
 ) {
@@ -334,9 +336,13 @@ export async function draftFromEvidence(
   if (!parsed.success) return failed("INVALID_INPUT");
   const evidenceIds = parsed.data.evidenceIds;
   if (new Set(evidenceIds).size !== evidenceIds.length) return failed("INVALID_INPUT");
-  const brand = await ownedBrand(db, ownerId, parsed.data.brandId);
-  if (!brand) return failed("NOT_FOUND");
-  const preview = await loadEvidence(db, ownerId, brand.id, evidenceIds);
+  const now = (options.clock ?? (() => new Date().toISOString()))();
+  const access = await authorizeOptimizationWrite(db, actorId, parsed.data.brandId, now);
+  if ("error" in access) return access;
+  const effectiveOwnerId = access.ownerId;
+  const brand = await ownedBrand(db, effectiveOwnerId, parsed.data.brandId);
+  if (!brand || brand.status !== "active") return failed("NOT_FOUND");
+  const preview = await loadEvidence(db, effectiveOwnerId, brand.id, evidenceIds);
   const blocked = readyEvidence(preview);
   if (blocked || !preview) return blocked ?? failed("NOT_FOUND");
   const gap = sharedGap(preview);
@@ -371,14 +377,16 @@ export async function draftFromEvidence(
   if (!judgment.success) return failed("INVALID_MODEL_OUTPUT");
   const copy = settleActionCopy(gap.absenceOnly, judgment.data.observedGap, judgment.data.hypothesis);
   const gapType: GapType = gap.absenceOnly ? "key_content_missing" : judgment.data.gapType;
-  const now = (options.clock ?? (() => new Date().toISOString()))();
   try {
     return await db.transaction(async (tx) => {
       const brands = new BrandDao(tx);
-      if (!await brands.lockOwner(ownerId)) return failed("NOT_FOUND");
-      const current = await brands.version(ownerId, brand.id);
-      if (!current) return failed("NOT_FOUND");
-      const fresh = await loadEvidence(tx, ownerId, current.id, evidenceIds);
+      if (!await brands.lockOwner(effectiveOwnerId)) return failed("NOT_FOUND");
+      const txAccess = await authorizeOptimizationWrite(tx, actorId, brand.id, now);
+      if ("error" in txAccess) return txAccess;
+      if (txAccess.ownerId !== effectiveOwnerId) return failed("NOT_FOUND");
+      const current = await brands.version(effectiveOwnerId, brand.id);
+      if (!current || current.status !== "active") return failed("NOT_FOUND");
+      const fresh = await loadEvidence(tx, effectiveOwnerId, current.id, evidenceIds);
       const freshBlocked = readyEvidence(fresh);
       if (freshBlocked || !fresh) return freshBlocked ?? failed("NOT_FOUND");
       if (evidenceFingerprint(fresh) !== fingerprint || !sharedGap(fresh)) return failed("OPERATION_CONFLICT");
@@ -386,7 +394,7 @@ export async function draftFromEvidence(
       const row: ActionDraftRow = {
         id: randomUUID(),
         brandId: current.id,
-        ownerId,
+        ownerId: effectiveOwnerId,
         evidenceIds,
         gapType,
         observedGap: copy.observedGap,
@@ -400,7 +408,7 @@ export async function draftFromEvidence(
         createdAt: now,
       };
       await dao.insertActionDraft(row);
-      const stored = await dao.actionDraftForOwner(ownerId, current.id, row.id);
+      const stored = await dao.actionDraftForOwner(effectiveOwnerId, current.id, row.id);
       if (!stored) throw new DraftAbort(failed("INVALID_MODEL_OUTPUT"));
       return { draft: publicDraft(stored) };
     });
@@ -412,7 +420,7 @@ export async function draftFromEvidence(
 
 export async function confirmActionDraft(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: ConfirmActionDraftInput,
   options: DraftOptions = {},
 ) {
@@ -422,117 +430,135 @@ export async function confirmActionDraft(
   let result;
   try {
     result = await db.transaction(async (tx) => {
-    const brands = new BrandDao(tx);
-    if (!await brands.lockOwner(ownerId)) return failed("NOT_FOUND");
-    const brand = await brands.version(ownerId, parsed.data.brandId);
-    if (!brand) return failed("NOT_FOUND");
-    const dao = new OptimizationDao(tx);
-    const draft = await dao.actionDraftForOwner(ownerId, brand.id, parsed.data.draftId);
-    if (!draft) return failed("NOT_FOUND");
-    if (draft.status === "confirmed" && draft.taskId) {
-      return { draft: { id: draft.id, status: "confirmed" as const, taskId: draft.taskId }, task: { id: draft.taskId, merged: true } };
-    }
-    if (draft.status !== "draft") return failed("DRAFT_CONFLICT");
-    const evidence = await loadEvidence(tx, ownerId, brand.id, draft.evidenceIds);
-    const blocked = readyEvidence(evidence);
-    if (blocked || !evidence) return blocked ?? failed("NOT_FOUND");
-    const gap = sharedGap(evidence);
-    if (!gap || gap.questionCluster !== draft.questionCluster || gap.targetPage !== draft.targetPage) {
-      return failed("OPERATION_CONFLICT");
-    }
-    if (gap.absenceOnly && draft.gapType !== "key_content_missing") return failed("OPERATION_CONFLICT");
-    const copy = settleActionCopy(gap.absenceOnly, parsed.data.observedGap ?? draft.observedGap, parsed.data.hypothesis ?? draft.hypothesis);
-    const settled: ActionDraftRow = { ...draft, observedGap: copy.observedGap, hypothesis: copy.hypothesis };
-    const finding = findingFromDraft(settled, evidence, brand.fields.name);
-    if (hasCausalClaim(`${finding.problemStatement}${finding.hypothesis}${finding.title}${finding.evidenceSummary}`)) {
-      throw new DraftAbort(failed("INVALID_INPUT"));
-    }
-    const findingId = randomUUID();
-    await dao.insertFinding({
-      id: findingId,
-      brandId: brand.id,
-      ownerId,
-      gapType: finding.gapType,
-      questionCluster: finding.questionCluster,
-      targetPage: finding.targetPage,
-      observationId: finding.observationId,
-      analysisVersionId: finding.analysisVersionId,
-      evidenceSummary: finding.evidenceSummary,
-      problemStatement: finding.problemStatement,
-      hypothesis: finding.hypothesis,
-      assumptionLevel: finding.assumptionLevel,
-      stepsJson: JSON.stringify(finding.steps),
-      completionCriteria: finding.completionCriteria,
-      retestMethod: finding.retestMethod,
-      businessImportance: finding.businessImportance,
-      estimatedEffort: finding.estimatedEffort,
-      verifiedEvidence: finding.verifiedEvidence,
-      privacyRisk: finding.privacyRisk,
-      createdAt: now,
-    });
-    const existing = await dao.findOpenTask({
-      ownerId,
-      brandId: brand.id,
-      questionCluster: finding.questionCluster,
-      targetPage: finding.targetPage,
-      gapType: finding.gapType,
-    });
-    const taskId = existing?.id ?? randomUUID();
-    if (!existing) {
-      await dao.insertTask({
-        id: taskId,
+      const initialAccess = await authorizeOptimizationWrite(tx, actorId, parsed.data.brandId, now);
+      if ("error" in initialAccess) return initialAccess;
+      const effectiveOwnerId = initialAccess.ownerId;
+      const brands = new BrandDao(tx);
+      if (!await brands.lockOwner(effectiveOwnerId)) return failed("NOT_FOUND");
+      const txAccess = await authorizeOptimizationWrite(tx, actorId, parsed.data.brandId, now);
+      if ("error" in txAccess) return txAccess;
+      if (txAccess.ownerId !== effectiveOwnerId) return failed("NOT_FOUND");
+      const brand = await brands.version(effectiveOwnerId, parsed.data.brandId);
+      if (!brand || brand.status !== "active") return failed("NOT_FOUND");
+      const dao = new OptimizationDao(tx);
+      const draft = await dao.actionDraftForOwner(effectiveOwnerId, brand.id, parsed.data.draftId);
+      if (!draft) return failed("NOT_FOUND");
+      if (draft.status === "confirmed" && draft.taskId) {
+        return {
+          draft: { id: draft.id, status: "confirmed" as const, taskId: draft.taskId },
+          task: { id: draft.taskId, merged: true },
+          ownerId: effectiveOwnerId,
+        };
+      }
+      if (draft.status !== "draft") return failed("DRAFT_CONFLICT");
+      const evidence = await loadEvidence(tx, effectiveOwnerId, brand.id, draft.evidenceIds);
+      const blocked = readyEvidence(evidence);
+      if (blocked || !evidence) return blocked ?? failed("NOT_FOUND");
+      const gap = sharedGap(evidence);
+      if (!gap || gap.questionCluster !== draft.questionCluster || gap.targetPage !== draft.targetPage) {
+        return failed("OPERATION_CONFLICT");
+      }
+      if (gap.absenceOnly && draft.gapType !== "key_content_missing") return failed("OPERATION_CONFLICT");
+      const copy = settleActionCopy(gap.absenceOnly, parsed.data.observedGap ?? draft.observedGap, parsed.data.hypothesis ?? draft.hypothesis);
+      const settled: ActionDraftRow = { ...draft, observedGap: copy.observedGap, hypothesis: copy.hypothesis };
+      const finding = findingFromDraft(settled, evidence, brand.fields.name);
+      if (hasCausalClaim(`${finding.problemStatement}${finding.hypothesis}${finding.title}${finding.evidenceSummary}`)) {
+        throw new DraftAbort(failed("INVALID_INPUT"));
+      }
+      const findingId = randomUUID();
+      await dao.insertFinding({
+        id: findingId,
         brandId: brand.id,
-        ownerId,
-        primaryFindingId: findingId,
+        ownerId: effectiveOwnerId,
         gapType: finding.gapType,
         questionCluster: finding.questionCluster,
         targetPage: finding.targetPage,
-        title: finding.title,
-        status: "todo",
-        priorityBucket: priorityBucketOf(finding),
-        manualRank: null,
-        reorderReason: null,
-        completionNote: null,
-        dismissReason: null,
-        retestConclusion: null,
+        observationId: finding.observationId,
+        analysisVersionId: finding.analysisVersionId,
+        evidenceSummary: finding.evidenceSummary,
+        problemStatement: finding.problemStatement,
+        hypothesis: finding.hypothesis,
+        assumptionLevel: finding.assumptionLevel,
+        stepsJson: JSON.stringify(finding.steps),
+        completionCriteria: finding.completionCriteria,
+        retestMethod: finding.retestMethod,
+        businessImportance: finding.businessImportance,
+        estimatedEffort: finding.estimatedEffort,
+        verifiedEvidence: finding.verifiedEvidence,
+        privacyRisk: finding.privacyRisk,
         createdAt: now,
-        updatedAt: now,
       });
-    }
-    await dao.linkEvidence(taskId, findingId, brand.id, now);
-    const confirmed = await dao.confirmActionDraft({ ...settled, status: "confirmed", taskId });
-    if (!confirmed) throw new DraftAbort(failed("DRAFT_CONFLICT"));
-    return {
-      draft: { id: draft.id, status: "confirmed" as const, taskId },
-      task: { id: taskId, merged: Boolean(existing) },
-    };
-  });
+      const existing = await dao.findOpenTask({
+        ownerId: effectiveOwnerId,
+        brandId: brand.id,
+        questionCluster: finding.questionCluster,
+        targetPage: finding.targetPage,
+        gapType: finding.gapType,
+      });
+      const taskId = existing?.id ?? randomUUID();
+      if (!existing) {
+        await dao.insertTask({
+          id: taskId,
+          brandId: brand.id,
+          ownerId: effectiveOwnerId,
+          primaryFindingId: findingId,
+          gapType: finding.gapType,
+          questionCluster: finding.questionCluster,
+          targetPage: finding.targetPage,
+          title: finding.title,
+          status: "todo",
+          priorityBucket: priorityBucketOf(finding),
+          manualRank: null,
+          reorderReason: null,
+          completionNote: null,
+          dismissReason: null,
+          retestConclusion: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      await dao.linkEvidence(taskId, findingId, brand.id, now);
+      const confirmed = await dao.confirmActionDraft({ ...settled, status: "confirmed", taskId });
+      if (!confirmed) throw new DraftAbort(failed("DRAFT_CONFLICT"));
+      return {
+        draft: { id: draft.id, status: "confirmed" as const, taskId },
+        task: { id: taskId, merged: Boolean(existing) },
+        ownerId: effectiveOwnerId,
+      };
+    });
   } catch (error) {
     if (error instanceof DraftAbort) return error.failure;
     throw error;
   }
   if ("error" in result) return result;
-  await invalidateEvidenceOverview(ownerId, parsed.data.brandId, options.cache ?? openCache());
-  return result;
+  await invalidateEvidenceOverview(result.ownerId, parsed.data.brandId, options.cache ?? openCache());
+  return { draft: result.draft, task: result.task };
 }
 
 export async function dismissActionDraft(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: DismissActionDraftInput,
 ) {
   const parsed = dismissActionDraftSchema.safeParse(input);
   if (!parsed.success) return failed("INVALID_INPUT");
+  const now = new Date().toISOString();
   return db.transaction(async (tx) => {
+    const initialAccess = await authorizeOptimizationWrite(tx, actorId, parsed.data.brandId, now);
+    if ("error" in initialAccess) return initialAccess;
+    const effectiveOwnerId = initialAccess.ownerId;
     const brands = new BrandDao(tx);
-    if (!await brands.lockOwner(ownerId)) return failed("NOT_FOUND");
-    const brand = await brands.version(ownerId, parsed.data.brandId);
-    if (!brand) return failed("NOT_FOUND");
+    if (!await brands.lockOwner(effectiveOwnerId)) return failed("NOT_FOUND");
+    const txAccess = await authorizeOptimizationWrite(tx, actorId, parsed.data.brandId, now);
+    if ("error" in txAccess) return txAccess;
+    if (txAccess.ownerId !== effectiveOwnerId) return failed("NOT_FOUND");
+    const brand = await brands.version(effectiveOwnerId, parsed.data.brandId);
+    if (!brand || brand.status !== "active") return failed("NOT_FOUND");
     const dao = new OptimizationDao(tx);
-    const draft = await dao.actionDraftForOwner(ownerId, brand.id, parsed.data.draftId);
+    const draft = await dao.actionDraftForOwner(effectiveOwnerId, brand.id, parsed.data.draftId);
     if (!draft) return failed("NOT_FOUND");
     if (draft.status !== "draft") return failed("DRAFT_CONFLICT");
-    if (!await dao.dismissActionDraft(draft.id, ownerId, brand.id)) return failed("DRAFT_CONFLICT");
+    if (!await dao.dismissActionDraft(draft.id, effectiveOwnerId, brand.id)) return failed("DRAFT_CONFLICT");
     return { draft: { id: draft.id, status: "dismissed" as const } };
   });
 }

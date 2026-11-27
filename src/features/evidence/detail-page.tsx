@@ -279,6 +279,7 @@ export default async function EvidenceDetailPage({
           brandId={observation.brandId}
           evidenceIds={observation.evidenceState === "draft_evidence" ? undefined : [observation.id]}
           drafts={actionDrafts.drafts}
+          canWrite={canWrite}
           messages={getMessages(locale).optimization}
         />
       )}
@@ -304,7 +305,7 @@ export default async function EvidenceDetailPage({
           messages={getMessages(locale).evidence}
         />
       )}
-      {canWrite && writeScope?.ownerId === session.user.id && observation.evidenceState !== "draft_evidence" ? (
+      {canWrite && observation.evidenceState !== "draft_evidence" ? (
         <section className="space-y-3 rounded-2xl border px-4 py-4">
           <form action={generateOptimizationAction} className="flex flex-wrap items-center gap-3">
             <input type="hidden" name="brandId" value={observation.brandId} />

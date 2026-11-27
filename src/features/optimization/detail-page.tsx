@@ -5,6 +5,7 @@ import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { authorizeBrandActor } from "../team-access/brand-scope";
 import { readTaskDetail } from "./commands";
 import { taskDisplayLabels, taskStatusOptions } from "./task-labels.ts";
 import { TaskUpdateForm } from "./task-update-form";
@@ -27,10 +28,12 @@ export default async function OptimizationDetailPage({
   const locale = await getLocale();
   const messages = getMessages(locale).evidenceOverview;
   const t = await getTranslator("optimization");
-  const detail = await readTaskDetail(getConnection(), session.user.id, taskId);
+  const connection = getConnection();
+  const detail = await readTaskDetail(connection, session.user.id, taskId);
   if ("error" in detail) notFound();
 
   const { task, findings, checks } = detail;
+  const canWrite = Boolean(await authorizeBrandActor(connection, session.user.id, task.brandId, "write"));
   const labels = taskDisplayLabels(messages, task);
   const publicStatusLabels = {
     reachable: t("fixtureReachable"),
@@ -58,19 +61,21 @@ export default async function OptimizationDetailPage({
           <Badge variant="outline">{labels.priority}</Badge>
           <Badge variant="secondary">{labels.status}</Badge>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild className={actionClass}>
-            <a href="#update-status">{t("updateTitle")}</a>
-          </Button>
-          <Button asChild variant="outline" className={actionClass}>
-            <Link
-              href={`/dashboard/content?brandId=${encodeURIComponent(task.brandId)}&taskId=${encodeURIComponent(task.id)}&cluster=${encodeURIComponent(task.questionCluster)}&primaryPage=${encodeURIComponent(task.targetPage)}#new-brief-heading`}
-              prefetch={false}
-            >
-              {t("createBrief")}
-            </Link>
-          </Button>
-        </div>
+        {canWrite ? (
+          <div className="flex flex-wrap gap-2">
+            <Button asChild className={actionClass}>
+              <a href="#update-status">{t("updateTitle")}</a>
+            </Button>
+            <Button asChild variant="outline" className={actionClass}>
+              <Link
+                href={`/dashboard/content?brandId=${encodeURIComponent(task.brandId)}&taskId=${encodeURIComponent(task.id)}&cluster=${encodeURIComponent(task.questionCluster)}&primaryPage=${encodeURIComponent(task.targetPage)}#new-brief-heading`}
+                prefetch={false}
+              >
+                {t("createBrief")}
+              </Link>
+            </Button>
+          </div>
+        ) : null}
         <dl className="wrap-anywhere max-w-2xl space-y-1 text-sm">
           <dt className="font-medium">{t("targetPage")}</dt>
           <dd className="text-muted-foreground">{task.targetPage}</dd>
@@ -115,45 +120,52 @@ export default async function OptimizationDetailPage({
         </section>
       ) : null}
 
-      <section id="update-status" tabIndex={-1} aria-labelledby="task-update-title" className={`${panelClass} scroll-mt-20`}>
-        <h2 id="task-update-title" className="text-lg font-semibold">{t("updateTitle")}</h2>
-        {savedDetails.length > 0 ? (
-          <div role="group" aria-labelledby="task-recorded-details" className="wrap-anywhere space-y-2 rounded-lg bg-muted/50 p-3 text-sm">
-            <h3 id="task-recorded-details" className="font-semibold">{t("recordedDetails")}</h3>
-            <dl className="space-y-2">
-              {savedDetails.map(({ label, value }) => (
-                <div key={label}>
-                  <dt className="font-medium">{label}</dt>
-                  <dd className="whitespace-pre-wrap text-muted-foreground">{value}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        ) : null}
-        <p id="task-update-hint" className="text-sm leading-6 text-muted-foreground">{t("updateHint")}</p>
-        <TaskUpdateForm
-          key={task.id}
-          brandId={task.brandId}
-          taskId={task.id}
-          initialStatus={task.status}
-          options={taskStatusOptions(messages)}
-          labels={{
-            status: t("status"),
-            completionNote: t("completionNote"),
-            dismissReason: t("dismissReason"),
-            manualRank: t("manualRank"),
-            reorderReason: t("reorderReason"),
-            save: t("save"),
-            saving: t("savingTask"),
-          }}
-          feedback={{
-            saved: t("taskSaved"),
-            INVALID_INPUT: t("taskUpdateInvalid"),
-            NOT_FOUND: t("NOT_FOUND"),
-            SERVICE_UNAVAILABLE: t("SERVICE_UNAVAILABLE"),
-          }}
-        />
-      </section>
+      {canWrite || savedDetails.length > 0 ? (
+        <section id="update-status" tabIndex={-1} aria-labelledby="task-update-title" className={`${panelClass} scroll-mt-20`}>
+          <h2 id="task-update-title" className="text-lg font-semibold">{canWrite ? t("updateTitle") : t("recordedDetails")}</h2>
+          {savedDetails.length > 0 ? (
+            <div role="group" aria-labelledby="task-recorded-details" className="wrap-anywhere space-y-2 rounded-lg bg-muted/50 p-3 text-sm">
+              <h3 id="task-recorded-details" className="font-semibold">{t("recordedDetails")}</h3>
+              <dl className="space-y-2">
+                {savedDetails.map(({ label, value }) => (
+                  <div key={label}>
+                    <dt className="font-medium">{label}</dt>
+                    <dd className="whitespace-pre-wrap text-muted-foreground">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ) : null}
+          {canWrite ? (
+            <>
+              <p id="task-update-hint" className="text-sm leading-6 text-muted-foreground">{t("updateHint")}</p>
+              <TaskUpdateForm
+                key={task.id}
+                brandId={task.brandId}
+                taskId={task.id}
+                initialStatus={task.status}
+                options={taskStatusOptions(messages)}
+                labels={{
+                  status: t("status"),
+                  completionNote: t("completionNote"),
+                  dismissReason: t("dismissReason"),
+                  manualRank: t("manualRank"),
+                  reorderReason: t("reorderReason"),
+                  save: t("save"),
+                  saving: t("savingTask"),
+                }}
+                feedback={{
+                  saved: t("taskSaved"),
+                  INVALID_INPUT: t("taskUpdateInvalid"),
+                  FORBIDDEN: t("FORBIDDEN"),
+                  NOT_FOUND: t("NOT_FOUND"),
+                  SERVICE_UNAVAILABLE: t("SERVICE_UNAVAILABLE"),
+                }}
+              />
+            </>
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }

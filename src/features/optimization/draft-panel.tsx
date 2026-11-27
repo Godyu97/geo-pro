@@ -44,12 +44,14 @@ export function ActionDraftPanel({
   brandId,
   evidenceIds,
   drafts,
+  canWrite = true,
   messages,
 }: {
   locale: Locale;
   brandId: string;
   evidenceIds?: string[];
   drafts: OpenDraft[];
+  canWrite?: boolean;
   messages: Messages["optimization"];
 }) {
   const router = useRouter();
@@ -81,7 +83,7 @@ export function ActionDraftPanel({
     <section className="space-y-3 rounded-2xl border p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">{messages.actionDraft}</h2>
-        {evidenceIds && evidenceIds.length > 0 ? (
+        {canWrite && evidenceIds && evidenceIds.length > 0 ? (
           <Button
             type="button"
             variant="outline"
@@ -109,31 +111,41 @@ export function ActionDraftPanel({
       <ul className="space-y-3">
         {openDrafts.map((draft) => (
           <li key={draft.id}>
-            <DraftEditor
-              locale={locale}
-              draft={draft}
-              pending={pending}
-              messages={messages}
-              onConfirm={(values) => post({
-                action: "confirm-action-draft",
-                brandId: draft.brandId,
-                draftId: draft.id,
-                operationId: crypto.randomUUID(),
-                ...values,
-              }, () => {
-                setOpenDrafts((current) => current.filter((item) => item.id !== draft.id));
-                setNotice(messages.draftConfirmed);
-              })}
-              onDismiss={() => post({
-                action: "dismiss-action-draft",
-                brandId: draft.brandId,
-                draftId: draft.id,
-                operationId: crypto.randomUUID(),
-              }, () => {
-                setOpenDrafts((current) => current.filter((item) => item.id !== draft.id));
-                setNotice(messages.draftDismissed);
-              })}
-            />
+            {canWrite ? (
+              <DraftEditor
+                locale={locale}
+                draft={draft}
+                pending={pending}
+                messages={messages}
+                onConfirm={(values) => post({
+                  action: "confirm-action-draft",
+                  brandId: draft.brandId,
+                  draftId: draft.id,
+                  operationId: crypto.randomUUID(),
+                  ...values,
+                }, () => {
+                  setOpenDrafts((current) => current.filter((item) => item.id !== draft.id));
+                  setNotice(messages.draftConfirmed);
+                })}
+                onDismiss={() => post({
+                  action: "dismiss-action-draft",
+                  brandId: draft.brandId,
+                  draftId: draft.id,
+                  operationId: crypto.randomUUID(),
+                }, () => {
+                  setOpenDrafts((current) => current.filter((item) => item.id !== draft.id));
+                  setNotice(messages.draftDismissed);
+                })}
+              />
+            ) : (
+              <article className="space-y-2 rounded-xl border px-4 py-4 text-sm">
+                <p className="text-muted-foreground">
+                  {messages.draftModel.replace("{model}", draft.modelName)} · {draft.gapType} · {formatWhen(locale, draft.createdAt)}
+                </p>
+                <p><span className="font-medium">{messages.observedGap}:</span> {draft.observedGap}</p>
+                <p><span className="font-medium">{messages.hypothesis}:</span> {draft.hypothesis}</p>
+              </article>
+            )}
           </li>
         ))}
       </ul>

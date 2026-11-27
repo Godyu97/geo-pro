@@ -260,6 +260,17 @@ export class OptimizationDao {
     return row ? taskRow.parse(row) : null;
   }
 
+  async taskIdentity(taskId: string) {
+    const [row] = await queryWithParameters(
+      this.db,
+      `SELECT id, brand_id AS "brandId", owner_id AS "ownerId" FROM optimization_task WHERE id = ?`,
+      [taskId],
+    );
+    return row
+      ? z.object({ id: brandIdSchema, brandId: brandIdSchema, ownerId: z.string().min(1) }).parse(row)
+      : null;
+  }
+
   async listFindingsForTask(taskId: string) {
     const rows = await queryWithParameters(
       this.db,

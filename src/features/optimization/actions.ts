@@ -61,6 +61,7 @@ export async function checkPagesAction(formData: FormData): Promise<void> {
   if (!parsed.success) return;
   await checkPages(getConnection(), session.user.id, parsed.data);
   revalidatePath("/dashboard/optimization");
+  revalidatePath("/dashboard/monitoring/overview");
 }
 
 export type OptimizationUpdateResult = "saved" | OptimizationError;

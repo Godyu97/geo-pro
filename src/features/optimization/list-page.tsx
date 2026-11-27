@@ -4,7 +4,7 @@ import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts";
-import { BrandDao } from "../brands/dao";
+import { authorizeBrandActor, workspaceBrand } from "../team-access/brand-scope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { listActionDrafts } from "./action-drafts";
@@ -41,19 +41,20 @@ export default async function OptimizationListPage({
   const messages = getMessages(locale);
   const t = await getTranslator("optimization");
   const connection = getConnection();
-  const brands = new BrandDao(connection);
-  const active = await brands.active(session.user.id);
-  const brandId = typeof params.brandId === "string" ? params.brandId : active?.id;
+  const requested = typeof params.brandId === "string" && params.brandId.trim() ? params.brandId.trim() : undefined;
+  const validRequest = requested ? brandIdSchema.safeParse(requested).success : true;
+  const scope = validRequest ? await workspaceBrand(connection, session.user.id, requested, "read") : null;
+  const brandId = scope?.brandId;
   const brandsAction = (
     <Button asChild className={actionClass}>
       <Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link>
     </Button>
   );
 
-  if (!brandId || !brandIdSchema.safeParse(brandId).success) {
+  if (!brandId) {
     return (
       <OptimizationHeader title={t("title")}>
-        {brandId ? (
+        {requested ? (
           <p role="alert" className="max-w-2xl text-sm leading-7">{t("NOT_FOUND")}</p>
         ) : (
           <p className="max-w-2xl text-sm leading-7 text-muted-foreground">{t("noBrand")}</p>
@@ -63,10 +64,12 @@ export default async function OptimizationListPage({
     );
   }
 
-  const [listed, drafts] = await Promise.all([
+  const [listed, drafts, writeScope] = await Promise.all([
     listPrioritizedTasks(connection, session.user.id, brandId, 50),
     listActionDrafts(connection, session.user.id, brandId),
+    authorizeBrandActor(connection, session.user.id, brandId, "write"),
   ]);
+  const canWrite = Boolean(writeScope);
   if ("error" in listed) {
     return (
       <OptimizationHeader title={t("title")}>
@@ -131,40 +134,43 @@ export default async function OptimizationListPage({
           locale={locale}
           brandId={brandId}
           drafts={drafts.drafts}
+          canWrite={canWrite}
           messages={messages.optimization}
         />
       )}
 
-      <section className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">
-        <h2 className="text-lg font-semibold">{t("checkPagesTitle")}</h2>
-        <p className="text-sm text-muted-foreground">{t("checkPagesHint")}</p>
-        <form action={checkPagesAction} className="space-y-3">
-          <input type="hidden" name="brandId" value={brandId} />
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("urlsLabel")}</span>
-            <textarea
-              name="urls"
-              rows={3}
-              required
-              className={fieldClass}
-              placeholder="https://example.com/page"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("fixtureStatus")}</span>
-            <select name="fixtureStatus" defaultValue="ok" className={fieldClass}>
-              <option value="ok">{t("fixtureReachable")}</option>
-              <option value="restricted">{t("fixtureRestricted")}</option>
-              <option value="error">{t("fixtureReadError")}</option>
-            </select>
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("fixtureBody")}</span>
-            <textarea name="fixtureBody" rows={3} className={fieldClass} />
-          </label>
-          <Button type="submit" variant="outline" className={actionClass}>{t("runCheck")}</Button>
-        </form>
-      </section>
+      {canWrite ? (
+        <section className="min-w-0 space-y-3 rounded-2xl border bg-card p-5">
+          <h2 className="text-lg font-semibold">{t("checkPagesTitle")}</h2>
+          <p className="text-sm text-muted-foreground">{t("checkPagesHint")}</p>
+          <form action={checkPagesAction} className="space-y-3">
+            <input type="hidden" name="brandId" value={brandId} />
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("urlsLabel")}</span>
+              <textarea
+                name="urls"
+                rows={3}
+                required
+                className={fieldClass}
+                placeholder="https://example.com/page"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("fixtureStatus")}</span>
+              <select name="fixtureStatus" defaultValue="ok" className={fieldClass}>
+                <option value="ok">{t("fixtureReachable")}</option>
+                <option value="restricted">{t("fixtureRestricted")}</option>
+                <option value="error">{t("fixtureReadError")}</option>
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("fixtureBody")}</span>
+              <textarea name="fixtureBody" rows={3} className={fieldClass} />
+            </label>
+            <Button type="submit" variant="outline" className={actionClass}>{t("runCheck")}</Button>
+          </form>
+        </section>
+      ) : null}
     </div>
   );
 }
