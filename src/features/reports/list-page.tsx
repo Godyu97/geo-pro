@@ -51,10 +51,12 @@ function relatedLinks(t: Awaited<ReturnType<typeof getTranslator<"reports">>>, b
 }
 
 function SnapshotBusinessLines({
+  brandId,
   view,
   locale,
   t,
 }: {
+  brandId: string;
   view: SnapshotView["business"] | undefined;
   locale: Locale;
   t: Awaited<ReturnType<typeof getTranslator<"reports">>>;
@@ -70,6 +72,21 @@ function SnapshotBusinessLines({
       {businessFeedbackLines(locale, view.feedback).map((line) => (
         <p key={line} className="leading-6 text-muted-foreground">{line}</p>
       ))}
+      {view.feedback.lead_feedback?.records.length ? (
+        <details>
+          <summary className="cursor-pointer py-2 font-medium">{t("businessLeadRecords")}</summary>
+          <ul className="space-y-1">
+            {view.feedback.lead_feedback.records.map(({ leadId, feedbackId }, index) => (
+              <li key={feedbackId}>
+                <Link className="inline-flex min-h-10 items-center underline underline-offset-4"
+                  href={`/dashboard/reports/leads?brandId=${brandId}&leadId=${leadId}&feedbackId=${feedbackId}#lead-record`}>
+                  {t("businessLeadRecord", { number: new Intl.NumberFormat(locale).format(index + 1) })}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -195,11 +212,13 @@ function SnapshotMetrics({ view, locale, t }: {
 
 function SnapshotReading({
   id,
+  brandId,
   view,
   locale,
   t,
 }: {
   id: string;
+  brandId: string;
   view: SnapshotView | undefined;
   locale: Locale;
   t: Awaited<ReturnType<typeof getTranslator<"reports">>>;
@@ -225,7 +244,7 @@ function SnapshotReading({
       </section>
       <section aria-labelledby={`${id}-feedback`} className="min-w-0 space-y-1">
         <h3 id={`${id}-feedback`} className="font-medium">{t("businessHeading")}</h3>
-        <SnapshotBusinessLines view={view?.business} locale={locale} t={t} />
+        <SnapshotBusinessLines brandId={brandId} view={view?.business} locale={locale} t={t} />
       </section>
     </div>
   );
@@ -568,7 +587,7 @@ export default async function ReportsListPage({
                   {item.predecessorId ? ` · ${t("snapshotPrevious", { id: item.predecessorId })}` : ""}
                 </p>
                 <SnapshotSourceNote source={views.get(item.id)?.source ?? result.sources[item.id]} t={t} />
-                <SnapshotReading id={item.id} view={views.get(item.id)} locale={locale} t={t} />
+                <SnapshotReading id={item.id} brandId={brandId} view={views.get(item.id)} locale={locale} t={t} />
                 <SnapshotDecision
                   rows={decisionsBySnapshot.get(item.id) ?? []}
                   canSave={Boolean(ownerView && views.get(item.id)?.comparisons)}

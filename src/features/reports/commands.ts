@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
 import { createObjectStorage } from "../../lib/storage/index.ts";
-import { BusinessLeadDao } from "../business-feedback/dao.ts";
+import { LeadFeedbackDao } from "../business-feedback/feedback-dao.ts";
 import { LeadQualityDao } from "../business-feedback/quality-dao.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { CrawlerObservationDao } from "../data-connections/crawler-dao.ts";
@@ -125,14 +125,34 @@ async function loadWindowCost(db: QueryConnection, brandId: string, windows: Cos
 }
 
 async function loadBusinessFeedback(db: QueryConnection, ownerId: string, brandId: string) {
-  const primaryCounts = await new BusinessLeadDao(db).primaryCounts(ownerId, brandId);
-  const quality = new LeadQualityDao(db);
-  const qualified = await quality.qualifiedCount(ownerId, brandId);
-  const rollup = await quality.observationRollup(ownerId, brandId);
+  const leads = await new LeadFeedbackDao(db).currentForBrand(ownerId, brandId);
+  const primaryCounts = { referral: 0, self_report: 0, landing_page: 0, unknown: 0 };
+  const leadFeedback = {
+    disqualified_inquiries: 0,
+    unknown_qualification: 0,
+    won_inquiries: 0,
+    followed_up_inquiries: 0,
+    unknown_follow_up: 0,
+    records: leads.flatMap(({ leadId, feedbackId }) => feedbackId ? [{ leadId, feedbackId }] : []),
+  };
+  let qualified = 0;
+  for (const lead of leads) {
+    primaryCounts[lead.primary] += 1;
+    if (lead.status === "qualified") qualified += 1;
+    else if (lead.status === "disqualified") leadFeedback.disqualified_inquiries += 1;
+    else leadFeedback.unknown_qualification += 1;
+    if (lead.outcome === "won") leadFeedback.won_inquiries += 1;
+    if (lead.outcome === "contacted" || lead.outcome === "won" || lead.outcome === "lost") {
+      leadFeedback.followed_up_inquiries += 1;
+    }
+    if (!lead.outcome || lead.outcome === "unknown") leadFeedback.unknown_follow_up += 1;
+  }
+  const rollup = await new LeadQualityDao(db).observationRollup(ownerId, brandId);
   const crawler = await new CrawlerObservationDao(db).brandRollup(ownerId, brandId);
   return summarizeBusinessFeedback({
     primaryCounts,
     qualified,
+    leadFeedback,
     identifiedReferrals: rollup.identified,
     sessionDenominator: rollup.denominator > 0 ? rollup.denominator : null,
     observationCrawlerVisits: rollup.crawlerVisits,

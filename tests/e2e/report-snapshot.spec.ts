@@ -219,6 +219,23 @@ test("report snapshots keep the current download readable and recoverable", asyn
     expect(lead.leads[0]).toMatchObject({ eventId: "evt-self", count: 1, primary: "self_report" });
     expect(lead.rejected).toEqual([{ index: 1, reason: "direct_pii" }]);
     expect(JSON.stringify(lead).includes("13800138000")).toBe(false);
+    const rule = await post(context, "/api/reports/lead-rules", {
+      brandId, requiresRealNeed: true, requiresIndustry: true, requiresFollowUp: true,
+    });
+    await post(context, `/api/reports/lead-rules/${rule.rule.id}/freeze`, {});
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto(`/dashboard/reports/leads?brandId=${brandId}`);
+    await activateFromKeyboard(page, page.getByRole("link", { name: "记录线索反馈", exact: true }));
+    const form = page.getByRole("form", { name: "记录线索反馈", exact: true });
+    await form.getByLabel("需求真实", { exact: true }).selectOption("1");
+    await form.getByLabel("可跟进", { exact: true }).selectOption("1");
+    await form.getByLabel("跟进结果", { exact: true }).selectOption("contacted");
+    await expectNoOverflow(page);
+    await activateFromKeyboard(page, form.getByRole("button", { name: "保存反馈", exact: true }));
+    await expect(page.getByText("反馈第 1 版 · 冻结规则第 1 版")).toBeVisible();
+    await page.reload();
+    await expect(page.getByText("有效性：未知", { exact: true })).toBeVisible();
+    await expect(page.getByText("跟进结果：已联系", { exact: true })).toBeVisible();
     await post(context, "/api/reports/crawler-visits", {
       brandId, userAgentClaimsAi: true, identityVerified: false, answerCitations: 0,
     });
@@ -234,6 +251,17 @@ test("report snapshots keep the current download readable and recoverable", asyn
     const href = `/dashboard/reports?brandId=${brandId}`;
     const seededBody = await (await context.request.get(`/api/reports/snapshots/${snapshotId}?format=json`)).body();
     const seeded = JSON.parse(seededBody.toString("utf8"));
+    expect(seeded.business_feedback.lead_feedback).toMatchObject({
+      unknown_qualification: 1, followed_up_inquiries: 1, records: [{ leadId: lead.leads[0].id }],
+    });
+    expect(seededBody.toString("utf8")).not.toContain("evt-self");
+    const { feedbackId } = seeded.business_feedback.lead_feedback.records[0];
+    const feedbackHref = `/dashboard/reports/leads?brandId=${brandId}&leadId=${lead.leads[0].id}&feedbackId=${feedbackId}#lead-record`;
+    const other = await outsider.newPage();
+    await other.goto(feedbackHref);
+    await expect(other.getByRole("main")).not.toContainText("evt-self");
+    await expect(other.getByRole("main").getByRole("alert")).toBeVisible();
+    await other.close();
     const metricKeys = ["mention_rate", "recommendation_rate", "official_site_citation_rate"] as const;
     await page.setViewportSize({ width: 375, height: 800 });
     await page.goto(href);
@@ -268,6 +296,17 @@ test("report snapshots keep the current download readable and recoverable", asyn
         await expect(card.getByRole("heading", { name: current.feedback, exact: true })).toBeVisible();
         await expect(card.getByText(current.diagnostic, { exact: true })).toBeVisible();
         await expect(card.getByText(current.businessInquiries, { exact: true })).toBeVisible();
+        const summary = card.getByText(locale === "en" ? "Open saved lead records" : "打开快照中的线索记录", { exact: true });
+        await activateFromKeyboard(page, summary);
+        const record = card.getByRole("link", { name: locale === "en" ? "Open lead record 1" : "打开线索记录 1", exact: true });
+        await expect(record).toHaveAttribute("href", feedbackHref);
+        if (width === 375) {
+          await activateFromKeyboard(page, record);
+          await expect(page.locator("#lead-record")).toContainText("evt-self");
+          await expect(page.locator("#lead-record")).toContainText(locale === "en" ? "Follow-up: Contacted" : "跟进结果：已联系");
+          await expectNoOverflow(page);
+          await page.goto(href);
+        }
         await expect(card.getByText(current.businessRate, { exact: true })).toBeVisible();
         await expect(card.getByText(current.businessCrawler, { exact: true })).toBeVisible();
         await expect(card.getByText(current.citationCount, { exact: true })).toBeVisible();

@@ -8,6 +8,8 @@ import { isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts.ts";
+import { recordLeadFeedback } from "./feedback-commands.ts";
+import { recordLeadFeedbackSchema } from "./feedback-contracts.ts";
 import { importBusinessLeads, listBusinessLeads, readBusinessLead } from "./commands.ts";
 import {
   businessLeadErrors,
@@ -81,6 +83,12 @@ export async function businessLeadImportResponse(request: Request) {
   try {
     if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
     const body = await readBoundedJson(request, 32 * 1024);
+    const feedback = recordLeadFeedbackSchema.safeParse(body);
+    if (feedback.success) {
+      const result = await recordLeadFeedback(getConnection(), gate.session.session.user.id, feedback.data);
+      if ("error" in result && result.error) return failure(result.error);
+      return json(result);
+    }
     const command = importBusinessLeadsSchema.safeParse(body);
     if (!command.success) return failure("INVALID_INPUT");
     const result = await importBusinessLeads(getConnection(), gate.session.session.user.id, command.data);

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { brand } from "./brand-schema.sqlite";
+import { businessLead } from "./business-lead-schema.sqlite";
 
 export const leadValidityRule = sqliteTable("lead_validity_rule", {
   id: text("id").primaryKey(),
@@ -68,5 +69,30 @@ export const leadObservation = sqliteTable("lead_observation", {
     and ${table.answerCitations} between 0 and 1000000000
     and ${table.calledIncluded} = 0
     and length(${table.ownerId}) between 1 and 128
+    and length(${table.createdAt}) between 20 and 40`),
+]);
+
+export const leadFeedback = sqliteTable("lead_feedback", {
+  id: text("id").primaryKey(),
+  leadId: text("lead_id").notNull().references(() => businessLead.id, { onDelete: "cascade" }),
+  ruleId: text("rule_id").notNull().references(() => leadValidityRule.id, { onDelete: "cascade" }),
+  revision: integer("revision").notNull(),
+  status: text("status").notNull(),
+  realNeed: integer("real_need"),
+  targetIndustry: integer("target_industry"),
+  canFollowUp: integer("can_follow_up"),
+  outcome: text("outcome").notNull(),
+  recordedBy: text("recorded_by").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("lead_feedback_lead_revision_uidx").on(table.leadId, table.revision),
+  index("lead_feedback_rule_idx").on(table.ruleId),
+  check("lead_feedback_state_check", sql`${table.revision} > 0
+    and ${table.status} in ('qualified', 'disqualified', 'unknown')
+    and ${table.realNeed} in (0, 1)
+    and ${table.targetIndustry} in (0, 1)
+    and ${table.canFollowUp} in (0, 1)
+    and ${table.outcome} in ('unknown', 'pending', 'contacted', 'won', 'lost')
+    and length(${table.recordedBy}) between 1 and 128
     and length(${table.createdAt}) between 20 and 40`),
 ]);

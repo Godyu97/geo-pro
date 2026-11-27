@@ -2,6 +2,7 @@ import { z } from "zod";
 import en from "../../lib/i18n/messages/en.json" with { type: "json" };
 import zhCN from "../../lib/i18n/messages/zh-CN.json" with { type: "json" };
 import { isLocale, type Locale } from "../../lib/i18n/locale.ts";
+import { brandIdSchema } from "../brands/contracts.ts";
 import { createTranslator } from "../../lib/i18n/translate.ts";
 import {
   aiReferralConversion,
@@ -35,6 +36,14 @@ export const snapshotBusinessFeedbackSchema = z.strictObject({
   deduped_inquiries: count,
   primary_distribution: primaryCounts,
   qualified_inquiries: count,
+  lead_feedback: z.strictObject({
+    disqualified_inquiries: count,
+    unknown_qualification: count,
+    won_inquiries: count,
+    followed_up_inquiries: count,
+    unknown_follow_up: count,
+    records: z.array(z.strictObject({ leadId: brandIdSchema, feedbackId: brandIdSchema })),
+  }).optional(),
   ai_referral_conversion: z.union([missingDenominator, measuredConversion]),
   self_reported_inquiries: count,
   self_reported_over_visits: z.null(),
@@ -65,6 +74,7 @@ type PrimaryCounts = Record<LeadEvidence, number>;
 export function summarizeBusinessFeedback(input: {
   primaryCounts: PrimaryCounts;
   qualified: number;
+  leadFeedback?: SnapshotBusinessFeedback["lead_feedback"];
   identifiedReferrals: number;
   sessionDenominator: number | null;
   observationCrawlerVisits: number;
@@ -95,9 +105,10 @@ export function summarizeBusinessFeedback(input: {
     deduped_inquiries: deduped,
     primary_distribution: { ...primary },
     qualified_inquiries: input.qualified,
+    ...(input.leadFeedback ? { lead_feedback: input.leadFeedback } : {}),
     ai_referral_conversion: denominator === null || conversion.identified.rate === null
       ? {
-        identified_referrals: 0,
+        identified_referrals: primary.referral,
         session_denominator: null,
         rate: null,
         reason: "missing_session_denominator",
@@ -133,6 +144,17 @@ export function businessFeedbackLines(locale: Locale, feedback: SnapshotBusiness
       unknown: number.format(primary.unknown),
     }),
     t("businessQualified", { count: number.format(feedback.qualified_inquiries) }),
+    ...(feedback.lead_feedback ? [
+      t("businessQualificationBreakdown", {
+        disqualified: number.format(feedback.lead_feedback.disqualified_inquiries),
+        unknown: number.format(feedback.lead_feedback.unknown_qualification),
+      }),
+      t("businessFollowUp", {
+        followedUp: number.format(feedback.lead_feedback.followed_up_inquiries),
+        won: number.format(feedback.lead_feedback.won_inquiries),
+        unknown: number.format(feedback.lead_feedback.unknown_follow_up),
+      }),
+    ] : []),
     conversion.rate === null
       ? t("businessRateNa")
       : t("businessRate", { rate: percent.format(conversion.rate) }),

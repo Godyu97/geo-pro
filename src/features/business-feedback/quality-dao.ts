@@ -213,6 +213,15 @@ export class LeadQualityDao {
     return this.ruleForOwner(ownerId, ruleId);
   }
 
+  async frozenRulesForBrand(ownerId: string, brandId: string) {
+    const rows = await queryWithParameters(this.db,
+      `SELECT ${ruleColumns} FROM lead_validity_rule
+       WHERE owner_id = ? AND brand_id = ? AND frozen = 1 ORDER BY version DESC`,
+      [ownerId, brandId],
+    );
+    return z.array(ruleRow).parse(rows);
+  }
+
   async rulesForBrand(ownerId: string, brandId: string) {
     const query = leadValidityRuleListQuery(ownerId, brandId);
     const rows = await queryWithParameters(this.db, query.sql, query.values);

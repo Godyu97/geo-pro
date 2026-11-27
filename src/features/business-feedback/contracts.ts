@@ -22,6 +22,8 @@ export const businessLeadErrors = {
   FORBIDDEN: 403,
   NOT_FOUND: 404,
   INVALID_INPUT: 400,
+  RULE_NOT_FROZEN: 409,
+  FEEDBACK_CHANGED: 409,
   SERVICE_UNAVAILABLE: 503,
 } as const;
 

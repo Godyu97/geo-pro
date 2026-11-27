@@ -701,6 +701,13 @@
       "when": 1795743167634,
       "tag": "0099_image_asset_use_superseded",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1795744899647,
+      "tag": "0100_slow_alex_power",
+      "breakpoints": true
     }
   ]
 }

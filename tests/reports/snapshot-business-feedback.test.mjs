@@ -8,7 +8,8 @@ import {
   recordLeadObservation,
   saveLeadValidityRule,
 } from "../../src/features/business-feedback/quality-commands.ts";
-import { businessLeadPrimaryCountsQuery } from "../../src/features/business-feedback/dao.ts";
+import { recordLeadFeedback } from "../../src/features/business-feedback/feedback-commands.ts";
+import { currentLeadFeedbackQuery, LeadFeedbackDao } from "../../src/features/business-feedback/feedback-dao.ts";
 import { leadObservationRollupQuery } from "../../src/features/business-feedback/quality-dao.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import { registerCrawlerVisit } from "../../src/features/data-connections/crawler-commands.ts";
@@ -183,8 +184,19 @@ for (const kind of ["sqlite", "postgresql"]) {
       requiresFollowUp: true,
     }, clock);
     assert.equal(savedRule.error, undefined);
+    const leadId = imported.leads[0].id;
+    const command = {
+      brandId, leadId, ruleId: savedRule.rule.id, expectedRevision: 0,
+      realNeed: true, targetIndustry: null, canFollowUp: true, outcome: "unknown",
+    };
+    assert.deepEqual(await recordLeadFeedback(db, outsider, command), { error: "NOT_FOUND" });
+    assert.deepEqual(await recordLeadFeedback(db, owner, command), { error: "RULE_NOT_FROZEN" });
     const frozen = await freezeLeadValidityRule(db, owner, savedRule.rule.id);
     assert.equal(frozen.rule.frozen, true);
+    const first = await recordLeadFeedback(db, owner, command);
+    assert.equal(first.feedback.status, "unknown");
+    assert.deepEqual(await recordLeadFeedback(db, owner, command), first);
+    assert.deepEqual(await recordLeadFeedback(db, owner, { ...command, outcome: "won" }), { error: "FEEDBACK_CHANGED" });
     const qualified = await qualifyLeadAgainstRule(db, owner, {
       brandId,
       ruleId: frozen.rule.id,
@@ -238,7 +250,11 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.deepEqual(document.business_feedback.primary_distribution, {
       referral: 0, self_report: 1, landing_page: 0, unknown: 0,
     });
-    assert.equal(document.business_feedback.qualified_inquiries, 1);
+    assert.equal(document.business_feedback.qualified_inquiries, 0, "An unlinked legacy judgment is not an inquiry");
+    assert.deepEqual(document.business_feedback.lead_feedback, {
+      disqualified_inquiries: 0, unknown_qualification: 1, won_inquiries: 0,
+      followed_up_inquiries: 0, unknown_follow_up: 1, records: [{ leadId, feedbackId: first.feedback.id }],
+    });
     assert.equal(document.business_feedback.ai_referral_conversion.rate, null);
     assert.equal(document.business_feedback.ai_referral_conversion.reason, "missing_session_denominator");
     assert.equal(document.business_feedback.self_reported_over_visits, null);
@@ -251,7 +267,8 @@ for (const kind of ["sqlite", "postgresql"]) {
     const sectionEnd = opened.html.indexOf("</section>", sectionStart);
     const section = opened.html.slice(sectionStart, sectionEnd);
     assert.match(section, /去重咨询 1/);
-    assert.match(section, /有效咨询 1/);
+    assert.match(section, /有效咨询 0/);
+    assert.match(section, /有效性未知 1/);
     assert.match(section, /可识别引荐转化率 N\/A/);
     assert.match(section, /没有可靠会话分母/);
     assert.equal(section.includes("爬虫访问"), false);
@@ -269,6 +286,14 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.match(opened.html, /不可比较。不建立因果。/);
     assert.equal(opened.html.includes("观察改善"), false);
     const preserved = opened.json;
+
+    const updated = await recordLeadFeedback(db, owner, {
+      ...command, expectedRevision: 1, targetIndustry: true, outcome: "won",
+    });
+    assert.equal(updated.feedback.revision, 2);
+    assert.equal(updated.feedback.status, "qualified");
+    assert.deepEqual(await new LeadFeedbackDao(db).read(leadId, first.feedback.id), first.feedback);
+    assert.equal(await new LeadFeedbackDao(db).read(randomUUID(), first.feedback.id), null);
 
     const observed = await recordLeadObservation(db, owner, {
       brandId,
@@ -295,6 +320,11 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(reread.json, preserved);
     const next = JSON.parse((await readSnapshot(db, owner, second.snapshot.id, options)).json);
     assert.equal(next.business_feedback.ai_referral_conversion.rate, 0.4);
+    assert.equal(next.business_feedback.qualified_inquiries, 1);
+    assert.deepEqual(next.business_feedback.lead_feedback, {
+      disqualified_inquiries: 0, unknown_qualification: 0, won_inquiries: 1,
+      followed_up_inquiries: 1, unknown_follow_up: 0, records: [{ leadId, feedbackId: updated.feedback.id }],
+    });
     assert.equal(next.business_feedback.self_reported_over_visits, null);
     assert.equal(next.business_feedback.crawler_visits.called_included, false);
     const secondHtml = (await readSnapshot(db, owner, second.snapshot.id, options)).html;
@@ -309,7 +339,7 @@ for (const kind of ["sqlite", "postgresql"]) {
     const explain = db.kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN ";
     const plans = [];
     for (const query of [
-      businessLeadPrimaryCountsQuery(owner, brandId),
+      currentLeadFeedbackQuery(owner, brandId),
       leadObservationRollupQuery(owner, brandId),
       crawlerBrandRollupQuery(owner, brandId),
     ]) {
@@ -322,7 +352,8 @@ for (const kind of ["sqlite", "postgresql"]) {
         : await run();
       plans.push(plan);
     }
-    assert.match(plans[0], /business_lead_owner_idx|business_lead/);
+    assert.match(plans[0], /business_lead_owner_idx/);
+    assert.match(plans[0], /lead_feedback_lead_revision_uidx/);
     assert.match(plans[1], /lead_observation_owner_idx|lead_observation/);
     assert.match(plans[2], /crawler_observation_owner_idx|crawler_observation/);
     if (db.kind === "postgresql") {
