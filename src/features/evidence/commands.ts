@@ -427,7 +427,11 @@ export async function completeManualEvidence(
 
     const current = await dao.observationForOwner(ownerId, input.observationId);
     if (!current || current.brandId !== input.brandId) return denied("NOT_FOUND");
-    if (current.evidenceState !== "draft_evidence" || current.sourceMode !== "consumer_ui" || current.captureMethod !== "manual") {
+    if (
+      current.evidenceState !== "draft_evidence"
+      || current.sourceMode !== "consumer_ui"
+      || (current.captureMethod !== "manual" && current.captureMethod !== "assisted")
+    ) {
       return denied("EVIDENCE_LOCKED");
     }
 

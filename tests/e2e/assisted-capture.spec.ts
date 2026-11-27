@@ -334,6 +334,27 @@ test("monitoring/capture aligns to ui-visual-v1 with bilingual viewports, keyboa
     await keyboardActivate(page, main.getByRole("button", { name: copy["zh-CN"].recordAttempt, exact: true }));
     await expect(main.getByText(copy["zh-CN"].attemptSaved, { exact: true })).toBeVisible();
 
+    // Record and confirm real consumer evidence, then drill down to consumer_ui answers and evidence detail
+    await main.getByLabel("回答原文", { exact: true }).fill(`消费者入口实测回答，推荐 ${brandName} 官网参考。`);
+    await main.getByLabel("引用 URL", { exact: true }).fill("https://assisted-capture-fixture.example.com/guide?utm_source=e2e");
+    await main.getByLabel("采集标识 / 入口", { exact: true }).fill("consumer-ui-e2e");
+    await main.getByLabel("存证定位符", { exact: true }).fill("consumer://e2e/session-1");
+    await keyboardActivate(page, main.getByRole("button", { name: copy["zh-CN"].recordAttempt, exact: true }));
+    await expect(main.getByText(copy["zh-CN"].attemptSaved, { exact: true })).toBeVisible();
+    await expect(main.getByText(`消费者入口实测回答，推荐 ${brandName} 官网参考。`, { exact: true })).toBeVisible();
+    await keyboardActivate(page, main.getByRole("button", { name: copy["zh-CN"].confirm, exact: true }).last());
+    await expect(main.getByRole("link", { name: "打开证据原文详情", exact: true }).last()).toBeVisible();
+    const consumerAnswersLink = main.getByRole("link", { name: "在消费者回答中查看", exact: true }).last();
+    await expect(consumerAnswersLink).toBeVisible();
+    await consumerAnswersLink.click();
+    await expect(page).toHaveURL(/\/dashboard\/monitoring\/answers\?.*sourceMode=consumer_ui/);
+    await main.getByRole("link", { name: "查看证据", exact: true }).first().click();
+    await expect(page).toHaveURL(/\/dashboard\/monitoring\/evidence\/[0-9a-f-]+/);
+    await expect(main.getByText(`消费者入口实测回答，推荐 ${brandName} 官网参考。`, { exact: true })).toBeVisible();
+    await expect(main.getByText("consumer-ui-e2e", { exact: true })).toBeVisible();
+    await expect(main.getByText("consumer://e2e/session-1", { exact: true })).toBeVisible();
+    await page.goto(route);
+
     // Cross-account isolation
     const outsiderPage = await outsider.newPage();
     await outsider.addCookies([{ name: "geo-locale", value: "en", url: origin }]);

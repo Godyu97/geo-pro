@@ -79,7 +79,7 @@ export async function captureAttemptCreateResponse(request: Request) {
   if ("error" in gate) return gate.error;
   try {
     if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
-    const body = await readBoundedJson(request, 1024);
+    const body = await readBoundedJson(request, 32_768);
     const command = recordCaptureAttemptSchema.safeParse(body);
     if (!command.success) return failure("INVALID_INPUT");
     const result = await recordCaptureAttempt(getConnection(), gate.session.session.user.id, command.data);
@@ -99,7 +99,7 @@ export async function captureAttemptConfirmResponse(request: Request, attemptId:
   if (!id.success) return failure("INVALID_INPUT");
   try {
     if (new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
-    const body = await readBoundedJson(request, 512);
+    const body = await readBoundedJson(request, 32_768);
     const command = confirmCaptureAttemptSchema.safeParse(body);
     if (!command.success) return failure("INVALID_INPUT");
     const result = await confirmCaptureAttempt(getConnection(), gate.session.session.user.id, id.data, command.data);

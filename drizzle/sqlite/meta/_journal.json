@@ -708,6 +708,13 @@
       "when": 1795763092944,
       "tag": "0100_safe_the_hunter",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1795764818356,
+      "tag": "0101_colorful_champions",
+      "breakpoints": true
     }
   ]
 }

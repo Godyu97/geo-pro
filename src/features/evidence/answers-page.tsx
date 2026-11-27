@@ -30,11 +30,12 @@ const emptyClass = "min-w-0 rounded-2xl border border-dashed bg-card px-4 py-8 t
 
 function relatedLinks(
   t: Awaited<ReturnType<typeof getTranslator<"evidenceOverview">>>,
-  input: { overviewHref: string; competitorsHref: string },
+  input: { overviewHref: string; competitorsHref: string; captureHref: string },
 ) {
   return [
     { href: input.overviewHref, label: t("backOverview") },
     { href: input.competitorsHref, label: t("competitors") },
+    { href: input.captureHref, label: t("openCapture") },
   ] as const;
 }
 
@@ -111,6 +112,7 @@ export default async function EvidenceAnswersPage({
         related={relatedLinks(t, {
           overviewHref: "/dashboard/monitoring/overview",
           competitorsHref: "/dashboard/monitoring/competitors",
+          captureHref: "/dashboard/monitoring/capture",
         })}
       />
     );
@@ -120,6 +122,7 @@ export default async function EvidenceAnswersPage({
   const brandRelated = relatedLinks(t, {
     overviewHref: `/dashboard/monitoring/overview${brandQuery}`,
     competitorsHref: `/dashboard/monitoring/competitors${brandQuery}`,
+    captureHref: `/dashboard/monitoring/capture${brandQuery}`,
   });
   const parsed = overviewScopeFromSearch(params, { brandId, sourceMode: "model_api" });
   if (!parsed.success) {
@@ -213,6 +216,7 @@ export default async function EvidenceAnswersPage({
       related={relatedLinks(t, {
         overviewHref,
         competitorsHref: `/dashboard/monitoring/competitors${brandQuery}`,
+        captureHref: `/dashboard/monitoring/capture${brandQuery}`,
       })}
     >
       <OverviewScopeForm

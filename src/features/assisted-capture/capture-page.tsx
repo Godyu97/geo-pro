@@ -33,11 +33,14 @@ export default async function CapturePage({
   const t = await getTranslator("assistedCapture");
   const messages = getMessages(locale).assistedCapture;
   const errorCode = typeof params.error === "string" ? params.error : undefined;
+  const requestedBrandId = typeof params.brandId === "string" && params.brandId.trim()
+    ? params.brandId.trim()
+    : undefined;
 
   let workspace: CaptureWorkspaceView | null = null;
   let traceId: string | null = null;
   try {
-    workspace = await readCaptureWorkspace(getConnection(), session.user.id);
+    workspace = await readCaptureWorkspace(getConnection(), session.user.id, requestedBrandId);
   } catch {
     traceId = randomUUID();
     console.error("assisted-capture-page-unavailable", { traceId });
@@ -66,7 +69,7 @@ export default async function CapturePage({
     );
   }
 
-  const { brand, sheets } = workspace;
+  const { brand, canWrite, promptSets, sheets } = workspace;
 
   if (!brand) {
     return (
@@ -98,6 +101,9 @@ export default async function CapturePage({
     );
   }
 
+  const brandQuery = `brandId=${encodeURIComponent(brand.id)}`;
+  const consumerAnswersHref = `/dashboard/monitoring/answers?${brandQuery}&sourceMode=consumer_ui`;
+
   return (
     <div className="min-w-0 space-y-6">
       <header className="min-w-0 space-y-3">
@@ -113,36 +119,43 @@ export default async function CapturePage({
               <Button asChild className={actionClass}>
                 <a href="#capture-sheets">{t("browseSheets")}</a>
               </Button>
-              <Button asChild variant="outline" className={actionClass}>
-                <a href="#capture-create-heading">{t("startCreate")}</a>
-              </Button>
+              {canWrite ? (
+                <Button asChild variant="outline" className={actionClass}>
+                  <a href="#capture-create-heading">{t("startCreate")}</a>
+                </Button>
+              ) : null}
             </>
-          ) : (
+          ) : canWrite ? (
             <Button asChild className={actionClass}>
               <a href="#capture-create-heading">{t("startCreate")}</a>
             </Button>
-          )}
+          ) : null}
           <Button asChild variant="outline" className={actionClass}>
-            <Link href={overviewPath} prefetch={false}>{t("backOverview")}</Link>
+            <Link href={`${overviewPath}?${brandQuery}&sourceMode=consumer_ui`} prefetch={false}>{t("backOverview")}</Link>
           </Button>
           <Button asChild variant="outline" className={actionClass}>
             <Link href={`/dashboard/brands/${brand.id}`} prefetch={false}>{t("viewBrand")}</Link>
           </Button>
         </div>
         <nav aria-label={t("relatedEntries")} className="flex min-w-0 flex-wrap gap-2">
+          <Link href={consumerAnswersHref} prefetch={false} className={relatedLinkClass}>
+            {t("openConsumerAnswers")}
+          </Link>
           <Link href="/dashboard/monitoring/plans" prefetch={false} className={relatedLinkClass}>
             {t("openPlans")}
           </Link>
           <Link href="/dashboard/monitoring/protocols" prefetch={false} className={relatedLinkClass}>
             {t("openProtocols")}
           </Link>
-          <Link href={`/dashboard/monitoring/new?brandId=${encodeURIComponent(brand.id)}`} prefetch={false} className={relatedLinkClass}>
+          <Link href={`/dashboard/monitoring/new?${brandQuery}`} prefetch={false} className={relatedLinkClass}>
             {t("openRunConfirm")}
           </Link>
         </nav>
       </header>
       <CapturePanel
-        brandId={brand.id}
+        brand={brand}
+        canWrite={canWrite}
+        promptSets={promptSets}
         sheets={sheets}
         initialError={isKnownError(errorCode) ? errorCode : null}
         messages={messages}

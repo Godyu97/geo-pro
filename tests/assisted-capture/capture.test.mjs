@@ -8,6 +8,7 @@ import {
   degradeCaptureSheet,
   getCaptureSheet,
   listCaptureSheets,
+  readCaptureWorkspace,
   recordCaptureAttempt,
 } from "../../src/features/assisted-capture/commands.ts";
 import {
@@ -21,6 +22,10 @@ import { captureAttemptListQuery, captureSheetListQuery } from "../../src/featur
 import { degradeEntry, effortComparison } from "../../src/features/assisted-capture/effort.ts";
 import { assistedCapture, confirmCapture } from "../../src/features/assisted-capture/rules.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
+import { completeManualEvidence, readObservation } from "../../src/features/evidence/commands.ts";
+import { readEvidenceOverview } from "../../src/features/evidence/overview-commands.ts";
+import { PromptDao } from "../../src/features/prompts/dao.ts";
+import { memoryCache } from "../../src/lib/cache/store.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { structure, testDatabase } from "../maintenance/helpers.mjs";
 
@@ -422,6 +427,317 @@ for (const kind of ["sqlite", "postgresql"]) {
       } finally {
         await ddl.cleanup();
       }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test(`${kind}: confirming capture writes consumer_ui evidence, enforces partial/handoff boundaries, and respects group roles`, async () => {
+    const fixture = await testDatabase(kind);
+    try {
+      const db = fixture.connection;
+      const cache = memoryCache();
+      const [owner, member, readonlyUser, outsider] = await Promise.all([
+        account(db),
+        account(db),
+        account(db),
+        account(db),
+      ]);
+      const brand = randomUUID();
+      const brands = new BrandDao(db);
+      await brands.insertBrand(owner, brand, time);
+      await brands.insertVersion(brand, 1, {
+        name: "GeoPro 消费者测试",
+        description: "用于消费者轨道辅助采集与入证测试的品牌",
+        website: "https://capture-evidence.example.com",
+        aliases: ["GeoPro"],
+        region: "CN",
+        language: "zh-CN",
+        competitors: [],
+        questions: [],
+      }, time);
+
+      await queryWithParameters(
+        db,
+        `INSERT INTO brand_member_grant (id, user_id, brand_id, role, active, expires_at, created_at, revoked_at)
+         VALUES (?, ?, ?, 'owner', 1, NULL, ?, NULL), (?, ?, ?, 'member', 1, NULL, ?, NULL), (?, ?, ?, 'read_only', 1, NULL, ?, NULL)`,
+        [randomUUID(), owner, brand, time, randomUUID(), member, brand, time, randomUUID(), readonlyUser, brand, time],
+      );
+
+      const promptIdA = randomUUID();
+      const promptIdB = randomUUID();
+      const clusterId = randomUUID();
+      const promptSetId = randomUUID();
+      const setId = randomUUID();
+      const promptDao = new PromptDao(db, brand);
+      await promptDao.insertSet({
+        id: promptSetId,
+        setId,
+        version: 1,
+        entityVersion: 1,
+        region: "CN",
+        language: "zh-CN",
+        content: {
+          clusters: [{
+            id: clusterId,
+            audience: "运营团队",
+            intent: "评估工具",
+            primaryPage: "https://capture-evidence.example.com",
+            conversionAction: "咨询试用",
+          }],
+          questions: [
+            {
+              id: promptIdA,
+              text: "消费者入口评估 GeoPro 的核心依据是什么",
+              type: "discovery",
+              clusterId,
+              source: "manual",
+              sourceNote: "",
+              stage: "consider",
+              region: "CN",
+              language: "zh-CN",
+              status: "confirmed",
+              acceptSimilar: true,
+              primary: true,
+            },
+            {
+              id: promptIdB,
+              text: "消费者入口如何核对品牌官网引用",
+              type: "discovery",
+              clusterId,
+              source: "manual",
+              sourceNote: "",
+              stage: "compare",
+              region: "CN",
+              language: "zh-CN",
+              status: "confirmed",
+              acceptSimilar: true,
+              primary: false,
+            },
+          ],
+        },
+        createdAt: time,
+      });
+
+      const clock = clockFrom("2026-11-27T08:00:00.000Z");
+
+      // Prime consumer_ui overview cache first so invalidation is exercised.
+      const beforeOverview = await readEvidenceOverview(db, owner, { brandId: brand, sourceMode: "consumer_ui" }, cache, clock);
+      assert.equal(beforeOverview.answers.length, 0);
+
+      // Member reads workspace with frozen prompt sets and write permission.
+      const memberWorkspace = await readCaptureWorkspace(db, member, brand);
+      assert.equal(memberWorkspace.canWrite, true);
+      assert.equal(memberWorkspace.brand?.id, brand);
+      assert.equal(memberWorkspace.promptSets.length, 1);
+      assert.equal(memberWorkspace.promptSets[0].questions.length, 2);
+
+      // Read-only user sees workspace as read-only and is forbidden from writing.
+      const readonlyWorkspace = await readCaptureWorkspace(db, readonlyUser, brand);
+      assert.equal(readonlyWorkspace.canWrite, false);
+      assert.equal(readonlyWorkspace.brand?.id, brand);
+      assert.deepEqual(
+        await createCaptureSheet(db, readonlyUser, {
+          brandId: brand,
+          promptIds: [promptIdA],
+          assistedMinutes: 5,
+          manualMinutes: 15,
+          citationsComplete: true,
+        }, clock),
+        { error: "FORBIDDEN" },
+      );
+
+      // Outsider gets NOT_FOUND.
+      assert.deepEqual(await readCaptureWorkspace(db, outsider, brand), { error: "NOT_FOUND" });
+
+      // Member creates frozen capture sheet from frozen prompt set.
+      const created = await createCaptureSheet(db, member, {
+        brandId: brand,
+        promptIds: [promptIdA, promptIdB],
+        assistedMinutes: 6,
+        manualMinutes: 18,
+        citationsComplete: true,
+      }, clock);
+      assert.ok("sheet" in created);
+      const sheetId = created.sheet.id;
+
+      // Credential text in answer/locator is rejected.
+      assert.deepEqual(
+        await recordCaptureAttempt(db, member, {
+          sheetId,
+          blockedBy: null,
+          citationCount: 1,
+          promptId: promptIdA,
+          answerText: "session_token=secret",
+          citations: ["https://capture-evidence.example.com/docs"],
+        }, clock),
+        { error: "INVALID_INPUT" },
+      );
+
+      // Handoff (login) with answerText stays handoff and never writes an observation.
+      const handoffRes = await recordCaptureAttempt(db, member, {
+        sheetId,
+        blockedBy: "login",
+        citationCount: 1,
+        promptId: promptIdA,
+        answerText: "登录墙阻断样本不应入证",
+      }, clock);
+      assert.ok("sheet" in handoffRes);
+      const handoffAttempt = handoffRes.sheet.attempts.at(-1);
+      assert.equal(handoffAttempt.status, "handoff");
+      const handoffConfirm = await confirmCaptureAttempt(db, member, handoffAttempt.id, { confirmed: true }, clock, cache);
+      assert.ok("sheet" in handoffConfirm);
+      assert.equal(handoffConfirm.sheet.attempts.at(-1).observationId, null);
+
+      // Preview attempt with answer, deduplicated UTM citations, locator, collector, and conditions -> writes complete consumer_ui observation.
+      const previewRes = await recordCaptureAttempt(db, member, {
+        sheetId,
+        blockedBy: null,
+        citationCount: 2,
+        promptId: promptIdA,
+        answerText: "GeoPro 智搜监测可核对公开网页引用，推荐使用官方来源进行复核。",
+        citations: [
+          "https://capture-evidence.example.com/guide?utm_source=test",
+          "https://capture-evidence.example.com/guide?fbclid=dup",
+        ],
+        locatorRef: "consumer://chat/session-001",
+        collectorId: "consumer-ui-chrome",
+        requestedNetworkMode: "on",
+        targetRegion: "CN",
+        observedRegion: "CN",
+        newSession: "true",
+        productMode: "true",
+      }, clock);
+      assert.ok("sheet" in previewRes);
+      const previewAttempt = previewRes.sheet.attempts.at(-1);
+      assert.equal(previewAttempt.status, "preview");
+      assert.equal(previewAttempt.questionText, "消费者入口评估 GeoPro 的核心依据是什么");
+
+      const confirmed = await confirmCaptureAttempt(db, member, previewAttempt.id, { confirmed: true }, clock, cache);
+      assert.ok("sheet" in confirmed);
+      const savedAttempt = confirmed.sheet.attempts.find((item) => item.id === previewAttempt.id);
+      assert.equal(savedAttempt.confirmed, true);
+      assert.equal(savedAttempt.complete, true);
+      assert.ok(savedAttempt.observationId);
+      assert.equal(savedAttempt.observationState, "complete");
+      assert.equal(savedAttempt.observationCitationState, "complete");
+
+      // Read back observation via Evidence detail & consumer_ui overview.
+      const detail = await readObservation(db, member, savedAttempt.observationId);
+      assert.ok(detail);
+      assert.equal(detail.observation.sourceMode, "consumer_ui");
+      assert.equal(detail.observation.captureMethod, "assisted");
+      assert.equal(detail.observation.questionText, "消费者入口评估 GeoPro 的核心依据是什么");
+      assert.equal(detail.observation.locatorRef, "consumer://chat/session-001");
+      assert.equal(detail.observation.collectorId, "consumer-ui-chrome");
+      assert.equal(detail.observation.requestedNetworkMode, "on");
+      assert.equal(detail.observation.observedRegion, "CN");
+      assert.equal(detail.observation.newSession, "true");
+      assert.equal(detail.observation.productMode, "true");
+      assert.equal(detail.observation.citationSetState, "complete");
+      assert.equal(detail.citations.length, 1);
+      assert.equal(detail.citations[0].citationOrigin, "consumer_visible");
+      assert.equal(detail.citations[0].normalizedUrl, "https://capture-evidence.example.com/guide");
+      assert.equal(detail.latestAnalysis?.mentioned, "true");
+      assert.equal(detail.latestAnalysis?.recommended, "true");
+      assert.equal(detail.latestAnalysis?.officialSiteCited, "true");
+
+      const afterOverview = await readEvidenceOverview(db, member, { brandId: brand, sourceMode: "consumer_ui" }, cache, clock);
+      assert.equal(afterOverview.answers.some((item) => item.observationId === savedAttempt.observationId), true);
+
+      // Partial attempt (0 citations) confirmed without supplementing stays citationSetState='partial' (not in C).
+      const partialRes = await recordCaptureAttempt(db, member, {
+        sheetId,
+        blockedBy: null,
+        citationCount: 0,
+        promptId: promptIdB,
+        answerText: "缺少引用链接的消费者回答样本。",
+        locatorRef: "consumer://chat/session-002",
+        collectorId: "consumer-ui-chrome",
+      }, clock);
+      assert.ok("sheet" in partialRes);
+      const partialAttempt = partialRes.sheet.attempts.at(-1);
+      assert.equal(partialAttempt.status, "partial");
+      const confirmedPartial = await confirmCaptureAttempt(db, member, partialAttempt.id, { confirmed: true }, clock, cache);
+      assert.ok("sheet" in confirmedPartial);
+      const savedPartial = confirmedPartial.sheet.attempts.find((item) => item.id === partialAttempt.id);
+      assert.equal(savedPartial.complete, false);
+      assert.equal(savedPartial.observationCitationState, "partial");
+      const partialDetail = await readObservation(db, member, savedPartial.observationId);
+      assert.equal(partialDetail.citationPool.inC, false);
+      assert.equal(partialDetail.citationPool.reason, "partial");
+
+      // Partial attempt missing locatorRef saves as draft_evidence and can be completed by owner via completeManualEvidence.
+      const draftRes = await recordCaptureAttempt(db, member, {
+        sheetId,
+        blockedBy: null,
+        citationCount: 0,
+        promptId: promptIdB,
+        answerText: "缺少定位符的草稿样本。",
+        collectorId: "consumer-ui-chrome",
+      }, clock);
+      assert.ok("sheet" in draftRes);
+      const draftAttempt = draftRes.sheet.attempts.at(-1);
+      const confirmedDraft = await confirmCaptureAttempt(db, member, draftAttempt.id, { confirmed: true }, clock, cache);
+      assert.ok("sheet" in confirmedDraft);
+      const savedDraft = confirmedDraft.sheet.attempts.find((item) => item.id === draftAttempt.id);
+      assert.equal(savedDraft.observationState, "draft_evidence");
+
+      const completedDraft = await completeManualEvidence(db, owner, {
+        action: "complete-manual",
+        brandId: brand,
+        observationId: savedDraft.observationId,
+        operationId: randomUUID(),
+        questionText: "消费者入口如何核对品牌官网引用",
+        answerText: "缺少定位符的草稿样本。",
+        region: "CN",
+        language: "zh-CN",
+        requestedNetworkMode: "unknown",
+        targetRegion: "CN",
+        observedRegion: "unknown",
+        newSession: "unknown",
+        productMode: "unknown",
+        entityVersion: 1,
+        citationSetState: "complete",
+        citations: [{
+          rawUrl: "https://capture-evidence.example.com/supplemented",
+          citationOrigin: "consumer_visible",
+          positionLabel: "1",
+          ownership: "unknown",
+          pageStatus: "unknown",
+        }],
+        locatorRef: "consumer://chat/session-003",
+        collectorId: "consumer-ui-chrome",
+        contested: false,
+        brandName: "GeoPro 消费者测试",
+        aliases: ["GeoPro"],
+        officialWebsite: "https://capture-evidence.example.com",
+      }, clock, cache);
+      assert.ok("observation" in completedDraft);
+      assert.equal(completedDraft.observation.evidenceState, "complete");
+      assert.equal(completedDraft.observation.captureMethod, "assisted");
+
+      // Degraded manual sheet writes captureMethod='manual' when confirmed.
+      const degraded = await degradeCaptureSheet(db, member, sheetId, { structureChanged: true }, clock);
+      assert.ok("sheet" in degraded);
+      assert.equal(degraded.sheet.mode, "manual");
+      const manualRes = await recordCaptureAttempt(db, member, {
+        sheetId,
+        blockedBy: null,
+        citationCount: 1,
+        promptId: promptIdB,
+        answerText: "结构变更后退回人工模式录入的真实回答。",
+        citations: ["https://capture-evidence.example.com/manual-fallback"],
+        locatorRef: "consumer://chat/manual-004",
+        collectorId: "consumer-manual",
+      }, clock);
+      assert.ok("sheet" in manualRes);
+      const manualConfirm = await confirmCaptureAttempt(db, member, manualRes.sheet.attempts.at(-1).id, { confirmed: true }, clock, cache);
+      assert.ok("sheet" in manualConfirm);
+      const manualObsId = manualConfirm.sheet.attempts.at(-1).observationId;
+      const manualDetail = await readObservation(db, owner, manualObsId);
+      assert.equal(manualDetail.observation.captureMethod, "manual");
+      assert.equal(manualDetail.observation.sourceMode, "consumer_ui");
     } finally {
       await fixture.cleanup();
     }

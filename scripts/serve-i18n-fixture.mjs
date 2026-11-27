@@ -531,7 +531,7 @@ await writeFile(capabilityService, capabilitySource.replace(capabilityRead, `${c
 
 const captureCommands = path.join(fixture, "src/features/assisted-capture/commands.ts");
 const captureSource = await readFile(captureCommands, "utf8");
-const captureRead = "export async function readCaptureWorkspace(db: DatabaseConnection, ownerId: string): Promise<CaptureWorkspaceView> {";
+const captureRead = "export async function readCaptureWorkspace(db: DatabaseConnection, ownerId: string, requestedBrandId?: string): Promise<CaptureWorkspaceView> {";
 const captureWrite = `export async function createCaptureSheet(
   db: DatabaseConnection,
   ownerId: string,

@@ -80,7 +80,7 @@ export default async function EvidenceDetailPage({
   const overviewHref = overviewScopePath("/dashboard/monitoring/overview", preserved);
   const manualContext = observation.evidenceState === "draft_evidence"
     && observation.sourceMode === "consumer_ui"
-    && observation.captureMethod === "manual"
+    && (observation.captureMethod === "manual" || observation.captureMethod === "assisted")
     ? await readManualEvidenceContext(getConnection(), session.user.id, observation.brandId)
     : null;
   const costText = capture.costState === "known" && capture.actualMinor !== null && capture.currency
@@ -154,6 +154,18 @@ export default async function EvidenceDetailPage({
             <dt className="text-muted-foreground">{t("captureCost")}</dt>
             <dd>{costText}</dd>
           </div>
+          {observation.collectorId ? (
+            <div>
+              <dt className="text-muted-foreground">{t("manualCollector")}</dt>
+              <dd>{observation.collectorId}</dd>
+            </div>
+          ) : null}
+          {observation.locatorRef ? (
+            <div>
+              <dt className="text-muted-foreground">{t("manualLocator")}</dt>
+              <dd>{observation.locatorRef}</dd>
+            </div>
+          ) : null}
         </dl>
       </section>
       <section className={panelClass}>

@@ -120,6 +120,7 @@ export function ManualEvidenceForm({
 
   return (
     <form
+      id="manual-evidence-form"
       className="min-w-0 space-y-4 rounded-2xl border bg-card p-4 sm:p-5"
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={() => { composing.current = false; }}
