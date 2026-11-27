@@ -35,6 +35,7 @@ import {
   approveContentSchema,
   batchControlSchema,
   blockChannelVariantSchema,
+  calendarErrorCodes,
   confirmBriefSchema,
   exportChannelVariantSchema,
   exportConfirmSchema,
@@ -473,8 +474,6 @@ export async function exportChannelVariantAction(formData: FormData) {
   return { ok: true as const };
 }
 
-const calendarErrors = new Set(["NOT_FOUND", "INVALID_INPUT", "FACT_INVALID", "OPERATION_CONFLICT"]);
-
 function calendarPath(brandId: string, extra: Record<string, string | undefined>) {
   const search = new URLSearchParams();
   if (brandId) search.set("brandId", brandId);
@@ -488,22 +487,25 @@ function calendarPath(brandId: string, extra: Record<string, string | undefined>
 export async function scanExpiredMaintenanceAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   const brandId = String(formData.get("brandId") ?? "");
+  const factVersionId = brandIdSchema.safeParse(formData.get("factVersionId")).data;
   const parsed = scanExpiredMaintenanceSchema.safeParse({ action: "scan-expired-maintenance", brandId });
-  if (!parsed.success) redirect(calendarPath(brandId, { calendarError: "INVALID_INPUT" }));
-  const result = await scanExpiredContentMaintenance(getConnection(), session.user.id, parsed.data.brandId);
+  if (!parsed.success) redirect(calendarPath("", { calendarError: "INVALID_INPUT" }));
+  const result = await Promise.resolve()
+    .then(() => scanExpiredContentMaintenance(getConnection(), session.user.id, parsed.data.brandId))
+    .catch(() => ({ error: "SERVICE_UNAVAILABLE" as const }));
+  if ("error" in result) {
+    const calendarError = calendarErrorCodes.find((code) => code === result.error) ?? "INVALID_INPUT";
+    redirect(calendarPath(parsed.data.brandId, { factVersionId, calendarError }));
+  }
   revalidatePath("/dashboard/content/calendar");
   revalidatePath(`/dashboard/brands/${parsed.data.brandId}/facts`);
-  if ("error" in result) {
-    redirect(calendarPath(parsed.data.brandId, {
-      calendarError: calendarErrors.has(result.error) ? result.error : "INVALID_INPUT",
-    }));
-  }
-  redirect(calendarPath(parsed.data.brandId, { calendarNotice: "scanned", scanned: String(result.scanned) }));
+  redirect(calendarPath(parsed.data.brandId, { factVersionId, calendarNotice: "scanned", scanned: String(result.scanned) }));
 }
 
 export async function settleMaintenanceAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   const brandId = String(formData.get("brandId") ?? "");
+  const factVersionId = brandIdSchema.safeParse(formData.get("factVersionId")).data;
   const taskId = String(formData.get("taskId") ?? "");
   const channels = formData.getAll("channel").map((value) => String(value));
   const changes: { channel: string; state: "verified" | "blocked"; verifiedOn?: string }[] = [];
@@ -523,14 +525,17 @@ export async function settleMaintenanceAction(formData: FormData): Promise<void>
     taskId,
     channels: changes,
   });
-  if (!parsed.success) redirect(calendarPath(brandId, { calendarError: "INVALID_INPUT" }));
-  const result = await settleContentMaintenance(getConnection(), session.user.id, parsed.data);
+  if (!parsed.success) {
+    redirect(calendarPath(brandIdSchema.safeParse(brandId).data ?? "", { factVersionId, calendarError: "INVALID_INPUT" }));
+  }
+  const result = await Promise.resolve()
+    .then(() => settleContentMaintenance(getConnection(), session.user.id, parsed.data))
+    .catch(() => ({ error: "SERVICE_UNAVAILABLE" as const }));
+  if ("error" in result) {
+    const calendarError = calendarErrorCodes.find((code) => code === result.error) ?? "INVALID_INPUT";
+    redirect(calendarPath(parsed.data.brandId, { factVersionId, calendarError }));
+  }
   revalidatePath("/dashboard/content/calendar");
   revalidatePath(`/dashboard/brands/${parsed.data.brandId}/facts`);
-  if ("error" in result) {
-    redirect(calendarPath(parsed.data.brandId, {
-      calendarError: calendarErrors.has(result.error) ? result.error : "INVALID_INPUT",
-    }));
-  }
-  redirect(calendarPath(parsed.data.brandId, { calendarNotice: "settled" }));
+  redirect(calendarPath(parsed.data.brandId, { factVersionId, calendarNotice: "settled" }));
 }

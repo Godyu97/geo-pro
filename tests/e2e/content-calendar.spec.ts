@@ -285,7 +285,7 @@ test("content calendar keeps the next maintenance action readable and recoverabl
     const stranger = await outsider.newPage();
     await outsider.addCookies([{ name: "geo-locale", value: "en", url: origin }]);
     await stranger.setViewportSize({ width: 375, height: 800 });
-    await stranger.goto(href);
+    expect((await stranger.goto(href))?.status()).toBe(404);
     await expect(stranger.getByRole("heading", { name: copy.en.missing, exact: true })).toBeVisible();
     await expect(stranger.getByText(longUrl)).toHaveCount(0);
     await expect(stranger.getByText(siteId)).toHaveCount(0);
@@ -308,6 +308,52 @@ test("content calendar keeps the next maintenance action readable and recoverabl
     await expect(page.getByText(copy["zh-CN"].verified, { exact: true })).toBeVisible();
     await expect(page.getByText(copy["zh-CN"].blocked, { exact: true })).toBeVisible();
     await expect(page.getByText(verifiedOn, { exact: true })).toBeVisible();
+
+    for (const role of ["read_only", "member"] as const) {
+      const collaborator = await browser.newContext({ baseURL: origin });
+      try {
+        const email = `content-calendar-${role}-${randomUUID()}@example.invalid`;
+        const userId = await register(collaborator, email);
+        accounts.push({ userId, email });
+        await post(context, "/api/settings/team/grants", { userId, brandId, role });
+        const calendar = await collaborator.newPage();
+        const scopedHref = `${href}&factVersionId=${factId}`;
+        for (const locale of ["zh-CN", "en"] as const) {
+          await collaborator.addCookies([{ name: "geo-locale", value: locale, url: origin }]);
+          for (const width of [375, 768, 1440]) {
+            await calendar.setViewportSize({ width, height: 800 });
+            expect((await calendar.goto(scopedHref))?.status()).toBe(200);
+            const main = calendar.getByRole("main");
+            await expect(main.getByRole("heading", { name: copy[locale].title, exact: true })).toBeVisible();
+            await expect(main.getByText(copy[locale].blocked, { exact: true })).toBeVisible();
+            await expect(main.getByText(longUrl, { exact: true })).toBeVisible();
+            await expect(main.locator("form")).toHaveCount(role === "read_only" ? 0 : 2);
+            await expectNoOverflow(calendar);
+          }
+        }
+        if (role === "read_only") {
+          const denied = await collaborator.request.post("/api/content/maintenance", {
+            headers: { Origin: origin },
+            data: { action: "settle-maintenance", brandId, taskId, channels: [{ channel: "site", state: "blocked" }] },
+          });
+          expect(denied.status()).toBe(403);
+          expect((await denied.json()).error.code).toBe("FORBIDDEN");
+        } else {
+          await activateFromKeyboard(calendar, calendar.getByRole("link", { name: "Affected pages", exact: true }));
+          await expect(calendar.locator("#calendar-tasks")).toBeFocused();
+          await calendar.getByLabel("Maintenance state for zhihu").selectOption("verified");
+          await calendar.getByLabel("Verification date for zhihu").fill(verifiedOn);
+          await activateFromKeyboard(calendar, calendar.getByRole("button", { name: "Save channel maintenance", exact: true }));
+          await expect(calendar.getByText("Channel states are saved.", { exact: false })).toBeVisible();
+          expect(new URL(calendar.url()).searchParams.get("factVersionId")).toBe(factId);
+          await calendar.reload();
+          await expect(calendar.getByRole("row").filter({ hasText: otherUrl }).getByText("Verified", { exact: true })).toBeVisible();
+          await expect(calendar.getByRole("row").filter({ hasText: longUrl }).getByText("Verified", { exact: true })).toBeVisible();
+        }
+      } finally {
+        await collaborator.close();
+      }
+    }
   } finally {
     await outsider.close();
     for (const { userId, email } of accounts) {

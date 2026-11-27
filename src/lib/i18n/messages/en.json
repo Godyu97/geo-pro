@@ -1764,6 +1764,8 @@
     "calendarReasonRevoked": "Fact revoked",
     "calendarTaskPlanned": "Some pages are not verified yet. The planned date is not the go-live date. Open the unverified publication first.",
     "calendarTaskBlocked": "Verified channels keep their verification. The blocked channel stays separate and does not change the others. Open the blocked publication next.",
+    "calendarSharedPlanned": "Some pages are awaiting verification. See the affected pages and their channel status.",
+    "calendarSharedBlocked": "Some channels are blocked. You can still see the verification results for the other channels.",
     "calendarTaskVerified": "These pages already have a verification date. The planned date is still not the go-live date.",
     "calendarTaskEmpty": "No maintenance tasks yet. Affected pages appear here after a fact expires or is revoked. The planned date is not the go-live date.",
     "calendarOpenPlanned": "Open the unverified publication",

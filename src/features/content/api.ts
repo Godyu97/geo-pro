@@ -195,9 +195,11 @@ export async function contentCalendarResponse(request: Request) {
   const entries = [...new URL(request.url).searchParams.entries()];
   const query = calendarQuerySchema.safeParse(Object.fromEntries(entries));
   if (!query.success) return errorResponse("INVALID_INPUT");
-  const result = await readContentCalendar(getConnection(), session.user.id, query.data);
+  const result = await Promise.resolve()
+    .then(() => readContentCalendar(getConnection(), session.user.id, query.data))
+    .catch(() => ({ error: "SERVICE_UNAVAILABLE" as const }));
   if ("error" in result) return errorResponse(result.error);
-  return Response.json(result, { headers });
+  return Response.json({ tasks: result.tasks }, { headers });
 }
 
 export async function contentMaintenanceResponse(request: Request) {
@@ -212,12 +214,18 @@ export async function contentMaintenanceResponse(request: Request) {
   }
   const parsed = maintenanceWriteSchema.safeParse(body);
   if (!parsed.success) return errorResponse("INVALID_INPUT");
-  const db = getConnection();
-  const result = parsed.data.action === "open-maintenance"
-    ? await openContentMaintenance(db, session.user.id, parsed.data)
-    : parsed.data.action === "scan-expired-maintenance"
-      ? await scanExpiredContentMaintenance(db, session.user.id, parsed.data.brandId)
-      : await settleContentMaintenance(db, session.user.id, parsed.data);
+  const input = parsed.data;
+  const result = await Promise.resolve().then(async () => {
+    const db = getConnection();
+    switch (input.action) {
+      case "open-maintenance":
+        return openContentMaintenance(db, session.user.id, input);
+      case "scan-expired-maintenance":
+        return scanExpiredContentMaintenance(db, session.user.id, input.brandId);
+      case "settle-maintenance":
+        return settleContentMaintenance(db, session.user.id, input);
+    }
+  }).catch(() => ({ error: "SERVICE_UNAVAILABLE" as const }));
   if ("error" in result) return errorResponse(result.error);
   return Response.json(result, { headers });
 }

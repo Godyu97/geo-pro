@@ -5,10 +5,11 @@ import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getTranslator } from "@/lib/i18n/server";
 import { Button } from "@/components/ui/button";
-import { brandIdSchema } from "../brands/contracts";
-import { BrandDao } from "../brands/dao";
+import { WorkspaceJump } from "@/components/layout/workspace-jump";
+import { workspaceBrand } from "../team-access/brand-scope";
 import { scanExpiredMaintenanceAction, settleMaintenanceAction } from "./actions";
-import { calendarQuerySchema } from "./contracts";
+import { contentCalendarPath } from "./calendar-workspace";
+import { calendarErrorCodes, calendarQuerySchema } from "./contracts";
 import { readContentCalendar } from "./maintenance";
 
 export async function generateMetadata() {
@@ -84,14 +85,19 @@ export default async function ContentCalendarPage({
   const params = await searchParams;
   const t = await getTranslator("content");
   const connection = getConnection();
-  const active = await new BrandDao(connection).active(session.user.id);
-  const requested = typeof params.brandId === "string" ? params.brandId : active?.id;
+  const query = calendarQuerySchema.partial({ brandId: true }).safeParse({
+    brandId: params.brandId,
+    factVersionId: params.factVersionId,
+  });
+  if (!query.success) notFound();
+  const { brandId, factVersionId } = query.data;
+  const requested = brandId ?? (await workspaceBrand(connection, session.user.id, undefined, "read"))?.brandId;
   const brandsAction = (
     <Button asChild className={actionClass}>
       <Link href="/dashboard/brands" prefetch={false}>{t("goBrands")}</Link>
     </Button>
   );
-  if (!requested || !brandIdSchema.safeParse(requested).success) {
+  if (!requested) {
     return (
       <CalendarCanvas
         title={t("calendarTitle")}
@@ -105,16 +111,12 @@ export default async function ContentCalendarPage({
 
   const contentHref = `/dashboard/content?brandId=${encodeURIComponent(requested)}`;
   const factsHref = `/dashboard/brands/${requested}/facts`;
-  const calendarHref = `/dashboard/content/calendar?brandId=${encodeURIComponent(requested)}`;
-  const requestedFact = typeof params.factVersionId === "string" ? params.factVersionId : undefined;
-  const parsedQuery = calendarQuerySchema.safeParse({
-    brandId: requested,
-    ...(requestedFact ? { factVersionId: requestedFact } : {}),
-  });
-  if (!parsedQuery.success) notFound();
+  const calendarQuery = new URLSearchParams({ brandId: requested });
+  if (factVersionId) calendarQuery.set("factVersionId", factVersionId);
+  const calendarHref = `${contentCalendarPath}?${calendarQuery}`;
   let calendar: Awaited<ReturnType<typeof readContentCalendar>>;
   try {
-    calendar = await readContentCalendar(connection, session.user.id, parsedQuery.data);
+    calendar = await readContentCalendar(connection, session.user.id, { brandId: requested, factVersionId });
   } catch {
     console.error("content-calendar-read-failed", { brandId: requested });
     calendar = { error: "SERVICE_UNAVAILABLE" };
@@ -147,7 +149,6 @@ export default async function ContentCalendarPage({
     mismatch: t("calendarReasonMismatch"),
     removed: t("calendarReasonRemoved"),
   } as const;
-  const calendarErrorCodes = ["NOT_FOUND", "INVALID_INPUT", "FACT_INVALID", "OPERATION_CONFLICT"] as const;
   const calendarError = calendarErrorCodes.find((code) => code === params.calendarError);
   const scanned = typeof params.scanned === "string" && /^\d{1,4}$/.test(params.scanned) ? Number(params.scanned) : null;
   const feedback = calendarError ? (
@@ -160,19 +161,20 @@ export default async function ContentCalendarPage({
   const pages = calendar.tasks.flatMap((task) => task.pages);
   const next = nextMaintenance(pages);
   const taskCopy = {
-    planned: t("calendarTaskPlanned"),
-    blocked: t("calendarTaskBlocked"),
+    planned: t(calendar.canOpenPublication ? "calendarTaskPlanned" : "calendarSharedPlanned"),
+    blocked: t(calendar.canOpenPublication ? "calendarTaskBlocked" : "calendarSharedBlocked"),
     verified: t("calendarTaskVerified"),
     empty: t("calendarTaskEmpty"),
   }[next.kind];
   const primary = next.page ? (
     <Button asChild className={actionClass}>
-      <Link
-        href={`/dashboard/content/publications/${next.page.pageId}`}
-        prefetch={false}
-      >
-        {next.kind === "planned" ? t("calendarOpenPlanned") : t("calendarOpenBlocked")}
-      </Link>
+      {calendar.canOpenPublication ? (
+        <Link href={`/dashboard/content/publications/${next.page.pageId}`} prefetch={false}>
+          {next.kind === "planned" ? t("calendarOpenPlanned") : t("calendarOpenBlocked")}
+        </Link>
+      ) : (
+        <WorkspaceJump href="#calendar-tasks">{t("calendarTable")}</WorkspaceJump>
+      )}
     </Button>
   ) : (
     <Button asChild className={actionClass}>
@@ -183,6 +185,7 @@ export default async function ContentCalendarPage({
     { href: contentHref, label: t("backToContent") },
     { href: factsHref, label: t("brandFactsLink") },
   ].filter((item) => next.page || item.href !== contentHref);
+  const TaskContainer = calendar.canWrite ? "form" : "div";
 
   return (
     <CalendarCanvas
@@ -198,92 +201,104 @@ export default async function ContentCalendarPage({
       relatedLabel={t("relatedEntries")}
       related={related}
     >
-      <form action={scanExpiredMaintenanceAction} className="flex min-w-0 flex-wrap gap-2">
-        <input type="hidden" name="brandId" value={requested} />
-        <Button type="submit" variant="outline" className={actionClass}>{t("scanExpiredFacts")}</Button>
-      </form>
-      {pages.length === 0 ? <p className={emptyClass}>{t("calendarEmpty")}</p> : calendar.tasks.map((task) => {
-        const controlFor = new Map<string, string>();
-        for (const page of task.pages) {
-          if (!controlFor.has(page.channel)) controlFor.set(page.channel, page.id);
-        }
-        return (
-        <section key={task.id} className="min-w-0 space-y-3">
-          <h2 className="break-words text-lg font-semibold">{reasonLabel[task.reason]}</h2>
-          <p className="break-words text-sm leading-6 text-muted-foreground">
-            {t("chainFact")}: <span className="[overflow-wrap:anywhere]">{task.factVersionId}</span>
-          </p>
-          <form action={settleMaintenanceAction} className="min-w-0 space-y-3">
-            <input type="hidden" name="brandId" value={requested} />
-            <input type="hidden" name="taskId" value={task.id} />
-            <div
-              role="region"
-              aria-label={t("calendarTable")}
-              tabIndex={0}
-              className="max-w-full min-w-0 overflow-x-auto rounded-xl border outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <table className="w-max min-w-full text-left text-sm">
-                <thead className="bg-secondary/50 text-muted-foreground">
-                  <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("calendarPage")}</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("calendarChannel")}</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("calendarChain")}</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("plannedOn")}</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("verifiedOn")}</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("maintenanceStatus")}</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("publishState")}</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("settleChannels")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {task.pages.map((page) => (
-                    <tr key={page.id} className="border-t">
-                      <td className="w-72 max-w-72 px-4 py-3 align-top whitespace-normal [overflow-wrap:anywhere]">{page.pageUrl}</td>
-                      <td className="px-4 py-3 align-top whitespace-nowrap">{page.channel}</td>
-                      <td className="w-72 max-w-72 px-4 py-3 align-top whitespace-normal [overflow-wrap:anywhere]">
-                        {t("chainDraft")}: {page.draftId}
-                        {" · "}
-                        {t("chainVariant")}: {page.variantId ?? t("noVariant")}
-                        {" · "}
-                        {t("chainPage")}: {page.pageId}
-                      </td>
-                      <td className="px-4 py-3 align-top whitespace-nowrap">{page.plannedOn ?? t("calendarNoDate")}</td>
-                      <td className="px-4 py-3 align-top whitespace-nowrap">{page.verifiedOn ?? t("notVerifiedYet")}</td>
-                      <td className="px-4 py-3 align-top whitespace-nowrap">{statusLabel[page.status]}</td>
-                      <td className="px-4 py-3 align-top whitespace-nowrap">{page.published ? t("liveAfterVerification") : t("notLive")}</td>
-                      <td className="px-4 py-3 align-top">
-                        {controlFor.get(page.channel) === page.id ? (
-                          <div className="flex min-w-44 flex-col gap-2">
-                            <input type="hidden" name="channel" value={page.channel} />
-                            <select
-                              name={`state-${page.channel}`}
-                              aria-label={t("settleStateFor", { channel: page.channel })}
-                              defaultValue=""
-                              className="h-10 w-full min-w-0 rounded-md border bg-background px-2"
-                            >
-                              <option value="">{t("settleUnchanged")}</option>
-                              <option value="verified">{t("settleVerified")}</option>
-                              <option value="blocked">{t("settleBlocked")}</option>
-                            </select>
-                            <input
-                              type="date"
-                              name={`verified-${page.channel}`}
-                              aria-label={t("settleDateFor", { channel: page.channel })}
-                              className="h-10 w-full min-w-0 rounded-md border bg-background px-2"
-                            />
-                          </div>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Button type="submit" className={actionClass}>{t("settleChannels")}</Button>
-          </form>
-        </section>
-        );
-      })}
+      {calendar.canWrite ? (
+        <form action={scanExpiredMaintenanceAction} className="flex min-w-0 flex-wrap gap-2">
+          <input type="hidden" name="brandId" value={requested} />
+          {factVersionId ? <input type="hidden" name="factVersionId" value={factVersionId} /> : null}
+          <Button type="submit" variant="outline" className={actionClass}>{t("scanExpiredFacts")}</Button>
+        </form>
+      ) : null}
+      {pages.length === 0 ? <p className={emptyClass}>{t("calendarEmpty")}</p> : (
+        <div id="calendar-tasks" tabIndex={-1} className="min-w-0 space-y-8">
+          {calendar.tasks.map((task) => {
+            const controlFor = new Map<string, string>();
+            for (const page of task.pages) {
+              if (!controlFor.has(page.channel)) controlFor.set(page.channel, page.id);
+            }
+            return (
+              <section key={task.id} className="min-w-0 space-y-3">
+                <h2 className="break-words text-lg font-semibold">{reasonLabel[task.reason]}</h2>
+                <p className="break-words text-sm leading-6 text-muted-foreground">
+                  {t("chainFact")}: <span className="[overflow-wrap:anywhere]">{task.factVersionId}</span>
+                </p>
+                <TaskContainer {...(calendar.canWrite ? { action: settleMaintenanceAction } : {})} className="min-w-0 space-y-3">
+                  {calendar.canWrite ? (
+                    <>
+                      <input type="hidden" name="brandId" value={requested} />
+                      <input type="hidden" name="taskId" value={task.id} />
+                      {factVersionId ? <input type="hidden" name="factVersionId" value={factVersionId} /> : null}
+                    </>
+                  ) : null}
+                  <div
+                    role="region"
+                    aria-label={t("calendarTable")}
+                    tabIndex={0}
+                    className="max-w-full min-w-0 overflow-x-auto rounded-xl border outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <table className="w-max min-w-full text-left text-sm">
+                      <thead className="bg-secondary/50 text-muted-foreground">
+                        <tr>
+                          <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("calendarPage")}</th>
+                          <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("calendarChannel")}</th>
+                          <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("calendarChain")}</th>
+                          <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("plannedOn")}</th>
+                          <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("verifiedOn")}</th>
+                          <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("maintenanceStatus")}</th>
+                          <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("publishState")}</th>
+                          {calendar.canWrite ? <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">{t("settleChannels")}</th> : null}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {task.pages.map((page) => (
+                          <tr key={page.id} className="border-t">
+                            <td className="w-72 max-w-72 px-4 py-3 align-top whitespace-normal [overflow-wrap:anywhere]">{page.pageUrl}</td>
+                            <td className="px-4 py-3 align-top whitespace-nowrap">{page.channel}</td>
+                            <td className="w-72 max-w-72 px-4 py-3 align-top whitespace-normal [overflow-wrap:anywhere]">
+                              {t("chainDraft")}: {page.draftId}
+                              {" · "}
+                              {t("chainVariant")}: {page.variantId ?? t("noVariant")}
+                              {" · "}
+                              {t("chainPage")}: {page.pageId}
+                            </td>
+                            <td className="px-4 py-3 align-top whitespace-nowrap">{page.plannedOn ?? t("calendarNoDate")}</td>
+                            <td className="px-4 py-3 align-top whitespace-nowrap">{page.verifiedOn ?? t("notVerifiedYet")}</td>
+                            <td className="px-4 py-3 align-top whitespace-nowrap">{statusLabel[page.status]}</td>
+                            <td className="px-4 py-3 align-top whitespace-nowrap">{page.published ? t("liveAfterVerification") : t("notLive")}</td>
+                            {calendar.canWrite ? <td className="px-4 py-3 align-top">
+                              {controlFor.get(page.channel) === page.id ? (
+                                <div className="flex min-w-44 flex-col gap-2">
+                                  <input type="hidden" name="channel" value={page.channel} />
+                                  <select
+                                    name={`state-${page.channel}`}
+                                    aria-label={t("settleStateFor", { channel: page.channel })}
+                                    defaultValue=""
+                                    className="h-10 w-full min-w-0 rounded-md border bg-background px-2"
+                                  >
+                                    <option value="">{t("settleUnchanged")}</option>
+                                    <option value="verified">{t("settleVerified")}</option>
+                                    <option value="blocked">{t("settleBlocked")}</option>
+                                  </select>
+                                  <input
+                                    type="date"
+                                    name={`verified-${page.channel}`}
+                                    aria-label={t("settleDateFor", { channel: page.channel })}
+                                    className="h-10 w-full min-w-0 rounded-md border bg-background px-2"
+                                  />
+                                </div>
+                              ) : null}
+                            </td> : null}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {calendar.canWrite ? <Button type="submit" className={actionClass}>{t("settleChannels")}</Button> : null}
+                </TaskContainer>
+              </section>
+            );
+          })}
+        </div>
+      )}
     </CalendarCanvas>
   );
 }

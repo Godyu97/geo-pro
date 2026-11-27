@@ -1764,6 +1764,8 @@
     "calendarReasonRevoked": "事实已撤销",
     "calendarTaskPlanned": "有页面尚未核验。计划日不是上线日期。先打开尚未核验的发布记录。",
     "calendarTaskBlocked": "已核验的渠道保持核验结果。受阻渠道单独标出，不会改掉其他渠道。下一步是查看受阻发布。",
+    "calendarSharedPlanned": "部分页面尚待核验，可在受影响页面中查看各渠道的状态。",
+    "calendarSharedBlocked": "部分渠道受阻，其他渠道的核验结果仍可查看。",
     "calendarTaskVerified": "这些页面都已有核验日。计划日仍不是上线日期。",
     "calendarTaskEmpty": "还没有维护任务。事实到期或撤销后，受影响页面会出现在这里。计划日不是上线日期。",
     "calendarOpenPlanned": "打开尚未核验的发布",

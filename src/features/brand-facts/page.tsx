@@ -23,23 +23,19 @@ const maintenanceReasons = {
   removed: "calendarReasonRemoved",
 } as const;
 
-async function FactMaintenance({ ownerId, brandId, factId }: { ownerId: string; brandId: string; factId: string }) {
+async function FactMaintenance({ actorId, brandId, factId }: { actorId: string; brandId: string; factId: string }) {
   const t = await getTranslator("content");
   const facts = await getTranslator("brandFacts");
-  let failed = false;
-  let tasks: Awaited<ReturnType<typeof readContentCalendar>> | { error: "NOT_FOUND" } = { error: "NOT_FOUND" };
-  try {
-    tasks = await readContentCalendar(getConnection(), ownerId, { brandId, factVersionId: factId });
-    if ("error" in tasks) failed = true;
-  } catch {
-    failed = true;
-  }
+  const tasks = await Promise.resolve()
+    .then(() => readContentCalendar(getConnection(), actorId, { brandId, factVersionId: factId }))
+    .catch(() => ({ error: "SERVICE_UNAVAILABLE" as const }));
+  if ("error" in tasks && tasks.error === "NOT_FOUND") return null;
   const href = `/dashboard/content/calendar?brandId=${encodeURIComponent(brandId)}&factVersionId=${encodeURIComponent(factId)}`;
-  const rows = failed || "error" in tasks ? [] : tasks.tasks;
+  const rows = "error" in tasks ? [] : tasks.tasks;
   return (
     <section className="min-w-0 space-y-3 rounded-xl border bg-card px-4 py-4">
       <h2 className="text-lg font-semibold">{facts("maintenanceChain")}</h2>
-      {failed ? <p role="alert" className="text-sm leading-6">{facts("maintenanceChainUnavailable")}</p> : rows.length === 0 ? (
+      {"error" in tasks ? <p role="alert" className="text-sm leading-6">{facts("maintenanceChainUnavailable")}</p> : rows.length === 0 ? (
         <p className="text-sm leading-6 text-muted-foreground">{facts("maintenanceChainEmpty")}</p>
       ) : rows.map((task) => (
         <div key={task.id} className="min-w-0 space-y-2 text-sm leading-6">
@@ -227,7 +223,7 @@ export async function BrandFactsPage({ params, searchParams }: {
           />
         ) : null}
       </aside>
-      {result.fact ? <FactMaintenance ownerId={user.id} brandId={id} factId={result.fact.id} /> : null}
+      {result.fact ? <FactMaintenance actorId={user.id} brandId={id} factId={result.fact.id} /> : null}
       <FactWorkspaceView key={user.id + id} brandId={id} locale={locale} data={result} messages={messages} />
     </div>
   );

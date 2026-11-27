@@ -448,3 +448,7 @@ export const calendarQuerySchema = z.strictObject({
   factVersionId: brandIdSchema.optional(),
 });
 export type CalendarQuery = z.infer<typeof calendarQuerySchema>;
+
+export const calendarErrorCodes = [
+  "NOT_FOUND", "FORBIDDEN", "INVALID_INPUT", "FACT_INVALID", "OPERATION_CONFLICT", "SERVICE_UNAVAILABLE",
+] as const satisfies readonly ContentError[];

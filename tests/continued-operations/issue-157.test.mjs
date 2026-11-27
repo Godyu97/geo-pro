@@ -21,6 +21,7 @@ import {
   scanExpiredContentMaintenance,
   settleContentMaintenance,
 } from "../../src/features/content/maintenance.ts";
+import { grantBrandMember, revokeBrandGrant } from "../../src/features/team-access/commands.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { testDatabase } from "../maintenance/helpers.mjs";
 
@@ -195,24 +196,33 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(await count(db, `SELECT count(*) AS "count" FROM content_maintenance_page WHERE brand_id = ?`, [brand]), 5);
   });
 
-  test(`${kind}: an expiry scan keeps one task and a blocked channel stays independent`, async (t) => {
+  test(`${kind}: a brand member scans expiry and settles channels without exposing or changing other data`, async (t) => {
     const { db, owner, brand, factId } = await setup(t, kind);
+    const member = await account(db);
+    const reader = await account(db);
+    const outsider = await account(db);
+    const otherBrand = randomUUID();
+    await new BrandDao(db).insertBrand(outsider, otherBrand, time);
+    const grant = await grantBrandMember(db, owner, { brandId: brand, userId: member, role: "member" }, time);
+    assert.equal(grant.grant.role, "member");
+    const readGrant = await grantBrandMember(db, owner, { brandId: brand, userId: reader, role: "read_only" }, time);
+    assert.equal(readGrant.grant.role, "read_only");
     const early = await scanExpiredContentMaintenance(db, owner, brand, clock);
     assert.equal(early.scanned, 0);
     assert.equal(early.opened, 0);
     assert.equal(await count(db, `SELECT count(*) AS "count" FROM content_maintenance_task WHERE brand_id = ?`, [brand]), 0);
 
-    const scanned = await scanExpiredContentMaintenance(db, owner, brand, () => expiredAt);
+    const scanned = await scanExpiredContentMaintenance(db, member, brand, () => expiredAt);
     assert.equal(scanned.scanned, 1);
     assert.equal(scanned.opened, 1);
     assert.equal(scanned.tasks.length, 1);
     assert.equal(scanned.tasks[0].pageCount, 5);
-    const again = await scanExpiredContentMaintenance(db, owner, brand, () => expiredAt);
+    const again = await scanExpiredContentMaintenance(db, member, brand, () => expiredAt);
     assert.equal(again.opened, 0);
     assert.equal(again.tasks[0].taskId, scanned.tasks[0].taskId);
     assert.equal(await count(db, `SELECT count(*) AS "count" FROM content_maintenance_task WHERE brand_id = ?`, [brand]), 1);
 
-    const settled = await settleContentMaintenance(db, owner, {
+    const settlement = {
       action: "settle-maintenance",
       brandId: brand,
       taskId: scanned.tasks[0].taskId,
@@ -221,7 +231,24 @@ for (const kind of ["sqlite", "postgresql"]) {
         { channel: "wechat", state: "verified", verifiedOn: "2026-11-20" },
         { channel: "zhihu", state: "blocked" },
       ],
-    }, () => expiredAt);
+    };
+    for (const [actor, error] of [[reader, "FORBIDDEN"], [outsider, "NOT_FOUND"]]) {
+      assert.deepEqual(await scanExpiredContentMaintenance(db, actor, brand, () => expiredAt), { error });
+      assert.deepEqual(await settleContentMaintenance(db, actor, settlement, () => expiredAt), { error });
+      assert.deepEqual(await openContentMaintenance(db, actor, {
+        action: "open-maintenance", brandId: brand, factVersionId: factId, reason: "expired", schedules: [],
+      }, () => expiredAt), { error });
+    }
+    assert.deepEqual(await readContentCalendar(db, outsider, { brandId: brand }), { error: "NOT_FOUND" });
+    assert.deepEqual(await readContentCalendar(db, member, { brandId: otherBrand }), { error: "NOT_FOUND" });
+    assert.deepEqual(await settleContentMaintenance(db, outsider, {
+      ...settlement, brandId: otherBrand,
+    }, () => expiredAt), { error: "NOT_FOUND" });
+    const before = await readContentCalendar(db, reader, { brandId: brand, factVersionId: factId });
+    assert.equal(before.canWrite, false);
+    assert.ok(taskPages(before).pages.every((page) => page.status === "planned"));
+
+    const settled = await settleContentMaintenance(db, member, settlement, () => expiredAt);
     assert.deepEqual(settled.rolledBack, []);
     const pages = new Map(settled.pages.map((page) => [page.channel, page]));
     assert.equal(pages.get("site").status, "verified");
@@ -231,9 +258,20 @@ for (const kind of ["sqlite", "postgresql"]) {
     assert.equal(pages.get("baijiahao").status, "planned");
     assert.equal(pages.get("toutiao").status, "planned");
     const calendar = taskPages(await readContentCalendar(db, owner, { brandId: brand, factVersionId: factId }));
+    const memberCalendar = await readContentCalendar(db, member, { brandId: brand, factVersionId: factId });
+    assert.equal(memberCalendar.canWrite, true);
+    assert.equal(memberCalendar.canOpenPublication, false);
+    assert.deepEqual(taskPages(memberCalendar), calendar);
+    assert.deepEqual(taskPages(await readContentCalendar(db, reader, { brandId: brand, factVersionId: factId })), calendar);
     assert.equal(calendar.reason, "expired");
     assert.equal(calendar.pages.find((page) => page.channel === "site").status, "verified");
     assert.equal(calendar.pages.find((page) => page.channel === "zhihu").status, "blocked");
+    const [stored] = await queryWithParameters(db,
+      "SELECT owner_id, status FROM content_maintenance_task WHERE id = ?", [scanned.tasks[0].taskId]);
+    assert.deepEqual({ ...stored }, { owner_id: owner, status: "open" });
+    assert.equal((await revokeBrandGrant(db, owner, grant.grant.id, expiredAt)).error, undefined);
+    assert.deepEqual(await readContentCalendar(db, member, { brandId: brand }), { error: "NOT_FOUND" });
+    assert.deepEqual(await settleContentMaintenance(db, member, settlement, () => expiredAt), { error: "NOT_FOUND" });
 
     const plan = await queryWithParameters(db,
       `${db.kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN "}SELECT id FROM (

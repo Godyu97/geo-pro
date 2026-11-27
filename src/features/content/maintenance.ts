@@ -1,11 +1,16 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { DatabaseConnection, TransactionConnection } from "../../lib/db/connection.ts";
+import { cache } from "react";
+import type { DatabaseConnection, QueryConnection, TransactionConnection } from "../../lib/db/connection.ts";
 import { FactDao } from "../brand-facts/dao.ts";
 import { factStatus } from "../brand-facts/rules.ts";
 import { BrandDao } from "../brands/dao.ts";
 import { calendarRow, impactSurface, settleChannels } from "../channel-variants/rules.ts";
+import { authorizeBrandActor } from "../team-access/brand-scope.ts";
+import { TeamAccessDao } from "../team-access/dao.ts";
+import { authorizePlatformAdmin } from "../team-access/platform-role.ts";
+import { brandDutyAllows } from "../team-access/rules.ts";
 import {
   targetChannelSchema,
   type CalendarQuery,
@@ -55,9 +60,32 @@ export function presentMaintenancePage(row: MaintenancePageRow) {
   };
 }
 
-async function ownedBrand(db: TransactionConnection | DatabaseConnection, ownerId: string, brandId: string) {
+async function ownedBrand(db: QueryConnection, ownerId: string, brandId: string) {
   const brand = await new BrandDao(db).owned(ownerId, brandId);
   return brand && brand.status === "active" ? brand : null;
+}
+
+export const readMaintenanceAccess = cache(async (db: QueryConnection, actorId: string, brandId: string) => {
+  const scope = await authorizeBrandActor(db, actorId, brandId, "read");
+  if (scope && await ownedBrand(db, scope.ownerId, brandId)) {
+    return { ownerId: scope.ownerId, canWrite: brandDutyAllows(scope.role, "write") };
+  }
+  if (await authorizePlatformAdmin(db, actorId)) {
+    const brand = await new TeamAccessDao(db).brandActor(actorId, brandId);
+    if (brand?.status === "active" && !brand.frozenAt) return { ownerId: brand.ownerId, canWrite: false };
+  }
+  return null;
+});
+
+async function lockMaintenanceWrite(db: TransactionConnection, actorId: string, brandId: string) {
+  const scope = await authorizeBrandActor(db, actorId, brandId, "write");
+  if (!scope) return denied(await readMaintenanceAccess(db, actorId, brandId) ? "FORBIDDEN" : "NOT_FOUND");
+  if (!await new BrandDao(db).lockOwner(scope.ownerId)) return denied("NOT_FOUND");
+  const current = await authorizeBrandActor(db, actorId, brandId, "write");
+  if (current?.ownerId !== scope.ownerId) {
+    return denied(await readMaintenanceAccess(db, actorId, brandId) ? "FORBIDDEN" : "NOT_FOUND");
+  }
+  return current;
 }
 
 function pageChannel(declaration: string, targetChannel: string) {
@@ -88,11 +116,15 @@ async function presentPages(dao: ContentDao, ownerId: string, rows: MaintenanceP
 
 export async function openContentMaintenance(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: OpenMaintenanceInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
-  return db.transaction((transaction) => openMaintenanceWithin(transaction, ownerId, input, clock));
+  return db.transaction(async (transaction) => {
+    const scope = await lockMaintenanceWrite(transaction, actorId, input.brandId);
+    if ("error" in scope) return scope;
+    return openMaintenanceForBrand(transaction, scope.ownerId, input, clock);
+  });
 }
 
 async function openMaintenanceWithin(
@@ -103,6 +135,15 @@ async function openMaintenanceWithin(
 ) {
     if (!await new BrandDao(transaction).lockOwner(ownerId)) return denied("NOT_FOUND");
     if (!await ownedBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+  return openMaintenanceForBrand(transaction, ownerId, input, clock);
+}
+
+async function openMaintenanceForBrand(
+  transaction: TransactionConnection,
+  ownerId: string,
+  input: OpenMaintenanceInput,
+  clock: Clock,
+) {
     const now = clock();
     const fact = await new FactDao(transaction, { ownerId, brandId: input.brandId }).version(input.factVersionId);
     if (!fact) return denied("NOT_FOUND");
@@ -197,13 +238,14 @@ async function openMaintenanceWithin(
 
 export async function settleContentMaintenance(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: SettleMaintenanceInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
   return db.transaction(async (transaction) => {
-    if (!await new BrandDao(transaction).lockOwner(ownerId)) return denied("NOT_FOUND");
-    if (!await ownedBrand(transaction, ownerId, input.brandId)) return denied("NOT_FOUND");
+    const scope = await lockMaintenanceWrite(transaction, actorId, input.brandId);
+    if ("error" in scope) return scope;
+    const { ownerId } = scope;
     const dao = new ContentDao(transaction);
     const task = await dao.getMaintenanceTask(ownerId, input.taskId);
     if (!task || task.brandId !== input.brandId || task.status !== "open") return denied("NOT_FOUND");
@@ -270,14 +312,18 @@ export async function settleContentMaintenance(
 
 export async function readContentCalendar(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   query: CalendarQuery,
 ) {
-  if (!await ownedBrand(db, ownerId, query.brandId)) return denied("NOT_FOUND");
+  const access = await readMaintenanceAccess(db, actorId, query.brandId);
+  if (!access) return denied("NOT_FOUND");
+  const { ownerId } = access;
   const dao = new ContentDao(db);
   const tasks = await dao.listMaintenanceTasks(ownerId, query.brandId, query.factVersionId, taskCap);
   const pages = await presentPages(dao, ownerId, await dao.listMaintenancePages(ownerId, tasks.map((task) => task.id)));
   return {
+    canWrite: access.canWrite,
+    canOpenPublication: access.canWrite && ownerId === actorId,
     tasks: tasks.map((task) => ({
       id: task.id,
       factVersionId: task.factVersionId,
@@ -292,41 +338,48 @@ const scanCap = 50;
 
 export async function scanExpiredContentMaintenance(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   brandId: string,
   clock: Clock = () => new Date().toISOString(),
 ) {
-  if (!await ownedBrand(db, ownerId, brandId)) return denied("NOT_FOUND");
-  const ids = await new ContentDao(db).listPublicationFactVersionIds(ownerId, brandId, scanCap);
-  const today = clock().slice(0, 10);
-  const expired = ids.length === 0
-    ? []
-    : (await new FactDao(db, { ownerId, brandId }).versionsById(ids)).filter((fact) => factStatus(fact, today) === "expired");
-  const tasks = [];
-  let opened = 0;
-  for (const fact of expired) {
-    const result = await openContentMaintenance(db, ownerId, {
-      action: "open-maintenance",
-      brandId,
-      factVersionId: fact.id,
-      reason: "expired",
-      schedules: [],
-    }, clock);
-    if ("error" in result) {
-      if (result.error === "FACT_INVALID") continue;
-      return result;
-    }
-    if (result.created) opened += 1;
-    if (result.taskId) {
-      tasks.push({
-        taskId: result.taskId,
-        factVersionId: fact.id,
-        created: result.created,
-        pageCount: result.pageCount,
-      });
-    }
+  try {
+    return await db.transaction(async (transaction) => {
+      const scope = await lockMaintenanceWrite(transaction, actorId, brandId);
+      if ("error" in scope) return scope;
+      const { ownerId } = scope;
+      const ids = await new ContentDao(transaction).listPublicationFactVersionIds(ownerId, brandId, scanCap);
+      const now = clock();
+      const today = now.slice(0, 10);
+      const expired = ids.length === 0
+        ? []
+        : (await new FactDao(transaction, { ownerId, brandId }).versionsById(ids)).filter((fact) => factStatus(fact, today) === "expired");
+      const tasks = [];
+      let opened = 0;
+      for (const fact of expired) {
+        const result = await openMaintenanceForBrand(transaction, ownerId, {
+          action: "open-maintenance",
+          brandId,
+          factVersionId: fact.id,
+          reason: "expired",
+          schedules: [],
+        }, () => now);
+        if ("error" in result) throw new ContentMaintenanceAbort(result.error);
+        if (result.created) opened += 1;
+        if (result.taskId) {
+          tasks.push({
+            taskId: result.taskId,
+            factVersionId: fact.id,
+            created: result.created,
+            pageCount: result.pageCount,
+          });
+        }
+      }
+      return { scanned: expired.length, opened, tasks };
+    });
+  } catch (error) {
+    if (error instanceof ContentMaintenanceAbort) return denied(error.code);
+    throw error;
   }
-  return { scanned: expired.length, opened, tasks };
 }
 
 export async function openRevokedFactMaintenance(

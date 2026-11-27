@@ -19,6 +19,7 @@ import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
 import { requireSession } from "@/lib/auth/session";
 import { brandIntakeDecision, type BrandIntakeMode } from "@/features/brands/intake";
 import { feedbackBrandUnavailable } from "@/features/business-feedback/workspace";
+import { calendarBrandUnavailable } from "@/features/content/calendar-workspace";
 import { entityBrandUnavailable } from "@/features/entity-accuracy/access";
 import { retestBrandUnavailable } from "@/features/formal-retest/workspace";
 
@@ -39,7 +40,8 @@ export default async function DashboardLayout({
   const requestPath = requestHeaders.get("x-geo-path");
   if (await entityBrandUnavailable(user.id, requestPath)
     || await retestBrandUnavailable(user.id, requestPath)
-    || await feedbackBrandUnavailable(user.id, requestPath)) notFound();
+    || await feedbackBrandUnavailable(user.id, requestPath)
+    || await calendarBrandUnavailable(user.id, requestPath)) notFound();
   const locale = await getLocale();
   const messages = getMessages(locale);
   const t = await getTranslator("common");
