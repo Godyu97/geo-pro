@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { BrandDao } from "../brands/dao.ts";
 import { authorizeBrandActor, workspaceBrand } from "../team-access/brand-scope.ts";
 import type { DatabaseConnection, QueryConnection } from "../../lib/db/connection.ts";
-import { promptCommand, promptScope, type DraftContent, type PromptCursor, type PromptScope } from "./contracts.ts";
+import { draftContent, maxDraftQuestions, promptCommand, promptScope, type DraftContent, type PromptCursor, type PromptScope } from "./contracts.ts";
+import type { BrandFields } from "../brands/contracts.ts";
 import { PromptDao, pageSize } from "./dao.ts";
 import {
   annotateDraft, budgetInput, changedQuestionIds, defaultCandidates, termList, validateDraft,
@@ -17,16 +18,9 @@ const fail = <T extends string>(error: T) => ({ error });
 type ReadQuery = { version?: string; after?: PromptCursor };
 
 export async function readPromptWorkspace(db: QueryConnection, scope: PromptScope, query: ReadQuery) {
-  let effectiveOwnerId = scope.ownerId;
-  let readOnlyMember = false;
-  let brand = await new BrandDao(db).version(scope.ownerId, scope.brandId);
-  if (!brand) {
-    const memberScope = await authorizeBrandActor(db, scope.ownerId, scope.brandId, "read");
-    if (!memberScope) return null;
-    effectiveOwnerId = memberScope.ownerId;
-    readOnlyMember = memberScope.role === "read_only";
-    brand = await new BrandDao(db).version(effectiveOwnerId, scope.brandId);
-  }
+  const access = await authorizeBrandActor(db, scope.ownerId, scope.brandId, "read");
+  if (!access) return null;
+  const brand = await new BrandDao(db).version(access.ownerId, scope.brandId);
   if (!brand) return null;
   const dao = new PromptDao(db, scope.brandId);
   const [draft, versions, selected, referenced, family, suggestions] = await Promise.all([
@@ -35,7 +29,7 @@ export async function readPromptWorkspace(db: QueryConnection, scope: PromptScop
     query.version ? dao.version(query.version) : Promise.resolve(null),
     dao.referencedIds(),
     dao.familyId(),
-    dao.suggestions(effectiveOwnerId),
+    dao.suggestions(access.ownerId),
   ]);
   if (query.version && !selected) return null;
   const base = draft?.baseSetId ? await dao.version(draft.baseSetId) : null;
@@ -49,7 +43,7 @@ export async function readPromptWorkspace(db: QueryConnection, scope: PromptScop
     const last = versions[pageSize - 1];
     return {
     brandName: brand.fields.name,
-    readOnly: brand.status !== "active" || readOnlyMember,
+    readOnly: brand.status !== "active" || access.role === "read_only",
     brand: fallback,
     terms,
     onboarding: brand.fields.questions.filter((text) => !editor.questions.some((question) => question.text === text)),
@@ -120,6 +114,57 @@ async function writeDraft(
   return { revision };
 }
 
+export function ensureCandidateCluster(content: DraftContent, language: string): DraftContent {
+  const fallback = language.toLowerCase().startsWith("zh")
+    ? { audience: "购买决策者", intent: "了解购买条件" }
+    : { audience: "Buyer", intent: "Understand purchase conditions" };
+  const [first, ...rest] = content.clusters;
+  if (!first) {
+    return {
+      ...content,
+      clusters: [{ id: randomUUID(), ...fallback, primaryPage: "", conversionAction: "" }],
+    };
+  }
+  if (first.audience && first.intent) return content;
+  return {
+    ...content,
+    clusters: [{ ...first, audience: first.audience || fallback.audience, intent: first.intent || fallback.intent }, ...rest],
+  };
+}
+
+/** The caller holds the brand owner's write lock in the same transaction. */
+export async function appendPromptCandidates(
+  db: QueryConnection,
+  brandId: string,
+  fields: BrandFields,
+  candidates: readonly { id: string; text: string; sourceNote: string }[],
+  acceptSimilar: boolean,
+  now: string,
+) {
+  const dao = new PromptDao(db, brandId);
+  const current = await dao.draft();
+  const fallback = current ? null : await dao.latestVersion();
+  const base = current?.content ?? fallback?.content ?? seedContent(fields);
+  const existing = new Set(base.questions.map(({ id }) => id));
+  const additions = candidates.filter(({ id }) => !existing.has(id));
+  if (!additions.length) return { added: 0 };
+  if (base.questions.length + additions.length > maxDraftQuestions) return fail("notReady");
+  const content = ensureCandidateCluster(base, fields.language);
+  const parsed = draftContent.safeParse({
+    clusters: content.clusters,
+    questions: [...content.questions, ...additions.map((question) => ({
+      ...question, clusterId: content.clusters[0].id, source: "generated", type: "discovery", stage: "consider",
+      region: fields.region, language: fields.language, status: "candidate", acceptSimilar, primary: false,
+    }))],
+  });
+  if (!parsed.success) return fail("invalidInput");
+  const validated = validateDraft(parsed.data, termList(fields), await dao.referencedIds(), "save");
+  if ("error" in validated) return validated;
+  const saved = await writeDraft(dao, current?.revision ?? null, current?.baseSetId ?? null,
+    current ? current.baseSetId : fallback?.id ?? null, validated.content, now);
+  return "error" in saved ? saved : { added: additions.length };
+}
+
 export async function executePromptCommand(db: DatabaseConnection, inputScope: unknown, input: unknown, clock = clockNow) {
   const scope = promptScope.parse(inputScope);
   const command = promptCommand.safeParse(input);
@@ -127,18 +172,14 @@ export async function executePromptCommand(db: DatabaseConnection, inputScope: u
   const operation = command.data;
   return db.transaction(async (transaction) => {
     const brands = new BrandDao(transaction);
-    if (!await brands.lockOwner(scope.ownerId)) return fail("notFound");
-    let effectiveOwnerId = scope.ownerId;
-    let brand = await brands.version(scope.ownerId, scope.brandId);
-    if (!brand) {
-      const writeScope = await authorizeBrandActor(transaction, scope.ownerId, scope.brandId, "write");
-      if (!writeScope) {
-        const readScope = await authorizeBrandActor(transaction, scope.ownerId, scope.brandId, "read");
-        return readScope ? fail("readOnly") : fail("notFound");
-      }
-      effectiveOwnerId = writeScope.ownerId;
-      brand = await brands.version(effectiveOwnerId, scope.brandId);
+    const access = await authorizeBrandActor(transaction, scope.ownerId, scope.brandId, "write");
+    if (!access || !await brands.lockOwner(access.ownerId)) {
+      const readScope = await authorizeBrandActor(transaction, scope.ownerId, scope.brandId, "read");
+      return readScope ? fail("readOnly") : fail("notFound");
     }
+    const currentAccess = await authorizeBrandActor(transaction, scope.ownerId, scope.brandId, "write");
+    if (currentAccess?.ownerId !== access.ownerId) return fail("notFound");
+    const brand = await brands.version(access.ownerId, scope.brandId);
     if (!brand) return fail("notFound");
     if (brand.status !== "active") return fail("readOnly");
     const dao = new PromptDao(transaction, scope.brandId);

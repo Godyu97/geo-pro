@@ -1,12 +1,14 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { WorkspaceJump } from "@/components/layout/workspace-jump";
 import { WorkspaceReadError, workspaceActionClass } from "@/components/layout/workspace-read-error";
 import { Button } from "@/components/ui/button";
 import { requireSession } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
 import { getLocale, getMessages, getTranslator } from "@/lib/i18n/server";
+import { brandIdSchema } from "../brands/contracts.ts";
 import { loadOwnedLabels } from "../team-access/commands.ts";
-import { listIndustryPacks } from "./industry-pack-commands.ts";
+import { listIndustryPacks, readIndustryPacksForBrand } from "./industry-pack-commands.ts";
 import { IndustryPacksPanel } from "./industry-packs-panel";
 
 const entry = "/dashboard/brands/industry-packs";
@@ -17,27 +19,40 @@ export async function generateMetadata() {
   return { title: t("title"), robots: { index: false, follow: false } };
 }
 
-export default async function IndustryPacksPage() {
+export default async function IndustryPacksPage({ searchParams }: {
+  searchParams: Promise<{ brandId?: string | string[] }>;
+}) {
   const { user } = await requireSession();
+  const { brandId } = await searchParams;
+  const selected = brandId === undefined ? null : brandIdSchema.safeParse(brandId);
+  if (selected && !selected.success) notFound();
   const locale = await getLocale();
   const messages = getMessages(locale).industryPacks;
+  const returnPath = selected ? `${entry}?brandId=${selected.data}` : entry;
   let loaded;
   try {
     const db = getConnection();
-    const workspace = await listIndustryPacks(db, user.id);
-    const labels = await loadOwnedLabels(db, workspace.brands.map(({ id }) => id));
-    loaded = { workspace, labels };
+    const workspace = selected
+      ? await readIndustryPacksForBrand(db, user.id, selected.data)
+      : await listIndustryPacks(db, user.id);
+    if (!("error" in workspace)) {
+      const labels = await loadOwnedLabels(db, workspace.brands.map(({ id }) => id));
+      loaded = { workspace, labels };
+    }
   } catch {
-    return <WorkspaceReadError title={messages.title} message={messages.SERVICE_UNAVAILABLE} reloadHref={entry}
+    return <WorkspaceReadError title={messages.title} message={messages.SERVICE_UNAVAILABLE} reloadHref={returnPath}
       backHref={brandsHref} backLabel={messages.backBrands} logEvent="industry-packs-page-unavailable" />;
   }
+  if (!loaded) notFound();
 
   const { workspace, labels } = loaded;
   const hasBrands = workspace.brands.length > 0;
+  const editableBrands = workspace.brands.filter(({ canWrite }) => canWrite);
+  const canRegister = editableBrands.length > 0;
   const hasPacks = workspace.packs.length > 0;
   const enterScope = <WorkspaceJump href="#industry-pack-scope">{messages.enterScope}</WorkspaceJump>;
   const viewPacks = <WorkspaceJump href="#industry-pack-list">{messages.viewPacks}</WorkspaceJump>;
-  const primary = hasBrands ? (hasPacks ? viewPacks : enterScope)
+  const primary = hasPacks ? viewPacks : canRegister ? enterScope
     : <Link href={brandsHref} prefetch={false}>{messages.openBrands}</Link>;
 
   return (
@@ -50,7 +65,7 @@ export default async function IndustryPacksPage() {
           <Button asChild className={workspaceActionClass}>
             {primary}
           </Button>
-          {hasPacks && <Button asChild variant="outline" className={workspaceActionClass}>{hasBrands ? enterScope : viewPacks}</Button>}
+          {hasPacks && canRegister && <Button asChild variant="outline" className={workspaceActionClass}>{enterScope}</Button>}
           {hasBrands && (
             <Button asChild variant="outline" className={workspaceActionClass}>
               <Link href={brandsHref} prefetch={false}>{messages.backBrands}</Link>
@@ -58,9 +73,9 @@ export default async function IndustryPacksPage() {
           )}
         </div>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{messages.description}</p>
-        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{messages.fixtureNote}</p>
       </header>
-      <IndustryPacksPanel brands={workspace.brands} packs={workspace.packs} labels={labels} messages={messages} />
+      <IndustryPacksPanel brands={editableBrands} packs={workspace.packs} labels={labels} messages={messages}
+        hasBrands={hasBrands} returnPath={returnPath} />
     </div>
   );
 }

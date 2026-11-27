@@ -6,6 +6,7 @@ import { initialBrandFields } from "../../src/features/brands/contracts.ts";
 import { BrandDao } from "../../src/features/brands/dao.ts";
 import {
   draftIndustryPackQuestions,
+  executeIndustryPackCommand,
   listIndustryPacks,
   readIndustryPack,
   registerIndustryPack,
@@ -19,7 +20,7 @@ import {
   IndustryPackDao,
   industryPackQuestionsForPackQuery,
   industryPacksForBrandQuery,
-  industryPacksForOwnerQuery,
+  industryPacksForBrandsQuery,
 } from "../../src/features/local-presence/industry-pack-dao.ts";
 import {
   draftQuestionBodies,
@@ -28,6 +29,8 @@ import {
   materialsAskToWidenScope,
 } from "../../src/features/local-presence/industry-pack.ts";
 import { safeReturnTo } from "../../src/lib/auth/return-to.ts";
+import { PromptDao } from "../../src/features/prompts/dao.ts";
+import { executePromptCommand } from "../../src/features/prompts/service.ts";
 import { queryWithParameters } from "../../src/lib/db/connection.ts";
 import { structure, testDatabase } from "../maintenance/helpers.mjs";
 
@@ -69,12 +72,12 @@ test("industry pack copy refuses uncovered regulated drafts and keeps questions 
   assert.match(zhCN.industryPacks.description, /不会调用模型/);
   assert.match(zhCN.industryPacks.description, /不会入库/);
   assert.match(zhCN.industryPacks.description, /草稿/);
-  assert.match(zhCN.industryPacks.SCOPE_BLOCKED, /没有调用模型/);
-  assert.match(zhCN.industryPacks.draftSaved, /没有变成可用/);
+  assert.match(zhCN.industryPacks.SCOPE_BLOCKED, /未覆盖/);
+  assert.match(zhCN.industryPacks.draftSaved, /审核题包/);
   assert.match(en.industryPacks.description, /regulated scenario/i);
   assert.match(en.industryPacks.description, /model is not called/i);
   assert.match(en.industryPacks.description, /stay drafts/i);
-  assert.match(en.industryPacks.SCOPE_BLOCKED, /model was not called/i);
+  assert.match(en.industryPacks.SCOPE_BLOCKED, /does not cover/i);
   assert.equal(JSON.stringify(zhCN.industryPacks).includes(scopeText), false);
   assert.equal(JSON.stringify(en.industryPacks).includes(scopeText), false);
   assert.equal(JSON.stringify(zhCN.industryPacks).includes(keptQuestion), false);
@@ -83,7 +86,7 @@ test("industry pack copy refuses uncovered regulated drafts and keeps questions 
   const page = await readFile(new URL("../../src/features/local-presence/industry-packs-page.tsx", import.meta.url), "utf8");
   const panel = await readFile(new URL("../../src/features/local-presence/industry-packs-panel.tsx", import.meta.url), "utf8");
   const source = await readFile(new URL("../../src/features/local-presence/industry-pack-commands.ts", import.meta.url), "utf8");
-  assert.equal(page.includes("description") && page.includes("fixtureNote"), true);
+  assert.equal(page.includes("description") && page.includes("fixtureNote") === false, true);
   assert.equal(panel.includes("scopeLine") && panel.includes("questionDraft") && panel.includes("SCOPE_BLOCKED") === false, true);
   assert.equal(panel.includes(scopeText), false);
   const draftSource = source.slice(source.indexOf("export async function draftIndustryPackQuestions"));
@@ -328,7 +331,8 @@ for (const kind of ["sqlite", "postgresql"]) {
           scenario: "general",
           materials: cleanMaterials,
         }, options);
-        assert.deepEqual(emptyGuarantee, { error: "INVALID_MODEL_OUTPUT" });
+        assert.equal(emptyGuarantee.error, "INVALID_MODEL_OUTPUT");
+        assert.ok(emptyGuarantee.traceId);
         assert.equal(await countBy(db, "industry_pack_question", "pack_id", created.pack.id), 2);
 
         mode = "down";
@@ -408,7 +412,7 @@ for (const kind of ["sqlite", "postgresql"]) {
         if (db.kind === "postgresql") await db.query("ANALYZE industry_pack");
         if (db.kind === "postgresql") await db.query("ANALYZE industry_pack_question");
         const explain = db.kind === "postgresql" ? "EXPLAIN (COSTS OFF) " : "EXPLAIN QUERY PLAN ";
-        const ownerQuery = industryPacksForOwnerQuery(owner);
+        const ownerQuery = industryPacksForBrandsQuery([{ ownerId: owner, brandId: brand }, { ownerId: owner, brandId: randomUUID() }]);
         const ownerPlan = JSON.stringify(await queryWithParameters(db, explain + ownerQuery.sql, ownerQuery.values));
         assert.match(ownerPlan, /industry_pack_owner(?:_brand)?_idx/);
         if (db.kind === "postgresql") assert.doesNotMatch(ownerPlan, /Seq Scan on industry_pack/);
@@ -420,6 +424,60 @@ for (const kind of ["sqlite", "postgresql"]) {
         assert.match(questionPlan, /industry_pack_question_pack_idx/);
         if (db.kind === "postgresql") assert.doesNotMatch(questionPlan, /Seq Scan on industry_pack_question/);
         assert.equal(await promptSets(), 0);
+        assert.equal(await runs(), 0);
+
+        const promptDao = new PromptDao(db, brand);
+        const cluster = { id: randomUUID(), audience: "购买负责人", intent: "采购选型", primaryPage: "", conversionAction: "" };
+        const original = {
+          clusters: [cluster],
+          questions: ["企业怎样选择本地配送供应商？", "如何了解送货周期和服务范围？", "签订供应合同时应该查验哪些条款？"].map((text) => ({
+            id: randomUUID(), clusterId: cluster.id, text, source: "manual", sourceNote: "", type: "discovery",
+            stage: "consider", region: "CN", language: "zh-CN", status: "confirmed", acceptSimilar: false, primary: true,
+          })),
+        };
+        const frozen = await executePromptCommand(db, { ownerId: owner, brandId: brand }, {
+          action: "freeze", id: randomUUID(), setId: randomUUID(), revision: null, baseSetId: null, content: original,
+        });
+        assert.equal(frozen.version, 1);
+        const frozenBefore = await promptDao.version(frozen.id);
+        const transition = (from, to) => ({ action: "transition", from, to });
+        const first = drafted.pack.questions[0].id;
+        const adopt = (questionIds, scenario = "general") => ({ action: "adopt", questionIds, scenario, acceptSimilar: false });
+        const run = (operation, actor = owner, id = created.pack.id) => executeIndustryPackCommand(db, actor, id, operation, { clock });
+        assert.deepEqual(await run(transition("draft", "available")), { error: "STATUS_CONFLICT" });
+        assert.deepEqual(await run(adopt([first])), { error: "STATUS_CONFLICT" });
+        assert.deepEqual(await run(transition("draft", "reviewed"), outsider), { error: "NOT_FOUND" });
+        assert.equal((await run(transition("draft", "reviewed"))).pack.status, "reviewed");
+        assert.equal((await run(transition("draft", "reviewed"))).pack.status, "reviewed");
+        assert.deepEqual(await run(adopt([first], "regulated")), { error: "SCOPE_BLOCKED" });
+        assert.deepEqual(await run(adopt([first, coveredDraft.pack.questions[0].id])), { error: "NOT_FOUND" });
+        assert.deepEqual((await promptDao.draft()).content, frozenBefore.content);
+
+        const callsBefore = calls.length;
+        assert.deepEqual(await draftIndustryPackQuestions(db, owner, created.pack.id, {
+          scenario: "general", materials: cleanMaterials,
+        }, options), { error: "STATUS_CONFLICT" });
+        assert.equal(calls.length, callsBefore);
+        const concurrent = await Promise.all([run(adopt([first])), run(adopt([first]))]);
+        assert.deepEqual(concurrent.map((result) => result.added).sort(), [0, 1]);
+        const adopted = await promptDao.draft();
+        assert.equal(adopted.revision, frozen.revision + 1);
+        assert.equal(adopted.baseSetId, frozen.id);
+        assert.deepEqual(adopted.content.questions.slice(0, 3), frozenBefore.content.questions);
+        const [candidate] = adopted.content.questions.slice(3);
+        assert.equal(candidate.id, first);
+        assert.equal(candidate.text, keptQuestion);
+        assert.equal(candidate.status, "candidate");
+        assert.equal(candidate.sourceNote, `industry-pack:${created.pack.id}`);
+        assert.deepEqual(await promptDao.version(frozen.id), frozenBefore);
+        assert.equal((await run(transition("reviewed", "available"))).pack.status, "available");
+        assert.equal((await run(adopt([drafted.pack.questions[1].id]))).added, 1);
+        assert.equal((await run(transition("available", "retired"))).pack.status, "retired");
+        assert.deepEqual(await run(adopt([first])), { error: "STATUS_CONFLICT" });
+        assert.equal((await run(transition("draft", "reviewed"), owner, covered.pack.id)).pack.status, "reviewed");
+        assert.deepEqual(await run(adopt([coveredDraft.pack.questions[0].id], "regulated"), owner, covered.pack.id), { error: "DRAFT_DUPLICATE" });
+        assert.equal((await run(transition("reviewed", "retired"), owner, covered.pack.id)).pack.status, "retired");
+        assert.equal(await promptSets(), 1);
         assert.equal(await runs(), 0);
       } finally {
         await ddl.cleanup();

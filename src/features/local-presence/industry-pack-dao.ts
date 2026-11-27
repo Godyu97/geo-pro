@@ -9,6 +9,7 @@ import {
   industryPackQuestionListLimit,
   industryPackScopeSchema,
   industryPackStatusSchema,
+  type IndustryPackStatus,
 } from "./industry-pack-contracts.ts";
 
 const timestampSchema = z.iso.datetime({ precision: 3 });
@@ -56,13 +57,13 @@ const packColumns = `id, brand_id AS "brandId", scope, covers_regulated AS "cove
 
 const questionColumns = `id, pack_id AS "packId", body, status, created_at AS "createdAt"`;
 
-export function industryPacksForOwnerQuery(ownerId: string) {
+export function industryPacksForBrandsQuery(brands: readonly { ownerId: string; brandId: string }[]) {
   return {
     sql: `SELECT ${packColumns} FROM industry_pack
-      WHERE owner_id = ?
-      ORDER BY created_at ASC, id ASC
+      WHERE ${brands.map(() => "(owner_id = ? AND brand_id = ?)").join(" OR ")}
+      ORDER BY created_at DESC, id DESC
       LIMIT ?`,
-    values: [ownerId, industryPackListLimit] as QueryValue[],
+    values: [...brands.flatMap(({ ownerId, brandId }) => [ownerId, brandId]), industryPackListLimit] as QueryValue[],
   };
 }
 
@@ -70,7 +71,7 @@ export function industryPacksForBrandQuery(ownerId: string, brandId: string) {
   return {
     sql: `SELECT ${packColumns} FROM industry_pack
       WHERE owner_id = ? AND brand_id = ?
-      ORDER BY created_at ASC, id ASC
+      ORDER BY created_at DESC, id DESC
       LIMIT ?`,
     values: [ownerId, brandId, industryPackListLimit] as QueryValue[],
   };
@@ -88,10 +89,13 @@ export function industryPackQuestionsForPackQuery(packId: string) {
 
 export function industryPackQuestionsQuery(packIds: readonly string[]) {
   return {
-    sql: `SELECT ${questionColumns} FROM industry_pack_question
-      WHERE pack_id IN (${packIds.map(() => "?").join(", ")})
-      ORDER BY pack_id ASC, created_at ASC, id ASC
-      LIMIT ?`,
+    sql: `SELECT ${questionColumns} FROM (
+        SELECT id, pack_id, body, status, created_at,
+          ROW_NUMBER() OVER (PARTITION BY pack_id ORDER BY created_at ASC, id ASC) AS position
+        FROM industry_pack_question WHERE pack_id IN (${packIds.map(() => "?").join(", ")})
+      ) ranked
+      WHERE position <= ?
+      ORDER BY pack_id ASC, created_at ASC, id ASC`,
     values: [...packIds, industryPackQuestionListLimit] as QueryValue[],
   };
 }
@@ -103,38 +107,38 @@ export class IndustryPackDao {
     this.db = db;
   }
 
-  async activeBrandIds(ownerId: string) {
-    const rows = await queryWithParameters(
-      this.db,
-      `SELECT id FROM brand
-        WHERE owner_id = ? AND status = 'active' AND frozen_at IS NULL
-        ORDER BY created_at ASC, id ASC
-        LIMIT ?`,
-      [ownerId, 20],
-    );
-    return z.array(z.object({ id: brandIdSchema })).parse(rows);
-  }
-
-  async packsForOwner(ownerId: string) {
-    const query = industryPacksForOwnerQuery(ownerId);
+  async packsForBrands(brands: readonly { ownerId: string; brandId: string }[]) {
+    if (!brands.length) return [];
+    const query = brands.length === 1
+      ? industryPacksForBrandQuery(brands[0].ownerId, brands[0].brandId)
+      : industryPacksForBrandsQuery(brands);
     return z.array(packRow).parse(await queryWithParameters(this.db, query.sql, query.values));
   }
 
-  async packsForBrand(ownerId: string, brandId: string) {
-    const query = industryPacksForBrandQuery(ownerId, brandId);
-    return z.array(packRow).parse(await queryWithParameters(this.db, query.sql, query.values));
+  async packBrand(packId: string) {
+    const [row] = await queryWithParameters(this.db, "SELECT brand_id FROM industry_pack WHERE id = ?", [packId]);
+    return row ? brandIdSchema.parse(row.brand_id) : null;
   }
 
-  async packForOwner(ownerId: string, packId: string) {
+  async packForBrand(ownerId: string, brandId: string, packId: string) {
     const rows = await queryWithParameters(
       this.db,
       `SELECT ${packColumns} FROM industry_pack
-        WHERE owner_id = ? AND id = ?
+        WHERE owner_id = ? AND brand_id = ? AND id = ?
         LIMIT 1`,
-      [ownerId, packId],
+      [ownerId, brandId, packId],
     );
     const parsed = z.array(packRow).parse(rows);
     return parsed[0] ?? null;
+  }
+
+  async transition(ownerId: string, brandId: string, packId: string, from: IndustryPackStatus, to: IndustryPackStatus) {
+    const rows = await queryWithParameters(this.db,
+      `UPDATE industry_pack SET status = ?
+       WHERE owner_id = ? AND brand_id = ? AND id = ? AND status = ?
+       RETURNING ${packColumns}`,
+      [to, ownerId, brandId, packId, from]);
+    return rows.length ? packRow.parse(rows[0]) : null;
   }
 
   async questionsForPacks(packIds: readonly string[]) {

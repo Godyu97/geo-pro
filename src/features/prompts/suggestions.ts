@@ -11,6 +11,7 @@ import {
   type DraftContent, type PromptScope, type PromptSuggestion, type SuggestionCandidate,
 } from "./contracts.ts";
 import { PromptDao } from "./dao.ts";
+import { ensureCandidateCluster } from "./service.ts";
 import { isNearDuplicate, normalizeQuestion, termList, validateDraft } from "./rules.ts";
 
 const promptSuggestionInstructions = [
@@ -66,28 +67,6 @@ function classify(existing: readonly string[], incoming: readonly ModelQuestion[
     kept.push({ text: item.text, type: item.type, stage: item.stage, warnings: similar ? ["similar"] : [] });
   }
   return { kept, discarded };
-}
-
-function clusterFallback(language: string) {
-  return language.toLowerCase().startsWith("zh")
-    ? { audience: "购买决策者", intent: "了解购买条件" }
-    : { audience: "Buyer", intent: "Understand purchase conditions" };
-}
-
-function ensureCluster(content: DraftContent, language: string): DraftContent {
-  const fallback = clusterFallback(language);
-  if (!content.clusters.length) {
-    return {
-      ...content,
-      clusters: [{ id: randomUUID(), audience: fallback.audience, intent: fallback.intent, primaryPage: "", conversionAction: "" }],
-    };
-  }
-  const [first, ...rest] = content.clusters;
-  if (first.audience && first.intent) return content;
-  return {
-    ...content,
-    clusters: [{ ...first, audience: first.audience || fallback.audience, intent: first.intent || fallback.intent }, ...rest],
-  };
 }
 
 async function questionTexts(dao: PromptDao, brandQuestions: readonly string[], promptSetId: string | null) {
@@ -182,7 +161,7 @@ async function accept(dao: PromptDao, fields: BrandFields, ownerId: string, id: 
   if (suggestion.status !== "draft") return { error: "conflict" as const };
   const current = await dao.draft();
   const questionId = randomUUID();
-  const seeded = ensureCluster(current?.content ?? { clusters: [], questions: [] }, fields.language);
+  const seeded = ensureCandidateCluster(current?.content ?? { clusters: [], questions: [] }, fields.language);
   const question = {
     id: questionId,
     clusterId: seeded.clusters[0].id,

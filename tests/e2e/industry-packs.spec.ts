@@ -27,15 +27,14 @@ async function register(context: BrowserContext) {
 }
 
 async function activate(page: Page, target: Locator) {
-  await target.focus();
   await page.keyboard.press("Tab");
-  await page.keyboard.press("Shift+Tab");
+  await target.focus();
   await expect(target).toBeFocused();
   expect(await target.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
   await page.keyboard.press("Enter");
 }
 
-test("industry packs guide setup, protect the registered scope and keep generated questions as drafts", async ({ page, context, browser }) => {
+test("industry packs can be reviewed and selected questions are adopted as draft candidates", async ({ page, context, browser }) => {
   test.setTimeout(100_000);
   const url = process.env.DATABASE_URL;
   if (!url || !["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname)) throw new Error("Requires loopback PostgreSQL");
@@ -154,6 +153,25 @@ test("industry packs guide setup, protect the registered scope and keep generate
       .toEqual([{ body: question, status: "draft" }]);
     expect(await sql`SELECT id FROM prompt_set WHERE brand_id = ${brandId}`).toHaveLength(0);
     expect(await sql`SELECT id FROM monitoring_run WHERE brand_id = ${brandId}`).toHaveLength(0);
+
+    await show("zh-CN", 375);
+    await activate(page, main.getByRole("button", { name: t.reviewAction }));
+    await expect(main.getByText(t.statusLine.replace("{status}", t.statusReviewed))).toBeVisible();
+    await activate(page, main.getByRole("button", { name: t.availableAction }));
+    await expect(main.getByText(t.statusLine.replace("{status}", t.statusAvailable))).toBeVisible();
+    const checkbox = main.getByRole("checkbox", { name: question, exact: true });
+    await checkbox.focus();
+    await page.keyboard.press("Space");
+    await expect(checkbox).toBeChecked();
+    const scenario = main.getByRole("combobox", { name: t.adoptionScenario });
+    await expect(scenario.locator('option[value="regulated"]')).toBeDisabled();
+    await scenario.selectOption("general");
+    await activate(page, main.getByRole("button", { name: t.adoptAction }));
+    await expect(main.getByText(t.adopted, { exact: true })).toBeVisible();
+    await main.getByRole("link", { name: t.openPromptDraft }).click();
+    await expect(page).toHaveURL(`/dashboard/brands/${brandId}/questions`);
+    await expect(main.getByRole("textbox", { name: zh.promptSets.textLabel.replace("{index}", "1"), exact: true })).toHaveValue(question);
+    expect(await sql`SELECT id FROM prompt_set WHERE brand_id = ${brandId}`).toHaveLength(0);
 
     accounts.push(await register(guest));
     await guest.addCookies([{ name: "geo-locale", value: "en", url: origin }]);

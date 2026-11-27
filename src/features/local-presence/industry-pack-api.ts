@@ -4,12 +4,14 @@ import { randomUUID } from "node:crypto";
 import { getAuthEnvironment } from "@/lib/auth/env";
 import { getSessionState } from "@/lib/auth/session";
 import { getConnection } from "@/lib/db/connection";
-import { isAllowedApiOrigin } from "@/lib/http/web-cors";
+import { allowsOptionalApiOrigin, isAllowedApiOrigin } from "@/lib/http/web-cors";
 import { readBoundedJson } from "@/lib/http/read-bounded-json";
 import { getTranslator } from "@/lib/i18n/server";
 import { brandIdSchema } from "../brands/contracts.ts";
+import { brandMaterialAccess } from "../brands/intake.ts";
 import {
   draftIndustryPackQuestions,
+  executeIndustryPackCommand,
   listIndustryPacks,
   readIndustryPack,
   readIndustryPacksForBrand,
@@ -17,6 +19,7 @@ import {
 } from "./industry-pack-commands.ts";
 import {
   draftIndustryPackQuestionsSchema,
+  industryPackCommandSchema,
   industryPackErrors,
   registerIndustryPackSchema,
   type IndustryPackError,
@@ -44,10 +47,30 @@ async function requireTrustedOrigin(request: Request) {
   }
   try {
     const origin = new URL(getAuthEnvironment().BETTER_AUTH_URL).origin;
-    if (!isAllowedApiOrigin(request, origin)) return { error: await failure("FORBIDDEN") };
+    const allowed = request.method === "GET" ? allowsOptionalApiOrigin(request, origin) : isAllowedApiOrigin(request, origin);
+    if (!allowed) return { error: await failure("FORBIDDEN") };
     return { session };
   } catch {
     return { error: await failure("SERVICE_UNAVAILABLE", randomUUID()) };
+  }
+}
+
+export async function industryPackCommandResponse(request: Request, packId: string) {
+  const gate = await requireTrustedOrigin(request);
+  if ("error" in gate) return gate.error;
+  const id = brandIdSchema.safeParse(packId);
+  if (!id.success || new URL(request.url).searchParams.size) return failure("INVALID_INPUT");
+  try {
+    const command = industryPackCommandSchema.safeParse(await readBoundedJson(request, 8 * 1024));
+    if (!command.success) return failure("INVALID_INPUT");
+    const { user } = gate.session.session;
+    const promptsAvailable = command.data.action !== "adopt" || brandMaterialAccess(request.headers, user.email).ok;
+    const result = await executeIndustryPackCommand(getConnection(), user.id, id.data, command.data, { promptsAvailable });
+    return "error" in result ? failure(result.error) : json(result);
+  } catch {
+    const traceId = randomUUID();
+    console.error("industry-pack-command-unavailable", { traceId });
+    return failure("SERVICE_UNAVAILABLE", traceId);
   }
 }
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { brandIdSchema } from "../brands/contracts.ts";
+import { maxDraftQuestions } from "../prompts/contracts.ts";
 
 export const industryPackListLimit = 50;
 export const industryPackQuestionListLimit = 200;
@@ -28,12 +29,35 @@ export const draftIndustryPackQuestionsSchema = z.strictObject({
   materials: industryPackMaterialsSchema,
 });
 
+export const industryPackCommandSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    action: z.literal("transition"),
+    from: industryPackStatusSchema,
+    to: industryPackStatusSchema.exclude(["draft"]),
+  }),
+  z.strictObject({
+    action: z.literal("adopt"),
+    scenario: industryPackScenarioSchema,
+    questionIds: z.array(brandIdSchema).min(1).max(maxDraftQuestions)
+      .refine((ids) => new Set(ids).size === ids.length),
+    acceptSimilar: z.boolean().default(false),
+  }),
+]);
+
 export const industryPackErrors = {
   SESSION_REQUIRED: 401,
   FORBIDDEN: 403,
   NOT_FOUND: 404,
   INVALID_INPUT: 400,
   SCOPE_BLOCKED: 409,
+  STATUS_CONFLICT: 409,
+  EMPTY_PACK: 409,
+  DRAFT_CONFLICT: 409,
+  DRAFT_LIMIT: 422,
+  DRAFT_DUPLICATE: 422,
+  DRAFT_SIMILAR: 422,
+  DRAFT_INVALID: 422,
+  PROMPTS_UNAVAILABLE: 403,
   AI_UNAVAILABLE: 503,
   AI_FAILED: 502,
   INVALID_MODEL_OUTPUT: 422,
@@ -45,6 +69,7 @@ export type RegisterIndustryPackInput = z.infer<typeof registerIndustryPackSchem
 export type DraftIndustryPackQuestionsInput = z.infer<typeof draftIndustryPackQuestionsSchema>;
 export type IndustryPackScenario = z.infer<typeof industryPackScenarioSchema>;
 export type IndustryPackStatus = z.infer<typeof industryPackStatusSchema>;
+export type IndustryPackCommand = z.infer<typeof industryPackCommandSchema>;
 
 export type IndustryPackQuestionView = {
   id: string;
@@ -60,11 +85,12 @@ export type IndustryPackView = {
   scope: string;
   coversRegulated: boolean;
   status: IndustryPackStatus;
+  canWrite: boolean;
   createdAt: string;
   questions: IndustryPackQuestionView[];
 };
 
 export type IndustryPackList = {
-  brands: { id: string }[];
+  brands: { id: string; canWrite: boolean }[];
   packs: IndustryPackView[];
 };

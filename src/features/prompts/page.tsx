@@ -154,6 +154,9 @@ export async function PromptSetsPage({ params, searchParams }: {
           ) : null}
         </div>
         <nav aria-label={messages.relatedEntries} className="flex min-w-0 flex-wrap gap-2">
+          <Link href={`/dashboard/brands/industry-packs?brandId=${id}`} prefetch={false} className={relatedLinkClass}>
+            {messages.openIndustryPacks}
+          </Link>
           <Link href={`${href}/facts`} prefetch={false} className={relatedLinkClass}>
             {messages.openFacts}
           </Link>
