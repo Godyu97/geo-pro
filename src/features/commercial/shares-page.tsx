@@ -24,7 +24,8 @@ export default async function SharesPage() {
   } catch {
     console.error("shares-page-unavailable");
   }
-  const canRegister = Boolean(workspace?.brands.length);
+  const hasBrands = Boolean(workspace?.brands.length);
+  const canRegister = Boolean(hasBrands && workspace?.snapshots.length);
   const hasShares = Boolean(workspace?.shares.length);
 
   return (
@@ -49,7 +50,12 @@ export default async function SharesPage() {
                   <a href="#whitelabel-share-brand">{t("startRegistration")}</a>
                 </Button>
               )}
-              {!canRegister && !hasShares && (
+              {hasBrands && !canRegister && (
+                <Button asChild variant={hasShares ? "outline" : "default"} className={actionClass}>
+                  <Link href="/dashboard/reports" prefetch={false}>{t("openReports")}</Link>
+                </Button>
+              )}
+              {!hasBrands && !hasShares && (
                 <Button asChild className={actionClass}>
                   <Link href="/dashboard/brands" prefetch={false}>{t("openBrands")}</Link>
                 </Button>
@@ -57,7 +63,7 @@ export default async function SharesPage() {
             </>
           ) : (
             <Button asChild className={actionClass}>
-              <a href="/dashboard/reports/shares">{t("reload")}</a>
+              <Link href="/dashboard/reports/shares" prefetch={false}>{t("reload")}</Link>
             </Button>
           )}
           <Button asChild variant="ghost" className={actionClass}>

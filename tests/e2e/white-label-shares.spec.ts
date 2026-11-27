@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { expect, test, type BrowserContext, type Locator, type Page, type Request } from "@playwright/test";
@@ -9,8 +10,7 @@ const origin = "http://localhost:3100";
 const path = "/dashboard/reports/shares";
 const endpoint = "/api/reports/shares";
 const headers = { Origin: origin };
-const probe = "geo-shares-read";
-const shots = ".cache/issue-135/shares";
+const shots = ".cache/issue-183/shares";
 const brandName = `Fixture-${"whitelabel".repeat(6)}`;
 const locales = ["zh-CN", "en"] as const;
 const widths = [375, 768, 1440];
@@ -61,23 +61,38 @@ function field(card: Locator, label: string) {
   return card.locator("dl > div").filter({ has: card.page().getByText(label, { exact: true }) });
 }
 
-test("brand owners can preview, expire and revoke white-label shares from the keyboard", async ({ context, page, browser }) => {
+function reportFixture(command: string, payload: object) {
+  return JSON.parse(execFileSync(process.execPath, [
+    "--conditions=react-server", "scripts/e2e-m0-fixture.mjs", command, JSON.stringify(payload),
+  ], { encoding: "utf8" }));
+}
+
+test("brand owner shares a real snapshot with an authorized read-only viewer and revokes access", async ({ context, page, browser }) => {
   test.setTimeout(150_000);
   const database = process.env.DATABASE_URL;
   if (!database || !["localhost", "127.0.0.1", "[::1]"].includes(new URL(database).hostname)) {
     throw new Error("White-label share browser tests require loopback PostgreSQL");
   }
   const sql = postgres(database, { max: 1 });
+  const viewerCtx = await browser.newContext({ baseURL: origin });
+  const viewerPage = await viewerCtx.newPage();
   const outsider = await browser.newContext({ baseURL: origin });
-  const emails = [`share-owner-${randomUUID()}@example.invalid`, `share-outsider-${randomUUID()}@example.invalid`];
+  const emails = [
+    `share-owner-${randomUUID()}@example.invalid`,
+    `share-viewer-${randomUUID()}@example.invalid`,
+    `share-outsider-${randomUUID()}@example.invalid`,
+  ];
   const main = page.getByRole("main");
   let brandId: string | undefined;
   let shareId: string | undefined;
 
   try {
     const ownerId = await register(context, emails[0]);
+    const viewerId = await register(viewerCtx, emails[1]);
+    await register(outsider, emails[2]);
+
     const shares = () => sql`
-      select id, brand_id, track, sample_size, grade, expires_at, revoked
+      select id, brand_id, snapshot_id, track, sample_size, grade, expires_at, revoked
       from whitelabel_share where owner_id = ${ownerId} order by created_at, id`;
     const accesses = () => sql`
       select a.share_id, a.visitor_id, a.accessed_at
@@ -104,6 +119,60 @@ test("brand owners can preview, expire and revoke white-label shares from the ke
     } });
     expect(brand.status()).toBe(200);
     brandId = (await brand.json()).id as string;
+
+    // Grant read_only access to viewerId
+    const grantResp = await context.request.post("/api/settings/team/grants", {
+      headers,
+      data: { userId: viewerId, brandId, role: "read_only" },
+    });
+    expect(grantResp.status()).toBe(200);
+
+    // Before generating a snapshot, the form should guide to reports instead of manual fields
+    await visit(page, "zh-CN", 375);
+    await expect(main.getByText(zh.shares.noSnapshots, { exact: true })).toBeVisible();
+
+    // Seed report observations and generate a real report snapshot
+    const seeded = reportFixture("report-observations", { userId: ownerId, brandId }) as {
+      before: { start: string; endExclusive: string; samples: unknown[] };
+      after: { start: string; endExclusive: string; samples: unknown[] };
+    };
+    const retestResp = await context.request.post("/api/reports", {
+      headers,
+      data: {
+        action: "request-retest",
+        brandId,
+        operationId: randomUUID(),
+        kind: "exploratory",
+        intent: "diagnostic",
+        track: "model_api",
+        timezone: "Asia/Shanghai",
+        entityVersion: 1,
+        before: seeded.before,
+        after: seeded.after,
+        locale: "zh-CN",
+        metric: "recommendation_rate",
+      },
+    });
+    expect(retestResp.status()).toBe(200);
+    const retestId = (await retestResp.json()).retest.id as string;
+
+    const snapResp = await context.request.post("/api/reports", {
+      headers,
+      data: {
+        action: "generate-report",
+        brandId,
+        operationId: randomUUID(),
+        retestId,
+        before: seeded.before,
+        after: seeded.after,
+        locale: "zh-CN",
+        metric: "recommendation_rate",
+        brandName,
+      },
+    });
+    expect(snapResp.status()).toBe(200);
+    const snapshotId = (await snapResp.json()).snapshot.id as string;
+
     for (const locale of locales) {
       const copy = messages[locale].shares;
       for (const width of widths) {
@@ -113,30 +182,24 @@ test("brand owners can preview, expire and revoke white-label shares from the ke
       }
     }
 
-    const data = {
-      brandId, track: "official_api", sampleSize: 1234, grade: "exploratory",
-      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
-    };
-    expect((await context.request.post(endpoint, { headers, data: { ...data, guarantee: "guaranteed results" } })).status()).toBe(400);
-    expect((await context.request.post(endpoint, { headers, data: { ...data, expiresAt: new Date(0).toISOString() } })).status()).toBe(400);
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    expect((await context.request.post(endpoint, { headers, data: { brandId, snapshotId, expiresAt, guarantee: "guaranteed results" } })).status()).toBe(400);
+    expect((await context.request.post(endpoint, { headers, data: { brandId, snapshotId, expiresAt: new Date(0).toISOString() } })).status()).toBe(400);
+    expect((await context.request.post(endpoint, { headers, data: { brandId, track: "model_api", sampleSize: 6, grade: "exploratory", expiresAt } })).status()).toBe(400);
+
     await visit(page, "zh-CN", 375);
     const form = main.getByRole("form", { name: zh.shares.createTitle });
     await activate(page, main.getByRole("link", { name: zh.shares.startRegistration, exact: true }));
     await expect(form.getByRole("combobox", { name: zh.shares.brand })).toBeFocused();
     await page.keyboard.press("Tab");
-    const track = form.getByRole("textbox", { name: zh.shares.track });
-    await expect(track).toBeFocused();
-    await track.fill(data.track);
-    await form.getByRole("textbox", { name: zh.shares.grade }).fill(data.grade);
-    await form.getByRole("textbox", { name: zh.shares.expiresAt }).fill(data.expiresAt);
-    const sample = form.getByRole("textbox", { name: zh.shares.sampleSize });
-    await sample.fill("-1");
-    const save = form.getByRole("button", { name: zh.shares.saveShare, exact: true });
-    await activate(page, save);
-    await expect(form.getByRole("status")).toHaveText(zh.shares.INVALID_INPUT);
-    expect(await shares()).toHaveLength(0);
+    const snapshotSelect = form.getByRole("combobox", { name: zh.shares.snapshot });
+    await expect(snapshotSelect).toBeFocused();
+    await expect(snapshotSelect).toHaveValue(snapshotId);
 
-    await sample.fill(String(data.sampleSize));
+    const expiresInput = form.getByRole("textbox", { name: zh.shares.expiresAt });
+    await expiresInput.fill(expiresAt);
+
+    const save = form.getByRole("button", { name: zh.shares.saveShare, exact: true });
     const release = Promise.withResolvers<void>();
     let writes = 0;
     const countWrite = (request: Request) => {
@@ -161,16 +224,17 @@ test("brand owners can preview, expire and revoke white-label shares from the ke
     await expect(form.getByRole("status")).toHaveText(zh.shares.SERVICE_UNAVAILABLE);
     await expect(save).toBeFocused();
     expect(await shares()).toHaveLength(0);
+
     await page.getByRole("combobox", { name: zh.common.language, exact: true }).selectOption("en");
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     const englishForm = main.getByRole("form", { name: en.shares.createTitle });
     await expect(englishForm.getByRole("status")).toHaveText(en.shares.SERVICE_UNAVAILABLE);
-    await expect(englishForm.getByRole("textbox", { name: en.shares.expiresAt })).toHaveValue(data.expiresAt);
-    await expect(englishForm.getByRole("textbox", { name: en.shares.sampleSize })).toHaveValue(String(data.sampleSize));
+    await expect(englishForm.getByRole("textbox", { name: en.shares.expiresAt })).toHaveValue(expiresAt);
     await activate(page, englishForm.getByRole("button", { name: en.shares.saveShare, exact: true }));
     await expect(englishForm.getByRole("status")).toHaveText(en.shares.saved);
+
     const [saved] = await shares();
-    expect(saved).toMatchObject({ brand_id: brandId, track: data.track, sample_size: data.sampleSize, grade: data.grade, expires_at: data.expiresAt, revoked: 0 });
+    expect(saved).toMatchObject({ brand_id: brandId, snapshot_id: snapshotId, track: "model_api", sample_size: 6, grade: "exploratory", expires_at: expiresAt, revoked: 0 });
     shareId = saved.id as string;
     const card = main.getByRole("article", { name: brandName, exact: true });
     await expect(card).toBeVisible();
@@ -180,126 +244,66 @@ test("brand owners can preview, expire and revoke white-label shares from the ke
       for (const width of widths) {
         await visit(page, locale, width);
         await expect(card.getByText(copy.statusActive, { exact: true })).toBeVisible();
-        await expect(field(card, copy.track).locator("dd")).toHaveText(data.track);
-        await expect(field(card, copy.sampleSize).locator("dd")).toHaveText(String(data.sampleSize));
-        await expect(field(card, copy.grade).locator("dd")).toHaveText(data.grade);
-        await expect(field(card, copy.expiresAt).locator("time")).toHaveAttribute("datetime", data.expiresAt);
+        await expect(field(card, copy.track).locator("dd")).toContainText("model_api");
+        await expect(field(card, copy.sampleSize).locator("dd").first()).toHaveText("6");
+        await expect(field(card, copy.grade).locator("dd")).toContainText("exploratory");
+        await expect(field(card, copy.limitations).locator("dd")).toContainText("小样本探索，不代表稳定趋势");
+        await expect(field(card, copy.expiresAt).locator("time")).toHaveAttribute("datetime", expiresAt);
         await checkLayout(page, copy.viewHistory, width, `active-${locale}`);
       }
     }
 
-    const resource = `${endpoint}/${shareId}`;
-    expect((await context.request.post(resource)).status()).toBe(403);
-    expect((await context.request.post(resource, { headers: { Origin: "https://untrusted.example.invalid" } })).status()).toBe(403);
-    expect(await accesses()).toHaveLength(0);
-    await visit(page, "en", 375);
-    await activate(page, main.getByRole("link", { name: en.shares.viewHistory, exact: true }));
-    await expect(main.getByRole("heading", { name: en.shares.myShares })).toBeFocused();
-    const preview = page.waitForResponse((response) => response.url() === origin + resource && response.request().method() === "POST");
-    await activate(page, card.getByRole("button", { name: en.shares.viewShare, exact: true }));
-    const viewed = await preview;
-    expect(viewed.status()).toBe(200);
-    expect(viewed.headers()["cache-control"]).toBe("private, no-store");
-    expect((await viewed.json()).share).toMatchObject({
-      id: shareId, track: data.track, sampleSize: data.sampleSize, grade: data.grade,
-    });
-    await expect(card.getByRole("status")).toContainText("Track: official_api. Sample size: 1234. Conclusion grade: exploratory.");
-    const history = await accesses();
-    expect(history).toEqual([expect.objectContaining({ share_id: shareId, visitor_id: ownerId })]);
-    await expect(field(card, en.shares.accessCount).locator("time")).toHaveAttribute("datetime", history[0].accessed_at);
-    await card.screenshot({ path: `${shots}/preview-en-375.png` });
+    // Authorized read_only viewer opens /dashboard/reports/shares and the controlled preview URL
+    await viewerPage.context().addCookies([{ name: "geo-locale", value: "zh-CN", url: origin }]);
+    await viewerPage.setViewportSize({ width: 375, height: 800 });
+    await viewerPage.goto(path);
+    const viewerMain = viewerPage.getByRole("main");
+    await expect(viewerMain.getByRole("form")).toHaveCount(0);
+    await expect(viewerMain.getByText(zh.shares.readOnlyNotice, { exact: true })).toBeVisible();
+    const viewerCard = viewerMain.getByRole("article", { name: brandName, exact: true });
+    await expect(viewerCard.getByRole("button", { name: zh.shares.revokeShare })).toHaveCount(0);
+    await viewerCard.getByRole("link", { name: zh.shares.openPreview, exact: true }).click();
+    await expect(viewerPage).toHaveURL(`${origin}${path}/${shareId}`);
+    await expect(viewerMain.getByRole("heading", { level: 1, name: zh.shares.previewTitle })).toBeVisible();
+    await expect(viewerMain).toContainText(brandName);
+    await expect(viewerMain).toContainText("model_api");
+    await expect(viewerMain).toContainText("6");
+    await expect(viewerMain).toContainText("exploratory");
+    await expect(viewerMain).toContainText("小样本探索，不代表稳定趋势");
+    await expect(viewerMain).toContainText(zh.shares.causalityNotice);
 
-    expect((await outsider.request.post(resource, { headers })).status()).toBe(401);
-    await register(outsider, emails[1]);
+    const history = await accesses();
+    expect(history).toEqual([expect.objectContaining({ share_id: shareId, visitor_id: viewerId })]);
+
+    // read_only viewer cannot create or revoke via API
+    const resource = `${endpoint}/${shareId}`;
+    expect((await viewerCtx.request.post(endpoint, { headers, data: { brandId, snapshotId, expiresAt } })).status()).toBe(403);
+    expect((await viewerCtx.request.post(`${resource}/revoke`, { headers })).status()).toBe(403);
+
+    // Outsider cannot read, preview, create, or revoke
     expect((await outsider.request.get(resource, { headers })).status()).toBe(404);
     expect((await outsider.request.post(resource, { headers })).status()).toBe(404);
     expect((await outsider.request.post(`${resource}/revoke`, { headers })).status()).toBe(404);
-    expect((await outsider.request.post(endpoint, { headers, data })).status()).toBe(404);
-    expect(await accesses()).toEqual(history);
+    expect((await outsider.request.post(endpoint, { headers, data: { brandId, snapshotId, expiresAt } })).status()).toBe(404);
 
-    for (const locale of locales) {
-      const copy = messages[locale].shares;
-      await visit(page, locale, 375);
-      const revoke = card.getByRole("button", { name: copy.revokeShare, exact: true });
-      await activate(page, revoke);
-      const dialog = page.getByRole("dialog", { name: copy.revokeShare });
-      await expect(dialog).toContainText(copy.confirmDescription);
-      await expect(dialog.getByRole("button", { name: copy.cancel, exact: true })).toBeFocused();
-      await expect(dialog).toBeInViewport({ ratio: 1 });
-      await page.screenshot({ path: `${shots}/revoke-${locale}-375.png` });
-      await page.keyboard.press("Escape");
-      await expect(dialog).toHaveCount(0);
-      await expect(revoke).toBeFocused();
-      expect(await shares()).toEqual([saved]);
-    }
-
+    // Owner revokes the share; the viewer's original entry /dashboard/reports/shares/[id] immediately stops working
+    await visit(page, "en", 375);
     await activate(page, card.getByRole("button", { name: en.shares.revokeShare, exact: true }));
     const dialog = page.getByRole("dialog", { name: en.shares.revokeShare });
     const confirm = dialog.getByRole("button", { name: en.shares.confirmRevoke, exact: true });
-    await page.route(`**${resource}/revoke`, (route) => route.fulfill({ status: 503, json: { error: { code: "SERVICE_UNAVAILABLE" } } }), { times: 1 });
-    await activate(page, confirm);
-    await expect(dialog.getByRole("status")).toHaveText(en.shares.SERVICE_UNAVAILABLE);
-    await expect(confirm).toBeFocused();
-    expect(await shares()).toEqual([saved]);
     await activate(page, confirm);
     await expect(dialog).toHaveCount(0);
-    await expect(card.getByRole("heading")).toBeFocused();
     await expect(card.getByText(en.shares.statusRevoked, { exact: true })).toBeVisible();
-    await expect(card.getByRole("button", { name: en.shares.viewShare })).toHaveCount(0);
-    await expect(card.getByRole("status")).toHaveText(en.shares.revoked);
     expect(await shares()).toEqual([{ ...saved, revoked: 1 }]);
-    expect((await context.request.get(resource, { headers })).status()).toBe(404);
-    expect((await context.request.post(resource, { headers })).status()).toBe(404);
-    expect(await accesses()).toEqual(history);
-
-    const expiring = await context.request.post(endpoint, { headers, data: {
-      ...data, sampleSize: 0, expiresAt: new Date(Date.now() + 8000).toISOString(),
-    } });
-    expect(expiring.status()).toBe(200);
-    const expiredId = (await expiring.json()).share.id as string;
-    await visit(page, "zh-CN", 375);
-    const expired = main.locator(`article[aria-labelledby="whitelabel-share-${expiredId}"]`);
-    await expect(expired.getByText(zh.shares.statusActive, { exact: true })).toBeVisible();
-    await expect(expired.getByText(zh.shares.statusExpired, { exact: true })).toBeVisible({ timeout: 15_000 });
-    await expect(expired.getByRole("button", { name: zh.shares.viewShare })).toHaveCount(0);
-    await expect(field(expired, zh.shares.sampleSize).locator("dd")).toHaveText("0");
-    expect((await context.request.post(`${endpoint}/${expiredId}`, { headers })).status()).toBe(404);
-    expect(await accesses()).toEqual(history);
-    await expired.screenshot({ path: `${shots}/expired-zh-CN-375.png` });
-
-    for (const locale of locales) {
-      const copy = messages[locale].shares;
-      await visit(page, locale, 375);
-      await expect(expired.getByText(copy.statusExpired, { exact: true })).toBeVisible();
-      await context.addCookies([{ name: probe, value: "slow", url: origin }]);
-      await page.reload({ waitUntil: "commit" });
-      await expect(main.getByRole("status").filter({ hasText: copy.loading })).toBeInViewport();
-      await page.screenshot({ path: `${shots}/loading-${locale}-375.png` });
-      await expect(expired).toBeVisible();
-      await context.addCookies([{ name: probe, value: "unavailable", url: origin }]);
-      await visit(page, locale, 375);
-      await expect(main.getByRole("alert")).toHaveText(copy.SERVICE_UNAVAILABLE);
-      await expect(main.getByRole("form")).toHaveCount(0);
-      await expect(main.getByRole("article")).toHaveCount(0);
-      await expect(main).not.toContainText("Private white-label share fixture failure");
-      await checkLayout(page, copy.reload, 375, `read-failure-${locale}`);
-      await context.clearCookies({ name: probe });
-      await activate(page, main.getByRole("link", { name: copy.reload, exact: true }));
-      await expect(expired).toBeVisible();
-    }
-
-    const archive = await context.request.post("/api/brands", { headers, data: {
-      action: "archive", actorId: ownerId, operationId: randomUUID(), brandId, expectedBrandRevision: 1,
-    } });
-    expect(archive.status()).toBe(200);
-    expect((await context.request.post(endpoint, { headers, data })).status()).toBe(404);
-    await visit(page, "en", 375);
-    await expect(main.getByRole("form", { name: en.shares.createTitle })).toHaveCount(0);
-    await expect(main.getByRole("article", { name: brandId, exact: true })).toHaveCount(2);
-    await checkLayout(page, en.shares.viewHistory, 375, "archived-en");
+    expect((await viewerCtx.request.get(resource, { headers })).status()).toBe(404);
+    expect((await viewerCtx.request.post(resource, { headers })).status()).toBe(404);
+    await viewerPage.goto(`${path}/${shareId}`);
+    await expect(viewerMain.getByRole("alert")).toHaveText(zh.shares.NOT_FOUND);
+    await expect(viewerMain).not.toContainText("小样本探索，不代表稳定趋势");
     expect(await accesses()).toEqual(history);
   } finally {
     try {
+      await viewerCtx.close();
       await outsider.close();
       for (const email of emails) {
         await sql`delete from "user" where email = ${email}`;

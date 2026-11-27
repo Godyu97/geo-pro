@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
@@ -15,13 +16,28 @@ import { formatDateTime } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
 import type { Messages } from "@/lib/i18n/server";
 import { createTranslator } from "@/lib/i18n/translate";
-import { formatShareSample, registerShareSchema, shareErrors, type ShareError, type ShareView, type ShareWorkspace } from "./share-contracts.ts";
+import {
+  formatShareSample,
+  shareErrors,
+  type ShareError,
+  type ShareSnapshotOption,
+  type ShareView,
+  type ShareWorkspace,
+} from "./share-contracts.ts";
 
 type Copy = Messages["shares"];
 type Translator = ReturnType<typeof createTranslator<Copy>>;
+
 const previewResponse = z.object({
-  share: registerShareSchema.pick({ track: true, sampleSize: true, grade: true }).strip(),
+  share: z.object({
+    id: z.string(),
+    track: z.string(),
+    sampleSize: z.number().int().min(0),
+    grade: z.string(),
+    limitations: z.array(z.string()).default([]),
+  }),
 });
+
 type Notice = ShareError | "saved" | "revoked" | z.infer<typeof previewResponse>["share"];
 
 const fieldClass = "scroll-mt-20 h-10 w-full min-w-0 rounded-lg border border-input bg-background px-2.5 text-sm focus-visible:outline-2 focus-visible:outline-ring";
@@ -37,22 +53,42 @@ function errorFrom(payload: unknown): ShareError {
   return Object.hasOwn(shareErrors, error.code) ? error.code as ShareError : "SERVICE_UNAVAILABLE";
 }
 
+function trackLabel(track: string, t: Translator) {
+  if (track === "model_api") return t("trackModelApi");
+  if (track === "consumer_ui") return t("trackConsumerUi");
+  return track;
+}
+
+function gradeLabel(grade: string, t: Translator) {
+  if (grade === "exploratory") return t("gradeExploratory");
+  if (grade === "incomparable") return t("gradeIncomparable");
+  return grade;
+}
+
 function ShareNotice({ notice, t }: { notice: Notice | null; t: Translator }) {
   const isError = typeof notice === "string" && Object.hasOwn(shareErrors, notice);
   return (
     <p role="status" className={isError ? "text-sm leading-6 text-destructive" : "text-sm leading-6 [overflow-wrap:anywhere] empty:sr-only"}>
       {typeof notice === "string" ? t(notice) : notice && t("viewed", {
-        track: notice.track, sampleSize: formatShareSample(notice.sampleSize), grade: notice.grade,
+        track: trackLabel(notice.track, t),
+        sampleSize: formatShareSample(notice.sampleSize),
+        grade: gradeLabel(notice.grade, t),
       })}
     </p>
   );
+}
+
+function ShareTime({ value, locale }: { value: string; locale: Locale }) {
+  const date = new Date(value);
+  const label = Number.isNaN(date.getTime()) ? value : `${formatDateTime(locale, date, "UTC")} UTC`;
+  return <time dateTime={value} title={value}>{label}</time>;
 }
 
 export function SharesPanel({ workspace, messages, now }: { workspace: ShareWorkspace; messages: Copy; now: string }) {
   const { locale } = useLocale();
   const router = useRouter();
   const t = createTranslator(locale, messages);
-  const names = new Map(workspace.brands.map((brand) => [brand.id, brand.name]));
+  const writableSet = new Set(workspace.writableBrandIds);
   const nextExpiry = workspace.shares
     .filter((share) => share.revoked === 0 && share.expiresAt > now)
     .map((share) => share.expiresAt).sort()[0];
@@ -67,7 +103,13 @@ export function SharesPanel({ workspace, messages, now }: { workspace: ShareWork
 
   return (
     <div className="min-w-0 space-y-6">
-      {workspace.brands.length === 0 ? <p className={emptyClass}>{t("noBrands")}</p> : <ShareForm t={t} brands={workspace.brands} />}
+      {workspace.brands.length === 0 ? (
+        <p className={emptyClass}>
+          {Object.keys(workspace.brandNames).length > 0 ? t("readOnlyNotice") : t("noBrands")}
+        </p>
+      ) : (
+        <ShareForm t={t} locale={locale} brands={workspace.brands} snapshots={workspace.snapshots} />
+      )}
       <section className="space-y-3" aria-labelledby="whitelabel-shares-heading">
         <h2 id="whitelabel-shares-heading" tabIndex={-1} className="scroll-mt-20 rounded-sm text-lg font-semibold focus-visible:ring-2 focus-visible:ring-ring">
           {t("myShares")}
@@ -76,7 +118,14 @@ export function SharesPanel({ workspace, messages, now }: { workspace: ShareWork
           <ul className="space-y-3">
             {workspace.shares.map((share) => (
               <li key={share.id} className="min-w-0">
-                <ShareCard share={share} brandName={names.get(share.brandId) ?? share.brandId} expired={share.expiresAt <= now} locale={locale} t={t} />
+                <ShareCard
+                  share={share}
+                  brandName={workspace.brandNames[share.brandId] ?? share.brandId}
+                  canWrite={writableSet.has(share.brandId)}
+                  expired={share.expiresAt <= now}
+                  locale={locale}
+                  t={t}
+                />
               </li>
             ))}
           </ul>
@@ -86,20 +135,47 @@ export function SharesPanel({ workspace, messages, now }: { workspace: ShareWork
   );
 }
 
-function ShareForm({ brands, t }: { brands: ShareWorkspace["brands"]; t: Translator }) {
+function formatSnapshotOption(snapshot: ShareSnapshotOption, locale: Locale, t: Translator) {
+  const status = t(snapshot.status === "created" ? "snapshotStatusCreated" : "snapshotStatusSuperseded");
+  const date = new Date(snapshot.createdAt);
+  const timeText = Number.isNaN(date.getTime()) ? snapshot.createdAt : `${formatDateTime(locale, date, "UTC")} UTC`;
+  return `${trackLabel(snapshot.track, t)} · ${gradeLabel(snapshot.grade, t)} · ${status} · ${snapshot.id.slice(0, 8)} (${timeText})`;
+}
+
+function ShareForm({
+  brands,
+  snapshots,
+  locale,
+  t,
+}: {
+  brands: ShareWorkspace["brands"];
+  snapshots: ShareSnapshotOption[];
+  locale: Locale;
+  t: Translator;
+}) {
   const router = useRouter();
   const inFlight = useRef(false);
+  const defaultBrand = brands.find((brand) => snapshots.some((snap) => snap.brandId === brand.id))?.id ?? brands[0]?.id ?? "";
+  const [brandId, setBrandId] = useState(defaultBrand);
+  const brandSnapshots = snapshots.filter((snap) => snap.brandId === brandId);
+  const [snapshotId, setSnapshotId] = useState(() => brandSnapshots[0]?.id ?? "");
+  const [expiresAt, setExpiresAt] = useState("");
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+
+  const selectedSnapshot = brandSnapshots.find((snap) => snap.id === snapshotId) ?? brandSnapshots[0];
+
+  function handleBrandChange(nextBrandId: string) {
+    setBrandId(nextBrandId);
+    const first = snapshots.find((snap) => snap.brandId === nextBrandId);
+    setSnapshotId(first?.id ?? "");
+    setNotice(null);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (inFlight.current) return;
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const sampleText = String(data.get("sampleSize") ?? "").trim();
-    const sampleSize = /^\d{1,10}$/.test(sampleText) ? Number(sampleText) : Number.NaN;
-    if (!Number.isInteger(sampleSize)) {
+    if (!selectedSnapshot) {
       setNotice("INVALID_INPUT");
       return;
     }
@@ -111,11 +187,9 @@ function ShareForm({ brands, t }: { brands: ShareWorkspace["brands"]; t: Transla
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          brandId: String(data.get("brandId") ?? ""),
-          track: String(data.get("track") ?? "").trim(),
-          sampleSize,
-          grade: String(data.get("grade") ?? "").trim(),
-          expiresAt: String(data.get("expiresAt") ?? "").trim(),
+          brandId,
+          snapshotId: selectedSnapshot.id,
+          expiresAt: expiresAt.trim(),
         }),
       });
       if (response.status === 401) {
@@ -127,7 +201,7 @@ function ShareForm({ brands, t }: { brands: ShareWorkspace["brands"]; t: Transla
         return;
       }
       setNotice("saved");
-      form.reset();
+      setExpiresAt("");
       router.refresh();
     } catch {
       setNotice("SERVICE_UNAVAILABLE");
@@ -137,47 +211,94 @@ function ShareForm({ brands, t }: { brands: ShareWorkspace["brands"]; t: Transla
     }
   }
 
+  if (snapshots.length === 0) {
+    return (
+      <div className={emptyClass}>
+        <p>{t("noSnapshots")}</p>
+        <Button asChild variant="outline" className={`${actionClass} mt-3`}>
+          <Link href="/dashboard/reports" prefetch={false}>{t("openReports")}</Link>
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={submit} aria-labelledby="whitelabel-share-create" className="min-w-0 max-w-2xl space-y-4 rounded-xl border bg-card p-4">
       <h2 id="whitelabel-share-create" className="text-lg font-semibold">{t("createTitle")}</h2>
-      <label className="block space-y-1 text-sm" htmlFor="whitelabel-share-brand">
-        <span>{t("brand")}</span>
-        <select id="whitelabel-share-brand" name="brandId" required className={fieldClass}>
+      <div className="space-y-1 text-sm">
+        <label htmlFor="whitelabel-share-brand">{t("brand")}</label>
+        <select
+          id="whitelabel-share-brand"
+          name="brandId"
+          required
+          value={brandId}
+          onChange={(event) => handleBrandChange(event.target.value)}
+          className={fieldClass}
+        >
           {brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
         </select>
-      </label>
-      <label className="block space-y-1 text-sm" htmlFor="whitelabel-share-track">
-        <span>{t("track")}</span>
-        <Input id="whitelabel-share-track" name="track" required minLength={1} maxLength={64} autoComplete="off" spellCheck={false} placeholder="official_api" className="h-10" />
-      </label>
-      <div className="space-y-1 text-sm">
-        <label htmlFor="whitelabel-share-sample">{t("sampleSize")}</label>
-        <Input id="whitelabel-share-sample" name="sampleSize" required inputMode="numeric" aria-describedby="whitelabel-share-sample-help" autoComplete="off" className="h-10" />
-        <p id="whitelabel-share-sample-help" className="text-muted-foreground">{t("sampleHint")}</p>
       </div>
-      <label className="block space-y-1 text-sm" htmlFor="whitelabel-share-grade">
-        <span>{t("grade")}</span>
-        <Input id="whitelabel-share-grade" name="grade" required minLength={1} maxLength={32} autoComplete="off" spellCheck={false} placeholder="exploratory" className="h-10" />
-      </label>
-      <div className="space-y-1 text-sm">
-        <label htmlFor="whitelabel-share-expires">{t("expiresAt")}</label>
-        <Input id="whitelabel-share-expires" name="expiresAt" required minLength={24} maxLength={24} aria-describedby="whitelabel-share-expires-help" autoComplete="off" className="h-10" />
-        <p id="whitelabel-share-expires-help" className="text-muted-foreground">{t("expiresHint")}</p>
-      </div>
-      <Button type="submit" aria-disabled={pending} className={actionClass}>{pending ? t("saving") : t("saveShare")}</Button>
+      {brandSnapshots.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+          <p>{t("noBrandSnapshots")}</p>
+          <Button asChild variant="outline" className={`${actionClass} mt-2`}>
+            <Link href={`/dashboard/reports?brandId=${encodeURIComponent(brandId)}`} prefetch={false}>{t("openReports")}</Link>
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-1 text-sm">
+            <label htmlFor="whitelabel-share-snapshot">{t("snapshot")}</label>
+            <select
+              id="whitelabel-share-snapshot"
+              name="snapshotId"
+              required
+              value={selectedSnapshot?.id ?? ""}
+              onChange={(event) => setSnapshotId(event.target.value)}
+              className={fieldClass}
+            >
+              {brandSnapshots.map((snap) => (
+                <option key={snap.id} value={snap.id}>{formatSnapshotOption(snap, locale, t)}</option>
+              ))}
+            </select>
+            {selectedSnapshot && (
+              <p className="text-muted-foreground">
+                {t("snapshotMeta", {
+                  track: trackLabel(selectedSnapshot.track, t),
+                  grade: gradeLabel(selectedSnapshot.grade, t),
+                  status: t(selectedSnapshot.status === "created" ? "snapshotStatusCreated" : "snapshotStatusSuperseded"),
+                })}
+              </p>
+            )}
+          </div>
+          <p className="text-xs leading-5 text-muted-foreground">{t("sampleHint")}</p>
+          <div className="space-y-1 text-sm">
+            <label htmlFor="whitelabel-share-expires">{t("expiresAt")}</label>
+            <Input
+              id="whitelabel-share-expires"
+              name="expiresAt"
+              required
+              minLength={24}
+              maxLength={24}
+              value={expiresAt}
+              onChange={(event) => setExpiresAt(event.target.value)}
+              placeholder="2026-12-31T00:00:00.000Z"
+              aria-describedby="whitelabel-share-expires-help"
+              autoComplete="off"
+              className="h-10"
+            />
+            <p id="whitelabel-share-expires-help" className="text-muted-foreground">{t("expiresHint")}</p>
+          </div>
+          <Button type="submit" aria-disabled={pending} className={actionClass}>{pending ? t("saving") : t("saveShare")}</Button>
+        </>
+      )}
       <ShareNotice notice={notice} t={t} />
     </form>
   );
 }
 
-function ShareTime({ value, locale }: { value: string; locale: Locale }) {
-  const date = new Date(value);
-  const label = Number.isNaN(date.getTime()) ? value : `${formatDateTime(locale, date, "UTC")} UTC`;
-  return <time dateTime={value} title={value}>{label}</time>;
-}
-
-function ShareCard({ share, brandName, expired, locale, t }: {
-  share: ShareView; brandName: string; expired: boolean; locale: Locale; t: Translator;
+function ShareCard({ share, brandName, canWrite, expired, locale, t }: {
+  share: ShareView; brandName: string; canWrite: boolean; expired: boolean; locale: Locale; t: Translator;
 }) {
   const router = useRouter();
   const inFlight = useRef(false);
@@ -233,17 +354,59 @@ function ShareCard({ share, brandName, expired, locale, t }: {
         <Badge variant={viewable ? "secondary" : "outline"}>{t(revoked ? "statusRevoked" : expired ? "statusExpired" : "statusActive")}</Badge>
       </div>
       <dl className="grid gap-3 rounded-lg bg-muted/50 p-3 text-sm sm:grid-cols-2">
-        <div><dt>{t("track")}</dt><dd className="font-medium [overflow-wrap:anywhere]"><bdi translate="no">{share.track}</bdi></dd></div>
-        <div><dt>{t("sampleSize")}</dt><dd className="font-medium tabular-nums">{formatShareSample(share.sampleSize)}</dd></div>
-        <div><dt>{t("grade")}</dt><dd className="font-medium [overflow-wrap:anywhere]"><bdi translate="no">{share.grade}</bdi></dd></div>
+        <div>
+          <dt>{t("snapshot")}</dt>
+          <dd className="font-medium [overflow-wrap:anywhere]" title={share.snapshotId ?? undefined}>
+            {share.snapshotId ? <bdi translate="no">{share.snapshotId}</bdi> : t("legacyShare")}
+          </dd>
+        </div>
+        <div>
+          <dt>{t("track")}</dt>
+          <dd className="font-medium [overflow-wrap:anywhere]">
+            {trackLabel(share.track, t)} · <bdi translate="no">{share.track}</bdi>
+          </dd>
+        </div>
+        <div>
+          <dt>{t("sampleSize")}</dt>
+          <dd className="font-medium tabular-nums">{formatShareSample(share.sampleSize)}</dd>
+          {share.sampleSummary && (
+            <dd className="mt-1 text-muted-foreground tabular-nums">
+              {t("sampleBreakdown", {
+                common: formatShareSample(share.sampleSummary.commonQueryCount),
+                frozen: formatShareSample(share.sampleSummary.frozenQueryCount),
+                before: formatShareSample(share.sampleSummary.beforeSampleCount),
+                after: formatShareSample(share.sampleSummary.afterSampleCount),
+              })}
+            </dd>
+          )}
+        </div>
+        <div>
+          <dt>{t("grade")}</dt>
+          <dd className="font-medium [overflow-wrap:anywhere]">
+            {gradeLabel(share.grade, t)} · <bdi translate="no">{share.grade}</bdi>
+          </dd>
+        </div>
+        <div className="sm:col-span-2">
+          <dt>{t("limitations")}</dt>
+          <dd className="mt-1 space-y-1 text-muted-foreground">
+            <ul className="list-disc space-y-1 pl-5">
+              {share.limitations.map((line) => <li key={line} className="[overflow-wrap:anywhere]">{line}</li>)}
+              <li>{t("causalityNotice")}</li>
+            </ul>
+          </dd>
+        </div>
         <div><dt>{t("expiresAt")}</dt><dd><ShareTime value={share.expiresAt} locale={locale} /></dd></div>
         <div><dt>{t("createdAt")}</dt><dd><ShareTime value={share.createdAt} locale={locale} /></dd></div>
-        <div>
+        <div className="sm:col-span-2">
           <dt>{t("accessCount")}</dt><dd className="font-medium tabular-nums">{formatShareSample(share.accesses.length)}</dd>
           {share.accesses.length > 0 && (
             <dd>
               <ul className="mt-1 space-y-1 text-muted-foreground">
-                {share.accesses.map((access) => <li key={access.id}><ShareTime value={access.accessedAt} locale={locale} /></li>)}
+                {share.accesses.map((access) => (
+                  <li key={access.id}>
+                    <bdi translate="no">{access.visitorId.slice(0, 8)}</bdi> · <ShareTime value={access.accessedAt} locale={locale} />
+                  </li>
+                ))}
               </ul>
             </dd>
           )}
@@ -251,40 +414,47 @@ function ShareCard({ share, brandName, expired, locale, t }: {
       </dl>
       <div className="flex flex-wrap gap-2 empty:hidden">
         {viewable && (
-          <Button type="button" aria-disabled={pending !== null} className={actionClass} onClick={() => void run("view")}>
-            {pending === "view" ? t("opening") : t("viewShare")}
-          </Button>
+          <>
+            <Button type="button" aria-disabled={pending !== null} className={actionClass} onClick={() => void run("view")}>
+              {pending === "view" ? t("opening") : t("viewShare")}
+            </Button>
+            <Button asChild variant="outline" className={actionClass}>
+              <Link href={`${sharesPath}/${share.id}`} prefetch={false}>{t("openPreview")}</Link>
+            </Button>
+          </>
         )}
-        <Dialog open={confirming} onOpenChange={(open) => {
-          if (inFlight.current) return;
-          setNotice(null);
-          setConfirming(open);
-        }}>
-          {!revoked && (
-            <DialogTrigger asChild>
-              <Button type="button" variant="outline" aria-disabled={pending !== null} className={actionClass}>{t("revokeShare")}</Button>
-            </DialogTrigger>
-          )}
-          <DialogContent showCloseButton={false} className="max-h-[calc(100dvh-2rem)] overflow-y-auto" onCloseAutoFocus={(event) => {
-            if (!revokedOnClose.current) return;
-            event.preventDefault();
-            heading.current?.focus();
+        {canWrite && (
+          <Dialog open={confirming} onOpenChange={(open) => {
+            if (inFlight.current) return;
+            setNotice(null);
+            setConfirming(open);
           }}>
-            <DialogHeader>
-              <DialogTitle>{t("revokeShare")}</DialogTitle>
-              <DialogDescription>{t("confirmDescription")}</DialogDescription>
-            </DialogHeader>
-            <ShareNotice notice={confirming ? notice : null} t={t} />
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button type="button" variant="outline" aria-disabled={pending !== null} className={actionClass}>{t("cancel")}</Button>
-              </DialogClose>
-              <Button type="button" variant="destructive" aria-disabled={pending !== null} className={actionClass} onClick={() => void run("revoke")}>
-                {pending === "revoke" ? t("revoking") : t("confirmRevoke")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            {!revoked && (
+              <DialogTrigger asChild>
+                <Button type="button" variant="outline" aria-disabled={pending !== null} className={actionClass}>{t("revokeShare")}</Button>
+              </DialogTrigger>
+            )}
+            <DialogContent showCloseButton={false} className="max-h-[calc(100dvh-2rem)] overflow-y-auto" onCloseAutoFocus={(event) => {
+              if (!revokedOnClose.current) return;
+              event.preventDefault();
+              heading.current?.focus();
+            }}>
+              <DialogHeader>
+                <DialogTitle>{t("revokeShare")}</DialogTitle>
+                <DialogDescription>{t("confirmDescription")}</DialogDescription>
+              </DialogHeader>
+              <ShareNotice notice={confirming ? notice : null} t={t} />
+              <DialogFooter>
+                <DialogClose asChild>
+                  <Button type="button" variant="outline" aria-disabled={pending !== null} className={actionClass}>{t("cancel")}</Button>
+                </DialogClose>
+                <Button type="button" variant="destructive" aria-disabled={pending !== null} className={actionClass} onClick={() => void run("revoke")}>
+                  {pending === "revoke" ? t("revoking") : t("confirmRevoke")}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
       <ShareNotice notice={!confirming && (viewable || typeof notice === "string") ? notice : null} t={t} />
     </article>

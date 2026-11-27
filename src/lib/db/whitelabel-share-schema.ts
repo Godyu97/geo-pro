@@ -2,8 +2,9 @@ import { sql } from "drizzle-orm";
 import { check, index, integer, pgTable, text } from "drizzle-orm/pg-core";
 import { user } from "./auth-schema";
 import { brand } from "./brand-schema";
+import { reportSnapshot } from "./report-schema";
 
-// White-label copy keeps track, sample size and grade. Revocation does not delete access rows.
+// White-label copy keeps track, sample size, grade and snapshot limitations. Revocation does not delete access rows.
 export const whitelabelShare = pgTable("whitelabel_share", {
   id: text("id").primaryKey(),
   brandId: text("brand_id").notNull().references(() => brand.id, { onDelete: "cascade" }),
@@ -14,8 +15,13 @@ export const whitelabelShare = pgTable("whitelabel_share", {
   expiresAt: text("expires_at").notNull(),
   revoked: integer("revoked").notNull(),
   createdAt: text("created_at").notNull(),
+  snapshotId: text("snapshot_id").references(() => reportSnapshot.id, { onDelete: "cascade" }),
+  limitationsJson: text("limitations_json"),
+  sampleSummaryJson: text("sample_summary_json"),
 }, (table) => [
   index("whitelabel_share_owner_idx").on(table.ownerId, table.createdAt, table.id),
+  index("whitelabel_share_brand_idx").on(table.brandId, table.createdAt, table.id),
+  index("whitelabel_share_snapshot_idx").on(table.snapshotId),
   check("whitelabel_share_state_check", sql`${table.revoked} in (0, 1)
     and ${table.sampleSize} between 0 and 2000000000
     and ${table.track} ~ '^[a-z0-9_]{1,64}$'
@@ -23,6 +29,9 @@ export const whitelabelShare = pgTable("whitelabel_share", {
     and length(${table.id}) = 36
     and length(${table.brandId}) = 36
     and length(${table.ownerId}) between 1 and 128
+    and (${table.snapshotId} is null or length(${table.snapshotId}) = 36)
+    and (${table.limitationsJson} is null or length(${table.limitationsJson}) >= 2)
+    and (${table.sampleSummaryJson} is null or length(${table.sampleSummaryJson}) >= 2)
     and length(${table.expiresAt}) between 20 and 40
     and length(${table.createdAt}) between 20 and 40`),
 ]);

@@ -2522,6 +2522,9 @@ CREATE TABLE "whitelabel_share" (
 	"expires_at" text NOT NULL,
 	"revoked" integer NOT NULL,
 	"created_at" text NOT NULL,
+	"snapshot_id" text,
+	"limitations_json" text,
+	"sample_summary_json" text,
 	CONSTRAINT "whitelabel_share_state_check" CHECK ("whitelabel_share"."revoked" in (0, 1)
     and "whitelabel_share"."sample_size" between 0 and 2000000000
     and "whitelabel_share"."track" ~ '^[a-z0-9_]{1,64}$'
@@ -2529,6 +2532,9 @@ CREATE TABLE "whitelabel_share" (
     and length("whitelabel_share"."id") = 36
     and length("whitelabel_share"."brand_id") = 36
     and length("whitelabel_share"."owner_id") between 1 and 128
+    and ("whitelabel_share"."snapshot_id" is null or length("whitelabel_share"."snapshot_id") = 36)
+    and ("whitelabel_share"."limitations_json" is null or length("whitelabel_share"."limitations_json") >= 2)
+    and ("whitelabel_share"."sample_summary_json" is null or length("whitelabel_share"."sample_summary_json") >= 2)
     and length("whitelabel_share"."expires_at") between 20 and 40
     and length("whitelabel_share"."created_at") between 20 and 40)
 );
@@ -3068,6 +3074,7 @@ ALTER TABLE "service_order" ADD CONSTRAINT "service_order_brand_id_brand_id_fk" 
 ALTER TABLE "service_order" ADD CONSTRAINT "service_order_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "whitelabel_share" ADD CONSTRAINT "whitelabel_share_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "whitelabel_share" ADD CONSTRAINT "whitelabel_share_owner_id_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "whitelabel_share" ADD CONSTRAINT "whitelabel_share_snapshot_id_report_snapshot_id_fk" FOREIGN KEY ("snapshot_id") REFERENCES "public"."report_snapshot"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "whitelabel_share_access" ADD CONSTRAINT "whitelabel_share_access_share_id_whitelabel_share_id_fk" FOREIGN KEY ("share_id") REFERENCES "public"."whitelabel_share"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "whitelabel_share_access" ADD CONSTRAINT "whitelabel_share_access_visitor_id_user_id_fk" FOREIGN KEY ("visitor_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 ALTER TABLE "data_connection" ADD CONSTRAINT "data_connection_brand_id_brand_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brand"("id") ON DELETE cascade ON UPDATE no action;
@@ -3326,6 +3333,8 @@ CREATE INDEX "brand_delegation_org_idx" ON "brand_delegation" USING btree ("orga
 CREATE INDEX "delegation_action_delegation_idx" ON "delegation_action" USING btree ("delegation_id","status");
 CREATE INDEX "service_order_owner_idx" ON "service_order" USING btree ("owner_id","created_at","id");
 CREATE INDEX "whitelabel_share_owner_idx" ON "whitelabel_share" USING btree ("owner_id","created_at","id");
+CREATE INDEX "whitelabel_share_brand_idx" ON "whitelabel_share" USING btree ("brand_id","created_at","id");
+CREATE INDEX "whitelabel_share_snapshot_idx" ON "whitelabel_share" USING btree ("snapshot_id");
 CREATE INDEX "whitelabel_share_access_share_idx" ON "whitelabel_share_access" USING btree ("share_id","accessed_at","id");
 CREATE INDEX "data_connection_owner_idx" ON "data_connection" USING btree ("owner_id","created_at","id");
 CREATE UNIQUE INDEX "data_connection_field_connection_idx" ON "data_connection_field" USING btree ("connection_id","position");

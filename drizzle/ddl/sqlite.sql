@@ -2946,8 +2946,12 @@ CREATE TABLE `whitelabel_share` (
 	`expires_at` text NOT NULL,
 	`revoked` integer NOT NULL,
 	`created_at` text NOT NULL,
+	`snapshot_id` text,
+	`limitations_json` text,
+	`sample_summary_json` text,
 	FOREIGN KEY (`brand_id`) REFERENCES `brand`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`owner_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`snapshot_id`) REFERENCES `report_snapshot`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "whitelabel_share_state_check" CHECK("whitelabel_share"."revoked" in (0, 1)
     and "whitelabel_share"."sample_size" between 0 and 2000000000
     and length("whitelabel_share"."track") between 1 and 64
@@ -2957,11 +2961,16 @@ CREATE TABLE `whitelabel_share` (
     and length("whitelabel_share"."id") = 36
     and length("whitelabel_share"."brand_id") = 36
     and length("whitelabel_share"."owner_id") between 1 and 128
+    and ("whitelabel_share"."snapshot_id" is null or length("whitelabel_share"."snapshot_id") = 36)
+    and ("whitelabel_share"."limitations_json" is null or length("whitelabel_share"."limitations_json") >= 2)
+    and ("whitelabel_share"."sample_summary_json" is null or length("whitelabel_share"."sample_summary_json") >= 2)
     and length("whitelabel_share"."expires_at") between 20 and 40
     and length("whitelabel_share"."created_at") between 20 and 40)
 );
 
 CREATE INDEX `whitelabel_share_owner_idx` ON `whitelabel_share` (`owner_id`,`created_at`,`id`);
+CREATE INDEX `whitelabel_share_brand_idx` ON `whitelabel_share` (`brand_id`,`created_at`,`id`);
+CREATE INDEX `whitelabel_share_snapshot_idx` ON `whitelabel_share` (`snapshot_id`);
 CREATE TABLE `whitelabel_share_access` (
 	`id` text PRIMARY KEY NOT NULL,
 	`share_id` text NOT NULL,
