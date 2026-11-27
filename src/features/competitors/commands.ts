@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { CacheStore } from "../../lib/cache/store.ts";
 import { openCache } from "../../lib/cache/store.ts";
 import type { DatabaseConnection, QueryConnection, TransactionConnection } from "../../lib/db/connection.ts";
+import { brandIdSchema } from "../brands/contracts.ts";
 import {
   competitorShareBreakdown,
   orderedRankBreakdown,
@@ -24,6 +25,7 @@ import {
   thirdPartySupportSummary,
 } from "../source-opportunities/rules.ts";
 import { isNativeCitationOrigin } from "../evidence/contracts.ts";
+import { authorizeBrandActor, type BrandScope } from "../team-access/brand-scope.ts";
 import type {
   BriefStatusInput,
   CompetitorError,
@@ -47,6 +49,30 @@ type Failure = { error: CompetitorError };
 
 function denied(error: CompetitorError): Failure {
   return { error };
+}
+
+async function authorizeCompetitorRead(
+  db: QueryConnection,
+  actorId: string,
+  brandId: string,
+  now: string,
+): Promise<BrandScope | Failure> {
+  if (!brandIdSchema.safeParse(brandId).success) return denied("NOT_FOUND");
+  const access = await authorizeBrandActor(db, actorId, brandId, "read", now);
+  return access ?? denied("NOT_FOUND");
+}
+
+async function authorizeCompetitorWrite(
+  db: QueryConnection,
+  actorId: string,
+  brandId: string,
+  now: string,
+): Promise<BrandScope | Failure> {
+  if (!brandIdSchema.safeParse(brandId).success) return denied("NOT_FOUND");
+  const access = await authorizeBrandActor(db, actorId, brandId, "write", now);
+  if (access) return access;
+  const read = await authorizeBrandActor(db, actorId, brandId, "read", now);
+  return denied(read ? "FORBIDDEN" : "NOT_FOUND");
 }
 
 export function labelsOf(row: CompetitorSetRow) {
@@ -106,16 +132,19 @@ export function shareFromMentions(
 
 export async function saveCompetitorSet(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: SaveCompetitorSetInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
-  const labels = normalizeCompetitorLabels(input.labels);
-  if (!labels) return denied("INVALID_INPUT");
-  const labelsJson = JSON.stringify(labels);
   return db.transaction(async (tx) => {
+    const now = clock();
+    const access = await authorizeCompetitorWrite(tx, actorId, input.brandId, now);
+    if ("error" in access) return access;
+    const labels = normalizeCompetitorLabels(input.labels);
+    if (!labels) return denied("INVALID_INPUT");
+    const labelsJson = JSON.stringify(labels);
+    const ownerId = access.ownerId;
     const dao = new CompetitorDao(tx);
-    if (!await dao.ownedBrand(ownerId, input.brandId)) return denied("NOT_FOUND");
     const existing = await dao.listSets(ownerId, input.brandId);
     const latest = existing.at(-1);
     if (latest && latest.labelsJson === labelsJson) {
@@ -127,7 +156,7 @@ export async function saveCompetitorSet(
       ownerId,
       version: (latest?.version ?? 0) + 1,
       labelsJson,
-      createdAt: clock(),
+      createdAt: now,
     };
     await dao.insertSet(row);
     return { set: { ...row, labels }, created: true as const };
@@ -136,13 +165,16 @@ export async function saveCompetitorSet(
 
 export async function recordCompetitorMentions(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: RecordMentionsInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
   return db.transaction(async (tx) => {
+    const now = clock();
+    const access = await authorizeCompetitorWrite(tx, actorId, input.brandId, now);
+    if ("error" in access) return access;
+    const ownerId = access.ownerId;
     const dao = new CompetitorDao(tx);
-    if (!await dao.ownedBrand(ownerId, input.brandId)) return denied("NOT_FOUND");
     const sets = await dao.listSets(ownerId, input.brandId);
     const set = sets.find((item) => item.id === input.setId);
     if (!set) return denied("NOT_FOUND");
@@ -171,7 +203,6 @@ export async function recordCompetitorMentions(
       }
     }
     const existingByLabel = new Map(existingRows.map((row) => [row.competitorLabel, row]));
-    const now = clock();
     for (const entry of entries) {
       const existing = existingByLabel.get(entry.label);
       if (existing) {
@@ -203,12 +234,14 @@ export async function recordCompetitorMentions(
 
 export async function readCompetitorShare(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   brandId: string,
   version?: number,
 ) {
+  const access = await authorizeCompetitorRead(db, actorId, brandId, new Date().toISOString());
+  if ("error" in access) return access;
+  const ownerId = access.ownerId;
   const dao = new CompetitorDao(db);
-  if (!await dao.ownedBrand(ownerId, brandId)) return denied("NOT_FOUND");
   const sets = await dao.listSets(ownerId, brandId);
   const selected = version === undefined ? sets.at(-1) ?? null : sets.find((item) => item.version === version) ?? null;
   if (version !== undefined && !selected) return denied("NOT_FOUND");
@@ -295,14 +328,17 @@ export function citationHosts(rows: readonly { normalizedUrl: string }[]) {
 
 export async function inspectCitationSource(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: InspectCitationInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
   const judged = inspectSource(input);
   return db.transaction(async (tx) => {
+    const now = clock();
+    const access = await authorizeCompetitorWrite(tx, actorId, input.brandId, now);
+    if ("error" in access) return access;
+    const ownerId = access.ownerId;
     const dao = new CompetitorDao(tx);
-    if (!await dao.ownedBrand(ownerId, input.brandId)) return denied("NOT_FOUND");
     if (!await dao.citationOwned(ownerId, input.brandId, input.citationId)) return denied("NOT_FOUND");
     let factClaim: string | null = null;
     if (judged.support === "supports" && input.factVersionId) {
@@ -316,7 +352,6 @@ export async function inspectCitationSource(
       factVersionId: judged.support === "supports" ? input.factVersionId ?? null : null,
       factClaim,
     });
-    const now = clock();
     const existing = await dao.findInspection(input.citationId);
     const row = {
       id: existing?.id ?? randomUUID(),
@@ -357,18 +392,26 @@ async function queryCitation(
   return listed.rows.filter((row) => row.citationId === citationId);
 }
 
-export async function readCitationSources(db: DatabaseConnection, ownerId: string, brandId: string) {
+export async function readCitationSources(db: DatabaseConnection, actorId: string, brandId: string) {
+  const access = await authorizeCompetitorRead(db, actorId, brandId, new Date().toISOString());
+  if ("error" in access) return access;
   const dao = new CompetitorDao(db);
-  if (!await dao.ownedBrand(ownerId, brandId)) return denied("NOT_FOUND");
-  const listed = await dao.listCitationSources(ownerId, brandId);
-  const citations = listed.rows.map(presentCitation);
-  const supportSummary = listed.truncated ? thirdPartySupportSummary([]) : thirdPartySupportSummary(citations.filter((item) => isNativeCitationOrigin(item.citationOrigin)));
-  return { citations, hosts: citationHosts(citations), supportSummary, truncated: listed.truncated };
+  const listed = await dao.listCitationSources(access.ownerId, brandId);
+  const allCitations = listed.rows.map(presentCitation);
+  const supportSummary = listed.truncated ? thirdPartySupportSummary([]) : thirdPartySupportSummary(allCitations.filter((item) => isNativeCitationOrigin(item.citationOrigin)));
+  const restricted = access.role === "read_only";
+  return {
+    citations: restricted ? [] : allCitations,
+    hosts: restricted ? [] : citationHosts(allCitations),
+    supportSummary,
+    citationCount: listed.truncated ? 0 : allCitations.length,
+    truncated: listed.truncated,
+  };
 }
 
 export async function proposeResearchBrief(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: ProposeBriefInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
@@ -383,11 +426,13 @@ export async function proposeResearchBrief(
   if (!judged.accepted) return { error: "INVALID_INPUT" as const, reason: judged.reason };
   const sourceIds = [...new Set(input.sourceIds)];
   return db.transaction(async (tx) => {
+    const now = clock();
+    const access = await authorizeCompetitorWrite(tx, actorId, input.brandId, now);
+    if ("error" in access) return access;
+    const ownerId = access.ownerId;
     const dao = new CompetitorDao(tx);
-    if (!await dao.ownedBrand(ownerId, input.brandId)) return denied("NOT_FOUND");
     const ownedIds = await dao.citationIdsOwned(ownerId, input.brandId, sourceIds);
     if (ownedIds.length !== sourceIds.length) return { error: "INVALID_INPUT" as const, reason: "missing_evidence" as const };
-    const now = clock();
     const row = {
       id: randomUUID(),
       brandId: input.brandId,
@@ -407,23 +452,26 @@ export async function proposeResearchBrief(
 
 export async function setResearchBriefStatus(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: BriefStatusInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
   return db.transaction(async (tx) => {
+    const now = clock();
+    const access = await authorizeCompetitorWrite(tx, actorId, input.brandId, now);
+    if ("error" in access) return access;
     const dao = new CompetitorDao(tx);
-    if (!await dao.ownedBrand(ownerId, input.brandId)) return denied("NOT_FOUND");
-    const updated = await dao.updateBriefStatus(ownerId, input.brandId, input.briefId, input.status, clock());
+    const updated = await dao.updateBriefStatus(access.ownerId, input.brandId, input.briefId, input.status, now);
     if (!updated) return denied("OPERATION_CONFLICT");
     return { id: input.briefId, status: input.status };
   });
 }
 
-export async function readResearchBriefs(db: DatabaseConnection, ownerId: string, brandId: string) {
+export async function readResearchBriefs(db: DatabaseConnection, actorId: string, brandId: string) {
+  const access = await authorizeCompetitorRead(db, actorId, brandId, new Date().toISOString());
+  if ("error" in access) return access;
   const dao = new CompetitorDao(db);
-  if (!await dao.ownedBrand(ownerId, brandId)) return denied("NOT_FOUND");
-  const rows = await dao.listBriefs(ownerId, brandId);
+  const rows = await dao.listBriefs(access.ownerId, brandId);
   return {
     briefs: rows.map((row) => ({
       ...row,
@@ -441,36 +489,41 @@ function zFacts(json: string) {
 
 export async function readCompetitorWorkspace(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   brandId: string,
   version?: number,
 ) {
+  const access = await authorizeCompetitorRead(db, actorId, brandId, new Date().toISOString());
+  if ("error" in access) return access;
+  const ownerId = access.ownerId;
+  const isReadOnly = access.role === "read_only";
   const dao = new CompetitorDao(db);
-  if (!await dao.ownedBrand(ownerId, brandId)) return denied("NOT_FOUND");
   const sets = await dao.listSets(ownerId, brandId);
   const selected = version === undefined ? sets.at(-1) ?? null : sets.find((item) => item.version === version) ?? null;
   if (version !== undefined && !selected) return denied("NOT_FOUND");
   const [mentions, observations, sources, briefs, approvedFacts] = await Promise.all([
     selected ? dao.listMentions(ownerId, brandId, selected.id) : Promise.resolve({ truncated: false as const, rows: [] }),
-    dao.listRecentObservations(ownerId, brandId),
+    isReadOnly ? Promise.resolve([]) : dao.listRecentObservations(ownerId, brandId),
     dao.listCitationSources(ownerId, brandId),
     dao.listBriefs(ownerId, brandId),
-    dao.listApprovedFacts(ownerId, brandId),
+    isReadOnly ? Promise.resolve([]) : dao.listApprovedFacts(ownerId, brandId),
   ]);
   const labels = selected ? labelsOf(selected) : [];
   const share = selected && !mentions.truncated
     ? shareFromMentions(labels, mentions.rows)
     : emptyShare(labels);
-  const citations = sources.rows.map(presentCitation);
-  const supportSummary = sources.truncated ? thirdPartySupportSummary([]) : thirdPartySupportSummary(citations.filter((item) => isNativeCitationOrigin(item.citationOrigin)));
+  const allCitations = sources.rows.map(presentCitation);
+  const supportSummary = sources.truncated ? thirdPartySupportSummary([]) : thirdPartySupportSummary(allCitations.filter((item) => isNativeCitationOrigin(item.citationOrigin)));
   return {
+    role: access.role,
     sets: sets.map((item) => ({ id: item.id, version: item.version, labels: labelsOf(item), createdAt: item.createdAt })),
     selected: selected ? { id: selected.id, version: selected.version, labels, createdAt: selected.createdAt } : null,
     ...share,
     truncated: mentions.truncated,
-    observations,
-    citations,
-    hosts: citationHosts(sources.rows),
+    observations: isReadOnly ? [] : observations,
+    citations: isReadOnly ? [] : allCitations,
+    hosts: isReadOnly ? [] : citationHosts(sources.rows),
+    citationCount: sources.truncated ? 0 : allCitations.length,
     supportSummary,
     sourcesTruncated: sources.truncated,
     briefs: briefs.map((row) => ({
@@ -484,7 +537,7 @@ export async function readCompetitorWorkspace(
       optimizationTaskId: row.optimizationTaskId,
       copiedReplacement: false as const,
     })),
-    usableFacts: usableFactsOf(approvedFacts),
+    usableFacts: isReadOnly ? [] : usableFactsOf(approvedFacts),
   };
 }
 
@@ -527,25 +580,33 @@ function parsedFactIds(json: string) {
   }
 }
 
-async function loadAcceptedBrief(tx: TransactionConnection, ownerId: string, input: ResearchHandoffInput) {
+async function loadAcceptedBrief(
+  tx: TransactionConnection,
+  actorId: string,
+  input: ResearchHandoffInput,
+  now: string,
+) {
+  const access = await authorizeCompetitorWrite(tx, actorId, input.brandId, now);
+  if ("error" in access) return access;
+  const ownerId = access.ownerId;
   const dao = new CompetitorDao(tx);
-  if (!await dao.ownedBrand(ownerId, input.brandId)) return denied("NOT_FOUND");
   const brief = await dao.lockBrief(ownerId, input.brandId, input.briefId);
   if (!brief) return denied("NOT_FOUND");
   if (brief.status !== "accepted") return denied("OPERATION_CONFLICT");
-  return { dao, brief };
+  return { dao, brief, ownerId };
 }
 
 export async function createContentBriefFromResearch(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: ResearchHandoffInput,
   clock: Clock = () => new Date().toISOString(),
 ) {
   return db.transaction(async (tx) => {
-    const loaded = await loadAcceptedBrief(tx, ownerId, input);
+    const now = clock();
+    const loaded = await loadAcceptedBrief(tx, actorId, input, now);
     if ("error" in loaded) return loaded;
-    const { dao, brief } = loaded;
+    const { dao, brief, ownerId } = loaded;
     const content = new ContentDao(tx);
     if (brief.contentBriefId) {
       const existing = await content.getBrief(ownerId, input.brandId, brief.contentBriefId);
@@ -556,7 +617,6 @@ export async function createContentBriefFromResearch(
     const competitorSource = citationSourceReference(
       await dao.citationUrls(ownerId, input.brandId, zFacts(brief.sourceIdsJson)),
     );
-    const now = clock();
     const planId = await ensureContentPlan(tx, ownerId, input.brandId, brief.questionCluster, now);
     const briefId = randomUUID();
     await content.insertBrief({
@@ -628,15 +688,18 @@ async function contentHandoffResult(
 
 export async function createOptimizationTaskFromResearch(
   db: DatabaseConnection,
-  ownerId: string,
+  actorId: string,
   input: ResearchHandoffInput,
   clock: Clock = () => new Date().toISOString(),
   cache?: CacheStore,
 ) {
+  let brandOwnerId = "";
   const created = await db.transaction(async (tx) => {
-    const loaded = await loadAcceptedBrief(tx, ownerId, input);
+    const now = clock();
+    const loaded = await loadAcceptedBrief(tx, actorId, input, now);
     if ("error" in loaded) return loaded;
-    const { dao, brief } = loaded;
+    const { dao, brief, ownerId } = loaded;
+    brandOwnerId = ownerId;
     const tasks = new OptimizationDao(tx);
     if (brief.optimizationTaskId) {
       const existing = await tasks.getTask(ownerId, input.brandId, brief.optimizationTaskId);
@@ -649,7 +712,6 @@ export async function createOptimizationTaskFromResearch(
     const prose = `${brief.gap}\n${reference ?? ""}`;
     if (!assertsNoCausalClaim(prose)) return denied("INVALID_INPUT");
     const targetPage = normalizeTargetPage(urls[0]);
-    const now = clock();
     const open = await tasks.findOpenTask({
       ownerId,
       brandId: input.brandId,
@@ -745,8 +807,8 @@ export async function createOptimizationTaskFromResearch(
     }
     return { taskId, created: true as const, merged: false as const, questionCluster: brief.questionCluster };
   });
-  if (!("error" in created)) {
-    await invalidateEvidenceOverview(ownerId, input.brandId, cache ?? openCache());
+  if (!("error" in created) && brandOwnerId) {
+    await invalidateEvidenceOverview(brandOwnerId, input.brandId, cache ?? openCache());
   }
   return created;
 }

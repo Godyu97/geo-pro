@@ -2167,6 +2167,8 @@
     "sources": "引用来源",
     "sourcesEmpty": "还没有已观察引用。",
     "sourcesTruncated": "引用数量过多，暂不计算第三方支持率，避免显示不完整的数字。",
+    "readOnlyNotice": "当前为只读成员视角，仅展示聚合数据，不可修改配置或查看未获准引用 URL。",
+    "readOnlySourcesNotice": "已隐藏未获准引用 URL 与域名明细，上方仅保留第三方支持率聚合统计。",
     "thirdPartySupportHeading": "第三方支持率",
     "thirdPartySupportNote": "仅基于已观察引用中的可判断复核计算（Js）：页面有效、正文可读且归属明确时才进入分母。未知与仅保存 URL 不进入分母，也不把共享域名或引用存在当作正向支持。",
     "referenceOriginNote": "搜索候选和分析师找到的页面会带来源类别列出，不计入正向第三方支持。",

@@ -2167,6 +2167,8 @@
     "sources": "Citations",
     "sourcesEmpty": "No observed citations yet.",
     "sourcesTruncated": "Too many citations to calculate third-party support rate. An incomplete number is not shown.",
+    "readOnlyNotice": "Read-only access: only aggregate views are shown; editing and unapproved citation URLs are hidden.",
+    "readOnlySourcesNotice": "Unapproved citation URLs and domain details are hidden for read-only access; only the aggregate third-party support summary is shown above.",
     "thirdPartySupportHeading": "Third-party support rate",
     "thirdPartySupportNote": "Computed over judgable reviews of observed citations only (Js): a citation enters the denominator only when the page is live, readable, and attribution is known. Unknown and URL-only citations stay out of the denominator, and shared domains or citation presence never count as positive support.",
     "referenceOriginNote": "Search candidates and pages found by an analyst stay listed with their source category and do not count as positive third-party support.",

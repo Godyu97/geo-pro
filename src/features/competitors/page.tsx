@@ -7,6 +7,7 @@ import type { Locale } from "@/lib/i18n/locale";
 import { getLocale, getTranslator } from "@/lib/i18n/server";
 import { Button } from "@/components/ui/button";
 import { BrandDao } from "../brands/dao";
+import { authorizeBrandActor, workspaceBrand } from "../team-access/brand-scope";
 import {
   briefStatusAction,
   createContentBriefFromResearchAction,
@@ -42,7 +43,7 @@ function citationOption(url: string) {
 }
 
 function knownError(error: string) {
-  if (error === "NOT_FOUND" || error === "INVALID_INPUT" || error === "OPERATION_CONFLICT") return error;
+  if (error === "NOT_FOUND" || error === "FORBIDDEN" || error === "INVALID_INPUT" || error === "OPERATION_CONFLICT") return error;
   return "INVALID_INPUT";
 }
 
@@ -98,9 +99,9 @@ export default async function CompetitorAnalysisPage({
   const locale = await getLocale();
   const t = await getTranslator("competitorAnalysis");
   const connection = getConnection();
-  const active = await new BrandDao(connection).active(session.user.id);
-  const requestedBrand = typeof params.brandId === "string" ? params.brandId : undefined;
-  const brandId = requestedBrand ?? active?.id;
+  const defaultScope = await workspaceBrand(connection, session.user.id, undefined, "read");
+  const requestedBrand = typeof params.brandId === "string" && params.brandId.trim() ? params.brandId.trim() : undefined;
+  const brandId = requestedBrand ?? defaultScope?.brandId;
   const version = typeof params.version === "string" && /^[1-9]\d*$/.test(params.version)
     ? Number(params.version)
     : undefined;
@@ -134,23 +135,31 @@ export default async function CompetitorAnalysisPage({
 
   const workspace = await readCompetitorWorkspace(connection, session.user.id, brandId, version);
   if ("error" in workspace) {
-    const recoveryHref = active ? "/dashboard/monitoring/competitors" : "/dashboard/brands";
+    const recoveryHref = defaultScope ? "/dashboard/monitoring/competitors" : "/dashboard/brands";
     return (
       <Canvas
         title={t("title")}
         summary={<p role="alert" className="max-w-2xl text-sm leading-7 wrap-anywhere">{t(knownError(workspace.error))}</p>}
         primary={(
           <Button asChild className={actionClass}>
-            <Link href={recoveryHref} prefetch={false}>{active ? t("currentBrand") : t("goBrands")}</Link>
+            <Link href={recoveryHref} prefetch={false}>{defaultScope ? t("currentBrand") : t("goBrands")}</Link>
           </Button>
         )}
         {...canvasLinks}
-        answersHref={active ? `/dashboard/monitoring/answers?brandId=${active.id}` : "/dashboard/monitoring/answers"}
-        overviewHref={active ? `/dashboard/monitoring/overview?brandId=${active.id}` : "/dashboard/monitoring/overview"}
+        answersHref={defaultScope ? `/dashboard/monitoring/answers?brandId=${defaultScope.brandId}` : "/dashboard/monitoring/answers"}
+        overviewHref={defaultScope ? `/dashboard/monitoring/overview?brandId=${defaultScope.brandId}` : "/dashboard/monitoring/overview"}
       />
     );
   }
 
+  const [readScope, writeScope] = await Promise.all([
+    authorizeBrandActor(connection, session.user.id, brandId, "read"),
+    authorizeBrandActor(connection, session.user.id, brandId, "write"),
+  ]);
+  const brandSummary = readScope ? await new BrandDao(connection).ownedSummary(readScope.ownerId, brandId) : null;
+  const canWrite = Boolean(writeScope);
+  const isReadOnly = workspace.role === "read_only";
+  const hasCitations = workspace.citationCount > 0;
   const notice = reason === "copied_replacement"
     ? t("copied")
     : reason === "missing_evidence"
@@ -158,7 +167,7 @@ export default async function CompetitorAnalysisPage({
       : error
         ? t(knownError(error))
         : "";
-  const brandName = active?.id === brandId ? active.name : "";
+  const brandName = brandSummary?.name ?? "";
 
   return (
     <Canvas
@@ -172,6 +181,7 @@ export default async function CompetitorAnalysisPage({
       {...canvasLinks}
     >
       {notice ? <p role="alert" className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm leading-6 wrap-anywhere">{notice}</p> : null}
+      {isReadOnly ? <p className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm leading-6 text-muted-foreground wrap-anywhere">{t("readOnlyNotice")}</p> : null}
 
       <section className={panelClass}>
         <h2 className="text-lg font-semibold">{t("sets")}</h2>
@@ -198,14 +208,16 @@ export default async function CompetitorAnalysisPage({
             ))}
           </ul>
         )}
-        <form action={saveCompetitorSetAction} className="space-y-3">
-          <input type="hidden" name="brandId" value={brandId} />
-          <label className="block min-w-0 text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("labels")}</span>
-            <textarea name="labels" rows={3} className={fieldClass} />
-          </label>
-          <Button type="submit" className={actionClass}>{t("saveSet")}</Button>
-        </form>
+        {canWrite ? (
+          <form action={saveCompetitorSetAction} className="space-y-3">
+            <input type="hidden" name="brandId" value={brandId} />
+            <label className="block min-w-0 text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("labels")}</span>
+              <textarea name="labels" rows={3} className={fieldClass} />
+            </label>
+            <Button type="submit" className={actionClass}>{t("saveSet")}</Button>
+          </form>
+        ) : null}
       </section>
 
       <section className="min-w-0 space-y-3">
@@ -465,78 +477,80 @@ export default async function CompetitorAnalysisPage({
         ) : null}
       </section>
 
-      <section className={panelClass}>
-        <h2 className="text-lg font-semibold">{t("record")}</h2>
-        {workspace.observations.length === 0 || !workspace.selected?.labels.length ? (
-          <p className="text-sm leading-7 text-muted-foreground">{t("noObservations")}</p>
-        ) : (
-          <form action={recordMentionsAction} className="min-w-0 space-y-3">
-            <input type="hidden" name="brandId" value={brandId} />
-            <input type="hidden" name="setId" value={workspace.selected.id} />
-            <div className="min-w-0 text-sm">
-              <label htmlFor="competitor-observation" className="mb-1 block text-muted-foreground">
-                {t("observation")}
-              </label>
-              <div className={selectWrap}>
-                <select
-                  id="competitor-observation"
-                  name="observationId"
-                  required
-                  defaultValue=""
-                  className="h-10 w-full max-w-full rounded-md border bg-background px-3"
-                >
-                  <option value="" disabled>{t("chooseObservation")}</option>
-                  {workspace.observations.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {t("observationOption", { id: item.id.slice(0, 8), question: item.questionText })}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <fieldset className="min-w-0 space-y-2">
-              <legend className="text-sm text-muted-foreground">{t("brand")}</legend>
-              {workspace.selected.labels.map((label) => (
-                <div key={label} className="flex min-w-0 flex-wrap items-center gap-2">
-                  <input type="hidden" name="setLabel" value={label} />
-                  <label className="flex min-w-0 flex-1 items-center gap-2 text-sm">
-                    <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{label}</span>
-                    <select
-                      name={`state:${label}`}
-                      aria-label={label}
-                      required
-                      defaultValue=""
-                      className="h-9 max-w-full rounded-md border bg-background px-2 text-sm"
-                    >
-                      <option value="" disabled>{t("chooseMentionState")}</option>
-                      <option value="false">{t("mentionFalse")}</option>
-                      <option value="true">{t("mentionTrue")}</option>
-                      <option value="unknown">{t("mentionUnknown")}</option>
-                    </select>
-                  </label>
-                  <input
-                    name={`position:${label}`}
-                    inputMode="numeric"
-                    aria-label={`${t("position")} ${label}`}
-                    className="h-9 w-20 shrink-0 rounded-md border bg-background px-2"
-                  />
+      {canWrite ? (
+        <section className={panelClass}>
+          <h2 className="text-lg font-semibold">{t("record")}</h2>
+          {workspace.observations.length === 0 || !workspace.selected?.labels.length ? (
+            <p className="text-sm leading-7 text-muted-foreground">{t("noObservations")}</p>
+          ) : (
+            <form action={recordMentionsAction} className="min-w-0 space-y-3">
+              <input type="hidden" name="brandId" value={brandId} />
+              <input type="hidden" name="setId" value={workspace.selected.id} />
+              <div className="min-w-0 text-sm">
+                <label htmlFor="competitor-observation" className="mb-1 block text-muted-foreground">
+                  {t("observation")}
+                </label>
+                <div className={selectWrap}>
+                  <select
+                    id="competitor-observation"
+                    name="observationId"
+                    required
+                    defaultValue=""
+                    className="h-10 w-full max-w-full rounded-md border bg-background px-3"
+                  >
+                    <option value="" disabled>{t("chooseObservation")}</option>
+                    {workspace.observations.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {t("observationOption", { id: item.id.slice(0, 8), question: item.questionText })}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              ))}
-            </fieldset>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="ordered" />
-              <span>{t("ordered")}</span>
-            </label>
-            <Button type="submit" className={actionClass}>{t("saveMentions")}</Button>
-          </form>
-        )}
-      </section>
+              </div>
+              <fieldset className="min-w-0 space-y-2">
+                <legend className="text-sm text-muted-foreground">{t("brand")}</legend>
+                {workspace.selected.labels.map((label) => (
+                  <div key={label} className="flex min-w-0 flex-wrap items-center gap-2">
+                    <input type="hidden" name="setLabel" value={label} />
+                    <label className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{label}</span>
+                      <select
+                        name={`state:${label}`}
+                        aria-label={label}
+                        required
+                        defaultValue=""
+                        className="h-9 max-w-full rounded-md border bg-background px-2 text-sm"
+                      >
+                        <option value="" disabled>{t("chooseMentionState")}</option>
+                        <option value="false">{t("mentionFalse")}</option>
+                        <option value="true">{t("mentionTrue")}</option>
+                        <option value="unknown">{t("mentionUnknown")}</option>
+                      </select>
+                    </label>
+                    <input
+                      name={`position:${label}`}
+                      inputMode="numeric"
+                      aria-label={`${t("position")} ${label}`}
+                      className="h-9 w-20 shrink-0 rounded-md border bg-background px-2"
+                    />
+                  </div>
+                ))}
+              </fieldset>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="ordered" />
+                <span>{t("ordered")}</span>
+              </label>
+              <Button type="submit" className={actionClass}>{t("saveMentions")}</Button>
+            </form>
+          )}
+        </section>
+      ) : null}
 
       <section className="min-w-0 space-y-3">
         <h2 className="text-lg font-semibold">{t("sources")}</h2>
         {workspace.sourcesTruncated ? (
           <p className={emptyClass}>{t("sourcesTruncated")}</p>
-        ) : workspace.citations.length > 0 ? (
+        ) : hasCitations ? (
           <div className={panelClass}>
             <h3 className="text-base font-medium">{t("thirdPartySupportHeading")}</h3>
             <p className="text-sm leading-6 text-muted-foreground">{t("thirdPartySupportNote")}</p>
@@ -579,16 +593,18 @@ export default async function CompetitorAnalysisPage({
             ) : null}
           </div>
         ) : null}
-        {workspace.hosts.length > 0 ? (
+        {!isReadOnly && workspace.hosts.length > 0 ? (
           <ul className="min-w-0 text-sm leading-6 text-muted-foreground">
             {workspace.hosts.map((host) => (
               <li key={host.host} className="[overflow-wrap:anywhere]">{t("hosts")}: {host.host} · {host.pages}</li>
             ))}
           </ul>
         ) : null}
-        {workspace.citations.length === 0 && !workspace.sourcesTruncated ? (
+        {!hasCitations && !workspace.sourcesTruncated ? (
           <p className={emptyClass}>{t("sourcesEmpty")}</p>
-        ) : (
+        ) : isReadOnly && !workspace.sourcesTruncated ? (
+          <p className={emptyClass}>{t("readOnlySourcesNotice")}</p>
+        ) : workspace.citations.length > 0 ? (
           <ul className="min-w-0 space-y-3">
             {workspace.citations.map((citation) => (
               <li key={citation.citationId} className="min-w-0 rounded-2xl border bg-card px-4 py-3 text-sm">
@@ -613,8 +629,8 @@ export default async function CompetitorAnalysisPage({
               </li>
             ))}
           </ul>
-        )}
-        {workspace.citations.length > 0 ? (
+        ) : null}
+        {canWrite && workspace.citations.length > 0 ? (
           <form action={inspectCitationAction} className={`${panelClass}`}>
             <h3 className="font-medium">{t("inspect")}</h3>
             <p className="text-xs leading-6 text-muted-foreground">{t("inspectHint")}</p>
@@ -670,7 +686,7 @@ export default async function CompetitorAnalysisPage({
                   <span>{t(brief.status)}</span>
                   <span>{brief.sourceIds.length}</span>
                 </p>
-                {brief.status === "proposed" ? (
+                {canWrite && brief.status === "proposed" ? (
                   <form action={briefStatusAction} className="mt-3 flex flex-wrap gap-2">
                     <input type="hidden" name="brandId" value={brandId} />
                     <input type="hidden" name="briefId" value={brief.id} />
@@ -678,24 +694,28 @@ export default async function CompetitorAnalysisPage({
                     <Button type="submit" name="status" value="dismissed" size="sm" variant="outline" className={actionClass}>{t("dismiss")}</Button>
                   </form>
                 ) : null}
-                {brief.status === "accepted" ? (
+                {brief.status === "accepted" && (canWrite || (!isReadOnly && (brief.contentBriefId || brief.optimizationTaskId))) ? (
                   <div className="mt-3 flex min-w-0 flex-wrap gap-2">
-                    <form action={createContentBriefFromResearchAction}>
-                      <input type="hidden" name="brandId" value={brandId} />
-                      <input type="hidden" name="briefId" value={brief.id} />
-                      <Button type="submit" size="sm" className={actionClass}>{t("createContentBrief")}</Button>
-                    </form>
-                    <form action={createOptimizationTaskFromResearchAction}>
-                      <input type="hidden" name="brandId" value={brandId} />
-                      <input type="hidden" name="briefId" value={brief.id} />
-                      <Button type="submit" size="sm" variant="outline" className={actionClass}>{t("createOptimizationTask")}</Button>
-                    </form>
-                    {brief.contentBriefId ? (
+                    {canWrite ? (
+                      <>
+                        <form action={createContentBriefFromResearchAction}>
+                          <input type="hidden" name="brandId" value={brandId} />
+                          <input type="hidden" name="briefId" value={brief.id} />
+                          <Button type="submit" size="sm" className={actionClass}>{t("createContentBrief")}</Button>
+                        </form>
+                        <form action={createOptimizationTaskFromResearchAction}>
+                          <input type="hidden" name="brandId" value={brandId} />
+                          <input type="hidden" name="briefId" value={brief.id} />
+                          <Button type="submit" size="sm" variant="outline" className={actionClass}>{t("createOptimizationTask")}</Button>
+                        </form>
+                      </>
+                    ) : null}
+                    {!isReadOnly && brief.contentBriefId ? (
                       <Link href={`/dashboard/content/briefs/${brief.contentBriefId}`} prefetch={false} className={linkClass}>
                         {t("openContentBrief")}
                       </Link>
                     ) : null}
-                    {brief.optimizationTaskId ? (
+                    {!isReadOnly && brief.optimizationTaskId ? (
                       <Link href={`/dashboard/optimization/${brief.optimizationTaskId}`} prefetch={false} className={linkClass}>
                         {t("openOptimizationTask")}
                       </Link>
@@ -706,48 +726,50 @@ export default async function CompetitorAnalysisPage({
             ))}
           </ul>
         )}
-        <form action={proposeBriefAction} className={panelClass}>
-          <input type="hidden" name="brandId" value={brandId} />
-          <label className="block min-w-0 text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("questionCluster")}</span>
-            <input name="questionCluster" required className={`${fieldClass} h-10`} />
-          </label>
-          <label className="block min-w-0 text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("gap")}</span>
-            <textarea name="gap" required rows={3} className={fieldClass} />
-          </label>
-          <label className="block min-w-0 text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("facts")}</span>
-            <textarea name="facts" rows={3} className={fieldClass} />
-          </label>
-          <label className="block min-w-0 text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("briefSources")}</span>
-            <span className={selectWrap}>
-              <select name="sourceId" multiple className="min-h-24 w-full max-w-full rounded-md border bg-background px-3 py-2">
-                {workspace.citations.map((citation) => (
-                  <option key={citation.citationId} value={citation.citationId}>{citationOption(citation.rawUrl)}</option>
-                ))}
-              </select>
-            </span>
-          </label>
-          <label className="block min-w-0 text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("sourceText")}</span>
-            <textarea name="sourceText" rows={3} className={fieldClass} />
-          </label>
-          <label className="block min-w-0 text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("briefText")}</span>
-            <textarea name="briefText" rows={3} className={fieldClass} />
-          </label>
-          <label className="block min-w-0 text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("sourceBrand")}</span>
-            <input name="sourceBrand" className={`${fieldClass} h-10`} />
-          </label>
-          <label className="block min-w-0 text-sm">
-            <span className="mb-1 block text-muted-foreground">{t("ownBrand")}</span>
-            <input name="ownBrand" className={`${fieldClass} h-10`} />
-          </label>
-          <Button type="submit" className={actionClass}>{t("saveBrief")}</Button>
-        </form>
+        {canWrite ? (
+          <form action={proposeBriefAction} className={panelClass}>
+            <input type="hidden" name="brandId" value={brandId} />
+            <label className="block min-w-0 text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("questionCluster")}</span>
+              <input name="questionCluster" required className={`${fieldClass} h-10`} />
+            </label>
+            <label className="block min-w-0 text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("gap")}</span>
+              <textarea name="gap" required rows={3} className={fieldClass} />
+            </label>
+            <label className="block min-w-0 text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("facts")}</span>
+              <textarea name="facts" rows={3} className={fieldClass} />
+            </label>
+            <label className="block min-w-0 text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("briefSources")}</span>
+              <span className={selectWrap}>
+                <select name="sourceId" multiple className="min-h-24 w-full max-w-full rounded-md border bg-background px-3 py-2">
+                  {workspace.citations.map((citation) => (
+                    <option key={citation.citationId} value={citation.citationId}>{citationOption(citation.rawUrl)}</option>
+                  ))}
+                </select>
+              </span>
+            </label>
+            <label className="block min-w-0 text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("sourceText")}</span>
+              <textarea name="sourceText" rows={3} className={fieldClass} />
+            </label>
+            <label className="block min-w-0 text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("briefText")}</span>
+              <textarea name="briefText" rows={3} className={fieldClass} />
+            </label>
+            <label className="block min-w-0 text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("sourceBrand")}</span>
+              <input name="sourceBrand" className={`${fieldClass} h-10`} />
+            </label>
+            <label className="block min-w-0 text-sm">
+              <span className="mb-1 block text-muted-foreground">{t("ownBrand")}</span>
+              <input name="ownBrand" className={`${fieldClass} h-10`} />
+            </label>
+            <Button type="submit" className={actionClass}>{t("saveBrief")}</Button>
+          </form>
+        ) : null}
       </section>
     </Canvas>
   );
